@@ -1,0 +1,642 @@
+"""Janela principal: duas abas de trabalho sobre uma fila só.
+
+**Download** — endereço e destino no topo, qualidade à esquerda, perfis rápidos
+à direita — e **Convert**, para arquivos que já estão no disco. As duas
+enfileiram no mesmo lugar, e por isso a **fila fica fora das abas**, embaixo:
+trocar de aba nunca esconde o que está em andamento.
+
+As duas linhas do topo da aba de download ("de onde" e "para onde") dividem a
+mesma grade: rótulos numa coluna, campos noutra, botões encostados na direita.
+É o que faz os dois campos começarem e terminarem exatamente na mesma coluna.
+"""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+import yt_dlp
+from PySide6.QtCore import QEvent, Qt, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QProgressDialog,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .. import APP_DISPLAY_NAME, __version__
+from ..core.binaries import FFmpegTools
+from ..core.job import Job, JobStatus
+from ..core.models import FormatMatrix, MediaInfo, PlaylistInfo
+from ..core.selector import (
+    AudioRequest,
+    VideoRequest,
+    build_opts,
+    describe_request,
+)
+from ..core.settings import Settings
+from ..workers.engine_worker import EngineUpdateWorker
+from ..workers.probe_worker import ProbeWorker
+from ..workers.queue import JobQueue
+from ..workers.runner import WorkerRunner
+from . import strings
+from .ffmpeg_setup import ensure_ffmpeg
+from .panels.convert_panel import ConvertPanel
+from .panels.media_card import MediaCard
+from .panels.profiles_panel import Profile, ProfilesPanel
+from .panels.quality_panel import QualityPanel
+from .panels.queue_panel import QueuePanel
+from .playlist_dialog import PlaylistDialog
+from .settings_dialog import SettingsDialog
+from .theme import qpalette, stylesheet
+
+# Índice da aba de download, a primeira criada.
+_TAB_DOWNLOAD = 0
+# Sem margem lateral: o conteúdo da aba fica na mesma coluna da fila, que está
+# fora das abas. Em cima, só o respiro que separa da barra de abas.
+_TAB_MARGINS = (0, 10, 0, 0)
+_TAB_SPACING = 10
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__()
+        self._settings = settings
+        self._tools: FFmpegTools | None = None
+        self._media: MediaInfo | None = None
+        self._runner = WorkerRunner()
+        self._split_by_user = False
+        self._balancing = False
+        # Diretório temporário próprio: mantém .part e fragmentos fora da pasta
+        # de destino, que só recebe arquivo pronto.
+        self._temp_dir = Path(tempfile.gettempdir()) / "videomanager"
+
+        self.setWindowTitle(f"{APP_DISPLAY_NAME} {__version__}")
+        # Altura escolhida para caber a aba inteira sem rolagem — barra de abas,
+        # cabeçalho e controles — com a fila mostrando quatro linhas. Em telas
+        # mais baixas o painel de controles rola: é para isso que ele está numa
+        # área de rolagem.
+        self.resize(1180, 860)
+
+        self._queue = JobQueue(settings, self)
+        self._queue.counts_changed.connect(self._update_status)
+
+        self._build_ui()
+        self._build_menu()
+        self._update_status()
+
+    # ------------------------------------------------------------------
+    # Montagem
+    # ------------------------------------------------------------------
+
+    def _build_ui(self) -> None:
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
+
+        # A fila fica fora das abas, embaixo: as duas alimentam a mesma fila, e
+        # trocar de aba não pode esconder o que está em andamento.
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._build_download_tab(), strings.TAB_DOWNLOAD)
+        self._convert = ConvertPanel(self._settings, self._tools_for_convert)
+        self._convert.jobs_ready.connect(self._submit_jobs)
+        self._convert.changed.connect(self._balance_panes)
+        self._tabs.addTab(self._wrap_tab(self._convert), strings.TAB_CONVERT)
+
+        self._vertical = QSplitter(Qt.Orientation.Vertical)
+        self._vertical.addWidget(self._tabs)
+        self._queue_panel = QueuePanel(self._queue)
+        self._vertical.addWidget(self._queue_panel)
+        # Os controles têm altura natural — passar disso só deixa espaço vazio.
+        # A fila, ao contrário, aproveita cada pixel: é o painel que o usuário
+        # fica olhando depois de enfileirar. Por isso a sobra vai toda para
+        # baixo, e a divisão é refeita a cada mudança de tamanho enquanto o
+        # usuário não assumir o divisor (ver :meth:`_balance_panes`).
+        self._vertical.setStretchFactor(0, 0)
+        self._vertical.setStretchFactor(1, 1)
+        self._vertical.setChildrenCollapsible(False)
+        self._vertical.installEventFilter(self)
+        self._vertical.splitterMoved.connect(self._on_split_moved)
+        root.addWidget(self._vertical, 1)
+
+    def _build_download_tab(self) -> QWidget:
+        """Endereço, destino, controles de qualidade e perfis rápidos."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(*_TAB_MARGINS)
+        layout.setSpacing(_TAB_SPACING)
+
+        self._header = self._build_header()
+        layout.addWidget(self._header)
+
+        self._left_pane = self._build_left_pane()
+        self._right_pane = self._build_right_pane()
+        self._middle = QSplitter(Qt.Orientation.Horizontal)
+        self._middle.addWidget(self._left_pane)
+        self._middle.addWidget(self._right_pane)
+        self._middle.setStretchFactor(0, 1)
+        self._middle.setStretchFactor(1, 0)
+        self._middle.setSizes([820, 300])
+        self._middle.setChildrenCollapsible(False)
+        layout.addWidget(self._wrap_scrollable(self._middle), 1)
+        return tab
+
+    @staticmethod
+    def _wrap_tab(inner: QWidget) -> QWidget:
+        """Dá à aba a mesma margem e a mesma rolagem da outra."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(*_TAB_MARGINS)
+        layout.setSpacing(_TAB_SPACING)
+        layout.addWidget(MainWindow._wrap_scrollable(inner))
+        return tab
+
+    def _on_split_moved(self, *_: int) -> None:
+        self._split_by_user = not self._balancing
+
+    def _tabs_height(self) -> int:
+        """Altura pedida pelas abas: a maior das duas, para as duas caberem.
+
+        É a mesma para as duas de propósito. A fila fica sempre na mesma linha,
+        o divisor não pula ao trocar de aba, e nenhuma das duas nasce cortada —
+        que era o que acontecia quando a altura vinha só da aba de download e a
+        de conversão precisava de mais. Quem quiser outra divisão arrasta o
+        divisor; a partir daí a escolha é do usuário.
+        """
+        page = self._tabs.widget(_TAB_DOWNLOAD)
+        # A barra de abas entra na conta: o que o divisor reparte é o QTabWidget
+        # inteiro, não a página. A medida sai da página **visível** — a escondida
+        # guarda a geometria de antes do último redimensionamento, e a diferença
+        # ia crescendo a cada troca de aba.
+        visible = self._tabs.currentWidget()
+        chrome = (
+            max(0, self._tabs.height() - visible.height()) if visible.height() else 0
+        )
+        margins = page.layout().contentsMargins()
+        inner = margins.top() + margins.bottom()
+
+        controls = max(
+            self._pane_height(self._left_pane),
+            self._pane_height(self._right_pane),
+        )
+        download = inner + self._header.sizeHint().height() + _TAB_SPACING + controls
+        convert = inner + self._pane_height(self._convert)
+        return chrome + max(download, convert)
+
+    @staticmethod
+    def _pane_height(pane: QWidget) -> int:
+        """Altura de que o painel precisa na largura que ele tem agora.
+
+        O ``sizeHint`` de um painel com texto que quebra linha é calculado numa
+        largura estreita, e sobra altura: o título do card cabe numa linha só na
+        largura real. Perguntar pela largura de agora evita reservar espaço em
+        cima que a fila usaria melhor.
+        """
+        layout = pane.layout()
+        if layout is not None and layout.hasHeightForWidth() and pane.width() > 0:
+            return layout.heightForWidth(pane.width())
+        return pane.sizeHint().height()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        # A geometria de verdade do divisor só existe no primeiro redimensiona-
+        # mento — nem no showEvent, nem num timer logo depois dele.
+        if watched is self._vertical and event.type() == QEvent.Type.Resize:
+            self._balance_panes()
+        return super().eventFilter(watched, event)
+
+    def _balance_panes(self) -> None:
+        """Dá aos controles a altura que eles pedem e a sobra para a fila.
+
+        O ``QSplitter`` reparte o espaço em proporção ao tamanho corrente de
+        cada painel, e não ao que cada um pede: sem esta correção os controles
+        nasciam cortados no meio de uma linha, com a fila vazia logo abaixo.
+        Quando a janela é baixa demais para os dois, a fila fica com o mínimo
+        dela e os controles passam a rolar.
+
+        Vale enquanto o usuário não arrastar o divisor: a partir daí a divisão é
+        escolha dele e não se mexe mais.
+        """
+        if self._split_by_user or self._balancing:
+            return
+        self._balancing = True
+        try:
+            # Mostrar ou esconder uma linha (a trilha de áudio, um aviso) só
+            # muda a altura pedida quando o pedido de layout é entregue. Sem
+            # entregá-lo aqui, mede-se o painel de antes da mudança.
+            QApplication.sendPostedEvents(None, int(QEvent.Type.LayoutRequest))
+            total = self._vertical.height() - self._vertical.handleWidth()
+            floor = self._queue_panel.minimumSizeHint().height()
+            top = max(0, min(self._tabs_height(), total - floor))
+            self._vertical.setSizes([top, total - top])
+        finally:
+            self._balancing = False
+
+    @staticmethod
+    def _wrap_scrollable(inner: QWidget) -> QScrollArea:
+        """Torna roláveis as duas colunas de controles, juntas.
+
+        A soma dos grupos tem altura mínima considerável. Em tela de notebook
+        (768 px) isso empurraria a fila para fora da janela — pior: com só uma
+        das colunas rolando, a outra sozinha já impedia a janela de encolher.
+        Rolando as duas juntas, elas continuam alinhadas entre si e a fila
+        continua visível em qualquer tela.
+        """
+        area = QScrollArea()
+        area.setWidget(inner)
+        area.setWidgetResizable(True)
+        area.setFrameShape(QScrollArea.Shape.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        return area
+
+    def _build_header(self) -> QWidget:
+        """Endereço e destino: duas linhas na mesma grade, tudo alinhado."""
+        box = QWidget()
+        grid = QGridLayout(box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
+        # Só a coluna dos campos cresce; rótulos e botões ficam no tamanho deles,
+        # nas mesmas colunas nas duas linhas.
+        grid.setColumnStretch(1, 1)
+
+        url_label = QLabel(strings.URL_LABEL)
+        grid.addWidget(url_label, 0, 0)
+        self._url = QLineEdit()
+        self._url.setPlaceholderText(strings.URL_PLACEHOLDER)
+        self._url.setClearButtonEnabled(True)
+        self._url.returnPressed.connect(self._analyze)
+        grid.addWidget(self._url, 0, 1)
+
+        self._paste = QPushButton(strings.URL_PASTE_AND_ANALYZE)
+        self._paste.clicked.connect(self._paste_and_analyze)
+        grid.addWidget(self._paste, 0, 2)
+
+        self._analyze_button = QPushButton(strings.URL_ANALYZE)
+        self._analyze_button.setProperty("role", "primary")
+        self._analyze_button.setDefault(True)
+        self._analyze_button.clicked.connect(self._analyze)
+        grid.addWidget(self._analyze_button, 0, 3)
+
+        dest_label = QLabel(strings.DEST_LABEL)
+        grid.addWidget(dest_label, 1, 0)
+        self._dest = QLineEdit(self._settings.download_dir)
+        self._dest.setToolTip(strings.DEST_TOOLTIP)
+        self._dest.editingFinished.connect(self._on_dest_edited)
+        grid.addWidget(self._dest, 1, 1)
+
+        browse = QPushButton(strings.DEST_BROWSE)
+        browse.clicked.connect(self._choose_dest)
+        # Logo abaixo de "Colar e analisar", na mesma coluna e com a mesma
+        # largura: os dois botões formam uma pilha só, ao lado dos dois campos.
+        grid.addWidget(browse, 1, 2)
+
+        return box
+
+    def _build_left_pane(self) -> QWidget:
+        pane = QWidget()
+        layout = QVBoxLayout(pane)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        self._card = MediaCard()
+        layout.addWidget(self._card)
+
+        self._quality = QualityPanel(self._settings)
+        self._quality.changed.connect(self._update_add_button)
+        # Trocar de modo ou fazer aparecer um aviso muda a altura do painel; a
+        # divisão da janela acompanha, para nada ficar cortado.
+        self._quality.changed.connect(self._balance_panes)
+        layout.addWidget(self._quality)
+
+        layout.addStretch(1)
+        return pane
+
+    def _build_right_pane(self) -> QWidget:
+        pane = QWidget()
+        layout = QVBoxLayout(pane)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        self._profiles = ProfilesPanel()
+        self._profiles.profile_chosen.connect(self._on_profile)
+        layout.addWidget(self._profiles, 1)
+
+        self._add_button = QPushButton(strings.ADD_TO_QUEUE)
+        self._add_button.setProperty("role", "primary")
+        self._add_button.setEnabled(False)
+        self._add_button.setToolTip(strings.ADD_TO_QUEUE_TIP)
+        self._add_button.clicked.connect(self._add_current_to_queue)
+        layout.addWidget(self._add_button)
+
+        return pane
+
+    def _build_menu(self) -> None:
+        # Sem entrada para a conversão: ela é uma aba, sempre à vista. Um item
+        # de menu que só troca de aba é caminho duplicado para a mesma coisa.
+        file_menu = self.menuBar().addMenu(strings.MENU_FILE)
+
+        open_dest = QAction(strings.ACTION_OPEN_DEST, self)
+        open_dest.triggered.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(self._settings.resolved_download_dir()))
+            )
+        )
+        file_menu.addAction(open_dest)
+
+        file_menu.addSeparator()
+        quit_action = QAction(strings.ACTION_QUIT, self)
+        quit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
+        tools_menu = self.menuBar().addMenu(strings.MENU_TOOLS)
+        settings_action = QAction(strings.ACTION_SETTINGS, self)
+        settings_action.triggered.connect(self._open_settings)
+        tools_menu.addAction(settings_action)
+        update_action = QAction(strings.ACTION_UPDATE_ENGINE, self)
+        update_action.triggered.connect(self._update_engine)
+        tools_menu.addAction(update_action)
+
+        help_menu = self.menuBar().addMenu(strings.MENU_HELP)
+        about = QAction(strings.ACTION_ABOUT, self)
+        about.triggered.connect(self._show_about)
+        help_menu.addAction(about)
+
+    # ------------------------------------------------------------------
+    # Primeira execução
+    # ------------------------------------------------------------------
+
+    def bootstrap(self) -> None:
+        """Garante o ffmpeg. Chamado depois de a janela aparecer."""
+        self._tools = ensure_ffmpeg(self)
+        self._update_status()
+
+    # ------------------------------------------------------------------
+    # Análise
+    # ------------------------------------------------------------------
+
+    def _paste_and_analyze(self) -> None:
+        clipboard = QGuiApplication.clipboard()
+        text = (clipboard.text() if clipboard else "").strip()
+        if text:
+            self._url.setText(text)
+            self._analyze()
+
+    def _analyze(self) -> None:
+        url = self._url.text().strip()
+        if not url:
+            return
+        self._set_analyzing(True)
+        worker = ProbeWorker(url, self._settings)
+        worker.signals.finished.connect(self._on_probed)
+        worker.signals.failed.connect(self._on_probe_failed)
+        self._runner.start(worker, worker.signals.finished, worker.signals.failed)
+
+    def _set_analyzing(self, busy: bool) -> None:
+        self._analyze_button.setEnabled(not busy)
+        self._analyze_button.setText(
+            strings.URL_ANALYZING if busy else strings.URL_ANALYZE
+        )
+        self._url.setEnabled(not busy)
+        self._paste.setEnabled(not busy)
+
+    def _on_probed(self, result: object) -> None:
+        self._set_analyzing(False)
+        if isinstance(result, PlaylistInfo):
+            self._handle_playlist(result)
+            return
+        if not isinstance(result, MediaInfo):
+            return
+        self._media = result
+        self._card.set_media(result)
+        self._quality.set_matrix(result.matrix)
+        self._profiles.set_enabled(True)
+        self._update_add_button()
+        # A análise pode acrescentar a linha de trilha de áudio; a divisão da
+        # janela é refeita para o painel continuar inteiro.
+        self._balance_panes()
+
+    def _on_probe_failed(self, message: str) -> None:
+        self._set_analyzing(False)
+        QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, message)
+
+    # ------------------------------------------------------------------
+    # Enfileiramento
+    # ------------------------------------------------------------------
+
+    def _update_add_button(self) -> None:
+        self._add_button.setEnabled(self._media is not None)
+        if self._media is not None:
+            self._add_button.setToolTip("")
+
+    def _on_profile(self, profile: Profile) -> None:
+        """Aplica o perfil e enfileira em seguida — um clique só."""
+        if self._media is None:
+            return
+        self._quality.apply_profile(
+            mode=profile.mode,
+            height=profile.height,
+            container=profile.container,
+            audio_codec=profile.audio_codec,
+            audio_quality=profile.audio_quality,
+        )
+        self._add_current_to_queue()
+
+    def _add_current_to_queue(self) -> None:
+        if self._media is None:
+            return
+        if not self._require_tools():
+            return
+        request = self._quality.build_request()
+        self._enqueue(self._media, request)
+
+    def _enqueue(self, media: MediaInfo, request: VideoRequest | AudioRequest) -> None:
+        assert self._tools is not None
+        dest = self._settings.resolved_download_dir()
+        opts, plan = build_opts(
+            request, media, self._settings, self._tools, dest, self._temp_dir
+        )
+        job = Job(
+            url=media.url,
+            title=media.title,
+            description=describe_request(request, plan),
+            opts=opts,
+            warnings=plan.warnings if plan else (),
+        )
+        self._queue.submit(job)
+
+    def _require_tools(self) -> bool:
+        """Bloqueia o enfileiramento sem ffmpeg, explicando o motivo."""
+        if self._tools is not None:
+            return True
+        self._tools = ensure_ffmpeg(self)
+        self._update_status()
+        return self._tools is not None
+
+    # ------------------------------------------------------------------
+    # Playlists
+    # ------------------------------------------------------------------
+
+    def _handle_playlist(self, playlist: PlaylistInfo) -> None:
+        if not self._require_tools():
+            return
+        dialog = PlaylistDialog(playlist, self)
+        if dialog.exec() != PlaylistDialog.DialogCode.Accepted:
+            return
+        entries = dialog.selected_entries()
+        if not entries:
+            return
+
+        # Cada item da playlist tem formatos próprios, então uma escolha por id
+        # concreto não valeria para todos. O pedido vai por limite de resolução,
+        # que o seletor resolve item a item na hora do download.
+        request = self._quality.build_batch_request(dialog.height_limit())
+        for entry in entries:
+            placeholder = MediaInfo(
+                url=entry.url, title=entry.title, matrix=FormatMatrix()
+            )
+            self._enqueue(placeholder, request)
+
+    # ------------------------------------------------------------------
+    # Conversor local
+    # ------------------------------------------------------------------
+
+    def _tools_for_convert(self) -> FFmpegTools | None:
+        """ffmpeg para a aba de conversão, provisionando na primeira vez.
+
+        A aba é montada junto com a janela, antes de o ffmpeg ser procurado, e
+        por isso pergunta por ele só na hora de inspecionar um arquivo.
+        """
+        self._require_tools()
+        return self._tools
+
+    def _submit_jobs(self, jobs: list[Job]) -> None:
+        for job in jobs:
+            self._queue.submit(job)
+
+    # ------------------------------------------------------------------
+    # Configurações e engine
+    # ------------------------------------------------------------------
+
+    def _choose_dest(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, strings.SETTINGS_DEST, self._dest.text() or str(Path.home())
+        )
+        if chosen:
+            self._dest.setText(chosen)
+            self._on_dest_edited()
+
+    def _on_dest_edited(self) -> None:
+        self._settings.download_dir = self._dest.text().strip() or self._settings.download_dir
+        self._settings.save()
+
+    def _open_settings(self) -> None:
+        dialog = SettingsDialog(self._settings, self)
+        if dialog.exec() != SettingsDialog.DialogCode.Accepted:
+            return
+        previous_theme = self._settings.theme
+        self._settings = dialog.result_settings()
+        self._settings.save()
+        self._queue.apply_settings(self._settings)
+        self._dest.setText(self._settings.download_dir)
+        if self._settings.theme != previous_theme:
+            app = QApplication.instance()
+            if app is not None:
+                app.setPalette(qpalette(self._settings.theme))
+                app.setStyleSheet(stylesheet(self._settings.theme))
+        self._update_status()
+
+    def _update_engine(self) -> None:
+        current = yt_dlp.version.__version__
+        answer = QMessageBox.question(
+            self,
+            strings.DIALOG_ENGINE_TITLE,
+            strings.DIALOG_ENGINE_BODY.format(current=current),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        dialog = QProgressDialog(strings.DIALOG_ENGINE_RUNNING, "", 0, 0, self)
+        dialog.setWindowTitle(strings.DIALOG_ENGINE_TITLE)
+        dialog.setCancelButton(None)
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.setMinimumDuration(0)
+
+        def on_finished(version: str, changed: bool) -> None:
+            dialog.reset()
+            if changed:
+                QMessageBox.information(
+                    self, strings.DIALOG_ENGINE_TITLE,
+                    strings.DIALOG_ENGINE_DONE.format(version=version),
+                )
+            else:
+                QMessageBox.information(
+                    self, strings.DIALOG_ENGINE_TITLE,
+                    strings.DIALOG_ENGINE_UPTODATE.format(version=version),
+                )
+
+        def on_failed(message: str) -> None:
+            dialog.reset()
+            QMessageBox.warning(
+                self, strings.DIALOG_ENGINE_TITLE,
+                strings.DIALOG_ENGINE_FAILED.format(error=message),
+            )
+
+        worker = EngineUpdateWorker(current)
+        worker.signals.finished.connect(on_finished)
+        worker.signals.failed.connect(on_failed)
+        self._runner.start(worker, worker.signals.finished, worker.signals.failed)
+        dialog.exec()
+
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            strings.ABOUT_TITLE,
+            strings.ABOUT_BODY.format(
+                version=__version__, ytdlp=yt_dlp.version.__version__
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Status e encerramento
+    # ------------------------------------------------------------------
+
+    def _update_status(self) -> None:
+        active = self._queue.count_by_status(JobStatus.RUNNING, JobStatus.PROCESSING)
+        pending = self._queue.count_by_status(JobStatus.PENDING)
+        done = self._queue.count_by_status(JobStatus.DONE)
+        parts = [strings.STATUS_COUNTS.format(active=active, pending=pending, done=done)]
+        if self._tools is not None:
+            parts.append(strings.STATUS_FFMPEG.format(source=self._tools.source))
+        self.statusBar().showMessage("  |  ".join(parts))
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """Confirma a saída quando há tarefas em andamento."""
+        unfinished = sum(1 for job in self._queue.jobs if not job.status.is_final)
+        if unfinished:
+            answer = QMessageBox.question(
+                self,
+                strings.DIALOG_QUIT_TITLE,
+                strings.DIALOG_QUIT_BODY.format(count=unfinished),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+        self._settings.save()
+        self._queue.shutdown()
+        event.accept()
