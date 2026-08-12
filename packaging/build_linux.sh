@@ -22,12 +22,19 @@ echo "==> instalando dependências"
 echo "==> testes (um pacote não deve ser gerado sobre suíte vermelha)"
 "$PY" -m pytest -q
 
-echo "==> baixando ffmpeg para embutir"
-PYTHONPATH=src "$PY" packaging/fetch_binaries.py
+if [ "${VM_BUNDLE_FFMPEG:-1}" = "0" ]; then
+    echo "==> ffmpeg NÃO será embutido (VM_BUNDLE_FFMPEG=0)"
+else
+    echo "==> baixando ffmpeg para embutir"
+    PYTHONPATH=src "$PY" packaging/fetch_binaries.py
+fi
 
 echo "==> empacotando"
 rm -rf build dist
 "$PY" -m PyInstaller --noconfirm --clean packaging/videomanager.spec
+
+echo "==> conferindo que o pacote abre"
+./packaging/smoke_run.sh dist/VideoManager/VideoManager
 
 echo
 echo "pronto: dist/VideoManager/VideoManager"

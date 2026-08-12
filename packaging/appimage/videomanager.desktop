@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Video Manager
+Comment=Baixe e converta vídeo e áudio
+Exec=VideoManager
+Icon=videomanager
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=vídeo;áudio;download;converter;yt-dlp;ffmpeg;
+StartupWMClass=VideoManager
