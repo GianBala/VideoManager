@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from . import APP_DISPLAY_NAME, APP_NAME, __version__
@@ -12,6 +14,19 @@ from .core.settings import Settings
 from .preflight import check_or_explain
 from .ui.main_window import MainWindow
 from .ui.theme import qpalette, stylesheet
+
+
+def _icon_path() -> Path:
+    """Ícone da aplicação, empacotado ou no repositório.
+
+    O PyInstaller extrai os dados para ``sys._MEIPASS``; fora dele, os arquivos
+    estão ao lado do código. Mesmo raciocínio de ``core.binaries.vendor_dir``.
+    """
+    base = getattr(sys, "_MEIPASS", None)
+    root = Path(base) if base else Path(__file__).resolve().parent
+    # PNG e não SVG: renderizar SVG depende do plugin de imagem ``qsvg``, que
+    # pode não ir junto no pacote — e o ícone sumiria sem erro nenhum.
+    return root / "resources" / "videomanager.png"
 
 
 def build_app(argv: list[str] | None = None) -> tuple[QApplication, MainWindow]:
@@ -24,6 +39,11 @@ def build_app(argv: list[str] | None = None) -> tuple[QApplication, MainWindow]:
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_DISPLAY_NAME)
     app.setApplicationVersion(__version__)
+    # Sem ícone explícito, o gerenciador de janelas mostra o genérico: ao abrir
+    # pelo AppImage não há .desktop instalado de onde ele possa deduzir um.
+    icon = _icon_path()
+    if icon.is_file():
+        app.setWindowIcon(QIcon(str(icon)))
     # Estilo Fusion como base: é o único idêntico no Windows e no Linux, então o
     # QSS produz o mesmo resultado nos dois sistemas.
     app.setStyle("Fusion")

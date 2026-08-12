@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Ícone da aplicação. As cores saem de ui/theme.py (fundo "bg" e destaque
+  "accent" do tema escuro) para que o ícone na barra de tarefas e a janela
+  aberta pareçam a mesma coisa.
+
+  O desenho é um triângulo de "play" girado para baixo: lido de pé é uma seta
+  de download, lido deitado é o play de um player. Um símbolo só em vez de dois
+  porque a 48 px — o tamanho real numa barra de tarefas — dois glifos viram
+  borrão.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="fundo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f3440"/>
+      <stop offset="1" stop-color="#1a1d24"/>
+    </linearGradient>
+    <linearGradient id="seta" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6ba0f7"/>
+      <stop offset="1" stop-color="#4c8bf5"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#fundo)"/>
+  <rect x="8.5" y="8.5" width="239" height="239" rx="53.5"
+        fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1"/>
+
+  <!-- Haste e ponta desenhadas juntas: um contorno arredondado só evita a
+       emenda visível que aparece quando dois objetos se encostam. -->
+  <path d="M128 46 L128 116" fill="none" stroke="url(#seta)"
+        stroke-width="30" stroke-linecap="round"/>
+  <path d="M84 116 L172 116 L128 182 Z" fill="url(#seta)"
+        stroke="url(#seta)" stroke-width="18" stroke-linejoin="round"/>
+
+  <rect x="62" y="196" width="132" height="20" rx="10" fill="#9aa3b2"/>
+</svg>
