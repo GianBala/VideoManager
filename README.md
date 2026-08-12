@@ -56,11 +56,42 @@ Sem ele o Qt falha com *“Could not load the Qt platform plugin xcb”*.
 Cada sistema gera o seu próprio pacote — o PyInstaller não faz compilação cruzada.
 
 ```bash
+./packaging/build_appimage.sh  # Linux  -> dist/Video_Manager-<versão>-<arch>.AppImage
 ./packaging/build_linux.sh     # Linux  -> dist/VideoManager/
 .\packaging\build_windows.ps1  # Windows -> dist\VideoManager\
 ```
 
-Os scripts rodam os testes, baixam o `ffmpeg` para embutir e só então empacotam.
+Os scripts rodam os testes, baixam o `ffmpeg` para embutir, empacotam e por fim
+abrem o executável gerado para conferir que ele realmente sobe.
+
+### AppImage
+
+Um arquivo só, sem instalação: baixe, dê permissão de execução, clique.
+
+```bash
+chmod +x Video_Manager-0.1.0-x86_64.AppImage
+./Video_Manager-0.1.0-x86_64.AppImage
+```
+
+Ele envelopa o mesmo pacote do `build_linux.sh`, então tem tudo dentro: Python,
+Qt, yt-dlp e o `ffmpeg`. Duas opções úteis:
+
+```bash
+./packaging/build_appimage.sh --reuse-dist        # pula o build, reusa dist/
+VM_BUNDLE_FFMPEG=0 ./packaging/build_appimage.sh  # sem ffmpeg: ~290 MB a menos
+```
+
+Com `VM_BUNDLE_FFMPEG=0` o app usa o `ffmpeg` do sistema ou oferece baixá-lo na
+primeira execução — vale a pena quando o AppImage vai ser distribuído por
+download.
+
+O AppImage não se instala no menu do sistema sozinho; para isso existe o
+[AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher). Se a imagem
+não montar por falta de FUSE na máquina, roda assim mesmo:
+
+```bash
+./Video_Manager-0.1.0-x86_64.AppImage --appimage-extract-and-run
+```
 
 ## Como o projeto está organizado
 

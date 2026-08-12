@@ -10,6 +10,7 @@ Não há compilação cruzada: cada sistema gera o seu próprio pacote. Rode
 ``build_linux.sh`` no Linux e ``build_windows.ps1`` no Windows.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -20,18 +21,26 @@ from videomanager.core.binaries import exe_name, platform_key  # noqa: E402
 
 # Binários preparados por packaging/fetch_binaries.py. Se ausentes, o pacote
 # ainda funciona: a aplicação oferece o download na primeira execução.
+#
+# VM_BUNDLE_FFMPEG=0 gera um pacote ~290 MB menor, que usa o ffmpeg do sistema
+# ou baixa na primeira execução. Existe porque um AppImage é feito para ser
+# distribuído por download, onde esse peso é o custo principal.
 _vendor = REPO_ROOT / "vendor" / platform_key()
-binaries_to_bundle = [
-    (str(_vendor / exe_name(stem)), f"vendor/{platform_key()}")
-    for stem in ("ffmpeg", "ffprobe")
-    if (_vendor / exe_name(stem)).is_file()
-]
+binaries_to_bundle = (
+    [
+        (str(_vendor / exe_name(stem)), f"vendor/{platform_key()}")
+        for stem in ("ffmpeg", "ffprobe")
+        if (_vendor / exe_name(stem)).is_file()
+    ]
+    if os.environ.get("VM_BUNDLE_FFMPEG", "1") != "0"
+    else []
+)
 
 a = Analysis(
     [str(REPO_ROOT / "src" / "videomanager" / "__main__.py")],
     pathex=[str(REPO_ROOT / "src")],
     binaries=binaries_to_bundle,
-    datas=[],
+    datas=[(str(REPO_ROOT / "src" / "videomanager" / "resources"), "resources")],
     # Os extratores do yt-dlp são carregados dinamicamente; sem coletá-los
     # explicitamente, o pacote reconhece só uma fração dos sites.
     hiddenimports=[

@@ -1,0 +1,15 @@
+#!/bin/sh
+# Ponto de entrada do AppImage: o runtime monta a imagem e executa este arquivo.
+#
+# Deliberadamente mínimo. É tentador exportar LD_LIBRARY_PATH apontando para as
+# bibliotecas empacotadas, mas o bootloader do PyInstaller já resolve as suas —
+# e a variável seria herdada pelo ffmpeg, que passaria a carregar a libstdc++ do
+# pacote em vez da do sistema.
+#
+# readlink -f é o que faz a conta funcionar quando o AppImage é chamado por um
+# link simbólico: sem ele, $0 aponta para o link e HERE cai fora da imagem.
+set -eu
+
+HERE="$(dirname "$(readlink -f "$0")")"
+
+exec "$HERE/usr/bin/VideoManager" "$@"
