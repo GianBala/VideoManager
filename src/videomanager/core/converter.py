@@ -31,6 +31,7 @@ from .binaries import FFmpegTools, subprocess_kwargs
 from .downloader import Progress
 from .errors import ConversionError, JobCancelled
 from .composer import Composition, describe_export, export_args
+from .parallel_export import ParallelExport, plan_segments
 from .trimmer import TrimTarget, build_trim_args, describe_trim
 
 # --- alvos de áudio ---------------------------------------------------------
@@ -623,6 +624,7 @@ class Converter:
         self._tools = tools
         self._on_progress = on_progress
         self._process: subprocess.Popen | None = None
+        self._parallel: ParallelExport | None = None
         self._cancelled = False
         self._lock = threading.Lock()
 
@@ -630,8 +632,36 @@ class Converter:
         self._cancelled = True
         with self._lock:
             process = self._process
+            parallel = self._parallel
         if process and process.poll() is None:
             process.terminate()
+        if parallel is not None:
+            parallel.cancel()
+
+    def _run_parallel(self, composition: Composition, segments: int) -> Path:
+        """Entrega a exportação ao caminho de trechos paralelos.
+
+        A referência é guardada porque o cancelamento chega por
+        :meth:`cancel`, de outra thread, e precisa alcançar os processos de lá.
+        """
+        export = ParallelExport(
+            composition,
+            self._destination,
+            self._tools,
+            segments,
+            on_progress=self._on_progress,
+        )
+        with self._lock:
+            self._parallel = export
+        if self._cancelled:
+            # Cancelado entre a decisão e o registro: sem isto, os trechos
+            # começariam depois de o usuário já ter desistido.
+            raise JobCancelled("Conversão cancelada.")
+        try:
+            return export.run()
+        finally:
+            with self._lock:
+                self._parallel = None
 
     @staticmethod
     def _drain(stream, into: deque[str]) -> None:
@@ -664,6 +694,16 @@ class Converter:
         )
 
     def run(self) -> Path:
+        # A interpolação é o único trabalho desta aplicação que não usa a máquina
+        # inteira: o filtro é de uma thread só. Quando dá para dividi-la em
+        # trechos paralelos, quem executa é outro caminho — e ``plan_segments``
+        # devolve 1 sempre que dividir não vale ou não é seguro (ver
+        # ``core/parallel_export.py``).
+        if isinstance(self._target, Composition):
+            segments = plan_segments(self._target)
+            if segments > 1:
+                return self._run_parallel(self._target, segments)
+
         args = build_args(self._media, self._target, self._destination, self._tools)
         self._destination.parent.mkdir(parents=True, exist_ok=True)
 
