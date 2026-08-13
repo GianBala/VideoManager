@@ -58,6 +58,13 @@ _HANDLE_WIDTH = 5
 _SNAP_PIXELS = 7
 _MIN_VIEW = 0.4
 
+# Quanto o ponteiro precisa andar para um clique virar arrasto. Sem essa folga,
+# selecionar um bloco já contava como edição: cada clique empilhava um desfazer
+# que não desfazia nada, e o Ctrl+Z passava a exigir uma dúzia de repetições
+# para voltar uma alteração de verdade. Também evita mover um bloco um quadro
+# sem querer, pelo tremor da mão no clique.
+_DRAG_SLACK = 4
+
 # Até onde se pode afastar **além** do fim da edição. Parar em "cabe tudo" deixa
 # a linha do tempo sem vazio nenhum depois do último bloco — e é justamente
 # nesse vazio que se solta um bloco para o fim, ou que se olha uma montagem
@@ -132,6 +139,10 @@ class Timeline(QWidget):
         self._drag = ""
         self._drag_clip = -1
         self._grab_offset = 0.0
+        # Onde o botão foi apertado, e se o arrasto já passou da folga: até lá
+        # nada é alterado no projeto (ver :data:`_DRAG_SLACK`).
+        self._press_at: QPointF | None = None
+        self._dragging = False
         self._pan_origin: QPointF | None = None
         self._pan_start = 0.0
 
@@ -567,8 +578,10 @@ class Timeline(QWidget):
         if clip_id >= 0:
             self.select(clip_id)
         if kind in ("inicio", "fim", "corpo"):
-            self.edit_started.emit()
+            # O aviso de que uma edição começou fica para o primeiro movimento
+            # que passe da folga: um clique de seleção não é uma edição.
             self._drag, self._drag_clip = kind, clip_id
+            self._press_at, self._dragging = event.position(), False
             found = self._project.find(clip_id)
             if found is not None and kind == "corpo":
                 # Guarda onde no bloco o mouse pegou: sem isso o bloco pula para
@@ -577,6 +590,7 @@ class Timeline(QWidget):
             return
 
         self._drag, self._drag_clip = "cursor", -1
+        self._press_at, self._dragging = None, False
         self.set_position(self._time_of(x), follow=False)
         self.scrubbed.emit(self._position)
 
@@ -603,6 +617,9 @@ class Timeline(QWidget):
             self.scrubbed.emit(self._position)
             return
 
+        if not self._past_slack(event.position()):
+            return
+
         found = self._project.find(self._drag_clip)
         if found is None:
             return
@@ -616,6 +633,23 @@ class Timeline(QWidget):
 
         moment = self._snap(self._time_of(x), clip)
         self.clip_resized.emit(clip.clip_id, self._drag, moment)
+
+    def _past_slack(self, point: QPointF) -> bool:
+        """Se o ponteiro já andou o bastante para isto ser um arrasto.
+
+        O aviso de início vai daqui, e só uma vez: é ele que empilha o desfazer,
+        e um desfazer por clique tornaria o Ctrl+Z inútil.
+        """
+        if self._dragging:
+            return True
+        if self._press_at is None:
+            return False
+        delta = point - self._press_at
+        if max(abs(delta.x()), abs(delta.y())) < _DRAG_SLACK:
+            return False
+        self._dragging = True
+        self.edit_started.emit()
+        return True
 
     def _drop_track(self, y: float, clip: Clip, origin: int) -> int:
         """Trilha sob o ponteiro, se ela aceitar este bloco."""
@@ -656,9 +690,10 @@ class Timeline(QWidget):
             self._pan_origin = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
             return
-        if self._drag in ("inicio", "fim", "corpo"):
+        if self._dragging and self._drag in ("inicio", "fim", "corpo"):
             self.edit_finished.emit()
         self._drag, self._drag_clip = "", -1
+        self._press_at, self._dragging = None, False
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         kind, index, clip_id = self._hit(event.position().x(), event.position().y())
