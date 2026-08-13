@@ -258,6 +258,106 @@ class TestMover:
         assert projeto.clips[0].start == 0.0
 
 
+class TestTrocarDeLugar:
+    """Reordenar dois blocos encostados, que é o gesto que não existia.
+
+    Dois blocos colados não deixam vão nenhum entre si, então a acomodação no
+    vão mais próximo devolvia sempre a mesma posição: arrastar o segundo para
+    antes do primeiro não fazia **nada**, e não havia outro caminho na tela para
+    reordenar uma sequência.
+
+    O que estes testes guardam, além da troca em si, é que ela **não se repete
+    sozinha**: o arrasto reaplica a mesma posição a cada movimento do mouse, e
+    uma troca que valesse nos dois sentidos no mesmo ponto faria os blocos
+    piscarem de lugar dezenas de vezes por segundo com a mão parada.
+    """
+
+    def montagem(self) -> tuple[Project, Clip, Clip]:
+        projeto = montado(
+            clip(start=0.0, duration=10.0), clip(start=10.0, duration=10.0)
+        )
+        primeiro, segundo = projeto.tracks[0].sorted_clips()
+        return projeto, primeiro, segundo
+
+    def posicoes(self, projeto: Project, *clips: Clip) -> list[float]:
+        """Onde cada bloco está agora, na ordem em que foram pedidos."""
+        return [projeto.find(c.clip_id)[1].start for c in clips]  # type: ignore[index]
+
+    def test_passar_do_meio_do_vizinho_troca_os_dois(self) -> None:
+        projeto, primeiro, segundo = self.montagem()
+        # O vizinho ocupa [0, 10]: a ponta esquerda do arrastado passou de 5.
+        movido = projeto.moved(segundo.clip_id, 0, 4.9)
+        assert self.posicoes(movido, segundo, primeiro) == [0.0, 10.0]
+
+    def test_encostar_a_ponta_nao_troca(self) -> None:
+        # Justapor é o gesto mais comum da linha do tempo, e ele não pode virar
+        # troca sem querer: até passar do meio do vizinho, nada muda.
+        projeto, primeiro, segundo = self.montagem()
+        movido = projeto.moved(segundo.clip_id, 0, 6.0)
+        assert self.posicoes(movido, primeiro, segundo) == [0.0, 10.0]
+
+    def test_bloco_mais_longo_que_o_vizinho_tambem_troca(self) -> None:
+        # Medir pelo meio do bloco **arrastado** não serve: um bloco de 40 s
+        # encosta no zero com o meio dele ainda em 20, longe de alcançar um
+        # vizinho de 20 s — e nenhum arrasto reordenava mais nada.
+        projeto = montado(clip(start=0.0, duration=20.0), clip(start=20.0, duration=40.0))
+        curto, longo = projeto.tracks[0].sorted_clips()
+        movido = projeto.moved(longo.clip_id, 0, 0.0)
+        assert self.posicoes(movido, longo, curto) == [0.0, 40.0]
+
+    def test_o_longo_volta_pelo_mesmo_ponto(self) -> None:
+        projeto = montado(clip(start=0.0, duration=20.0), clip(start=20.0, duration=40.0))
+        curto, longo = projeto.tracks[0].sorted_clips()
+        trocado = projeto.moved(longo.clip_id, 0, 0.0)
+        assert self.posicoes(trocado.moved(longo.clip_id, 0, 9.9), longo, curto) == [
+            0.0, 40.0
+        ], "aquém do ponto de troca, continua na frente"
+        voltou = trocado.moved(longo.clip_id, 0, 10.1)
+        assert self.posicoes(voltou, curto, longo) == [0.0, 20.0]
+
+    def test_a_troca_volta_pelo_mesmo_caminho(self) -> None:
+        projeto, primeiro, segundo = self.montagem()
+        trocado = projeto.moved(segundo.clip_id, 0, 4.9)
+        voltou = trocado.moved(segundo.clip_id, 0, 5.1)
+        assert self.posicoes(voltou, primeiro, segundo) == [0.0, 10.0]
+
+    def test_insistir_no_mesmo_ponto_nao_fica_piscando(self) -> None:
+        # O arrasto reaplica a mesma posição a cada movimento do mouse: se a
+        # troca se repetisse, os dois blocos trocariam de lugar dezenas de vezes
+        # por segundo enquanto a mão estivesse parada.
+        projeto, primeiro, segundo = self.montagem()
+        trocado = projeto.moved(segundo.clip_id, 0, 4.9)
+        de_novo = trocado.moved(segundo.clip_id, 0, 4.9)
+        assert self.posicoes(de_novo, segundo, primeiro) == [0.0, 10.0]
+
+    def test_duracoes_diferentes_ficam_encostadas_no_comeco(self) -> None:
+        projeto = montado(
+            clip(start=0.0, duration=10.0), clip(start=10.0, duration=3.0)
+        )
+        longo, curto = projeto.tracks[0].sorted_clips()
+        movido = projeto.moved(curto.clip_id, 0, 2.0)
+        assert self.posicoes(movido, curto, longo) == [0.0, 3.0]
+
+    def test_a_troca_nao_esbarra_num_terceiro(self) -> None:
+        # Os dois ficam dentro do espaço que já ocupavam juntos, e por isso a
+        # troca nunca sobrepõe quem está ao lado.
+        projeto = montado(
+            clip(start=0.0, duration=10.0),
+            clip(start=10.0, duration=3.0),
+            clip(start=13.0, duration=5.0),
+        )
+        longo, curto, vizinho = projeto.tracks[0].sorted_clips()
+        movido = projeto.moved(curto.clip_id, 0, 2.0)
+        assert self.posicoes(movido, curto, longo, vizinho) == [0.0, 3.0, 13.0]
+
+    def test_com_vao_no_meio_o_bloco_so_anda(self) -> None:
+        # Onde há espaço não há o que trocar: o bloco vai para onde foi solto.
+        projeto = montado(clip(start=0.0, duration=5.0), clip(start=20.0, duration=5.0))
+        primeiro, segundo = projeto.tracks[0].sorted_clips()
+        movido = projeto.moved(segundo.clip_id, 0, 12.0)
+        assert self.posicoes(movido, primeiro, segundo) == [0.0, 12.0]
+
+
 class TestSomSeparadoEUmBlocoDeAudio:
     """O bloco que "separar áudio" cria é áudio, mesmo vindo de um arquivo com
     imagem.
