@@ -26,6 +26,7 @@ from videomanager.core.composer import (
     describe_export,
     export_args,
     frame_command,
+    interpolation_bytes,
     playback_command,
     simple_trim,
 )
@@ -283,6 +284,108 @@ class TestInterpolacao:
         assert "interpolado" not in describe_export(rapido, "mp4", interpolate=True)
 
 
+class TestCustoDaInterpolacao:
+    """O que impede uma exportação interpolada de derrubar a máquina.
+
+    A memória do ``minterpolate`` é função do tamanho do quadro que ele recebe —
+    medido: 1,6 GB a 1080p e 5,6 GB a 4K, iguais para 5 s e para 20 s — e o
+    filtro não tem controle nenhum para isso (``mb_size`` vai só até 16, e
+    desligar o ``vsbmc`` muda 16 MB). Restam duas defesas, e as duas estão aqui:
+    **dar ao filtro o menor quadro possível** e **dizer o número antes**.
+    """
+
+    def em(self, largura: int, altura: int, fps: float = 60.0) -> Project:
+        return Project(
+            tracks=(video_track(clip(self.material())),),
+            width=largura, height=altura, fps=fps,
+        )
+
+    def material(self, largura: int = 1920, altura: int = 1080) -> MediaRef:
+        return MediaRef(
+            path=Path("/m/cinema.mp4"), kind=MediaKind.VIDEO, duration=30.0,
+            width=largura, height=altura, fps=24.0, has_audio=True, channels=2,
+        )
+
+    def test_material_maior_que_a_tela_encolhe_antes_de_interpolar(self) -> None:
+        # 4K numa tela 1080p: estimar movimento em 4K para depois jogar fora três
+        # quartos dos pixels é pagar 5,6 GB onde 1,6 GB dá o mesmo resultado.
+        projeto_4k = Project(
+            tracks=(video_track(clip(self.material(3840, 2160))),),
+            width=1920, height=1080, fps=60.0,
+        )
+        texto = filtros(projeto_4k, interpolate=True)
+        assert texto.index("scale=") < texto.index("minterpolate")
+
+    def test_material_menor_que_a_tela_interpola_antes_de_crescer(self) -> None:
+        # O movimento está nos pixels originais: ampliar primeiro só faria o
+        # filtro estimar movimento em pixels que o próprio scale inventou, pelo
+        # preço da tela grande.
+        projeto_hd = Project(
+            tracks=(video_track(clip(self.material(1280, 720))),),
+            width=3840, height=2160, fps=60.0,
+        )
+        texto = filtros(projeto_hd, interpolate=True)
+        assert texto.index("minterpolate") < texto.index("scale=")
+
+    def test_duplicar_quadro_e_sempre_depois_de_encaixar(self) -> None:
+        # Sem interpolação a ordem não tem escolha a fazer: encaixar primeiro faz
+        # o scale receber os 24 quadros da origem em vez dos 60 da tela, e
+        # duplicar depois é de graça.
+        texto = filtros(self.em(3840, 2160), interpolate=False)
+        assert texto.index("scale=") < texto.index("fps=60.000000")
+
+    def test_sem_tamanho_conhecido_a_tela_e_o_teto(self) -> None:
+        # A tela é um teto conhecido; o do material não. Encaixar primeiro é o
+        # lado que não pode surpreender.
+        sem_tamanho = MediaRef(
+            path=Path("/m/x.mp4"), kind=MediaKind.VIDEO, duration=30.0,
+            width=None, height=None, fps=24.0, has_audio=True, channels=2,
+        )
+        projeto_cego = Project(
+            tracks=(video_track(clip(sem_tamanho)),),
+            width=1920, height=1080, fps=60.0,
+        )
+        texto = filtros(projeto_cego, interpolate=True)
+        assert texto.index("scale=") < texto.index("minterpolate")
+
+    def test_a_memoria_anunciada_e_a_do_quadro_que_o_filtro_recebe(self) -> None:
+        grande = interpolation_bytes(self.em(3840, 2160))
+        pequena = interpolation_bytes(self.em(1920, 1080))
+        # O material é 1080p: numa tela 4K ele é interpolado antes de crescer, e
+        # por isso as duas telas custam o mesmo. É a diferença entre anunciar o
+        # custo real e anunciar o que a tela sugere.
+        assert grande == pequena
+        assert pequena == pytest.approx(1920 * 1080 * 803, rel=0.01)
+
+    def test_a_tela_menor_limita_o_custo(self) -> None:
+        projeto_4k = Project(
+            tracks=(video_track(clip(self.material(3840, 2160))),),
+            width=1280, height=720, fps=60.0,
+        )
+        assert interpolation_bytes(projeto_4k) == pytest.approx(
+            1280 * 720 * 803, rel=0.01
+        )
+
+    def test_cada_bloco_soma_porque_cada_um_vira_um_filtro(self) -> None:
+        # O grafo instancia um ``minterpolate`` por bloco, e todos vivem
+        # enquanto a exportação existe: o pico é a soma, não o maior.
+        dois = Project(
+            tracks=(video_track(
+                clip(self.material(), start=0.0, duration=10.0),
+                clip(self.material(), start=10.0, duration=10.0),
+            ),),
+            width=1920, height=1080, fps=60.0,
+        )
+        assert interpolation_bytes(dois) == 2 * interpolation_bytes(self.em(1920, 1080))
+
+    def test_sem_o_que_interpolar_nao_ha_custo(self) -> None:
+        na_taxa = Project(
+            tracks=(video_track(clip(VIDEO)),), width=1920, height=1080, fps=30.0
+        )
+        assert interpolation_bytes(na_taxa) == 0
+        assert interpolation_bytes(projeto(audio_track(clip(ESTEREO)))) == 0
+
+
 class TestJanela:
     def test_bloco_que_ja_passou_nao_entra(self) -> None:
         # Ao reproduzir a partir dos 30 s, o que acabou aos 10 não é aberto.
@@ -401,7 +504,6 @@ class TestCaminhoRapido:
 
     def test_trilha_muda_nao_e_recorte(self) -> None:
         assert simple_trim(projeto(video_track(clip(), muted=True))) is None
-
 
     def test_tela_diferente_da_origem_nao_e_recorte(self) -> None:
         # Copiar os dados entrega a imagem como ela está no arquivo: a tela

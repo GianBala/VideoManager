@@ -297,16 +297,6 @@ def _sar_of(stream: dict) -> float:
         return 1.0
 
 
-def volume_medio(path: Path, tools) -> float:
-    saida = subprocess.run(
-        [tools.ffmpeg_str, "-hide_banner", "-nostdin", "-i", str(path),
-         "-af", "volumedetect", "-f", "null", "-"],
-        capture_output=True, text=True,
-    ).stderr
-    linha = next(l for l in saida.splitlines() if "mean_volume:" in l)
-    return float(linha.split("mean_volume:")[1].split("dB")[0])
-
-
 def brilho_medio(path: Path, tools, at: float) -> float:
     """Luminância média do quadro em ``at``, de 0 (preto) a 255.
 
@@ -496,6 +486,56 @@ class TestExportacaoDaEdicao:
         # duração certa, contagem certa, nenhum erro, e o fim preto.
         assert brilho_medio(interpolado, tools, duracao - 0.05) > 10, (
             "o fim do bloco interpolado não pode sair preto"
+        )
+
+    def test_interpolar_para_uma_tela_maior_continua_saindo_certo(
+        self, tmp_path: Path, tools
+    ) -> None:
+        """A ordem barata é interpolar antes de ampliar — e o arquivo é o mesmo.
+
+        Estimar movimento em pixels que o ``scale`` acabou de inventar custa o
+        tamanho da tela e não acrescenta informação: o movimento está nos pixels
+        originais. Mas trocar a ordem mexe no que sai, e é isso que se mede aqui
+        — tamanho da tela, imagens distintas de verdade e o fim do bloco ainda
+        reposto pelo ``tpad``, que agora corre antes do encaixe.
+        """
+        from videomanager.core.composer import Composition
+        from videomanager.core.converter import Converter, probe_file
+        from videomanager.core.project import media_ref, new_project
+
+        duracao = 2.0
+        origem = tmp_path / "pequeno.mp4"
+        subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-f", "lavfi",
+             "-i", f"testsrc2=size=320x180:rate=24:duration={duracao}",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+             "-pix_fmt", "yuv420p", str(origem)],
+            check=True,
+        )
+        projeto = replace(
+            new_project(media_ref(probe_file(origem, tools))),
+            width=640, height=360, fps=60.0,
+        )
+
+        saida = tmp_path / "ampliado.mp4"
+        Converter(
+            probe_file(origem, tools),
+            Composition(projeto, "mp4", interpolate=True),
+            saida,
+            tools,
+        ).run()
+
+        formato, streams = ffprobe_streams(saida, tools)
+        video = stream_of(streams, "video")
+        assert (video["width"], video["height"]) == (640, 360), (
+            "interpolar antes de ampliar não muda a tela que foi pedida"
+        )
+        assert float(formato["duration"]) == pytest.approx(duracao, abs=0.2)
+        assert distintos(saida, tools) > 100, (
+            "os quadros que faltavam existem, estimados no material original"
+        )
+        assert brilho_medio(saida, tools, duracao - 0.05) > 10, (
+            "o ``tpad`` continua repondo o fim, agora antes do encaixe"
         )
 
     def test_pixel_nao_quadrado_sai_com_a_forma_certa(self, tmp_path: Path, tools) -> None:

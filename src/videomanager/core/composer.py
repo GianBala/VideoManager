@@ -71,6 +71,14 @@ _MIN_CANVAS = 0.04
 # e nada disso aparece: a sobreposição é desligada no fim do bloco.
 _INTERPOLATE_TAIL = 0.5
 
+# Memória do ``minterpolate``, por pixel do quadro que ele **recebe**. Medido
+# nesta máquina, pico de RSS de uma exportação: 1589 MB a 1920×1080 (803 B/px) e
+# 5655 MB a 3840×2160 (715 B/px). Não cresce com a duração — 20 s a 1080p pediu
+# os mesmos 1,6 GB que 5 s —, e é por isso que o custo pode ser anunciado antes
+# de a exportação começar (ver :func:`interpolation_bytes`). O valor é o maior
+# dos dois: errar para cima só antecipa um aviso, errar para baixo derruba a
+# máquina.
+_INTERPOLATE_BYTES_PER_PIXEL = 803
 
 
 @dataclass(frozen=True)
@@ -159,6 +167,17 @@ def _input_args(piece: _Piece, fps: float) -> list[str]:
     return ["-ss", f"{piece.seek:.6f}", "-i", str(clip.media.path)]
 
 
+def _interpolates(piece: _Piece, fps: float, interpolate: bool) -> bool:
+    """Se **este** bloco vai ter quadros inventados.
+
+    A caixa marcada não basta: só há o que interpolar num bloco de vídeo abaixo
+    da taxa da tela. Um bloco já na taxa (ou acima) pagaria a estimativa de
+    movimento para nada, e uma imagem parada não tem movimento a estimar.
+    """
+    origem = piece.clip.media.fps
+    return bool(interpolate and origem and origem < fps - 0.01)
+
+
 def _rate_chain(piece: _Piece, fps: float, interpolate: bool) -> str:
     """Como este bloco chega à taxa da tela.
 
@@ -174,12 +193,9 @@ def _rate_chain(piece: _Piece, fps: float, interpolate: bool) -> str:
     rápido, oclusão e corte de cena saem deformados —, e por isso é escolha
     explícita e nunca o padrão.
 
-    Só entra onde há o que interpolar: um bloco que já está na taxa da tela (ou
-    acima dela) pagaria a estimativa de movimento para nada, e uma imagem parada
-    não tem movimento nenhum a estimar.
+    Só entra onde há o que interpolar: ver :func:`_interpolates`.
     """
-    origem = piece.clip.media.fps
-    if interpolate and origem and origem < fps - 0.01:
+    if _interpolates(piece, fps, interpolate):
         # ``tpad`` repõe o fim: para inventar um quadro, o filtro precisa do
         # **seguinte**, e por isso ele entrega alguns quadros a menos do que
         # recebeu. Medido: 236 de 240. O bloco acabava antes da hora e o que
@@ -203,13 +219,49 @@ def _video_chain(
         steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
     else:
         steps.append("setpts=PTS-STARTPTS")
-    steps.append(_rate_chain(piece, fps, interpolate))
-    steps.append(_fit_scale(project.width, project.height))
+    if _rate_first(piece, project, fps, interpolate):
+        steps.append(_rate_chain(piece, fps, interpolate))
+        steps.append(_fit_scale(project.width, project.height))
+    else:
+        steps.append(_fit_scale(project.width, project.height))
+        steps.append(_rate_chain(piece, fps, interpolate))
     steps.append(
         f"pad={project.width}:{project.height}:(ow-iw)/2:(oh-ih)/2:color=black"
     )
     steps.append("setsar=1")
     return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
+
+
+def _rate_first(
+    piece: _Piece, project: Project, fps: float, interpolate: bool
+) -> bool:
+    """Se a taxa é ajustada **antes** do encaixe na tela.
+
+    A regra é uma só: **o trabalho pesado acontece no menor dos dois tamanhos.**
+
+    Duplicar quadro é sempre depois de encaixar. Assim o ``scale`` recebe os
+    quadros da origem (24) em vez dos da tela (60) — a duplicação em si é de
+    graça, porque o ffmpeg só repassa o mesmo quadro.
+
+    Interpolar é o contrário quando a tela é **maior** que o material: estimar
+    movimento em pixels que o ``scale`` acabou de inventar custa o tamanho da
+    tela e não acrescenta informação nenhuma — o movimento está nos pixels
+    originais. Subir depois sai mais barato e mais fiel.
+
+    A ordem não é detalhe de desempenho: a memória do ``minterpolate`` é função
+    do tamanho do quadro (medido: 1,6 GB a 1080p, 5,6 GB a 4K, com 20 s gastando
+    o mesmo que 5 s). Interpolar um material 1080p numa tela 4K reservava os
+    5,6 GB **sem nada em troca**, e foi assim que uma exportação sozinha comeu a
+    memória da máquina.
+    """
+    if not _interpolates(piece, fps, interpolate):
+        return False
+    media = piece.clip.media
+    if not media.width or not media.height:
+        # Sem saber o tamanho da origem, encaixar primeiro é o lado seguro: a
+        # tela é um teto conhecido, e o do material não.
+        return False
+    return media.width * media.height < project.width * project.height
 
 
 def _fit_scale(width: int, height: int) -> str:
@@ -535,14 +587,46 @@ def as_trim_target(
     )
 
 
-def can_interpolate(project: Project) -> bool:
-    """Se há bloco abaixo da taxa da tela — o único caso com o que interpolar."""
-    return any(
-        clip.media.fps and clip.media.fps < project.fps - 0.01
+def _interpolated_clips(project: Project) -> list[Clip]:
+    """Os blocos que teriam quadros inventados nesta edição.
+
+    Uma regra só, usada para oferecer a opção e para dizer o que ela vai custar:
+    duas contas para a mesma decisão acabam discordando, e aqui a que discordasse
+    anunciaria uma memória que não é a pedida.
+    """
+    return [
+        clip
         for track in project.video_tracks
         for clip in track.clips
-        if clip.has_image
-    )
+        if clip.has_image and clip.media.fps and clip.media.fps < project.fps - 0.01
+    ]
+
+
+def can_interpolate(project: Project) -> bool:
+    """Se há bloco abaixo da taxa da tela — o único caso com o que interpolar."""
+    return bool(_interpolated_clips(project))
+
+
+def interpolation_bytes(project: Project) -> int:
+    """Memória que uma exportação interpolada deste projeto vai pedir.
+
+    Existe para a aba **dizer o número antes de enfileirar**, como já diz o ponto
+    real do corte rápido. O ``minterpolate`` não tem controle de memória — nem
+    ``mb_size``, nem desligar o ``vsbmc`` mudam o pico (medido: 1573 contra 1589
+    MB) —, então o que resta é escolher uma tela que caiba e saber disso antes.
+
+    O total soma os blocos porque o grafo instancia **um filtro por bloco**, e
+    todos vivem enquanto a exportação existe. Cada um conta pelo quadro que
+    recebe, que é o menor entre material e tela — a mesma regra de
+    :func:`_rate_first`.
+    """
+    total = 0
+    for clip in _interpolated_clips(project):
+        pixels = project.width * project.height
+        if clip.media.width and clip.media.height:
+            pixels = min(pixels, clip.media.width * clip.media.height)
+        total += pixels * _INTERPOLATE_BYTES_PER_PIXEL
+    return total
 
 
 def describe_export(

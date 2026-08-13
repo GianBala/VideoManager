@@ -310,8 +310,9 @@ EDIT_INTERPOLATE_OFF = (
     "Só há o que interpolar quando algum bloco está abaixo da taxa da tela."
 )
 EDIT_INTERPOLATE_WARN = (
-    "Interpolar multiplica o tempo da exportação (medido: 38×) e deforma o que "
-    "se move depressa."
+    "Interpolar multiplica o tempo da exportação (medido: 38×), deforma o que "
+    "se move depressa e reserva cerca de {memory} de memória — reduza a tela se "
+    "for demais para esta máquina."
 )
 
 # exportação
