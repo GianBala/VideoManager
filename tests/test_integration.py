@@ -281,6 +281,32 @@ def volume_medio(path: Path, tools) -> float:
     return float(linha.split("mean_volume:")[1].split("dB")[0])
 
 
+def brilho_medio(path: Path, tools, at: float) -> float:
+    """Luminância média do quadro em ``at``, de 0 (preto) a 255.
+
+    É como se afirma que **não há imagem** num trecho: a ausência de vídeo
+    indevido não aparece na duração, nem nos streams, nem em exceção nenhuma.
+    """
+    quadro = subprocess.run(
+        [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-ss", f"{at:.3f}",
+         "-i", str(path), "-frames:v", "1", "-vf", "scale=16:16",
+         "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
+        capture_output=True, check=True,
+    ).stdout
+    assert quadro, f"não saiu quadro em {at} s"
+    return sum(quadro) / len(quadro)
+
+
+def volume_medio(path: Path, tools) -> float:
+    saida = subprocess.run(
+        [tools.ffmpeg_str, "-hide_banner", "-nostdin", "-i", str(path),
+         "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True,
+    ).stderr
+    linha = next(l for l in saida.splitlines() if "mean_volume:" in l)
+    return float(linha.split("mean_volume:")[1].split("dB")[0])
+
+
 class TestExportacaoDaEdicao:
     def test_ganho_em_decibeis_sai_exato_no_arquivo(self, tmp_path: Path, tools) -> None:
         """0 dB tem de significar "não mexe", e -6 dB tem de ser -6 dB.
@@ -354,6 +380,45 @@ class TestExportacaoDaEdicao:
         formato, streams = ffprobe_streams(saida, tools)
         assert float(formato["duration"]) == pytest.approx(8.0, abs=0.2)
         assert stream_of(streams, "audio") is not None
+
+    def test_som_separado_nao_leva_a_imagem_junto(self, tmp_path: Path, tools) -> None:
+        """Separar o áudio e movê-lo não pode reaparecer como imagem.
+
+        O bloco que "separar áudio" cria vem de um arquivo **com vídeo**, e a
+        composição decidia o que desenhar pela mídia do bloco: o vídeo do som
+        separado era sobreposto a tudo, no instante para onde o som fosse
+        arrastado. Não levanta erro, não muda a duração e não muda os streams —
+        só medindo a imagem no trecho em que ela não devia existir.
+        """
+        from videomanager.core.composer import Composition
+        from videomanager.core.converter import Converter, probe_file
+        from videomanager.core.project import media_ref, new_project
+
+        origem = gerar_video(tmp_path / "fonte.mp4", tools, duracao=4.0)
+        projeto = new_project(media_ref(probe_file(origem, tools)))
+        projeto = projeto.detached_audio(projeto.clips[0].clip_id)
+        som = [c for t in projeto.audio_tracks for c in t.clips][0]
+        # O som vai para depois do fim da imagem: a edição passa a durar 8 s,
+        # e os 4 s finais têm de ser tela preta com som.
+        projeto = projeto.moved(
+            som.clip_id, projeto.track_index(projeto.audio_tracks[0].track_id), 4.0
+        )
+
+        saida = tmp_path / "separado.mp4"
+        Converter(
+            probe_file(origem, tools), Composition(projeto, "mp4"), saida, tools
+        ).run()
+
+        formato, streams = ffprobe_streams(saida, tools)
+        assert float(formato["duration"]) == pytest.approx(8.0, abs=0.3)
+        assert stream_of(streams, "audio") is not None, "o som separado tem de sair"
+        # Medido nesta fonte: 124,6 onde há imagem e 3,5 na tela preta (não é
+        # zero cravado porque o h264 deixa resíduo em volta do preto). Com o
+        # defeito, os 6 s mediam 124,7 — a imagem inteira, de volta.
+        assert brilho_medio(saida, tools, 1.0) > 100, "a imagem existe onde ela está"
+        assert brilho_medio(saida, tools, 6.0) < 10, (
+            "onde só há som, a tela é preta — não o vídeo do bloco de áudio"
+        )
 
     def test_pixel_nao_quadrado_sai_com_a_forma_certa(self, tmp_path: Path, tools) -> None:
         """Rip de DVD e filmadora antiga guardam a imagem espremida.

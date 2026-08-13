@@ -973,7 +973,10 @@ class EditPanel(QWidget):
         )
         index = self._free_track(pasted)
         if index is None:
-            kind = TrackKind.VIDEO if pasted.media.has_video else TrackKind.AUDIO
+            # Pelo bloco, não pela mídia dele: um bloco de "separar áudio" vem
+            # de um arquivo com imagem, e pela mídia a cópia de um som ia parar
+            # numa trilha de vídeo, recolando o vídeo inteiro.
+            kind = TrackKind.VIDEO if pasted.has_image else TrackKind.AUDIO
             project = self._project.with_track(kind)
             index = 0 if kind is TrackKind.VIDEO else len(project.tracks) - 1
             self._project = project
