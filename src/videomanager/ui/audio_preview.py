@@ -19,6 +19,10 @@ o que a placa realmente consumiu, e é a única medida honesta de "onde a
 reprodução está": o relógio de parede adianta quando o computador não dá conta,
 e o resultado seria imagem à frente do som.
 
+**Parar não espera ninguém.** Encerrar o ffmpeg é trabalho de uma thread
+descartável (:func:`_dispose`), porque esperá-lo na interface custava dois
+segundos de janela congelada por pausa — ver o comentário lá.
+
 Nada aqui pode derrubar a aba: sem o módulo de multimídia no pacote, sem
 dispositivo de som ou sem trilha audível no projeto, :attr:`available` é falso e
 a prévia toca muda, como nasceu.
@@ -58,6 +62,48 @@ _QUEUE_CHUNKS = 24
 _FEED_MS = 20
 
 _BYTES_PER_SECOND = SAMPLE_RATE * CHANNELS * 2  # s16le
+
+# Quanto a thread de encerramento dá ao ffmpeg antes de matá-lo. Ver
+# :func:`_reap`: com o cano cheio o prazo quase sempre se esgota, então ele é
+# curto — o que se ganha esperando mais é um processo decodificando à toa
+# enquanto o próximo já está tocando.
+_TERMINATE_GRACE = 0.2
+
+
+def _reap(process: subprocess.Popen) -> None:
+    """Encerra o ffmpeg da mixagem, com prazo e depois à força.
+
+    **Um ffmpeg bloqueado escrevendo num cano que ninguém lê não atende ao
+    SIGTERM.** Ele só nota o pedido entre pacotes, e não chega lá: o ``write``
+    fica preso até haver espaço, e espaço não vai haver — a leitura parou junto
+    com a reprodução. Medido nesta máquina, três vezes seguidas: o
+    ``wait(timeout=2)`` da parada ia até o fim, **2,00 s** em cheio.
+
+    Isso rodava na interface. Eram dois segundos de janela congelada em cada
+    pausa e em cada toque na linha do tempo durante a reprodução — exatamente o
+    lugar em que se espera resposta imediata.
+    """
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=_TERMINATE_GRACE)
+    except subprocess.SubprocessError:
+        process.kill()
+        process.wait()
+
+
+def _dispose(process: subprocess.Popen) -> threading.Thread:
+    """Manda encerrar ``process`` fora da interface, e devolve na hora.
+
+    A thread **não** é daemon: fechar a janela é o último momento em que alguém
+    pode mandar o ffmpeg parar, e uma thread daemon seria abandonada no meio
+    disso se o interpretador terminasse antes dela. O preço é uma fração de
+    segundo no fechamento, e só quando havia som tocando.
+    """
+    thread = threading.Thread(target=_reap, args=(process,), daemon=False)
+    thread.start()
+    return thread
 
 
 class AudioPreview(QObject):
@@ -134,11 +180,21 @@ class AudioPreview(QObject):
 
         self._origin = at
         self._finished = False
-        self._stopping.clear()
-        self._chunks = queue.Queue(_QUEUE_CHUNKS)
+        # Fila e sinal de parada **novos**, e entregues ao leitor como
+        # argumentos: a reprodução anterior é encerrada sem espera, então o
+        # leitor dela ainda pode estar de pé por alguns instantes. Enquanto os
+        # dois compartilhavam os atributos do objeto, esse leitor atrasado
+        # despejava o som antigo na fila da reprodução nova — e via o sinal de
+        # parada ser limpo aqui, o que o fazia continuar lendo sem fim.
+        chunks: queue.Queue[bytes | None] = queue.Queue(_QUEUE_CHUNKS)
+        stopping = threading.Event()
+        self._chunks = chunks
+        self._stopping = stopping
         self._pending = None
         self._process = process
-        self._reader = threading.Thread(target=self._read, args=(process,), daemon=True)
+        self._reader = threading.Thread(
+            target=self._read, args=(process, chunks, stopping), daemon=True
+        )
         self._reader.start()
 
         self._sink = QAudioSink(device, fmt, self)
@@ -147,19 +203,29 @@ class AudioPreview(QObject):
         self._feed.start()
         return True
 
-    def _read(self, process: subprocess.Popen) -> None:
-        """Lê o ffmpeg em pedaços, na thread — a interface nunca toca no cano."""
+    def _read(
+        self,
+        process: subprocess.Popen,
+        chunks: queue.Queue[bytes | None],
+        stopping: threading.Event,
+    ) -> None:
+        """Lê o ffmpeg em pedaços, na thread — a interface nunca toca no cano.
+
+        Só mexe no que recebeu: a fila e o sinal de parada são os da reprodução
+        que o criou, e não os do objeto. É o que impede um leitor atrasado de
+        alimentar a reprodução seguinte (ver :meth:`start`).
+        """
         try:
             assert process.stdout is not None
-            while not self._stopping.is_set():
+            while not stopping.is_set():
                 data = process.stdout.read(_CHUNK)
                 if not data:
                     break
                 # Com prazo: sem ele, um cancelamento com a fila cheia deixaria
                 # esta thread pendurada até alguém consumir.
-                while not self._stopping.is_set():
+                while not stopping.is_set():
                     try:
-                        self._chunks.put(data, timeout=0.2)
+                        chunks.put(data, timeout=0.2)
                         break
                     except queue.Full:
                         continue
@@ -167,7 +233,7 @@ class AudioPreview(QObject):
             pass
         finally:
             try:
-                self._chunks.put_nowait(None)  # marca o fim do fluxo
+                chunks.put_nowait(None)  # marca o fim do fluxo
             except queue.Full:
                 pass
 
@@ -228,6 +294,13 @@ class AudioPreview(QObject):
         self.stopped.emit()
 
     def stop(self) -> None:
+        """Encerra a reprodução e **devolve na hora**.
+
+        Nada aqui espera processo: quem espera é a thread de :func:`_dispose`.
+        A interface chama isto a cada pausa e a cada toque na linha do tempo
+        durante a reprodução, e é o caminho que precisa responder no quadro
+        seguinte.
+        """
         self._generation += 1
         self._feed.stop()
         self._stopping.set()
@@ -236,12 +309,8 @@ class AudioPreview(QObject):
             self._sink.deleteLater()
             self._sink = None
         self._device = None
-        if self._process is not None and self._process.poll() is None:
-            self._process.terminate()
-            try:
-                self._process.wait(timeout=2)
-            except subprocess.SubprocessError:
-                self._process.kill()
+        if self._process is not None:
+            _dispose(self._process)
         self._process = None
         self._reader = None
         self._pending = None

@@ -16,8 +16,10 @@ entregues em 4 s, som ao dobro da velocidade.
 from __future__ import annotations
 
 import queue
+import subprocess
+import threading
 
-from videomanager.ui.audio_preview import AudioPreview
+from videomanager.ui.audio_preview import AudioPreview, _reap
 
 
 class SinkDeMentira:
@@ -145,3 +147,107 @@ def test_fim_da_reproducao_corrente_avisa() -> None:
     avisador = Avisador()
     avisador.emitir(7)  # geração corrente
     assert avisador.parou and avisador.avisou
+
+
+class ProcessoDeMentira:
+    """Um ffmpeg que ignora o SIGTERM, como o de verdade faz com o cano cheio."""
+
+    def __init__(self, *, atende_terminate: bool) -> None:
+        self._atende = atende_terminate
+        self.vivo = True
+        self.pediram_terminate = False
+        self.mataram = False
+
+    def poll(self) -> int | None:
+        return None if self.vivo else 0
+
+    def terminate(self) -> None:
+        self.pediram_terminate = True
+        self.vivo = not self._atende
+
+    def kill(self) -> None:
+        self.mataram = True
+        self.vivo = False
+
+    def wait(self, timeout: float | None = None) -> int:
+        if self.vivo:
+            raise subprocess.TimeoutExpired("ffmpeg", timeout or 0)
+        return 0
+
+
+def test_ffmpeg_que_ignora_o_terminate_e_morto() -> None:
+    # Bloqueado escrevendo num cano que ninguém lê, o ffmpeg só nota o pedido de
+    # parada entre pacotes — e não chega lá. Medido: o ``wait(timeout=2)`` ia
+    # até o fim todas as vezes, e ele rodava na interface: dois segundos de
+    # janela congelada em cada pausa.
+    processo = ProcessoDeMentira(atende_terminate=False)
+    _reap(processo)  # type: ignore[arg-type]
+    assert processo.pediram_terminate
+    assert processo.mataram, "não adianta pedir com jeito e desistir"
+    assert not processo.vivo
+
+
+def test_ffmpeg_que_atende_nao_precisa_ser_morto() -> None:
+    processo = ProcessoDeMentira(atende_terminate=True)
+    _reap(processo)  # type: ignore[arg-type]
+    assert processo.pediram_terminate and not processo.mataram
+
+
+def test_processo_ja_encerrado_nao_recebe_sinal() -> None:
+    processo = ProcessoDeMentira(atende_terminate=True)
+    processo.vivo = False
+    _reap(processo)  # type: ignore[arg-type]
+    assert not processo.pediram_terminate and not processo.mataram
+
+
+class CanoDeMentira:
+    def __init__(self, pedacos: list[bytes]) -> None:
+        self._pedacos = list(pedacos)
+
+    def read(self, _tamanho: int) -> bytes:
+        return self._pedacos.pop(0) if self._pedacos else b""
+
+
+class ProcessoComCano:
+    def __init__(self, pedacos: list[bytes]) -> None:
+        self.stdout = CanoDeMentira(pedacos)
+
+
+class Tocador:
+    """Um objeto com a fila da reprodução **nova**, como fica depois do start."""
+
+    def __init__(self) -> None:
+        self._chunks: queue.Queue[bytes | None] = queue.Queue()
+        self._stopping = threading.Event()
+
+
+def test_leitor_antigo_nao_alimenta_a_reproducao_nova() -> None:
+    # Parar não espera mais o ffmpeg morrer, então o leitor da reprodução
+    # anterior ainda pode estar de pé quando a próxima começa. Enquanto os dois
+    # compartilhavam os atributos do objeto, esse leitor atrasado despejava o som
+    # antigo na fila da reprodução nova — som de outro trecho, no meio deste.
+    antiga: queue.Queue[bytes | None] = queue.Queue()
+    parada = threading.Event()
+    tocador = Tocador()
+
+    AudioPreview._read(  # type: ignore[arg-type]
+        tocador, ProcessoComCano([b"velho"]), antiga, parada
+    )
+
+    assert antiga.get_nowait() == b"velho"
+    assert tocador._chunks.empty(), "a fila da reprodução nova ficou intacta"
+
+
+def test_o_sinal_de_parada_do_leitor_e_o_dele() -> None:
+    # O ``start`` cria um sinal novo em vez de limpar o antigo: limpando, o
+    # leitor já mandado parar voltava a ler e não parava mais.
+    tocador = Tocador()
+    parada = threading.Event()
+    parada.set()
+    fila: queue.Queue[bytes | None] = queue.Queue()
+
+    AudioPreview._read(  # type: ignore[arg-type]
+        tocador, ProcessoComCano([b"velho"]), fila, parada
+    )
+
+    assert fila.get_nowait() is None, "só o fim do fluxo, nenhum áudio"
