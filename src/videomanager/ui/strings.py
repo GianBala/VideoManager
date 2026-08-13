@@ -216,6 +216,16 @@ EDIT_MUTED = "✕"
 # barra da linha do tempo
 EDIT_SPLIT = "Dividir"
 EDIT_DELETE = "Excluir bloco"
+EDIT_TRIM_LEFT = "Apagar à esquerda"
+EDIT_TRIM_LEFT_TIP = (
+    "Apaga o trecho do bloco que está antes do cursor. O mesmo que arrastar a "
+    "ponta esquerda até aqui, sem precisar mirar no quadro."
+)
+EDIT_TRIM_RIGHT = "Apagar à direita"
+EDIT_TRIM_RIGHT_TIP = (
+    "Apaga o trecho do bloco que está depois do cursor. O mesmo que arrastar a "
+    "ponta direita até aqui, sem precisar mirar no quadro."
+)
 EDIT_DETACH = "Separar áudio"
 EDIT_DETACH_TIP = (
     "Tira o som do bloco de vídeo e o põe numa trilha de áudio própria, na "
