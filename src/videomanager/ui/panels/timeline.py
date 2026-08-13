@@ -90,12 +90,24 @@ _RULER_LABEL_SPACE = 78
 
 @dataclass
 class _Strip:
-    """Imagens de um bloco, guardadas com o trecho de origem que cobrem."""
+    """Imagens de um bloco, guardadas pelo **instante da origem** que mostram.
+
+    A chave é o instante, e não a posição na tira, porque a posição muda de
+    significado a cada zoom: aproximar reduz o trecho visível e o número de
+    miniaturas, e a imagem que era "a terceira de doze" passa a ser desenhada
+    onde agora está "a terceira de seis" — outro momento do vídeo. Enquanto a
+    chave era o índice, dar zoom mostrava as imagens antigas nos lugares
+    errados até as novas chegarem, e as que sobravam de uma tira mais longa
+    eram desenhadas fora do trecho.
+
+    Pelo instante, uma imagem já gerada continua certa onde quer que o zoom a
+    coloque, e o que muda é só a largura da célula em volta dela.
+    """
 
     in_point: float = 0.0
     out_point: float = 0.0
     count: int = 0
-    thumbs: dict[int, QImage] = field(default_factory=dict)
+    thumbs: dict[float, QImage] = field(default_factory=dict)
     wave: QImage | None = None
 
     def matches(self, in_point: float, out_point: float) -> bool:
@@ -105,10 +117,41 @@ class _Strip:
             and abs(self.out_point - out_point) < 1e-6
         )
 
-    def slice_of(self, index: int) -> tuple[float, float]:
-        span = (self.out_point - self.in_point) / self.count if self.count else 0.0
-        begin = self.in_point + span * index
-        return begin, begin + span
+    @property
+    def span(self) -> float:
+        """Largura, em segundos de origem, da célula de cada miniatura."""
+        return (self.out_point - self.in_point) / self.count if self.count else 0.0
+
+    def _inherit(self, antigas: dict[float, QImage]) -> dict[float, QImage]:
+        """Aproveita da tira anterior **uma imagem por célula**: a mais central.
+
+        Guardar todas faria o dicionário crescer a cada zoom — ir e voltar duas
+        vezes já dobrava o número de imagens vivas, sem nada aparecer a mais na
+        tela, já que as células novas cobrem a mesma faixa.
+
+        A mais próxima do centro é a melhor aproximação disponível para aquela
+        célula até a imagem definitiva chegar, e é o que faz o zoom parecer
+        contínuo em vez de piscar.
+        """
+        if not antigas or self.count <= 0:
+            return {}
+        herdadas: dict[float, QImage] = {}
+        for index in range(self.count):
+            centro = self.in_point + self.span * (index + 0.5)
+            perto = min(antigas, key=lambda m: abs(m - centro))
+            if abs(perto - centro) <= self.span:
+                herdadas[perto] = antigas[perto]
+        return herdadas
+
+    def cell_of(self, moment: float) -> tuple[float, float]:
+        """O trecho que a imagem daquele instante ocupa.
+
+        O instante é o **meio** da célula: é assim que ``filmstrip_times`` os
+        escolhe, e é o que faz uma imagem gerada noutro zoom continuar centrada
+        onde deve.
+        """
+        metade = self.span / 2
+        return moment - metade, moment + metade
 
 
 class Timeline(QWidget):
@@ -229,10 +272,10 @@ class Timeline(QWidget):
         # As imagens anteriores ficam até as novas chegarem: apagá-las aqui
         # faria o bloco piscar em branco a cada mudança de zoom.
         antiga = self._strips.get(clip_id)
-        self._strips[clip_id] = _Strip(
-            in_point, out_point, count, dict(antiga.thumbs) if antiga else {},
-            wave=antiga.wave if antiga else None,
-        )
+        nova = _Strip(in_point, out_point, count, wave=antiga.wave if antiga else None)
+        if antiga is not None:
+            nova.thumbs = nova._inherit(antiga.thumbs)
+        self._strips[clip_id] = nova
 
     def strip_count(self, clip_id: int) -> int:
         """Quantas miniaturas o bloco tem pedidas — zero se ainda não tem tira."""
@@ -243,11 +286,23 @@ class Timeline(QWidget):
         strip = self._strips.get(clip_id)
         return (strip.in_point, strip.out_point) if strip else None
 
-    def set_thumb(self, clip_id: int, index: int, image: QImage) -> None:
+    def set_thumb(self, clip_id: int, moment: float, image: QImage) -> None:
+        """Guarda a imagem pelo instante da origem que ela mostra.
+
+        A imagem definitiva de uma célula desaloja a aproximação herdada do zoom
+        anterior. Sem isso as duas conviveriam com células sobrepostas, e a mais
+        tardia — que pode ser a velha — ficaria por cima da certa.
+        """
         strip = self._strips.get(clip_id)
-        if strip is not None:
-            strip.thumbs[index] = image
-            self.update()
+        if strip is None:
+            return
+        metade = strip.span / 2
+        for antigo in [
+            m for m in strip.thumbs if m != moment and abs(m - moment) < metade
+        ]:
+            del strip.thumbs[antigo]
+        strip.thumbs[moment] = image
+        self.update()
 
     def set_wave(self, clip_id: int, in_point: float, out_point: float, image: QImage) -> None:
         strip = self._strips.setdefault(clip_id, _Strip(in_point, out_point, 0, {}))
@@ -490,8 +545,8 @@ class Timeline(QWidget):
         strip = self._strips.get(clip.clip_id)
         if strip is None or not strip.thumbs:
             return
-        for index, image in strip.thumbs.items():
-            begin, end = strip.slice_of(index)
+        for moment, image in sorted(strip.thumbs.items()):
+            begin, end = strip.cell_of(moment)
             cell = self._source_rect(clip, rect, begin, end)
             if cell.right() < rect.left() or cell.left() > rect.right():
                 continue
