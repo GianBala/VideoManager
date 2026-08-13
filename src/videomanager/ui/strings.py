@@ -156,20 +156,32 @@ CONVERT_KEEP = "Manter original"
 CONVERT_NO_FILES = "Escolha ao menos um arquivo."
 
 # --- editor de vídeo ---------------------------------------------------------
-EDIT_OPEN = "Abrir vídeo…"
-EDIT_REPLACE = "Trocar arquivo…"
+EDIT_IMPORT = "Importar mídia…"
+EDIT_IMPORT_TIP = (
+    "Traz vídeos, fotos ou áudios para a edição. Também aceita arrastar "
+    "arquivos para dentro da aba."
+)
+EDIT_IMPORT_REJECTED = "Estes arquivos foram ignorados:"
+EDIT_POOL_TIP = "Mídias já importadas nesta edição"
+EDIT_INSERT = "Inserir no cursor"
+EDIT_INSERT_TIP = (
+    "Coloca a mídia escolhida na primeira trilha em que ela caiba, a partir do "
+    "cursor"
+)
 EDIT_EMPTY = (
-    "Abra um vídeo para recortar.\n"
-    "Você também pode arrastar o arquivo para cá."
+    "Importe vídeos, fotos ou áudios para montar a edição.\n"
+    "Você também pode arrastar os arquivos para cá."
 )
+EDIT_COLLAPSE = "Retrair prévia"
+EDIT_EXPAND = "Expandir prévia"
+EDIT_COLLAPSE_TIP = "Encolhe a imagem para a linha do tempo ficar com a janela"
 EDIT_FILE_FILTER = (
-    "Vídeo (*.mp4 *.mkv *.webm *.avi *.mov *.flv *.wmv *.m4v *.ts *.mpg *.mpeg);;"
-    "Áudio (*.mp3 *.m4a *.aac *.opus *.ogg *.flac *.wav);;Todos (*)"
-)
-EDIT_NO_FILE = "Nenhum arquivo aberto."
-EDIT_AUDIO_ONLY = (
-    "Arquivo só de áudio.\n"
-    "Use a forma de onda na linha do tempo para achar os pontos de corte."
+    "Mídia (*.mp4 *.mkv *.webm *.avi *.mov *.flv *.wmv *.m4v *.ts *.mpg *.mpeg "
+    "*.mp3 *.m4a *.aac *.opus *.ogg *.flac *.wav "
+    "*.png *.jpg *.jpeg *.bmp *.webp *.gif);;"
+    "Vídeo (*.mp4 *.mkv *.webm *.avi *.mov *.flv *.wmv *.m4v *.ts);;"
+    "Áudio (*.mp3 *.m4a *.aac *.opus *.ogg *.flac *.wav);;"
+    "Imagem (*.png *.jpg *.jpeg *.bmp *.webp *.gif);;Todos (*)"
 )
 EDIT_NO_PLAYBACK = "Não há imagem nem som para reproduzir neste arquivo"
 
@@ -203,33 +215,71 @@ EDIT_MUTED = "✕"
 
 # barra da linha do tempo
 EDIT_SPLIT = "Dividir"
-EDIT_DELETE = "Excluir trecho"
+EDIT_DELETE = "Excluir bloco"
+EDIT_DETACH = "Separar áudio"
+EDIT_DETACH_TIP = (
+    "Tira o som do bloco de vídeo e o põe numa trilha de áudio própria, na "
+    "mesma posição — o vídeo fica mudo e o som passa a se mover sozinho"
+)
+EDIT_COPY = "Copiar"
+EDIT_PASTE = "Colar"
+EDIT_ADD_VIDEO_TRACK_FULL = "Nova trilha de vídeo"
+EDIT_ADD_AUDIO_TRACK_FULL = "Nova trilha de áudio"
+EDIT_TRACK_MUTE = "Calar a trilha"
+EDIT_TRACK_UNMUTE = "Voltar o som da trilha"
+EDIT_DELETE_TRACK = "Excluir a trilha “{name}”"
+EDIT_DELETE_TRACK_TIP = (
+    "Some com a trilha e com o que estiver nela. Importar uma mídia cria a "
+    "trilha de que ela precisa, então não é preciso guardar trilha vazia."
+)
+EDIT_DELETE_TRACK_TITLE = "Excluir a trilha?"
+EDIT_DELETE_TRACK_BODY = (
+    "A trilha “{name}” tem {count} bloco(s). Excluí-la leva todos junto.\n\n"
+    "Dá para desfazer com Ctrl+Z."
+)
+EDIT_MENU_HINT = "Botão direito na trilha: dividir, copiar, separar áudio, excluir"
+EDIT_TRACK_COUNT = "{tracks} trilhas · {clips} blocos · {duration}"
 EDIT_UNDO = "Desfazer"
 EDIT_REDO = "Refazer"
 EDIT_ZOOM_IN = "Aproximar"
 EDIT_ZOOM_OUT = "Afastar"
 EDIT_ZOOM_FIT = "Ver tudo"
+EDIT_ZOOM_FIT_TIP = (
+    "Enquadra a edição inteira. Afastar além disso continua valendo — o vazio "
+    "depois do último bloco é onde se solta um bloco para o fim."
+)
 EDIT_TIMELINE_HINT = (
-    "Arraste o cursor para navegar · roda do mouse aproxima · Shift+roda desloca · "
-    "arraste as pontas do trecho para ajustar"
+    "Arraste o bloco para mudá-lo de lugar ou de trilha · as pontas ajustam o "
+    "corte · roda do mouse aproxima · Shift+roda desloca · M no cabeçalho cala "
+    "a trilha"
 )
 
 # trecho selecionado
 EDIT_CLIP_START = "Início"
 EDIT_CLIP_END = "Fim"
-EDIT_CLIP_NONE = "Nenhum trecho selecionado."
-EDIT_CLIP_COUNT = "{count} trecho(s) · {duration} no total"
-EDIT_MARK_START = "Trazer o início do trecho para o cursor"
-EDIT_MARK_END = "Trazer o fim do trecho para o cursor"
-EDIT_MARK_HERE = "Marcar ({key})"
+EDIT_CLIP_NONE = "Nenhum bloco selecionado."
+EDIT_CLIP_INFO = "{name} · {duration}"
+EDIT_GAIN = "Volume do bloco"
+EDIT_GAIN_TIP = (
+    "Ganho aplicado só a este bloco, em decibéis. 0 dB não mexe no som; "
+    "−6 dB é metade da amplitude; +6 dB é o dobro.\n"
+    "Para calar a trilha inteira, use o M no cabeçalho dela."
+)
+EDIT_CLIP_MUTE = "Bloco mudo"
+EDIT_CLIP_UNMUTE = "Voltar o som do bloco"
+EDIT_CLIP_DETACHED = "áudio separado em outra trilha"
+EDIT_GAIN_DETACHED = (
+    "O som deste bloco foi separado para uma trilha própria — é lá que o "
+    "volume dele se ajusta agora."
+)
+EDIT_CLIP_MUTE_TIP = (
+    "Cala só este bloco. O vídeo continua aparecendo — é assim que se troca a "
+    "trilha sonora de um trecho."
+)
 EDIT_FIELD_TIP = "Tempo no formato h:mm:ss,mmm — digite e pressione Enter"
 
 # exportação
-EDIT_EXPORT_LABEL = "Exportar:"
 EDIT_CUT_LABEL = "Corte:"
-EDIT_OUTPUT_JOIN = "Um vídeo só (junta os trechos)"
-EDIT_OUTPUT_EACH = "Um arquivo por trecho"
-EDIT_MODE_EXACT = "Corte exato (recodifica)"
 EDIT_MODE_FAST = "Corte rápido (sem recodificar)"
 EDIT_MODE_TIP = (
     "Vídeo comprimido só pode ser cortado sem recodificar em um keyframe, que "
@@ -240,6 +290,12 @@ EDIT_MODE_TIP = (
     "nenhuma, mas começa no keyframe anterior ao ponto marcado."
 )
 EDIT_PLAN = "O que vai acontecer: {plan}"
+EDIT_PLAN_FAST = ".{container} · cópia direta (sem recodificar) · {duration}"
+EDIT_FAST_UNAVAILABLE = (
+    "O corte rápido vale enquanto a edição for um recorte de um arquivo só. "
+    "Com mais de um bloco, mídia acrescentada, volume alterado ou trilha "
+    "sobreposta, a exportação precisa compor — e compor recodifica."
+)
 EDIT_DRIFT = (
     "Sem recodificar, o corte vai começar em {time} — {delta} antes do ponto "
     "marcado."
@@ -247,17 +303,11 @@ EDIT_DRIFT = (
 EDIT_DRIFT_NONE = (
     "O ponto marcado cai num keyframe: mesmo sem recodificar, o corte sai exato."
 )
-EDIT_JOIN_NEEDS_REENCODE = (
-    "Juntar vários trechos num arquivo só exige recodificar; com o corte rápido, "
-    "cada trecho vira um arquivo."
-)
 EDIT_SAME_FOLDER = "Salvar na mesma pasta do arquivo original"
 EDIT_EXPORT = "Adicionar à fila"
 EDIT_NO_CLIPS = "Não sobrou nenhum trecho para exportar."
 EDIT_SUFFIX_ONE = " (corte)"
-EDIT_SUFFIX_MANY = " (corte {index})"
-
-# --- configurações -----------------------------------------------------------
+EDIT_SUFFIX_EDIT = " (edição)"
 SETTINGS_TITLE = "Configurações"
 SETTINGS_TAB_GENERAL = "Geral"
 SETTINGS_TAB_NETWORK = "Rede"
