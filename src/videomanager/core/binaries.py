@@ -100,6 +100,34 @@ def subprocess_kwargs() -> dict:
     return kwargs
 
 
+# Teto de threads de decodificação para o que serve à **prévia**. O padrão do
+# ffmpeg é uma thread por núcleo, e numa máquina de vinte núcleos montar vinte
+# threads para devolver um quadro custa mais do que decodificá-lo. Medido, dez
+# quadros isolados: 1,00 s e 3,34 s de CPU no padrão contra 0,77 s e 2,58 s com
+# oito — mais rápido **e** com menos CPU, que é o que sobra para a exportação
+# que estiver correndo ao lado. Oito é o melhor ou empatado em cinco dos seis
+# casos medidos (h264 e HEVC, 1080p e 4K, quadro isolado e tira); só a tira de
+# HEVC 4K perde 6% de tempo, em troca de 39% menos CPU.
+#
+# Não vale para a exportação: lá o que se quer é o arquivo pronto antes, e todo
+# núcleo é bem-vindo.
+_MAX_DECODE_THREADS = 8
+
+
+def decode_threads() -> int:
+    """Quantas threads a decodificação da prévia pode usar."""
+    return max(1, min(_MAX_DECODE_THREADS, os.cpu_count() or _MAX_DECODE_THREADS))
+
+
+def decode_thread_args() -> list[str]:
+    """O limite acima, na forma de argumento — vai **antes** de cada ``-i``.
+
+    A posição não é detalhe: ``-threads`` é opção de entrada, e depois do ``-i``
+    ele valeria para o codificador da saída, que aqui nem existe.
+    """
+    return ["-threads", str(decode_threads())]
+
+
 def vendor_dir() -> Path:
     """Pasta de binários empacotados, ao lado do executável ou do código."""
     base = getattr(sys, "_MEIPASS", None)  # definido pelo PyInstaller
