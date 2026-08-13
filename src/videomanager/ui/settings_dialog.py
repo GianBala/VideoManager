@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
 )
 from yt_dlp.cookies import SUPPORTED_BROWSERS
 
+from ..core import hwaccel
+from ..core.binaries import find_tools
 from ..core.settings import Settings
 from . import strings
 from .theme import FIELD_WIDTH
@@ -88,6 +90,21 @@ class SettingsDialog(QDialog):
         """
         form.addRow(box)
 
+    def _describe_encoder(self) -> None:
+        """Diz o que **vai** acontecer, não o que foi pedido.
+
+        A escolha do usuário é uma preferência; quem decide é a máquina. Um
+        diálogo que só ecoasse "NVIDIA (NVENC)" esconderia que o driver é antigo
+        demais e que a exportação vai sair em software de qualquer forma.
+        """
+        escolha = self._encoder.currentData() or hwaccel.SOFTWARE
+        self._encoder_state.setText(hwaccel.describe(escolha, find_tools()))
+
+    def _retest_encoder(self) -> None:
+        """Refaz as sondagens: driver atualizado ou placa liberada mudam a resposta."""
+        hwaccel.forget_probes()
+        self._describe_encoder()
+
     def _align_label_column(self) -> None:
         width = max((label.sizeHint().width() for label in self._labels), default=0)
         for label in self._labels:
@@ -117,6 +134,33 @@ class SettingsDialog(QDialog):
         self._theme.setCurrentIndex(max(0, self._theme.findData(self._settings.theme)))
         self._theme.setFixedWidth(FIELD_WIDTH)
         self._add_row(form, strings.SETTINGS_THEME, self._theme)
+
+        self._encoder = QComboBox()
+        for value, label in hwaccel.CHOICES:
+            self._encoder.addItem(label, value)
+        self._encoder.setCurrentIndex(
+            max(0, self._encoder.findData(self._settings.hardware_encoder))
+        )
+        self._encoder.setFixedWidth(FIELD_WIDTH)
+        self._encoder.setToolTip(strings.SETTINGS_ENCODER_TIP)
+        self._encoder.currentIndexChanged.connect(self._describe_encoder)
+        self._add_row(form, strings.SETTINGS_ENCODER, self._encoder)
+
+        # O resultado do teste fica na linha de baixo, e não numa dica: é a
+        # resposta à única pergunta que importa aqui — "a minha placa vai ser
+        # usada?" —, e ela depende da máquina, não da escolha.
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        self._encoder_state = QLabel("")
+        self._encoder_state.setProperty("role", "dim")
+        self._encoder_state.setWordWrap(True)
+        row.addWidget(self._encoder_state, 1)
+        test = QPushButton(strings.SETTINGS_ENCODER_TEST)
+        test.setToolTip(strings.SETTINGS_ENCODER_TEST_TIP)
+        test.clicked.connect(self._retest_encoder)
+        row.addWidget(test)
+        form.addRow(row)
+        self._describe_encoder()
 
         return page
 
@@ -203,6 +247,9 @@ class SettingsDialog(QDialog):
         updated.download_dir = self._dest.text().strip() or self._settings.download_dir
         updated.separate_by_site = self._separate.isChecked()
         updated.theme = self._theme.currentData() or "dark"
+        updated.hardware_encoder = (
+            self._encoder.currentData() or hwaccel.SOFTWARE
+        )
         updated.max_concurrent_jobs = self._concurrent.value()
         updated.concurrent_fragments = self._fragments.value()
         updated.rate_limit_kbps = self._rate.value()

@@ -331,6 +331,20 @@ SETTINGS_WRITE_SUBS = "Baixar legendas em arquivo separado (.srt)"
 SETTINGS_EMBED_SUBS = "Embutir legendas no arquivo"
 SETTINGS_AUTO_SUBS = "Incluir legendas geradas automaticamente"
 SETTINGS_SUB_LANGS = "Idiomas (separados por vírgula)"
+SETTINGS_ENCODER = "Codificação de vídeo"
+SETTINGS_ENCODER_TIP = (
+    "Quem recodifica vídeo é o processador, por padrão: o x264 comprime melhor "
+    "que qualquer placa no mesmo tamanho de arquivo.\n"
+    "Usar a placa costuma ser várias vezes mais rápido, em troca de um pouco de "
+    "eficiência — vale quando a exportação é longa e o tamanho não é o problema.\n"
+    "Se a placa escolhida não abrir na hora de gravar, a tarefa sai em software "
+    "sozinha, em vez de falhar."
+)
+SETTINGS_ENCODER_TEST = "Testar agora"
+SETTINGS_ENCODER_TEST_TIP = (
+    "Manda a placa codificar um quadro de verdade. É o único jeito de saber: "
+    "o ffmpeg lista encoders que não abrem nesta máquina."
+)
 SETTINGS_THEME = "Tema"
 THEME_DARK = "Escuro"
 THEME_LIGHT = "Claro"
