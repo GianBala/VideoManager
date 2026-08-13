@@ -232,7 +232,11 @@ def build_graph(
 
     for piece in pieces:
         inputs += _input_args(piece, fps)
-        if want_video and piece.clip.media.has_video:
+        # ``has_image``, e não ``media.has_video``: o bloco de "separar áudio"
+        # vem de um arquivo com imagem, e pela mídia ele entrava aqui — a
+        # composição desenhava o vídeo dele por cima de tudo, no instante em que
+        # o som estivesse, e ainda pagava a decodificação.
+        if want_video and piece.clip.has_image:
             video_parts.append(piece)
         if want_audio and piece.clip.has_sound:
             audio_parts.append(piece)
@@ -432,6 +436,10 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     if any(clip.media.path != first.path for clip in clips):
         return None
     if any(clip.muted or abs(clip.gain_db) >= 0.05 for clip in clips):
+        return None
+    # Um bloco de "separar áudio" é só o som do arquivo, e copiar os dados
+    # levaria a imagem junto: o que se pediu na tela deixaria de ser o que sai.
+    if any(clip.audio_only or clip.detached for clip in clips):
         return None
     if first.kind is MediaKind.IMAGE:
         return None
