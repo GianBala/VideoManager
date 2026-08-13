@@ -171,6 +171,144 @@ def render_frame(
     return frame if frame.is_complete else None
 
 
+# Passo entre miniaturas a partir do qual sai mais barato **buscar** cada uma do
+# que decodificar reto até ela. Buscar custa um processo, uma abertura e um salto
+# (medido: ~0,11 s por miniatura); decodificar reto custa o tempo do trecho
+# dividido pela velocidade de decodificação (medido: ~20× o tempo real em 4K).
+# Os dois se igualam perto de 2 s de passo, e o valor é conservador de propósito:
+# errar para o lado da busca custa alguns décimos, errar para o outro faz uma
+# tira sobre um vídeo de duas horas decodificar as duas horas.
+_STRIP_ONE_PASS_STEP = 2.0
+
+
+def _one_pass_worth_it(times: tuple[float, ...]) -> bool:
+    """Se a tira inteira sai de um ffmpeg só, em vez de um por miniatura."""
+    if len(times) < 2:
+        return False
+    return times[1] - times[0] <= _STRIP_ONE_PASS_STEP
+
+
+def _strip_command(
+    path: Path, times: tuple[float, ...], size: tuple[int, int], tools: FFmpegTools
+) -> list[str]:
+    """Comando que devolve a tira inteira, em ordem, num fluxo só.
+
+    O ``fps`` do filtro é o inverso do passo entre miniaturas, e o ``-ss`` cai na
+    **primeira** delas — que é meia fatia depois do começo do trecho. Assim os
+    quadros gerados pelo filtro (0, passo, 2×passo…) caem exatamente nos
+    instantes de :func:`filmstrip_times`, sem precisar escolher nada.
+
+    ``round=up`` é a parte que não se adivinha. O padrão do filtro é ``near``, e
+    com ele a tira saía inteira **meio passo adiantada** em relação ao caminho de
+    uma busca por miniatura: medido nesta fonte, 19 de brilho onde o outro
+    caminho dá 9, e assim nas doze. Nada falhava — a tira aparecia completa, em
+    ordem e bonita, mostrando os instantes errados. ``up`` é a mesma regra do
+    ``-ss``: o primeiro quadro com pts **maior ou igual** ao pedido.
+
+    O ``scale`` vem depois do ``fps``: escalar antes seria escalar todos os
+    quadros decodificados para jogar fora a esmagadora maioria deles.
+    """
+    width, height = size
+    step = times[1] - times[0]
+    return [
+        tools.ffmpeg_str,
+        "-nostdin",
+        "-hide_banner",
+        "-v", "error",
+        "-ss", f"{max(0.0, times[0]):.6f}",
+        "-i", str(path),
+        "-vf", f"fps={1.0 / step:.9f}:round=up,scale={width}:{height}",
+        "-frames:v", str(len(times)),
+        "-f", "rawvideo",
+        "-pix_fmt", "rgb24",
+        "pipe:1",
+    ]
+
+
+def filmstrip_frames(
+    path: Path,
+    start: float,
+    end: float,
+    count: int,
+    size: tuple[int, int],
+    tools: FFmpegTools,
+    *,
+    timeout: int = 120,
+) -> Iterator[tuple[int, RawFrame]]:
+    """As miniaturas de um trecho, na ordem, cada uma assim que sai.
+
+    Um ffmpeg por miniatura é o caminho óbvio e era o que havia aqui, mas cada
+    uma custava um processo, uma abertura de arquivo e a montagem de um
+    decodificador — para devolver um quadro. Num passe só, medido: 1,32 s contra
+    0,21 s a 1080p (6,3×) e 3,08 s contra 0,29 s a 4K (10,6×).
+
+    O passe único **não** vale sempre: ele decodifica o trecho inteiro, então uma
+    tira sobre duas horas de vídeo decodificaria duas horas. Ver
+    :func:`_one_pass_worth_it`.
+
+    Quem chama continua recebendo as miniaturas uma a uma, e é o que faz a tira
+    aparecer preenchendo da esquerda para a direita em vez de tudo no fim.
+    """
+    times = filmstrip_times(start, end, count)
+    if not times:
+        return
+
+    vistos: set[int] = set()
+    if _one_pass_worth_it(times):
+        for index, frame in _stream_strip(path, times, size, tools, timeout):
+            vistos.add(index)
+            yield index, frame
+
+    # O que o passe único não entregou sai uma a uma. Cobre desde o caso em que
+    # ele nem vale a pena até o arquivo que termina antes do fim do trecho — sem
+    # isso, um defeito no fluxo deixaria a tira pela metade em silêncio.
+    for index, moment in enumerate(times):
+        if index in vistos:
+            continue
+        frame = render_frame(path, moment, size, tools)
+        if frame is not None:
+            yield index, frame
+
+
+def _stream_strip(
+    path: Path,
+    times: tuple[float, ...],
+    size: tuple[int, int],
+    tools: FFmpegTools,
+    timeout: int,
+) -> Iterator[tuple[int, RawFrame]]:
+    """Lê a tira do cano, um quadro por vez, e encerra o ffmpeg ao sair.
+
+    O ``finally`` é o que sustenta o cancelamento: quem consome fecha o gerador
+    ao desistir, e o processo morre junto em vez de continuar decodificando um
+    trecho que ninguém vai mais ver.
+    """
+    width, height = size
+    frame_bytes = width * height * BYTES_PER_PIXEL
+    kwargs = subprocess_kwargs()
+    kwargs["stderr"] = subprocess.DEVNULL
+    try:
+        process = subprocess.Popen(_strip_command(path, times, size, tools), **kwargs)
+    except OSError:
+        return
+    try:
+        assert process.stdout is not None
+        for index, moment in enumerate(times):
+            data = process.stdout.read(frame_bytes)
+            if not data or len(data) < frame_bytes:
+                return
+            yield index, RawFrame(data, width, height, moment)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        if process.stdout is not None:
+            process.stdout.close()
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.SubprocessError:
+            process.kill()
+
+
 def render_waveform(
     path: Path,
     tools: FFmpegTools,

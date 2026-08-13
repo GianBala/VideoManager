@@ -9,11 +9,23 @@ o som já saiu ao dobro. Estes testes fixam as duas pontas.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
 
-from videomanager.core.preview import MAX_PREVIEW_FPS, FramePump, fit_size, preview_fps
+from videomanager.core.binaries import FFmpegTools
+from videomanager.core.preview import (
+    MAX_PREVIEW_FPS,
+    FramePump,
+    _one_pass_worth_it,
+    _strip_command,
+    filmstrip_times,
+    fit_size,
+    preview_fps,
+)
 from videomanager.workers.preview_worker import PlaybackWorker
+
+TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
 
 
 class TestTaxaDaPrevia:
@@ -57,3 +69,70 @@ class TestTamanho:
         # Escaladores e codificadores trabalham em blocos de dois pixels.
         largura, altura = fit_size(1919, 1079, 777, 777)
         assert largura % 2 == 0 and altura % 2 == 0
+
+
+class TestTiraDeMiniaturas:
+    """Uma tira é uma chamada ao ffmpeg, não doze.
+
+    Cada miniatura custava um processo, uma abertura de arquivo e a montagem de
+    um decodificador para devolver um quadro. Medido: 1,32 s contra 0,21 s a
+    1080p e 3,08 s contra 0,29 s a 4K.
+
+    O passe único decodifica o trecho **inteiro**, então a escolha entre os dois
+    caminhos é o que impede a otimização de virar regressão numa tira sobre um
+    vídeo de horas.
+    """
+
+    def tempos(self, inicio: float, fim: float, quantas: int) -> tuple[float, ...]:
+        return filmstrip_times(inicio, fim, quantas)
+
+    def test_trecho_curto_sai_num_passe_so(self) -> None:
+        assert _one_pass_worth_it(self.tempos(0.0, 12.0, 12))
+
+    def test_trecho_longo_continua_buscando_cada_uma(self) -> None:
+        # Duas horas visíveis: decodificar reto até a última miniatura custaria
+        # as duas horas, contra doze saltos de um décimo de segundo.
+        assert not _one_pass_worth_it(self.tempos(0.0, 7200.0, 12))
+
+    def test_uma_miniatura_so_nao_tem_passo(self) -> None:
+        # É o caso da imagem parada, que não tem trecho a percorrer.
+        assert not _one_pass_worth_it(self.tempos(3.0, 3.0, 1))
+
+    def test_a_busca_cai_na_primeira_miniatura(self) -> None:
+        tempos = self.tempos(10.0, 22.0, 12)
+        comando = _strip_command(Path("/m/v.mp4"), tempos, (160, 90), TOOLS)
+        assert comando[comando.index("-ss") + 1] == f"{tempos[0]:.6f}"
+
+    def test_a_taxa_pedida_e_o_inverso_do_passo(self) -> None:
+        # É o que faz os quadros do filtro (0, passo, 2×passo…) caírem
+        # exatamente nos instantes de filmstrip_times, sem escolher nada.
+        tempos = self.tempos(0.0, 24.0, 12)
+        passo = tempos[1] - tempos[0]
+        comando = _strip_command(Path("/m/v.mp4"), tempos, (160, 90), TOOLS)
+        filtro = comando[comando.index("-vf") + 1]
+        assert filtro.startswith(f"fps={1.0 / passo:.9f}")
+
+    def test_arredonda_para_cima_como_o_ss_faz(self) -> None:
+        # O padrão do filtro é "near", e com ele a tira inteira saía meio passo
+        # adiantada em relação a uma busca direta — completa, em ordem e no
+        # instante errado. "up" é a mesma regra do -ss: o primeiro quadro com
+        # pts maior ou igual ao pedido.
+        comando = _strip_command(
+            Path("/m/v.mp4"), self.tempos(0.0, 12.0, 12), (160, 90), TOOLS
+        )
+        assert "round=up" in comando[comando.index("-vf") + 1]
+
+    def test_escala_depois_de_escolher_os_quadros(self) -> None:
+        # Escalar antes seria escalar todo quadro decodificado para jogar fora a
+        # esmagadora maioria deles.
+        comando = _strip_command(
+            Path("/m/v.mp4"), self.tempos(0.0, 12.0, 12), (160, 90), TOOLS
+        )
+        filtro = comando[comando.index("-vf") + 1]
+        assert filtro.index("fps=") < filtro.index("scale=160:90")
+
+    def test_pede_exatamente_a_quantidade_de_miniaturas(self) -> None:
+        comando = _strip_command(
+            Path("/m/v.mp4"), self.tempos(0.0, 12.0, 12), (160, 90), TOOLS
+        )
+        assert comando[comando.index("-frames:v") + 1] == "12"
