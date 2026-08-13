@@ -233,3 +233,77 @@ def test_arquivo_de_saida_nunca_sobrescreve_a_origem(tools, arquivo_local: Path)
     alvo = "mp3" if codec == "mp3" else "m4a"
     destino = output_path(arquivo_local, AudioTarget(codec=alvo), arquivo_local.parent)
     assert destino.resolve() != arquivo_local.resolve()
+
+
+class TestCodificacaoPorPlaca:
+    """A placa precisa **obedecer** ao número de qualidade, não só aceitar o argumento.
+
+    Um encoder de placa que recebe o número sem o controle de taxa o descarta em
+    silêncio e grava no bitrate padrão dele. Não há erro, não há aviso, o arquivo
+    existe e a duração confere — só a imagem é pior. Nenhum teste offline alcança
+    isso: é preciso codificar de verdade e comparar.
+    """
+
+    def _fonte_exigente(self, tmp_path: Path, tools) -> Path:
+        """Ruído a 1080p: o material que mais expõe um bitrate baixo demais.
+
+        Vídeo comum disfarça o defeito — o encoder tem folga de sobra para uma
+        cena parada. É preciso um quadro que não se deixe comprimir para que a
+        diferença entre "obedeceu ao pedido" e "gravou no padrão dele" apareça.
+        """
+        origem = tmp_path / "ruido.mp4"
+        subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y",
+             "-f", "lavfi", "-i", "nullsrc=s=1920x1080:r=30:d=3",
+             "-vf", "geq=random(1)*255:128:128",
+             "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p", str(origem)],
+            check=True, capture_output=True,
+        )
+        return origem
+
+    def _fidelidade(self, origem: Path, saida: Path, tools) -> float:
+        """SSIM médio da saída contra a origem. 1,0 é idêntico."""
+        texto = subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-nostdin", "-i", str(saida),
+             "-i", str(origem), "-lavfi", "ssim", "-f", "null", "-"],
+            capture_output=True, text=True,
+        ).stderr
+        linha = next(l for l in texto.splitlines() if "All:" in l)
+        return float(linha.split("All:")[1].split()[0])
+
+    def _codificar(self, origem: Path, saida: Path, tools, args: list[str]) -> float:
+        subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-i", str(origem),
+             *args, "-an", str(saida)],
+            check=True, capture_output=True,
+        )
+        return self._fidelidade(origem, saida, tools)
+
+    def test_a_placa_nao_sai_pior_que_o_software(self, tmp_path: Path, tools) -> None:
+        """Escolher a placa troca tempo por tamanho de arquivo — nunca por imagem.
+
+        Com os argumentos anteriores (``-cq`` sem controle de taxa) esta mesma
+        fonte saía com SSIM 0,482 contra 0,998 do software: metade da imagem
+        perdida, sem erro nenhum, sem aviso, com a duração correta. É o defeito
+        que este teste existe para não deixar voltar.
+        """
+        from videomanager.core import hwaccel
+
+        if "nvenc" not in hwaccel.available(tools):
+            pytest.skip("nenhuma placa NVIDIA responde nesta máquina")
+
+        origem = self._fonte_exigente(tmp_path, tools)
+        placa = self._codificar(
+            origem, tmp_path / "placa.mp4", tools,
+            hwaccel.encode_args("h264", "nvenc", tools),
+        )
+        software = self._codificar(
+            origem, tmp_path / "software.mp4", tools,
+            hwaccel.encode_args("h264", hwaccel.SOFTWARE, tools),
+        )
+        # Comparar com o software, e não com um número fixo, é o que mantém o
+        # teste válido quando o material de teste ou a build do ffmpeg mudarem.
+        assert placa >= software - 0.03, (
+            f"a placa entregou SSIM {placa:.4f} contra {software:.4f} do software: "
+            "o número de qualidade não está chegando ao encoder"
+        )

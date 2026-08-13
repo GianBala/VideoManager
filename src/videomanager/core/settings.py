@@ -82,6 +82,12 @@ class Settings:
     concurrent_fragments: int = 4
     rate_limit_kbps: int = 0  # 0 = ilimitado
 
+    # --- codificação ---
+    # Preferência de encoder de vídeo: "software" (padrão), "auto" ou o nome de
+    # uma placa. É só uma preferência — o que vale é o que abre na máquina, e a
+    # queda para software é automática (ver core/hwaccel.py).
+    hardware_encoder: str = "software"
+
     # --- interface ---
     theme: str = "dark"
     window_geometry: str = ""  # QByteArray serializado em base64
