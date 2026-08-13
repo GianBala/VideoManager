@@ -247,7 +247,6 @@ EDIT_DELETE_TRACK_BODY = (
     "A trilha “{name}” tem {count} bloco(s). Excluí-la leva todos junto.\n\n"
     "Dá para desfazer com Ctrl+Z."
 )
-EDIT_MENU_HINT = "Botão direito na trilha: dividir, copiar, separar áudio, excluir"
 EDIT_TRACK_COUNT = "{tracks} trilhas · {clips} blocos · {duration}"
 EDIT_UNDO = "Desfazer"
 EDIT_REDO = "Refazer"
@@ -281,10 +280,6 @@ EDIT_CLIP_DETACHED = "áudio separado em outra trilha"
 EDIT_GAIN_DETACHED = (
     "O som deste bloco foi separado para uma trilha própria — é lá que o "
     "volume dele se ajusta agora."
-)
-EDIT_CLIP_MUTE_TIP = (
-    "Cala só este bloco. O vídeo continua aparecendo — é assim que se troca a "
-    "trilha sonora de um trecho."
 )
 EDIT_FIELD_TIP = "Tempo no formato h:mm:ss,mmm — digite e pressione Enter"
 
@@ -328,7 +323,6 @@ EDIT_INTERPOLATE_WARN = (
 )
 
 # exportação
-EDIT_CUT_LABEL = "Corte:"
 EDIT_MODE_FAST = "Corte rápido (sem recodificar)"
 EDIT_MODE_TIP = (
     "Vídeo comprimido só pode ser cortado sem recodificar em um keyframe, que "

@@ -170,6 +170,14 @@ _CANVAS_PRESETS = (
 )
 _RATE_PRESETS = (24.0, 25.0, 30.0, 50.0, 60.0)
 
+# Largura das duas listas de saída. Medida, e não estimada: é a do texto mais
+# longo que cada uma pode mostrar — "Automática · segue o material (3840 × 2160)"
+# e "Automática (29,97 fps)" — mais a moldura e a seta, que somam 38 px no
+# Fusion. Os valores anteriores (210 e 130) cortavam justamente o item
+# automático, que é o que diz em que tela e em que taxa a edição está.
+_CANVAS_BOX_WIDTH = 300
+_RATE_BOX_WIDTH = 175
+
 # Vagas de ffmpeg da aba (ver o construtor). Números pequenos e de propósito: o
 # que limita aqui não é o processador, é a memória — cada worker decodifica
 # vídeo, e o material que se edita costuma ser o mais pesado que a máquina tem.
@@ -181,6 +189,8 @@ _BACKGROUND_WORKERS = 2  # tira, onda e keyframes, que podem esperar
 # leem como um grupo só, e o usuário procura em "desfazer" o alvo que "excluir"
 # tem. É mais que o espaçamento normal da barra, que é 6.
 _TOOL_GROUP_GAP = 22
+# Distância entre o volume do bloco e o grupo de zoom, na outra ponta da barra.
+_VOLUME_ZOOM_GAP = 72
 
 
 
@@ -607,10 +617,25 @@ class EditPanel(QWidget):
         self._count_label.setProperty("role", "dim")
         row.addWidget(self._count_label)
         row.addStretch(1)
-        hint = QLabel(strings.EDIT_MENU_HINT)
-        hint.setProperty("role", "dim")
-        row.addWidget(hint)
-        row.addSpacing(10)
+
+        # O volume do bloco mora aqui, e não na linha dos timecodes: ali ele
+        # ocupava uma faixa inteira da altura da aba junto do mudo, e altura
+        # nesta aba é prévia (ver ``MainWindow._balance_panes``). Aqui ele fica
+        # a um passo do bloco que ajusta, no espaço que já existia.
+        row.addWidget(QLabel(strings.EDIT_GAIN))
+        self._gain = QDoubleSpinBox()
+        self._gain.setRange(MIN_GAIN_DB, MAX_GAIN_DB)
+        self._gain.setSingleStep(0.5)
+        self._gain.setDecimals(1)
+        self._gain.setSuffix(" dB")
+        self._gain.setFixedWidth(96)
+        self._gain.setToolTip(strings.EDIT_GAIN_TIP)
+        self._gain.valueChanged.connect(self._on_gain)
+        self._gain.editingFinished.connect(self._end_gain_session)
+        row.addWidget(self._gain)
+        # Folga larga: o volume é do bloco escolhido, o zoom é da vista. Encostar
+        # um no outro faria a barra terminar num amontoado de coisas sem relação.
+        row.addSpacing(_VOLUME_ZOOM_GAP)
 
         for text, tip, slot in (
             ("−", strings.EDIT_ZOOM_OUT, lambda: self._zoom(1 / _ZOOM_FACTOR)),
@@ -659,25 +684,10 @@ class EditPanel(QWidget):
         row.addWidget(self._start_field)
         row.addWidget(QLabel(strings.EDIT_CLIP_END))
         row.addWidget(self._end_field)
-        row.addSpacing(10)
-
-        row.addWidget(QLabel(strings.EDIT_GAIN))
-        self._gain = QDoubleSpinBox()
-        self._gain.setRange(MIN_GAIN_DB, MAX_GAIN_DB)
-        self._gain.setSingleStep(0.5)
-        self._gain.setDecimals(1)
-        self._gain.setSuffix(" dB")
-        self._gain.setFixedWidth(96)
-        self._gain.setToolTip(strings.EDIT_GAIN_TIP)
-        self._gain.valueChanged.connect(self._on_gain)
-        self._gain.editingFinished.connect(self._end_gain_session)
-        row.addWidget(self._gain)
-
-        self._clip_mute = QCheckBox(strings.EDIT_CLIP_MUTE)
-        self._clip_mute.setToolTip(strings.EDIT_CLIP_MUTE_TIP)
-        self._clip_mute.toggled.connect(self._on_clip_mute)
-        row.addWidget(self._clip_mute)
-
+        # O volume subiu para a barra da linha do tempo e o mudo saiu daqui: ele
+        # continua no menu do botão direito, sobre o bloco que ele cala, que é
+        # onde se procura por ele. Os dois juntos custavam uma faixa da altura
+        # da aba — e altura, aqui, é tamanho de prévia.
         row.addSpacing(10)
         self._clip_label = QLabel(strings.EDIT_CLIP_NONE)
         self._clip_label.setProperty("role", "dim")
@@ -704,40 +714,36 @@ class EditPanel(QWidget):
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(6)
 
-        choices = QHBoxLayout()
-        choices.setContentsMargins(0, 0, 0, 0)
-        choices.setSpacing(14)
-        choices.addWidget(QLabel(strings.EDIT_CUT_LABEL))
-        self._fast = QCheckBox(strings.EDIT_MODE_FAST)
-        self._fast.setToolTip(strings.EDIT_MODE_TIP)
-        self._fast.toggled.connect(self._on_mode_changed)
-        choices.addWidget(self._fast)
-        choices.addStretch(1)
-        column.addLayout(choices)
-
-        # A tela fica numa linha própria, logo acima do texto que anuncia o
-        # resultado: é lendo "1920×1080 · 30 fps" que se descobre querer outra
-        # coisa. Espremer isto na linha do corte passava da largura da janela.
+        # Tudo que decide **como** a exportação sai numa linha só: tela, taxa,
+        # interpolação e corte rápido. Antes o corte rápido tinha uma faixa
+        # inteira para si, e as quatro escolhas se leem juntas de qualquer
+        # forma — o corte rápido só está disponível quando a tela e a taxa são
+        # as do próprio arquivo, então elas se explicam uma à outra.
         canvas = QHBoxLayout()
         canvas.setContentsMargins(0, 0, 0, 0)
         canvas.setSpacing(8)
         canvas.addWidget(QLabel(strings.EDIT_CANVAS))
         self._canvas_box = QComboBox()
         self._canvas_box.setToolTip(strings.EDIT_CANVAS_TIP)
-        self._canvas_box.setMinimumWidth(210)
+        self._canvas_box.setMinimumWidth(_CANVAS_BOX_WIDTH)
         self._canvas_box.currentIndexChanged.connect(self._on_canvas_choice)
         canvas.addWidget(self._canvas_box)
         canvas.addSpacing(10)
         canvas.addWidget(QLabel(strings.EDIT_CANVAS_RATE))
         self._rate_box = QComboBox()
         self._rate_box.setToolTip(strings.EDIT_CANVAS_RATE_TIP)
-        self._rate_box.setMinimumWidth(130)
+        self._rate_box.setMinimumWidth(_RATE_BOX_WIDTH)
         self._rate_box.currentIndexChanged.connect(self._on_rate_choice)
         canvas.addWidget(self._rate_box)
         canvas.addSpacing(10)
         self._interpolate = QCheckBox(strings.EDIT_INTERPOLATE)
         self._interpolate.toggled.connect(self._on_mode_changed)
         canvas.addWidget(self._interpolate)
+        canvas.addSpacing(10)
+        self._fast = QCheckBox(strings.EDIT_MODE_FAST)
+        self._fast.setToolTip(strings.EDIT_MODE_TIP)
+        self._fast.toggled.connect(self._on_mode_changed)
+        canvas.addWidget(self._fast)
         canvas.addStretch(1)
         column.addLayout(canvas)
 
@@ -1279,7 +1285,6 @@ class EditPanel(QWidget):
             self._start_field.setText(format_timecode(clip.start) if clip else "")
             self._end_field.setText(format_timecode(clip.end) if clip else "")
             self._gain.setValue(clip.gain_db if clip else 0.0)
-            self._clip_mute.setChecked(bool(clip and clip.muted))
         finally:
             self._syncing = False
 
@@ -2221,21 +2226,17 @@ class EditPanel(QWidget):
         self._insert.setEnabled(bool(self._pool))
         for field in (self._start_field, self._end_field):
             field.setEnabled(clip is not None)
-        # Volume e mudo só onde há som para ajustar. Num bloco cujo áudio foi
-        # separado eles ficam desligados de propósito: o som agora é o do outro
+        # Volume só onde há som para ajustar. Num bloco cujo áudio foi
+        # separado ele fica desligado de propósito: o som agora é o do outro
         # bloco, e é lá que ele se ajusta — oferecer o controle aqui seria
-        # oferecer um botão que não faz nada.
+        # oferecer um botão que não faz nada. O mudo saiu da barra e vive no
+        # menu do botão direito, que só o oferece quando ele tem o que calar.
         adjustable = clip is not None and clip.can_adjust_sound
         self._gain.setEnabled(adjustable)
-        self._clip_mute.setEnabled(adjustable)
-        tip = (
+        self._gain.setToolTip(
             strings.EDIT_GAIN_DETACHED
             if clip is not None and clip.detached
             else strings.EDIT_GAIN_TIP
-        )
-        self._gain.setToolTip(tip)
-        self._clip_mute.setToolTip(
-            tip if clip is not None and clip.detached else strings.EDIT_CLIP_MUTE_TIP
         )
 
         self._refresh_clip_actions()
