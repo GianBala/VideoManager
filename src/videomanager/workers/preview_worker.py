@@ -9,6 +9,7 @@ pedidos deixa de interessar antes de terminar. Daí cada worker carregar um
 
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 
 from PySide6.QtCore import QRunnable, Slot
@@ -19,9 +20,8 @@ from dataclasses import replace
 
 from ..core.preview import (
     FramePump,
-    filmstrip_times,
+    filmstrip_frames,
     frame_from_command,
-    render_frame,
     render_waveform,
 )
 from ..core.trimmer import keyframe_times
@@ -82,7 +82,9 @@ class FilmstripWorker(QRunnable):
     ) -> None:
         super().__init__()
         self._path = path
-        self._times = filmstrip_times(start, end, count)
+        self._start = start
+        self._end = end
+        self._count = count
         self._size = size
         self._tools = tools
         self._token = token
@@ -94,12 +96,18 @@ class FilmstripWorker(QRunnable):
 
     @Slot()
     def run(self) -> None:
+        # ``closing`` não é zelo: desistir no meio da tira precisa **fechar** o
+        # gerador, e é o fechamento que encerra o ffmpeg do passe único. Sair do
+        # laço sem isso deixaria o processo decodificando o resto de um trecho
+        # que ninguém vai ver — de novo o caso que enchia a máquina de ffmpeg.
+        quadros = filmstrip_frames(
+            self._path, self._start, self._end, self._count, self._size, self._tools
+        )
         try:
-            for index, moment in enumerate(self._times):
-                if self._cancelled:
-                    return
-                frame = render_frame(self._path, moment, self._size, self._tools)
-                if frame is not None:
+            with closing(quadros):
+                for index, frame in quadros:
+                    if self._cancelled:
+                        return
                     emit_safely(self.signals.strip, self._token, index, frame)
         finally:
             emit_safely(self.signals.done)

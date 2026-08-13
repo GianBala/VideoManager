@@ -668,3 +668,115 @@ class TestCodificacaoPorPlaca:
             f"a placa entregou SSIM {placa:.4f} contra {software:.4f} do software: "
             "o número de qualidade não está chegando ao encoder"
         )
+
+
+class TestTiraDeMiniaturas:
+    """As miniaturas têm de sair nos instantes certos, nos dois caminhos.
+
+    A tira passou a sair de um ffmpeg só (medido: 6,3× a 1080p, 10,6× a 4K), com
+    queda para uma busca por miniatura quando o passo é grande demais. O risco
+    dessa troca não é falhar: é a tira continuar aparecendo, bonita, mostrando os
+    instantes errados — e ninguém percebe olhando doze quadradinhos de vídeo.
+
+    A fonte é um esmaecimento linear de preto para branco, então o brilho médio
+    de cada miniatura **diz o instante em que ela foi tirada**. É o que permite
+    afirmar o instante sem comparar pixels com um caminho que pode estar errado
+    junto.
+    """
+
+    def fonte(self, path: Path, tools, duracao: float) -> Path:
+        subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-f", "lavfi",
+             "-i", f"color=c=white:s=320x180:r=30:d={duracao}",
+             "-vf", f"fade=t=in:st=0:d={duracao}",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+             "-pix_fmt", "yuv420p", str(path)],
+            check=True,
+        )
+        return path
+
+    def brilho(self, frame) -> float:
+        return sum(frame.data) / len(frame.data)
+
+    @pytest.mark.parametrize(
+        ("duracao", "passe_unico"),
+        [(12.0, True), (48.0, False)],
+        ids=["passe unico", "uma busca por miniatura"],
+    )
+    def test_cada_miniatura_cai_no_instante_dela(
+        self, tmp_path: Path, tools, duracao: float, passe_unico: bool
+    ) -> None:
+        from videomanager.core.preview import (
+            _one_pass_worth_it,
+            filmstrip_frames,
+            filmstrip_times,
+            render_frame,
+        )
+
+        origem = self.fonte(tmp_path / "fade.mp4", tools, duracao)
+        quantas = 12
+        tempos = filmstrip_times(0.0, duracao, quantas)
+        assert _one_pass_worth_it(tempos) is passe_unico, (
+            "o caminho exercitado não é o que este caso quer medir"
+        )
+
+        tira = dict(filmstrip_frames(origem, 0.0, duracao, quantas, (160, 90), tools))
+        assert sorted(tira) == list(range(quantas)), "nenhuma miniatura pode faltar"
+
+        for index, frame in tira.items():
+            # Duas afirmações, e as duas são necessárias. A primeira é absoluta:
+            # o esmaecimento é linear, então o brilho **diz** o instante, e isso
+            # vale mesmo que os dois caminhos estejam errados juntos.
+            esperado = 255 * tempos[index] / duracao
+            assert self.brilho(frame) == pytest.approx(esperado, abs=8), (
+                f"a miniatura {index} não é a do instante {tempos[index]:.2f} s"
+            )
+            # A segunda é a promessa da otimização: mudou o custo, não a imagem.
+            # Foi ela que pegou o ``round`` do filtro ``fps`` deslocando a tira
+            # inteira meio passo — sem falhar nada, só mostrando outro instante.
+            antigo = render_frame(origem, tempos[index], (160, 90), tools)
+            assert antigo is not None
+            assert frame.data == antigo.data, (
+                f"a miniatura {index} não é a mesma que uma busca direta devolve"
+            )
+
+    def test_as_miniaturas_saem_em_ordem_e_completas(self, tmp_path: Path, tools) -> None:
+        from videomanager.core.preview import filmstrip_frames
+
+        origem = self.fonte(tmp_path / "fade.mp4", tools, 12.0)
+        saida = list(filmstrip_frames(origem, 0.0, 12.0, 12, (160, 90), tools))
+        assert [i for i, _ in saida] == list(range(12)), (
+            "a tira preenche da esquerda para a direita: a ordem é o efeito visível"
+        )
+        brilhos = [self.brilho(f) for _, f in saida]
+        assert brilhos == sorted(brilhos), "o esmaecimento só cresce"
+
+    def test_desistir_no_meio_encerra_o_ffmpeg(
+        self, tmp_path: Path, tools, monkeypatch
+    ) -> None:
+        """Fechar o gerador tem de matar o processo do passe único.
+
+        Sem isso, cada aproximação na linha do tempo deixaria um ffmpeg
+        decodificando um trecho que ninguém vai mais ver — que é a raiz do
+        estouro de memória que esta aba já causou.
+        """
+        from videomanager.core import preview
+
+        abertos: list[subprocess.Popen] = []
+        original = preview.subprocess.Popen
+
+        def espiao(*args, **kwargs):
+            processo = original(*args, **kwargs)
+            abertos.append(processo)
+            return processo
+
+        monkeypatch.setattr(preview.subprocess, "Popen", espiao)
+
+        origem = self.fonte(tmp_path / "fade.mp4", tools, 12.0)
+        gerador = preview.filmstrip_frames(origem, 0.0, 12.0, 12, (160, 90), tools)
+        next(gerador)
+        assert abertos, "o passe único abre um processo só"
+        gerador.close()
+        assert abertos[0].poll() is not None, (
+            "o ffmpeg continuou vivo depois de a tira ser abandonada"
+        )
