@@ -38,6 +38,12 @@ class JobStatus(Enum):
 class JobKind(Enum):
     DOWNLOAD = "download"
     CONVERT = "conversão"
+    TRIM = "recorte"
+
+    @property
+    def runs_ffmpeg_locally(self) -> bool:
+        """Se a tarefa é executada pelo conversor, e não pelo downloader."""
+        return self in (JobKind.CONVERT, JobKind.TRIM)
 
 
 _counter = itertools.count(1)

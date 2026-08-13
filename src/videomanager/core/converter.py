@@ -30,6 +30,7 @@ from pathlib import Path
 from .binaries import FFmpegTools, subprocess_kwargs
 from .downloader import Progress
 from .errors import ConversionError, JobCancelled
+from .trimmer import TrimTarget, build_trim_args, describe_trim
 
 # --- alvos de áudio ---------------------------------------------------------
 # Codec pedido -> encoder do ffmpeg. "copy" não aparece aqui: é tratado à parte.
@@ -183,7 +184,11 @@ class VideoTarget:
         return self.container
 
 
-ConversionTarget = AudioTarget | VideoTarget
+# O recorte da aba de edição também é executado pelo :class:`Converter`: o que
+# muda é a montagem dos argumentos, e todo o resto — progresso lido do ffmpeg,
+# cancelamento, limpeza da saída parcial — vale igual. O módulo ``trimmer``
+# depende deste, e nunca o contrário, para a dependência continuar de mão única.
+ConversionTarget = AudioTarget | VideoTarget | TrimTarget
 
 
 # ---------------------------------------------------------------------------
@@ -295,20 +300,30 @@ def can_copy_audio(media: LocalMedia, codec: str) -> bool:
     return stream.codec.lower() in _EQUIVALENT_SOURCE_CODECS.get(codec, set())
 
 
-def output_path(source: Path, target: ConversionTarget, dest_dir: Path | None = None) -> Path:
+def output_path(
+    source: Path,
+    target: ConversionTarget,
+    dest_dir: Path | None = None,
+    suffix: str = "",
+) -> Path:
     """Caminho de saída, evitando sobrescrever o arquivo de origem.
 
     Converter um ``.mp3`` para ``.mp3`` com outro bitrate é um pedido legítimo, e
     sem o sufixo a origem seria destruída no meio da leitura.
+
+    ``suffix`` distingue saídas que nascem do mesmo arquivo — os vários trechos
+    de um recorte — sem depender do contador, que só entra em cena quando o nome
+    escolhido já existe.
     """
     directory = dest_dir or source.parent
-    candidate = directory / f"{source.stem}.{target.extension}"
+    stem = f"{source.stem}{suffix}"
+    candidate = directory / f"{stem}.{target.extension}"
     if candidate.resolve() == source.resolve():
-        candidate = directory / f"{source.stem} (convertido).{target.extension}"
+        candidate = directory / f"{stem} (convertido).{target.extension}"
     # Não sobrescreve arquivos já existentes.
     counter = 2
     while candidate.exists():
-        candidate = directory / f"{source.stem} ({counter}).{target.extension}"
+        candidate = directory / f"{stem} ({counter}).{target.extension}"
         counter += 1
     return candidate
 
@@ -479,11 +494,26 @@ def build_args(
 ) -> list[str]:
     if isinstance(target, AudioTarget):
         return build_audio_args(media, target, destination, tools)
+    if isinstance(target, TrimTarget):
+        return build_trim_args(media, target, destination, tools)
     return build_video_args(media, target, destination, tools)
+
+
+def output_duration(media: LocalMedia, target: ConversionTarget) -> float | None:
+    """Duração que a saída vai ter — a régua do percentual de progresso.
+
+    Só um recorte tem duração diferente da origem, e é justamente onde usar a
+    duração do arquivo faria a barra parar em 3% numa tarefa concluída.
+    """
+    if isinstance(target, TrimTarget):
+        return target.output_duration or None
+    return media.duration
 
 
 def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
     """Resumo do que a conversão vai fazer, para exibir antes de começar."""
+    if isinstance(target, TrimTarget):
+        return describe_trim(media, target)
     if isinstance(target, AudioTarget):
         if can_copy_audio(media, target.codec):
             return f"{target.codec.upper()} · cópia direta (sem recodificar)"
@@ -575,13 +605,13 @@ class Converter:
     def _emit(self, seconds: float | None, size: int | None) -> None:
         if self._on_progress is None:
             return
-        duration = self._media.duration
+        duration = output_duration(self._media, self._target)
         percent = None
         if seconds is not None and duration:
             percent = min(100.0, seconds * 100.0 / duration)
         self._on_progress(
             Progress(
-                phase="Convertendo",
+                phase="Recortando" if isinstance(self._target, TrimTarget) else "Convertendo",
                 percent=percent,
                 downloaded_bytes=size,
                 indeterminate=percent is None,
