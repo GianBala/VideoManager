@@ -1042,6 +1042,11 @@ class EditPanel(QWidget):
     def _on_clip_selected(self, _clip_id: int) -> None:
         self._end_gain_session()
         self._refresh_clip_fields()
+        # Trocar de bloco troca o que os controles alcançam — volume e mudo se
+        # desligam num bloco sem som ajustável. Antes isto pegava carona no fim
+        # do arrasto; agora que um clique simples não conta como edição (ver
+        # ``timeline._DRAG_SLACK``), a seleção precisa avisar por conta própria.
+        self._refresh_controls()
 
     def _refresh_clip_fields(self) -> None:
         clip = self._timeline.selected_clip
