@@ -527,6 +527,7 @@ def build_args(
             tools,
             container=target.container,
             hardware=target.hardware,
+            interpolate=target.interpolate,
         )
     return build_video_args(media, target, destination, tools)
 
@@ -545,7 +546,9 @@ def output_duration(media: LocalMedia, target: ConversionTarget) -> float | None
 def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
     """Resumo do que a conversão vai fazer, para exibir antes de começar."""
     if isinstance(target, Composition):
-        return describe_export(target.project, target.container, target.hardware)
+        return describe_export(
+            target.project, target.container, target.hardware, target.interpolate
+        )
     if isinstance(target, TrimTarget):
         return describe_trim(media, target)
     if isinstance(target, AudioTarget):
