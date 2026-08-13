@@ -97,6 +97,7 @@ from ...core.project import (
 )
 from ...core.settings import Settings
 from ...core.trimmer import (
+    MIN_SEGMENT,
     CutMode,
     TrimTarget,
     format_span,
@@ -547,15 +548,19 @@ class EditPanel(QWidget):
         bloco na mão, e cada uma que sai daqui é uma coisa a menos entre a
         imagem e a linha do tempo.
 
-        Dividir e excluir são a exceção, e por frequência: são as duas operações
-        que se repetem dezenas de vezes ao montar uma sequência, e abrir um menu
-        para cada uma custa mais que o espaço de dois botões. Continuam no menu
-        também — o atalho não substitui o lugar onde elas se procuram.
+        As quatro que ficam aqui são a exceção, e por frequência: dividir,
+        apagar à esquerda, apagar à direita e excluir se repetem dezenas de vezes
+        ao montar uma sequência, e abrir um menu para cada uma custa mais que o
+        espaço de quatro botões. Continuam no menu também — o atalho não
+        substitui o lugar onde elas se procuram.
 
-        Os dois ficam **afastados** de desfazer e refazer porque não são a mesma
+        Elas ficam **afastadas** de desfazer e refazer porque não são a mesma
         coisa: desfazer age sobre a edição inteira e está sempre disponível;
-        estes agem sobre o bloco selecionado e se desligam sem ele. Colados,
-        pareceriam quatro botões do mesmo grupo.
+        estas agem sobre o bloco selecionado e se desligam sem ele. Coladas,
+        pareceriam seis botões do mesmo grupo.
+
+        A ordem é a do corte: a tesoura divide, as duas do meio apagam um lado,
+        a lixeira apaga tudo — da menor consequência para a maior.
         """
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -574,6 +579,24 @@ class EditPanel(QWidget):
             row, "", "S", self._split_here, strings.EDIT_SPLIT, 40
         )
         self._split_button.setIcon(icons.scissors(self._colors["text"]))
+        self._trim_left_button = self._tool(
+            row, "", "Q", lambda: self._trim_to_cursor("inicio"),
+            strings.EDIT_TRIM_LEFT, 40,
+        )
+        self._trim_left_button.setIcon(icons.trim_left(self._colors["text"]))
+        # Dica maior que a dos outros três: tesoura e lixeira se explicam
+        # sozinhas, "apagar à esquerda" não diz de onde nem até onde.
+        self._trim_left_button.setToolTip(
+            f"{strings.EDIT_TRIM_LEFT}  (Q)\n{strings.EDIT_TRIM_LEFT_TIP}"
+        )
+        self._trim_right_button = self._tool(
+            row, "", "W", lambda: self._trim_to_cursor("fim"),
+            strings.EDIT_TRIM_RIGHT, 40,
+        )
+        self._trim_right_button.setIcon(icons.trim_right(self._colors["text"]))
+        self._trim_right_button.setToolTip(
+            f"{strings.EDIT_TRIM_RIGHT}  (W)\n{strings.EDIT_TRIM_RIGHT_TIP}"
+        )
         self._delete_button = self._tool(
             row, "", "Del", self._delete_selected, strings.EDIT_DELETE, 40
         )
@@ -755,6 +778,10 @@ class EditPanel(QWidget):
             ("Space", self._toggle_play),
             ("S", self._split_here),
             ("Ctrl+B", self._split_here),
+            # Q e W são as teclas de aparar até o cursor nos editores que quem
+            # usa isto já conhece.
+            ("Q", lambda: self._trim_to_cursor("inicio")),
+            ("W", lambda: self._trim_to_cursor("fim")),
             ("Del", self._delete_selected),
             ("Ctrl+C", self._copy_clip),
             ("Ctrl+V", self._paste_clip),
@@ -967,6 +994,18 @@ class EditPanel(QWidget):
         if clip is not None:
             self._act(menu, f"{strings.EDIT_SPLIT}  (S)", self._split_here,
                       enabled=clip.contains(self._position))
+            self._act(
+                menu, f"{strings.EDIT_TRIM_LEFT}  (Q)",
+                lambda: self._trim_to_cursor("inicio"),
+                enabled=self._can_trim(clip, "inicio"),
+                tip=strings.EDIT_TRIM_LEFT_TIP,
+            )
+            self._act(
+                menu, f"{strings.EDIT_TRIM_RIGHT}  (W)",
+                lambda: self._trim_to_cursor("fim"),
+                enabled=self._can_trim(clip, "fim"),
+                tip=strings.EDIT_TRIM_RIGHT_TIP,
+            )
             self._act(menu, f"{strings.EDIT_COPY}  (Ctrl+C)", self._copy_clip)
             self._act(menu, f"{strings.EDIT_DELETE}  (Del)", self._delete_selected)
             menu.addSeparator()
@@ -1107,6 +1146,36 @@ class EditPanel(QWidget):
             return
         self._remember()
         self._apply(self._project.without_clip(clip.clip_id))
+
+    def _trim_to_cursor(self, edge: str) -> None:
+        """Apaga o que está de um lado do cursor, dentro do bloco selecionado.
+
+        É o mesmo que arrastar aquela ponta até o cursor — e é literalmente a
+        mesma operação do modelo (``Project.resized``), então o ponto de origem
+        acompanha, os vizinhos são respeitados e o desfazer funciona igual.
+        Existe como botão porque mirar a ponta com o mouse exige aproximar até
+        o quadro, e o cursor já está no lugar exato.
+        """
+        clip = self._timeline.selected_clip
+        if not self._can_trim(clip, edge):
+            return
+        self._remember()
+        self._apply(self._project.resized(clip.clip_id, edge, self._position))
+
+    def _can_trim(self, clip: Clip | None, edge: str) -> bool:
+        """Se há o que apagar daquele lado, e se sobra bloco depois.
+
+        Sobrar menos que o mínimo não é aparar, é apagar o bloco por um caminho
+        que não diz isso — para apagar existe a lixeira ao lado.
+        """
+        if clip is None or not clip.contains(self._position):
+            return False
+        if edge == "inicio":
+            return (
+                self._position > clip.start
+                and clip.end - self._position >= MIN_SEGMENT
+            )
+        return self._position - clip.start >= MIN_SEGMENT
 
     def _detach_audio(self) -> None:
         clip = self._timeline.selected_clip
@@ -1631,6 +1700,8 @@ class EditPanel(QWidget):
         self._split_button.setEnabled(
             clip is not None and clip.contains(self._position)
         )
+        self._trim_left_button.setEnabled(self._can_trim(clip, "inicio"))
+        self._trim_right_button.setEnabled(self._can_trim(clip, "fim"))
         self._delete_button.setEnabled(clip is not None)
 
     def _on_scrub(self, seconds: float) -> None:
