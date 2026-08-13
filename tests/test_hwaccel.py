@@ -164,3 +164,38 @@ class TestSondagem:
         assert comando[comando.index("-frames:v") + 1] == "1"
         assert comando[comando.index("-c:v") + 1] == "h264_nvenc"
         assert comando[-1] == "-", "escreve em lugar nenhum"
+
+
+class TestSondagemPronta:
+    """Se a interface pode responder na hora ou precisa sair da frente.
+
+    A sondagem custa de 0,5 s a 3,4 s nesta máquina, e ela rodava na thread da
+    interface: o diálogo de configurações abria congelado por todo esse tempo.
+    ``probes_ready`` é o que permite decidir sem descobrir isso do jeito difícil
+    — perguntando e travando.
+    """
+
+    def test_sem_ffmpeg_nao_ha_o_que_esperar(self) -> None:
+        # A frase já está resolvida sem sondar nada, então a tela responde na
+        # hora em vez de mostrar "verificando" para sempre.
+        assert hwaccel.probes_ready(None) is True
+
+    def test_antes_de_sondar_nao_esta_pronta(self) -> None:
+        assert hwaccel.probes_ready(TOOLS) is False
+
+    def test_depois_de_sondar_todos_esta_pronta(self) -> None:
+        fingir(**{kind: kind == "nvenc" for kind in hwaccel.ORDER})
+        assert hwaccel.probes_ready(TOOLS) is True
+
+    def test_sondar_so_o_preferido_ainda_nao_e_pronto(self) -> None:
+        # Ser conservador aqui não custa nada: no máximo a tela vai por um
+        # caminho assíncrono que teria sido dispensável.
+        fingir(nvenc=True)
+        assert hwaccel.probes_ready(TOOLS) is False
+
+    def test_esquecer_volta_a_pedir_sondagem(self) -> None:
+        # É o que faz o botão "Testar agora" mostrar o aviso de verificação de
+        # novo, em vez de repetir a resposta velha na hora.
+        fingir(**{kind: True for kind in hwaccel.ORDER})
+        hwaccel.forget_probes()
+        assert hwaccel.probes_ready(TOOLS) is False
