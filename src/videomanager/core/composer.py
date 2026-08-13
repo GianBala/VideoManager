@@ -158,15 +158,32 @@ def _video_chain(piece: _Piece, project: Project, fps: float) -> str:
     else:
         steps.append("setpts=PTS-STARTPTS")
     steps.append(f"fps={fps:.6f}")
-    steps.append(
-        f"scale={project.width}:{project.height}"
-        ":force_original_aspect_ratio=decrease"
-    )
+    steps.append(_fit_scale(project.width, project.height))
     steps.append(
         f"pad={project.width}:{project.height}:(ow-iw)/2:(oh-ih)/2:color=black"
     )
     steps.append("setsar=1")
     return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
+
+
+def _fit_scale(width: int, height: int) -> str:
+    """Encaixa o bloco na tela **pela forma com que ele é exibido**.
+
+    ``force_original_aspect_ratio=decrease`` mede a proporção em pixels
+    armazenados e ignora a proporção do pixel; com o ``setsar=1`` logo depois, um
+    arquivo de pixel não quadrado — rip de DVD, filmadora antiga — saía achatado
+    na horizontal. Medido: uma fonte 720×480 com pixel 32:27 (exibida em 16:9)
+    saía 720×480 quadrado, ou seja 3:2. Nada falhava; a imagem só ficava
+    espremida.
+
+    ``dar`` é a proporção de exibição da entrada, que o ffmpeg já calcula com o
+    pixel embutido. Onde o arquivo não informa o pixel, ele assume quadrado e a
+    conta devolve o mesmo de antes (conferido com uma entrada de ``sar``
+    desconhecido). O arredondamento para par é exigência dos codificadores.
+    """
+    largest = f"min({width},{height}*dar)"
+    tallest = f"min({height},{width}/dar)"
+    return f"scale=w='trunc({largest}/2)*2':h='trunc({tallest}/2)*2'"
 
 
 def _audio_chain(piece: _Piece) -> str:

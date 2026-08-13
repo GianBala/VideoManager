@@ -18,6 +18,7 @@ from videomanager.core.converter import (
     LocalMedia,
     LocalStream,
     VideoTarget,
+    _ratio,
     build_args,
     can_copy_audio,
     describe_target,
@@ -283,3 +284,27 @@ class TestOutputPath:
         (tmp_path / "video.mp3").write_bytes(b"ja existe")
         destino = output_path(tmp_path / "video.mp4", AudioTarget(codec="mp3"), tmp_path)
         assert destino.name == "video (2).mp3"
+
+
+class TestProporcaoDoPixel:
+    """A leitura do ``sample_aspect_ratio``, que o ffprobe escreve com ":".
+
+    Só este número distingue um arquivo 720×480 de 4:3 de um 720×480 que se
+    exibe em 16:9. Sem ele, o segundo saía achatado da edição — e nada falhava.
+    """
+
+    def test_le_a_razao_com_dois_pontos(self) -> None:
+        assert _ratio("32:27") == pytest.approx(32 / 27)
+        assert _ratio("1:1") == 1.0
+
+    def test_desconhecida_vira_nada(self) -> None:
+        # "0:1" e "N/A" são como o ffprobe diz "não sei" — diferente de "é
+        # quadrado", ainda que o ffmpeg trate os dois igual na hora de desenhar.
+        assert _ratio("0:1") is None
+        assert _ratio("N/A") is None
+        assert _ratio(None) is None
+
+    def test_barra_nao_e_razao_de_pixel(self) -> None:
+        # O framerate usa barra; a proporção do pixel, dois-pontos. Aceitar as
+        # duas formas aqui esconderia um campo lido do lugar errado.
+        assert _ratio("30/1") is None

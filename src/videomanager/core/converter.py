@@ -115,6 +115,12 @@ class LocalStream:
     height: int | None = None
     width: int | None = None
     fps: float | None = None
+    # Proporção do pixel (``sample_aspect_ratio``). Quase toda mídia atual tem
+    # pixel quadrado e traz 1, mas rip de DVD e filmadora antiga guardam a
+    # imagem espremida — 720×480 para exibir em 16:9 — e só este número diz
+    # isso. Sem ele, a imagem sai achatada e nada falha. ``None`` quando o
+    # arquivo não informa, que o ffmpeg trata como 1.
+    sar: float | None = None
     bitrate: float | None = None  # kbps
     sample_rate: int | None = None
     channels: int | None = None
@@ -238,6 +244,7 @@ def probe_file(path: Path, tools: FFmpegTools) -> LocalMedia:
                 height=_int(raw.get("height")),
                 width=_int(raw.get("width")),
                 fps=_fraction(raw.get("r_frame_rate")),
+                sar=_ratio(raw.get("sample_aspect_ratio")),
                 bitrate=_kbps(raw.get("bit_rate")),
                 sample_rate=_int(raw.get("sample_rate")),
                 channels=_int(raw.get("channels")),
@@ -280,6 +287,20 @@ def _fraction(value: object) -> float | None:
     if "/" not in text:
         return _float(text)
     numerator, _, denominator = text.partition("/")
+    num, den = _float(numerator), _float(denominator)
+    return num / den if num and den else None
+
+
+def _ratio(value: object) -> float | None:
+    """Converte a proporção do pixel — "32:27" — no número correspondente.
+
+    O ffprobe escreve razão com dois-pontos, e não com barra como o framerate.
+    Desconhecida ele escreve "0:1" ou "N/A": as duas viram ``None``, que é
+    diferente de 1 — não se sabe, e não "é quadrado".
+    """
+    numerator, separator, denominator = str(value or "").partition(":")
+    if not separator:
+        return None
     num, den = _float(numerator), _float(denominator)
     return num / den if num and den else None
 
