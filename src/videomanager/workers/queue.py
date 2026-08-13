@@ -2,8 +2,14 @@
 
 Usa ``QThreadPool``, que já resolve o enfileiramento: tarefas acima do limite de
 simultaneidade ficam esperando vaga sozinhas, sem precisarmos de um agendador
-próprio. O limite existe porque baixar dez vídeos ao mesmo tempo numa conexão
-doméstica deixa todos lentos e aumenta a chance de a plataforma limitar a banda.
+próprio.
+
+**São duas filas, porque são dois recursos diferentes.** Baixar espera a rede, e
+o limite existe porque baixar dez vídeos ao mesmo tempo numa conexão doméstica
+deixa todos lentos e aumenta a chance de a plataforma limitar a banda. Converter
+espera a **máquina**, e aí o limite é outro: um ffmpeg já usa todos os núcleos
+sozinho, então dois em paralelo não entregam nada antes — só dividem os mesmos
+núcleos e **somam a memória**. Ver :data:`_LOCAL_JOBS`.
 """
 
 from __future__ import annotations
@@ -17,6 +23,15 @@ from ..core.job import Job, JobStatus
 from ..core.settings import Settings
 from .convert_worker import ConvertWorker
 from .download_worker import DownloadWorker
+
+# Quantas tarefas de ffmpeg local correm ao mesmo tempo — uma. Não é conta de
+# núcleos: um ffmpeg sozinho já ocupa os que existem, e o que a segunda tarefa
+# acrescenta é **memória**. Uma exportação com interpolação pede 5,6 GB numa tela
+# 4K (medido; ver ``core/composer.py``), e três delas em paralelo — que era o
+# padrão desta fila — não cabem em máquina nenhuma que se venda hoje. O custo de
+# serializar é nenhum: o mesmo trabalho, na mesma ordem, terminando antes por
+# não disputar cache nem memória.
+_LOCAL_JOBS = 1
 
 
 class JobQueue(QObject):
@@ -39,6 +54,8 @@ class JobQueue(QObject):
         self._workers: dict[int, DownloadWorker | ConvertWorker] = {}
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(max(1, settings.max_concurrent_jobs))
+        self._local = QThreadPool(self)
+        self._local.setMaxThreadCount(_LOCAL_JOBS)
 
     # -- leitura ----------------------------------------------------------
 
@@ -57,6 +74,13 @@ class JobQueue(QObject):
         return any(not job.status.is_final for job in self._jobs.values())
 
     def apply_settings(self, settings: Settings) -> None:
+        """A preferência do usuário vale para a rede, e só.
+
+        A fila local não é ajustável de propósito: o número que faz sentido ali
+        não é uma preferência, é o que a máquina aguenta — e quem pediria três
+        conversões em paralelo estaria pedindo a mesma coisa mais devagar, com o
+        risco de não terminar nenhuma.
+        """
         self._settings = settings
         self._pool.setMaxThreadCount(max(1, settings.max_concurrent_jobs))
 
@@ -73,8 +97,10 @@ class JobQueue(QObject):
 
     def _start(self, job: Job) -> None:
         worker: DownloadWorker | ConvertWorker
+        pool = self._pool
         if job.kind.runs_ffmpeg_locally:
             worker = ConvertWorker(job)
+            pool = self._local
         else:
             worker = DownloadWorker(job)
 
@@ -87,7 +113,7 @@ class JobQueue(QObject):
         job.status = JobStatus.PENDING
         job.error = None
         self.job_changed.emit(job)
-        self._pool.start(worker)
+        pool.start(worker)
 
     def cancel(self, job_id: int) -> None:
         job = self._jobs.get(job_id)
@@ -110,7 +136,12 @@ class JobQueue(QObject):
         prazo o processo sai de todo modo.
         """
         self.cancel_all()
-        self._pool.waitForDone(timeout_ms)
+        # As duas filas, e o prazo é de cada uma: esperar as duas em sequência
+        # pelo prazo inteiro dobraria o tempo de saída no pior caso, mas o pior
+        # caso aqui é justamente o que não pode travar o fechamento. Metade para
+        # cada uma mantém a promessa do prazo.
+        self._pool.waitForDone(timeout_ms // 2)
+        self._local.waitForDone(timeout_ms // 2)
 
     def retry(self, job_id: int) -> None:
         """Recoloca na fila uma tarefa que falhou ou foi cancelada."""
