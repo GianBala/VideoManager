@@ -71,3 +71,15 @@ def format_fps(fps: float | None) -> str:
     if fps is None or fps <= 0:
         return DASH
     return str(int(round(fps)))
+
+
+def format_rate(fps: float | None) -> str:
+    """Framerate **exato**, para onde a diferença entre 29,97 e 30 importa.
+
+    Numa lista de formatos, arredondar ajuda: "29,97" só faria procurar a
+    diferença. Já na taxa escolhida para a exportação os dois valores produzem
+    arquivos diferentes, e a lista não pode oferecer um mostrando o outro.
+    """
+    if fps is None or fps <= 0:
+        return DASH
+    return _decimal(fps, 2)

@@ -69,6 +69,7 @@ from ...core.binaries import FFmpegTools
 from ...core.composer import (
     Composition,
     audio_command,
+    can_interpolate,
     describe_export,
     frame_command,
     playback_command,
@@ -76,6 +77,7 @@ from ...core.composer import (
 )
 from ...core.converter import LocalMedia, output_path, probe_file
 from ...core.errors import VideoManagerError
+from ...core.humanize import format_rate
 from ...core.job import Job, JobKind
 from ...core.preview import fit_size, preview_fps
 from ...core.project import (
@@ -135,6 +137,10 @@ _FULLSCREEN_MAX_WIDTH = 1920
 
 _VIEW_SETTLE_MS = 220
 _RESIZE_SETTLE_MS = 200
+# Espera antes de refazer o fluxo depois de uma alteração feita com o vídeo
+# tocando. Um arrasto de volume avisa a cada meio decibel: sem a espera, cada
+# passo abriria um ffmpeg novo.
+_LIVE_RESTART_MS = 200
 # Espera antes de gravar as preferências de som, para um arrasto de volume não
 # escrever o arquivo de configuração dezenas de vezes.
 _PREFS_SAVE_MS = 900
@@ -153,6 +159,42 @@ _WAVE_MAX_WIDTH = 1200
 # Sem ele o layout espreme a linha do tempo até sobrar só a régua, porque é a
 # prévia que tem política de esticar e ela não abre mão sozinha.
 _TIMELINE_MIN_HEIGHT = 150
+
+# Telas oferecidas além das que o próprio material traz. São os formatos que os
+# aparelhos e os sites esperam — não uma tabela de tudo que existe.
+_CANVAS_PRESETS = (
+    (3840, 2160), (2560, 1440), (1920, 1080), (1280, 720), (854, 480),
+    (1080, 1920), (720, 1280), (1080, 1080),
+)
+_RATE_PRESETS = (24.0, 25.0, 30.0, 50.0, 60.0)
+
+def _wrapping_label(role: str) -> QLabel:
+    """Rótulo que quebra linha **e** cobra do layout a altura que isso exige.
+
+    Um ``QLabel`` com ``wordWrap`` sabe calcular a própria altura, mas o layout
+    só pergunta quando a política de tamanho declara que a altura depende da
+    largura. Sem a declaração, o texto do plano quebrava em duas linhas e a
+    caixa continuava dimensionada para uma: a segunda linha — e o aviso logo
+    abaixo — nasciam cortados pela borda da janela.
+    """
+    label = QLabel("")
+    label.setProperty("role", role)
+    label.setWordWrap(True)
+    policy = label.sizePolicy()
+    policy.setHeightForWidth(True)
+    label.setSizePolicy(policy)
+    return label
+
+
+def _index_of(box: QComboBox, value: object) -> int:
+    """Posição do item que guarda este dado, ou -1.
+
+    Não é o ``findData`` do Qt: ele compara os dados como ``QVariant``, e dois
+    pares ``(1280, 720)`` iguais em Python não são o mesmo objeto — a busca
+    devolvia -1 e a escolha de tela simplesmente não acontecia, enquanto a de
+    taxa (um número) funcionava. Aqui a comparação é a do Python.
+    """
+    return next((i for i in range(box.count()) if box.itemData(i) == value), -1)
 
 
 class _Preview(QLabel):
@@ -204,6 +246,11 @@ class EditPanel(QWidget):
         self._clipboard: Clip | None = None
         self._keyframes: tuple[float, ...] = ()
         self._keyframe_source: Path | None = None
+        # Tela pedida, ou ``None`` para seguir o material. Mora aqui, e não no
+        # projeto, porque é preferência de saída e não parte da montagem — ver
+        # :meth:`_sync_canvas`.
+        self._canvas_choice: tuple[int, int] | None = None
+        self._rate_choice: float | None = None
 
         self._tokens = itertools.count(1)
         self._frame_token = 0
@@ -245,6 +292,11 @@ class EditPanel(QWidget):
         self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(_RESIZE_SETTLE_MS)
         self._resize_timer.timeout.connect(lambda: self._request_frame(force=True))
+
+        self._live_timer = QTimer(self)
+        self._live_timer.setSingleShot(True)
+        self._live_timer.setInterval(_LIVE_RESTART_MS)
+        self._live_timer.timeout.connect(self._restart_stream)
 
         self._build_ui()
         self._install_shortcuts()
@@ -557,6 +609,11 @@ class EditPanel(QWidget):
     def _build_export_row(self) -> QWidget:
         box = QWidget()
         box.setProperty("role", "plain")
+        # Altura natural, nunca espremida: sem isto o layout repartia a falta de
+        # espaço entre a prévia e esta caixa, e o aviso da última linha nascia
+        # cortado pela borda da janela. Aqui quem cede pixels é a prévia — ela é
+        # a única coisa da aba que rende com espaço sobrando.
+        box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         column = QVBoxLayout(box)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(6)
@@ -572,20 +629,47 @@ class EditPanel(QWidget):
         choices.addStretch(1)
         column.addLayout(choices)
 
+        # A tela fica numa linha própria, logo acima do texto que anuncia o
+        # resultado: é lendo "1920×1080 · 30 fps" que se descobre querer outra
+        # coisa. Espremer isto na linha do corte passava da largura da janela.
+        canvas = QHBoxLayout()
+        canvas.setContentsMargins(0, 0, 0, 0)
+        canvas.setSpacing(8)
+        canvas.addWidget(QLabel(strings.EDIT_CANVAS))
+        self._canvas_box = QComboBox()
+        self._canvas_box.setToolTip(strings.EDIT_CANVAS_TIP)
+        self._canvas_box.setMinimumWidth(210)
+        self._canvas_box.currentIndexChanged.connect(self._on_canvas_choice)
+        canvas.addWidget(self._canvas_box)
+        canvas.addSpacing(10)
+        canvas.addWidget(QLabel(strings.EDIT_CANVAS_RATE))
+        self._rate_box = QComboBox()
+        self._rate_box.setToolTip(strings.EDIT_CANVAS_RATE_TIP)
+        self._rate_box.setMinimumWidth(130)
+        self._rate_box.currentIndexChanged.connect(self._on_rate_choice)
+        canvas.addWidget(self._rate_box)
+        canvas.addSpacing(10)
+        self._interpolate = QCheckBox(strings.EDIT_INTERPOLATE)
+        self._interpolate.toggled.connect(self._on_mode_changed)
+        canvas.addWidget(self._interpolate)
+        canvas.addStretch(1)
+        column.addLayout(canvas)
+
+        # O plano e o aviso ocupam a largura inteira, em linhas próprias. Ao
+        # lado do botão eles ficavam numa coluna de 732 px e quebravam em duas
+        # linhas — e a altura dessa quebra não atravessa uma linha horizontal
+        # (``heightForWidth`` para no ``QHBoxLayout``), então a caixa continuava
+        # dimensionada para uma linha e a última nascia cortada. Com a largura
+        # toda, o texto cabe numa linha e a conta fecha sozinha.
+        self._plan = _wrapping_label("dim")
+        column.addWidget(self._plan)
+        self._warning = _wrapping_label("warn")
+        self._warning.setVisible(False)
+        column.addWidget(self._warning)
+
         actions = QHBoxLayout()
         actions.setSpacing(12)
-        texts = QVBoxLayout()
-        texts.setSpacing(2)
-        self._plan = QLabel("")
-        self._plan.setProperty("role", "dim")
-        self._plan.setWordWrap(True)
-        texts.addWidget(self._plan)
-        self._warning = QLabel("")
-        self._warning.setProperty("role", "warn")
-        self._warning.setWordWrap(True)
-        self._warning.setVisible(False)
-        texts.addWidget(self._warning)
-        actions.addLayout(texts, 1)
+        actions.addStretch(1)
 
         self._same_folder = QCheckBox(strings.EDIT_SAME_FOLDER)
         self._same_folder.setChecked(True)
@@ -732,6 +816,7 @@ class EditPanel(QWidget):
             return
 
         self._refresh_pool()
+        self._refresh_canvas_controls()
         self._pool_box.setCurrentIndex(self._pool.index(added[-1]))
         if insert:
             self._remember()
@@ -756,6 +841,11 @@ class EditPanel(QWidget):
         Procura a primeira trilha em que o bloco caiba inteiro; se não houver
         nenhuma, cria uma trilha nova em vez de empurrar o que já está lá — o
         que o usuário montou não se mexe sozinho.
+
+        A tela do projeto não é decidida aqui: quem decide é :meth:`_sync_canvas`,
+        depois de o bloco entrar, e olhando a edição inteira. Enquanto era o
+        primeiro arquivo importado que mandava, a ordem de importação decidia a
+        qualidade de tudo — e não havia como mudar de ideia.
         """
         clip = Clip(
             media=reference,
@@ -770,10 +860,6 @@ class EditPanel(QWidget):
                 self._project.tracks[0 if kind is TrackKind.VIDEO else -1].track_id
             )
         self._project = self._project.with_clip(index, clip)
-        # A tela é medida depois de o bloco entrar, e sobre a edição inteira:
-        # é o que impede a ordem de importação de decidir a qualidade do
-        # resultado (ver :func:`auto_canvas`).
-        self._project = auto_canvas(self._project)
         self._timeline.select(clip.clip_id)
 
     def _free_track(self, clip: Clip) -> int | None:
@@ -906,11 +992,17 @@ class EditPanel(QWidget):
         self._after_edit(refit=refit)
 
     def _after_edit(self, *, refit: bool = False) -> None:
+        self._sync_canvas()
         self._timeline.set_project(self._project, refit=refit)
         self._refresh_clip_fields()
         self._refresh_controls()
         self._view_timer.start()
         self._request_frame(force=True)
+        if self._playing:
+            # A composição mudou com a reprodução em andamento, e o que está
+            # saindo é a composição de antes: o grafo do ffmpeg foi montado na
+            # hora em que o fluxo abriu (ver :meth:`_restart_stream`).
+            self._live_timer.start()
         self.changed.emit()
 
     def _on_clip_moved(self, clip_id: int, track_index: int, start: float) -> None:
@@ -1068,6 +1160,126 @@ class EditPanel(QWidget):
         if clip.detached:
             info = f"{info} · {strings.EDIT_CLIP_DETACHED}"
         self._clip_label.setText(info)
+
+    # ------------------------------------------------------------------
+    # Tela do projeto
+    # ------------------------------------------------------------------
+
+    def _sync_canvas(self) -> None:
+        """Põe a tela do projeto de acordo com o que está escolhido.
+
+        A escolha é **do painel, não do projeto**: ela é uma preferência de
+        saída, como "corte rápido", e não uma alteração da montagem. Por isso
+        não entra na pilha de desfazer — um Ctrl+Z que devolvesse a tela antiga
+        sem mexer no controle deixaria os dois discordando na tela seguinte.
+
+        As duas metades são independentes: dá para fixar o tamanho e deixar a
+        taxa seguir o material, ou o contrário.
+        """
+        material = auto_canvas(self._project)
+        width, height = self._canvas_choice or (material.width, material.height)
+        fps = self._rate_choice or material.fps
+        if (self._project.width, self._project.height, self._project.fps) == (
+            width, height, fps
+        ):
+            return
+        self._project = replace(self._project, width=width, height=height, fps=fps)
+
+    def _on_canvas_choice(self, index: int) -> None:
+        if self._syncing or index < 0:
+            return
+        self._canvas_choice = self._canvas_box.itemData(index)
+        self._after_edit()
+
+    def _on_rate_choice(self, index: int) -> None:
+        if self._syncing or index < 0:
+            return
+        self._rate_choice = self._rate_box.itemData(index)
+        self._after_edit()
+
+    def _canvas_options(self) -> list[tuple[str, object]]:
+        """Automática, os tamanhos do próprio material e os formatos comuns.
+
+        Os tamanhos das mídias importadas vêm primeiro porque são os únicos que
+        não custam nada: qualquer outro obriga a redimensionar todo bloco.
+        """
+        options: list[tuple[str, object]] = [(strings.EDIT_CANVAS_AUTO, None)]
+        seen: set[tuple[int, int]] = set()
+        sizes = [
+            (ref.width, ref.height)
+            for ref in self._pool
+            if ref.has_video and ref.width and ref.height
+        ]
+        ordered = sorted(sizes, key=lambda size: -size[0] * size[1])
+        for width, height in [*ordered, *_CANVAS_PRESETS]:
+            if (width, height) in seen:
+                continue
+            seen.add((width, height))
+            options.append(
+                (strings.EDIT_CANVAS_SIZE.format(width=width, height=height),
+                 (width, height))
+            )
+        return options
+
+    def _rate_options(self) -> list[tuple[str, object]]:
+        options: list[tuple[str, object]] = [(strings.EDIT_CANVAS_RATE_AUTO, None)]
+        rates = {
+            round(ref.fps, 3) for ref in self._pool if ref.has_video and ref.fps
+        }
+        for rate in sorted(rates | set(_RATE_PRESETS)):
+            options.append((strings.EDIT_CANVAS_FPS.format(fps=format_rate(rate)), rate))
+        return options
+
+    def _refresh_canvas_controls(self) -> None:
+        """Reconstrói as listas só quando elas mudam de conteúdo.
+
+        Refazer a lista a cada alteração da edição fecharia o menu na cara de
+        quem estivesse com ele aberto.
+        """
+        self._syncing = True
+        try:
+            for box, options, choice in (
+                (self._canvas_box, self._canvas_options(), self._canvas_choice),
+                (self._rate_box, self._rate_options(), self._rate_choice),
+            ):
+                # Comparação só pelos dados: o texto do primeiro item é
+                # reescrito no fim daqui com a tela que a escolha produziu.
+                if [box.itemData(i) for i in range(box.count())] != [
+                    data for _, data in options
+                ]:
+                    box.clear()
+                    for label, data in options:
+                        box.addItem(label, data)
+                index = _index_of(box, choice)
+                if index < 0 and choice is not None:
+                    # A escolha sumiu da lista: volta ao automático de verdade,
+                    # em vez de a lista dizer "Automática" e a exportação sair
+                    # com a tela antiga.
+                    self._canvas_choice, self._rate_choice = (
+                        (None, self._rate_choice)
+                        if box is self._canvas_box
+                        else (self._canvas_choice, None)
+                    )
+                box.setCurrentIndex(max(0, index))
+        finally:
+            self._syncing = False
+
+        # O que a escolha automática produziu fica à vista mesmo sem abrir a
+        # lista: sem isso, "Automática" não diz em que tela a edição está.
+        self._canvas_box.setItemText(
+            0,
+            f"{strings.EDIT_CANVAS_AUTO}  ("
+            + strings.EDIT_CANVAS_SIZE.format(
+                width=self._project.width, height=self._project.height
+            )
+            + ")",
+        )
+        self._rate_box.setItemText(
+            0,
+            f"{strings.EDIT_CANVAS_RATE_AUTO}  ("
+            + strings.EDIT_CANVAS_FPS.format(fps=format_rate(self._project.fps))
+            + ")",
+        )
 
     # ------------------------------------------------------------------
     # Prévia
@@ -1464,11 +1676,41 @@ class EditPanel(QWidget):
 
         self._playing = True
         self._refresh_play_button()
+        self._open_stream(seconds)
+        self._tick.start()
+
+    def _open_stream(self, seconds: float) -> None:
+        """Abre imagem e som da composição corrente, a partir de ``seconds``."""
+        tools = self._ensure_tools()
+        if tools is None:
+            return
+        self._live_timer.stop()
         self._start_frames(seconds)
         command = audio_command(self._project, seconds, tools)
         if command is not None and self._audio.available:
             self._audio.start(command, seconds)
-        self._tick.start()
+        else:
+            # A composição pode ter ficado sem som — uma trilha calada, o último
+            # bloco audível apagado. Sem parar, o que já estava no processo
+            # continuaria tocando depois de silenciado na tela.
+            self._audio.stop()
+
+    def _restart_stream(self) -> None:
+        """Refaz o fluxo com a composição nova, sem sair da reprodução.
+
+        O volume em decibéis, o mudo e a posição dos blocos entram no **grafo do
+        ffmpeg**, e o grafo é montado na hora em que o fluxo abre: mexer neles
+        com o vídeo tocando não muda o que já está saindo do processo. Sem isto
+        era preciso pausar e voltar para ouvir o próprio ajuste — justamente na
+        hora em que ele menos serve, porque o que se quer é comparar.
+        """
+        if not self._playing:
+            return
+        position = self._position
+        if position >= self._duration - frame_step(self._fps):
+            self._stop_playback()
+            return
+        self._open_stream(position)
 
     def _start_frames(self, seconds: float) -> None:
         tools = self._ensure_tools()
@@ -1520,6 +1762,7 @@ class EditPanel(QWidget):
 
     def _stop_playback(self) -> None:
         self._tick.stop()
+        self._live_timer.stop()
         self._audio.stop()
         if self._playback is not None:
             self._playback.cancel()
@@ -1610,6 +1853,10 @@ class EditPanel(QWidget):
     def _on_mode_changed(self) -> None:
         self._timeline.update()
         self._refresh_plan()
+        # O aviso aparece e some com a escolha, e com ele a altura preferida do
+        # painel: sem avisar, a linha de baixo nasce cortada (ver
+        # ``MainWindow._balance_panes``).
+        self.changed.emit()
 
     def _fast_available(self) -> bool:
         """O corte sem recodificar só sobrevive enquanto a edição for um recorte.
@@ -1674,16 +1921,32 @@ class EditPanel(QWidget):
             self._warning.setText(self._drift_text(target))
         else:
             plan = describe_export(
-                self._project, self._container(), self._settings.hardware_encoder
+                self._project,
+                self._container(),
+                self._settings.hardware_encoder,
+                self._interpolating,
             )
-            self._warning.setText(
-                "" if self._fast_available() else strings.EDIT_FAST_UNAVAILABLE
-                if self._fast.isChecked()
-                else ""
-            )
+            self._warning.setText(self._compose_warning())
         self._plan.setText(strings.EDIT_PLAN.format(plan=plan))
         self._warning.setVisible(bool(self._warning.text()))
         self._export.setEnabled(True)
+
+    @property
+    def _interpolating(self) -> bool:
+        """Se a exportação vai inventar os quadros que faltam.
+
+        A caixa marcada não basta: ela fica desligada quando não há bloco abaixo
+        da taxa da tela, e uma caixa desligada não manda em nada.
+        """
+        return self._interpolate.isChecked() and can_interpolate(self._project)
+
+    def _compose_warning(self) -> str:
+        """O que precisa ser dito antes de a exportação entrar na fila."""
+        if self._interpolating:
+            return strings.EDIT_INTERPOLATE_WARN
+        if self._fast.isChecked() and not self._fast_available():
+            return strings.EDIT_FAST_UNAVAILABLE
+        return ""
 
     def _drift_text(self, target: TrimTarget) -> str:
         if target.anchor is None:
@@ -1716,7 +1979,10 @@ class EditPanel(QWidget):
 
         fast = self._fast.isChecked() and self._fast_available()
         target = self._trim_target() if fast else Composition(
-            self._project, self._container(), self._settings.hardware_encoder
+            self._project,
+            self._container(),
+            self._settings.hardware_encoder,
+            self._interpolating,
         )
         dest_dir = (
             None if self._same_folder.isChecked() else self._settings.resolved_download_dir()
@@ -1737,7 +2003,10 @@ class EditPanel(QWidget):
                 )
                 if fast
                 else describe_export(
-                    self._project, self._container(), self._settings.hardware_encoder
+                    self._project,
+                    self._container(),
+                    self._settings.hardware_encoder,
+                    self._interpolating,
                 )
             ),
             kind=JobKind.TRIM,
@@ -1819,6 +2088,17 @@ class EditPanel(QWidget):
         if not self._fast_available() and self._fast.isChecked():
             self._fast.setChecked(False)
 
+        # Interpolar só faz sentido com bloco abaixo da taxa da tela. Desmarcar
+        # junto com o desligamento é o que impede uma caixa cinza e marcada
+        # continuar mandando na exportação.
+        interpolavel = can_interpolate(self._project)
+        self._interpolate.setEnabled(interpolavel)
+        self._interpolate.setToolTip(
+            strings.EDIT_INTERPOLATE_TIP if interpolavel else strings.EDIT_INTERPOLATE_OFF
+        )
+        if not interpolavel and self._interpolate.isChecked():
+            self._interpolate.setChecked(False)
+
         self._count_label.setText(
             strings.EDIT_TRACK_COUNT.format(
                 tracks=len(self._project.tracks),
@@ -1828,6 +2108,7 @@ class EditPanel(QWidget):
             if loaded
             else ""
         )
+        self._refresh_canvas_controls()
         self._lock_readouts()
         self._update_time_labels()
         self._sync_scrollbar()
