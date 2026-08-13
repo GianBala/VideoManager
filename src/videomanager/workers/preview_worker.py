@@ -15,36 +15,49 @@ from PySide6.QtCore import QRunnable, Slot
 
 from ..core.binaries import FFmpegTools
 from ..core.errors import VideoManagerError
-from ..core.preview import FramePump, filmstrip_times, render_frame, render_waveform
+from dataclasses import replace
+
+from ..core.preview import (
+    FramePump,
+    filmstrip_times,
+    frame_from_command,
+    render_frame,
+    render_waveform,
+)
 from ..core.trimmer import keyframe_times
 from .signals import PreviewSignals, emit_safely
 
 
 class FrameWorker(QRunnable):
-    """Um quadro exato, para a tela de prévia."""
+    """Um quadro da composição, para a tela de prévia.
+
+    Recebe o comando pronto — montado pelo compositor a partir do projeto — em
+    vez de um arquivo: é isso que faz a prévia mostrar as trilhas sobrepostas, e
+    não só a mídia de baixo.
+    """
 
     def __init__(
         self,
-        path: Path,
-        seconds: float,
+        command: list[str],
         size: tuple[int, int],
-        tools: FFmpegTools,
+        seconds: float,
         token: int,
     ) -> None:
         super().__init__()
-        self._path = path
-        self._seconds = seconds
+        self._command = command
         self._size = size
-        self._tools = tools
+        self._seconds = seconds
         self._token = token
         self.signals = PreviewSignals()
 
     @Slot()
     def run(self) -> None:
         try:
-            frame = render_frame(self._path, self._seconds, self._size, self._tools)
+            frame = frame_from_command(self._command, self._size)
             if frame is not None:
-                emit_safely(self.signals.frame, self._token, frame)
+                emit_safely(
+                    self.signals.frame, self._token, replace(frame, seconds=self._seconds)
+                )
         finally:
             emit_safely(self.signals.done)
 
@@ -162,22 +175,29 @@ class KeyframeWorker(QRunnable):
 
 
 class PlaybackWorker(QRunnable):
-    """Reprodução da prévia: um quadro por sinal, no ritmo do relógio."""
+    """Reprodução da prévia: um quadro por sinal, no ritmo do relógio.
+
+    O fluxo é o da composição inteira a partir do instante pedido, então ele
+    acaba junto com o projeto — os vãos entre blocos vêm pretos, como no arquivo
+    exportado, em vez de serem pulados.
+    """
 
     def __init__(
         self,
-        path: Path,
+        command: list[str],
         start: float,
         size: tuple[int, int],
-        tools: FFmpegTools,
         token: int,
         *,
-        stop_at: float | None = None,
+        fps: int,
     ) -> None:
         super().__init__()
-        self._pump = FramePump(path, start, size, tools)
+        # A taxa vem de fora e é obrigatória: é a **mesma** com que o comando
+        # foi montado. Se as duas se separarem, o fluxo é gerado num ritmo e
+        # entregue noutro — e a reprodução sai em velocidade errada sem nada
+        # falhar. Por isso não há valor padrão aqui.
+        self._pump = FramePump(command, start, size, fps=fps)
         self._token = token
-        self._stop_at = stop_at
         self.signals = PreviewSignals()
 
     def cancel(self) -> None:
@@ -188,9 +208,5 @@ class PlaybackWorker(QRunnable):
         try:
             for frame in self._pump.frames():
                 emit_safely(self.signals.frame, self._token, frame)
-                # Parar no fim do trecho é o que faz o botão de reprodução
-                # servir para conferir o corte, e não só o arquivo.
-                if self._stop_at is not None and frame.seconds >= self._stop_at:
-                    break
         finally:
             emit_safely(self.signals.done)

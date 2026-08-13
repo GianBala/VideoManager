@@ -195,11 +195,13 @@ class FullscreenPreview(QWidget):
     # ------------------------------------------------------------------
 
     def set_frame(self, pixmap: QPixmap) -> None:
-        """Mostra o quadro, ampliando só o que faltar para encher a tela.
+        """Mostra o quadro, ajustando só o que não couber.
 
-        Durante a reprodução os quadros chegam menores que a tela de propósito
-        (ver ``EditPanel._preview_size``): ampliar aqui custa muito menos que
-        decodificar em resolução cheia trinta vezes por segundo.
+        Os quadros chegam já no tamanho da tela (ver
+        ``EditPanel._preview_size``), então normalmente não há nada a fazer aqui:
+        ampliar um quadro menor deixaria a imagem borrada, que se lê como perda
+        de qualidade do vídeo e não como escolha da prévia. O ajuste continua
+        para o intervalo entre trocar de tamanho e o quadro novo chegar.
         """
         area = self._image.size()
         if pixmap.width() != area.width() and pixmap.height() != area.height():

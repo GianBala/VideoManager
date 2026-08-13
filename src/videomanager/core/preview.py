@@ -6,9 +6,10 @@ próximo. O ffmpeg entrega **o quadro pedido**, que é a única forma de o que e
 na tela ser exatamente o que o corte vai produzir. E ele já está garantido — é o
 mesmo binário que junta vídeo e áudio de todo download.
 
-O som é o oposto: precisa sair contínuo, não exato, e por isso quem toca é o
-``QMediaPlayer`` (ver ``ui/audio_preview.py``). Enquanto a prévia roda, é o
-relógio dele que manda, e os quadros daqui correm atrás.
+O som é o oposto: precisa sair contínuo, não exato, e por isso ele sai da
+mixagem do compositor direto para a placa (ver ``ui/audio_preview.py``).
+Enquanto a prévia roda, é o relógio da placa que manda, e os quadros daqui
+correm atrás.
 
 **Os quadros vêm em rgb24 cru, sem passar por PNG ou JPEG.** Um quadro cru vira
 ``QImage`` por cópia direta de memória, sem codificar de um lado e decodificar do
@@ -31,10 +32,24 @@ from pathlib import Path
 
 from .binaries import FFmpegTools, subprocess_kwargs
 
-# Quadros por segundo da reprodução de prévia. Cada quadro é um arquivo de
-# imagem cru atravessando um cano: 15 é fluido o suficiente para acompanhar uma
-# ação e barato o bastante para não disputar CPU com um download em andamento.
-PREVIEW_FPS = 15
+# Teto da taxa da prévia. Abaixo dele a reprodução usa **a taxa do próprio
+# projeto**: pedir ao ffmpeg a mesma taxa da origem faz o filtro ``fps`` não ter
+# o que duplicar nem descartar, e o movimento na tela é o do arquivo. Uma taxa
+# fixa mais baixa — havia 15 aqui — deixa a imagem visivelmente aos trancos num
+# vídeo de 30 ou 60 fps.
+#
+# O teto existe para material acima de 60 fps, onde o ganho é imperceptível e o
+# custo não é: cada quadro é uma imagem crua atravessando um cano. Medido nesta
+# máquina, 1920×1080 a 60 fps sustenta 355 MB/s sem atrasar.
+MAX_PREVIEW_FPS = 60
+
+
+def preview_fps(project_fps: float | None) -> int:
+    """Taxa da reprodução de prévia para um projeto."""
+    if not project_fps or project_fps <= 0:
+        return 30
+    return max(1, min(MAX_PREVIEW_FPS, round(project_fps)))
+
 
 BYTES_PER_PIXEL = 3  # rgb24
 
@@ -80,8 +95,13 @@ def filmstrip_times(start: float, end: float, count: int) -> tuple[float, ...]:
     fatia: pegar o começo faria a primeira miniatura ser sempre o primeiro
     quadro do arquivo, que costuma ser preto.
     """
-    if count <= 0 or end <= start:
+    if count <= 0:
         return ()
+    if end <= start:
+        # Trecho de duração zero — uma imagem, que só tem o instante zero.
+        # Devolver a fatia média de um intervalo vazio pediria ao ffmpeg um
+        # quadro depois do fim do arquivo, e ele não devolveria nada.
+        return (start,)
     step = (end - start) / count
     return tuple(start + step * (index + 0.5) for index in range(count))
 
@@ -99,6 +119,21 @@ def _run(command: list[str], timeout: int) -> bytes:
     except (OSError, subprocess.SubprocessError):
         return b""
     return proc.stdout or b"" if proc.returncode == 0 else b""
+
+
+def frame_from_command(
+    command: list[str], size: tuple[int, int], *, timeout: int = 60
+) -> RawFrame | None:
+    """Um quadro cru produzido por um comando já montado.
+
+    É por aqui que entra a composição da linha do tempo (ver ``core/composer``):
+    o mesmo grafo que exporta o arquivo desenha o quadro da prévia, e por isso o
+    que está na tela é a montagem de verdade, com as trilhas sobrepostas na
+    ordem certa.
+    """
+    width, height = size
+    frame = RawFrame(_run(command, timeout), width, height)
+    return frame if frame.is_complete else None
 
 
 def render_frame(
@@ -200,17 +235,15 @@ class FramePump:
 
     def __init__(
         self,
-        path: Path,
+        command: list[str],
         start: float,
         size: tuple[int, int],
-        tools: FFmpegTools,
         *,
-        fps: int = PREVIEW_FPS,
+        fps: int,
     ) -> None:
-        self._path = path
+        self._command = command
         self._start = max(0.0, start)
         self._size = size
-        self._tools = tools
         self._fps = max(1, fps)
         self._process: subprocess.Popen | None = None
         self._stopped = False
@@ -223,23 +256,6 @@ class FramePump:
         if process and process.poll() is None:
             process.terminate()
 
-    def _command(self) -> list[str]:
-        width, height = self._size
-        return [
-            self._tools.ffmpeg_str,
-            "-nostdin",
-            "-hide_banner",
-            "-v", "error",
-            "-ss", f"{self._start:.6f}",
-            "-i", str(self._path),
-            # A taxa vem antes da escala: descartar quadros primeiro é mais
-            # barato que redimensionar quadros que serão descartados.
-            "-vf", f"fps={self._fps},scale={width}:{height}",
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb24",
-            "pipe:1",
-        ]
-
     def frames(self) -> Iterator[RawFrame]:
         """Gera os quadros a partir de ``start``, no ritmo do relógio."""
         width, height = self._size
@@ -251,7 +267,7 @@ class FramePump:
         # cano e travaria o ffmpeg — a prévia congelaria sem explicação.
         kwargs["stderr"] = subprocess.DEVNULL
         try:
-            process = subprocess.Popen(self._command(), **kwargs)
+            process = subprocess.Popen(self._command, **kwargs)
         except OSError:
             return
 
