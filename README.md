@@ -1,9 +1,10 @@
 # Video Manager
 
 Aplicativo desktop para Windows e Linux que baixa vídeo e áudio de centenas de
-plataformas e converte arquivos que você já tem no disco. Duas abas — **Download**
-e **Convert** — sobre uma fila só, que fica fora delas e sempre à vista embaixo.
-Na de download, no espírito do ATubeCatcher: endereço e destino no topo,
+plataformas, converte arquivos que você já tem no disco e recorta vídeo. Três
+abas — **Download**, **Convert** e **Editar** — sobre uma fila só, que fica fora
+delas e à vista embaixo (no editor ela sai de cena, para o vídeo ocupar a
+janela). Na de download, no espírito do ATubeCatcher: endereço e destino no topo,
 qualidade à esquerda, perfis rápidos à direita.
 
 Usa **yt-dlp** para extração e **ffmpeg** para processamento.
@@ -17,6 +18,13 @@ Usa **yt-dlp** para extração e **ffmpeg** para processamento.
 - **Conversão de arquivos locais** para MP3 e outros formatos, com
   arrastar-e-soltar, na aba **Convert** — que enfileira na mesma fila dos
   downloads, sem interromper o que já está em andamento.
+- **Recorte de vídeo** na aba **Editar**, com os gestos que o CapCut e o Filmora
+  tornaram padrão: prévia grande em cima, linha do tempo embaixo, cursor
+  arrastável, tesoura dividindo no ponto do cursor, alças nas pontas de cada
+  trecho, zoom com a roda do mouse e desfazer. Reprodução **com som**, volume
+  ajustável durante a edição, e navegação **quadro a quadro** — o que está na
+  tela é exatamente o quadro em que o corte vai cair. Exporta os trechos unidos
+  num arquivo só ou cada um no seu.
 - **Playlists e canais** em lote, com seleção item a item.
 - **Legendas** (inclusive automáticas), em arquivo separado ou embutidas.
 - **Cookies do navegador** para mídias privadas, com restrição de idade, de
@@ -69,8 +77,8 @@ abrem o executável gerado para conferir que ele realmente sobe.
 Um arquivo só, sem instalação: baixe, dê permissão de execução, clique.
 
 ```bash
-chmod +x Video_Manager-0.1.0-x86_64.AppImage
-./Video_Manager-0.1.0-x86_64.AppImage
+chmod +x Video_Manager-0.2.0-x86_64.AppImage
+./Video_Manager-0.2.0-x86_64.AppImage
 ```
 
 Ele envelopa o mesmo pacote do `build_linux.sh`, então tem tudo dentro: Python,
@@ -90,7 +98,7 @@ O AppImage não se instala no menu do sistema sozinho; para isso existe o
 não montar por falta de FUSE na máquina, roda assim mesmo:
 
 ```bash
-./Video_Manager-0.1.0-x86_64.AppImage --appimage-extract-and-run
+./Video_Manager-0.2.0-x86_64.AppImage --appimage-extract-and-run
 ```
 
 ## Como o projeto está organizado
@@ -103,12 +111,12 @@ src/videomanager/
 ```
 
 A dependência é de mão única: `ui` → `workers` → `core`. É o que permite testar
-toda a lógica de mídia sem abrir uma janela — os 265 testes da suíte offline não
+toda a lógica de mídia sem abrir uma janela — os testes da suíte offline não
 instanciam Qt nem tocam a rede.
 
-### Os dois módulos que importam
+### Os módulos que importam
 
-O trabalho difícil não está na interface, e sim em dois arquivos.
+O trabalho difícil não está na interface, e sim em três arquivos.
 
 **`core/format_matrix.py`** normaliza a resposta crua de cada extrator. Cada
 plataforma devolve uma estrutura diferente, e a diferença não é cosmética:
@@ -136,6 +144,29 @@ baixava vídeo **mudo**.
   codec escolhido, a saída é **trocar de stream** (sem perda, mesma qualidade) ou
   **trocar de container** — nunca recodificar por conta própria. Toda substituição
   vira um aviso na tela, antes de o download começar.
+
+**`core/trimmer.py`** é o recorte, e vive do fato de que vídeo comprimido só
+pode ser cortado sem recodificar **num keyframe** — quadros completos que
+aparecem a cada poucos segundos; entre eles há apenas diferenças, que sozinhas
+não formam imagem. Daí as duas saídas honestas, e as duas na tela:
+
+- **Corte exato**, que recodifica o trecho e começa no quadro marcado;
+- **Corte rápido**, que copia os dados como estão — sai em segundos, sem perda
+  nenhuma, mas começa no keyframe anterior.
+
+O aplicativo mapeia os keyframes com o ffprobe (só demultiplexando, sem
+decodificar) e **anuncia o ponto real do corte antes de enfileirar**: “sem
+recodificar, o corte vai começar em 0:00:04,000 — 1,30 s antes do ponto
+marcado”. As marcas aparecem na linha do tempo e o arrasto se imanta nelas, o
+que permite escolher um corte instantâneo e exato de propósito.
+
+A prévia e as miniaturas saem do próprio ffmpeg, em quadros crus, e não de um
+player: um player entrega o quadro que conseguir — normalmente o keyframe mais
+próximo —, e aqui o que está na tela precisa ser exatamente o quadro do corte. O
+som é o contrário: precisa sair contínuo, e quem toca é o `QMediaPlayer`.
+Enquanto a prévia roda, **o relógio é o áudio** — o ouvido percebe um engasgo de
+vinte milissegundos, o olho não percebe um quadro repetido —, e a imagem se
+corrige contra ele quando os dois se afastam.
 
 ### Testes
 
