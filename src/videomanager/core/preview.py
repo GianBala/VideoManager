@@ -30,7 +30,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from .binaries import FFmpegTools, subprocess_kwargs
+from .binaries import FFmpegTools, decode_thread_args, subprocess_kwargs
 
 # Teto da taxa da prévia. Abaixo dele a reprodução usa **a taxa do próprio
 # projeto**: pedir ao ffmpeg a mesma taxa da origem faz o filtro ``fps`` não ter
@@ -158,6 +158,7 @@ def render_frame(
         "-nostdin",
         "-hide_banner",
         "-v", "error",
+        *decode_thread_args(),
         "-ss", f"{max(0.0, seconds):.6f}",
         "-i", str(path),
         "-frames:v", "1",
@@ -215,6 +216,7 @@ def _strip_command(
         "-nostdin",
         "-hide_banner",
         "-v", "error",
+        *decode_thread_args(),
         "-ss", f"{max(0.0, times[0]):.6f}",
         "-i", str(path),
         "-vf", f"fps={1.0 / step:.9f}:round=up,scale={width}:{height}",

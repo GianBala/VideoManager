@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.core.binaries import FFmpegTools
+from videomanager.core.binaries import FFmpegTools, decode_threads
 from videomanager.core.preview import (
     MAX_PREVIEW_FPS,
     FramePump,
@@ -136,3 +136,12 @@ class TestTiraDeMiniaturas:
             Path("/m/v.mp4"), self.tempos(0.0, 12.0, 12), (160, 90), TOOLS
         )
         assert comando[comando.index("-frames:v") + 1] == "12"
+
+    def test_o_teto_de_threads_vem_antes_da_entrada(self) -> None:
+        # Depois do ``-i`` o argumento valeria para o codificador da saída, que
+        # aqui nem existe — e a decodificação ficaria no padrão em silêncio.
+        comando = _strip_command(
+            Path("/m/v.mp4"), self.tempos(0.0, 12.0, 12), (160, 90), TOOLS
+        )
+        assert comando.index("-threads") < comando.index("-i")
+        assert comando[comando.index("-threads") + 1] == str(decode_threads())
