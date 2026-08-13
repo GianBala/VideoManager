@@ -699,5 +699,8 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self._settings.save()
+        # A aba de edição tem processos próprios (prévia e mixagem) que a fila
+        # não conhece: sem este aviso, eles ficam rodando depois da janela.
+        self._edit.shutdown()
         self._queue.shutdown()
         event.accept()

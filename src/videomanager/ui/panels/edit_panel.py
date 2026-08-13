@@ -1,38 +1,36 @@
-"""A aba de edição: prévia em cima, linha do tempo embaixo, fila logo abaixo.
+"""A aba de edição: prévia em cima, linha do tempo multipista embaixo.
 
 A disposição e os gestos são os que os editores de consumo (CapCut, Filmora)
-tornaram padrão, porque é o vocabulário que quem vai usar já tem: **posicionar o
-cursor, dividir com a tesoura, apagar o que não serve, arrastar as pontas** —
-e o que sobrou na trilha é o que será exportado. Não há campo escondido: o
-formulário de tempos ao lado edita o mesmo trecho que está selecionado na
-trilha, nos dois sentidos.
+tornaram padrão, porque é o vocabulário que quem vai usar já tem: **importar
+mídia, largar na linha do tempo, arrastar os blocos, dividir no cursor, apagar o
+que não serve e exportar**. O que está nas trilhas é o que vai ser exportado.
 
-Três decisões próprias desta tela:
+Quatro decisões próprias desta tela:
+
+**O projeto é imutável e o painel é o dono dele.** A linha do tempo só desenha e
+avisa a intenção ("este bloco foi solto ali"); quem aplica é aqui, guardando o
+estado anterior numa pilha. Desfazer é trocar o projeto pelo anterior — não há
+o que reverter passo a passo.
+
+**A prévia é a composição de verdade.** O quadro parado e a reprodução saem do
+mesmo grafo do ffmpeg que exporta o arquivo (ver ``core/composer``), então
+trilha sobreposta, vão preto, volume em decibéis e mudo aparecem na tela como
+vão aparecer no resultado. O som é a mixagem, pelo mesmo motivo.
 
 **Um pedido de quadro por vez.** Arrastar o cursor gera dezenas de pedidos por
 segundo, e atender todos encheria a fila de trabalho com imagens que ninguém vai
-ver. Guardamos só o último pedido e o disparamos quando o anterior volta — o que
-mantém a resposta imediata e o custo constante, independentemente da velocidade
-do arrasto.
+ver. Guardamos só o último e o disparamos quando o anterior volta.
 
-**A reprodução atravessa os cortes.** Ao chegar ao fim de um trecho, a prévia
-salta para o começo do seguinte, pulando o que foi apagado. É o que transforma o
-botão de reprodução numa conferência do resultado, e não do arquivo de origem.
-
-**A imagem vem do ffmpeg e o som vem do Qt, e quem manda no tempo é o som.** As
-duas exigências são opostas: a imagem precisa ser o quadro exato do corte (ver
-``core/preview``), o som precisa sair contínuo. Enquanto toca, o relógio é o
-áudio — o ouvido percebe um engasgo de vinte milissegundos e não percebe um
-quadro repetido —, e a imagem se corrige contra ele quando os dois se afastam
-demais. Sem som disponível (arquivo sem trilha, pacote sem o módulo de
-multimídia), o fluxo de quadros volta a ser o próprio relógio e a prévia toca
-muda, como antes.
+**Enquanto toca, o relógio é o áudio.** O ouvido percebe um engasgo de vinte
+milissegundos e o olho não percebe um quadro repetido; com a imagem seguindo o
+som, um computador que não dá conta perde quadros e continua no tempo certo.
 """
 
 from __future__ import annotations
 
 import itertools
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
@@ -47,44 +45,64 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QButtonGroup,
     QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
-    QRadioButton,
+    QScrollArea,
     QScrollBar,
     QSizePolicy,
     QSlider,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
 from ...core.binaries import FFmpegTools
+from ...core.composer import (
+    Composition,
+    audio_command,
+    describe_export,
+    frame_command,
+    playback_command,
+    simple_trim,
+)
 from ...core.converter import LocalMedia, output_path, probe_file
 from ...core.errors import VideoManagerError
-from ...core.humanize import format_size
 from ...core.job import Job, JobKind
-from ...core.preview import fit_size
+from ...core.preview import fit_size, preview_fps
+from ...core.project import (
+    MAX_GAIN_DB,
+    MIN_GAIN_DB,
+    Clip,
+    MediaKind,
+    MediaRef,
+    Project,
+    TrackKind,
+    accepts,
+    fit_canvas,
+    media_ref,
+    new_project,
+    next_clip_id,
+)
 from ...core.settings import Settings
 from ...core.trimmer import (
     CutMode,
-    Segment,
     TrimTarget,
-    describe_trim,
     format_span,
     format_timecode,
     frame_index,
     frame_step,
-    has_real_video,
     keyframe_after,
     keyframe_at_or_before,
     parse_timecode,
-    seek_time,
 )
 from ...workers.preview_worker import (
     FilmstripWorker,
@@ -99,57 +117,47 @@ from ..audio_preview import AudioPreview
 from ..fullscreen_preview import FullscreenPreview
 from ..theme import palette
 from .timeline import (
+    AUDIO_TRACK_HEIGHT,
     FILM_CELL_WIDTH,
-    FILM_HEIGHT,
-    WAVE_HEIGHT,
+    VIDEO_TRACK_HEIGHT,
     Timeline,
     image_from_frame,
     pixmap_from_frame,
 )
 
-# Altura mínima da prévia. Baixa de propósito: a aba divide a janela com a fila,
-# e a prévia é o que mais cresce quando sobra espaço (ver a política de tamanho
-# do rótulo). Quem quiser uma tela maior arrasta o divisor.
+# Altura mínima da prévia, e a altura dela quando retraída. A prévia é o único
+# painel que estica: tudo o mais tem altura natural, e o que sobrar de janela
+# vira imagem maior.
 _PREVIEW_MIN_HEIGHT = 160
-# Teto do que se pede ao ffmpeg. Decodificar em 4K para exibir em 600 px de
-# largura gastaria tempo em pixels que a tela não mostra. O valor cobre uma
-# janela maximizada em 1080p sem nunca ser ele o limite — quem manda no tamanho
-# é a altura disponível, senão sobraria tarja preta dos lados de propósito.
+_PREVIEW_COLLAPSED = 92
 _PREVIEW_MAX_WIDTH = 1280
-# Tetos da tela cheia: o quadro parado vem em resolução de tela, a reprodução
-# vem menor e é ampliada na exibição (ver :meth:`EditPanel._preview_size`).
 _FULLSCREEN_MAX_WIDTH = 1920
-_FULLSCREEN_PLAYING_WIDTH = 1280
 
-# Espera antes de refazer miniaturas e onda depois de mexer no zoom. Um zoom é
-# uma sequência de passos da roda do mouse; sem a pausa, cada passo dispararia
-# uma geração inteira que o passo seguinte descartaria.
 _VIEW_SETTLE_MS = 220
-# Mesma ideia para o redimensionamento da janela, que chega em rajada.
 _RESIZE_SETTLE_MS = 200
-
+# Espera antes de gravar as preferências de som, para um arrasto de volume não
+# escrever o arquivo de configuração dezenas de vezes.
+_PREFS_SAVE_MS = 900
 _ZOOM_FACTOR = 1.6
-
-# Passo do relógio da reprodução. 40 ms move o cursor de forma contínua ao olho
-# sem custar nada: cada tique é uma leitura de posição e um repintar.
 _TICK_MS = 40
-# Diferença entre a imagem e o som a partir da qual vale recomeçar o fluxo de
-# quadros. Meio quadro ninguém nota; um terço de segundo é dublagem ruim.
 _MAX_DRIFT = 0.35
-# Intervalo mínimo entre duas correções, para uma máquina lenta não ficar
-# reiniciando o ffmpeg em looping e piorar justamente o que tenta corrigir.
 _RESYNC_COOLDOWN = 1.5
+
+# Miniaturas por bloco. O teto existe porque um bloco largo não fica mais
+# compreensível com quarenta imagens do que com doze, e cada uma é uma chamada
+# ao ffmpeg.
+_MAX_THUMBS = 12
+_WAVE_MAX_WIDTH = 1200
+
+# Piso da área de trilhas: régua, uma trilha de vídeo e uma de áudio inteiras.
+# Sem ele o layout espreme a linha do tempo até sobrar só a régua, porque é a
+# prévia que tem política de esticar e ela não abre mão sozinha.
+_TIMELINE_MIN_HEIGHT = 150
 
 
 class _Preview(QLabel):
-    """Tela da prévia: mantém o quadro centralizado e o fundo preto.
+    """Tela da prévia: mantém o quadro centralizado e o fundo preto."""
 
-    ``QLabel`` com pixmap escalado, e não um widget desenhado à mão, porque o
-    quadro já chega no tamanho certo — o escalonamento aqui só cuida da fração
-    de segundo entre redimensionar a janela e o quadro novo chegar.
-    """
-
-    # Duplo clique abre a tela cheia, como em qualquer player.
     double_clicked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -163,14 +171,14 @@ class _Preview(QLabel):
         self.setProperty("role", "dim")
 
     def sizeHint(self) -> QSize:  # noqa: N802
-        return QSize(480, _PREVIEW_MIN_HEIGHT)
+        return QSize(480, self.minimumHeight())
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         self.double_clicked.emit()
 
 
 class EditPanel(QWidget):
-    """Abre um vídeo, recorta trechos dele e entrega as tarefas para a fila."""
+    """Monta um projeto de várias trilhas e entrega a exportação para a fila."""
 
     jobs_ready = Signal(list)  # list[Job]
     changed = Signal()
@@ -188,48 +196,50 @@ class EditPanel(QWidget):
         self._runner = WorkerRunner()
         self._colors = palette(settings.theme)
 
-        self._media: LocalMedia | None = None
+        self._project = new_project()
+        self._pool: list[MediaRef] = []
+        self._probed: dict[Path, LocalMedia] = {}
+        self._history: list[Project] = []
+        self._future: list[Project] = []
+        self._clipboard: Clip | None = None
         self._keyframes: tuple[float, ...] = ()
-        self._history: list[tuple[Segment, ...]] = []
-        self._future: list[tuple[Segment, ...]] = []
+        self._keyframe_source: Path | None = None
 
-        # Pedidos de imagem em voo. O contador é global às três espécies de
-        # pedido: um número que nunca se repete é o bastante para descartar o
-        # que chegou tarde, e evita três contadores para a mesma finalidade.
         self._tokens = itertools.count(1)
         self._frame_token = 0
-        self._strip_token = 0
-        self._wave_token = 0
         self._play_token = 0
+        self._strip_tokens: dict[int, int] = {}
+        self._strip_workers: dict[int, FilmstripWorker] = {}
         self._frame_busy = False
         self._wanted: float | None = None
         self._rendered: float | None = None
         self._playing = False
         self._playback: PlaybackWorker | None = None
-        self._strip_worker: FilmstripWorker | None = None
-        # Criada na primeira vez que for pedida: quem só recorta sem ampliar
-        # nunca paga por ela.
         self._fullscreen: FullscreenPreview | None = None
         self._syncing = False
         self._shown_frame = 0.0
         self._resynced_at = 0.0
         self._resume_wanted = False
+        self._collapsed = False
+        # Bloco cujo volume está sendo ajustado agora: enquanto for o mesmo, os
+        # passos entram num desfazer só (ver :meth:`_on_gain`).
+        self._gain_session = -1
 
-        # O som sai pelo Qt e a imagem pelo ffmpeg; quem manda no tempo é o som
-        # (ver ui/audio_preview.py). O tique lê o relógio do áudio e arrasta a
-        # tela atrás dele.
         self._audio = AudioPreview(self)
-        self._audio.set_volume(settings.preview_volume)
-        self._audio.set_muted(settings.preview_muted)
         self._audio.stopped.connect(self._stop_playback)
         self._tick = QTimer(self)
         self._tick.setInterval(_TICK_MS)
-        self._tick.timeout.connect(self._on_audio_tick)
+        self._tick.timeout.connect(self._on_tick)
 
         self._view_timer = QTimer(self)
         self._view_timer.setSingleShot(True)
         self._view_timer.setInterval(_VIEW_SETTLE_MS)
         self._view_timer.timeout.connect(self._refresh_backdrop)
+
+        self._prefs_timer = QTimer(self)
+        self._prefs_timer.setSingleShot(True)
+        self._prefs_timer.setInterval(_PREFS_SAVE_MS)
+        self._prefs_timer.timeout.connect(self._save_audio_prefs)
 
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
@@ -238,23 +248,34 @@ class EditPanel(QWidget):
 
         self._build_ui()
         self._install_shortcuts()
-        self._update_controls()
+        self._refresh_all()
 
     # ------------------------------------------------------------------
     # Montagem
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(8)
+        self._layout.addWidget(self._build_source_row())
 
-        layout.addWidget(self._build_source_row())
-        # Só a prévia estica: tudo o mais na aba tem altura natural, e o que
-        # sobrar de janela vira imagem maior.
-        layout.addWidget(self._build_player(), 1)
-        layout.addWidget(self._build_timeline_group())
-        layout.addWidget(self._build_export_row())
+        # Divisor arrastável entre a imagem e as trilhas, em vez de uma divisão
+        # fixa: quanto de cada uma se quer à vista muda a cada momento da
+        # edição — enquadrando um corte, a imagem; montando a sequência, as
+        # trilhas. O botão de retrair continua existindo como atalho para o
+        # extremo mais pedido.
+        self._split_view = QSplitter(Qt.Orientation.Vertical)
+        self._split_view.setChildrenCollapsible(False)
+        self._player_box = self._build_player()
+        self._split_view.addWidget(self._player_box)
+        self._timeline_box = self._build_timeline_area()
+        self._split_view.addWidget(self._timeline_box)
+        self._split_view.setStretchFactor(0, 1)
+        self._split_view.setStretchFactor(1, 0)
+        self._layout.addWidget(self._split_view, 1)
+
+        self._layout.addWidget(self._build_export_row())
 
     def _build_source_row(self) -> QWidget:
         box = QWidget()
@@ -263,16 +284,26 @@ class EditPanel(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
 
-        self._open = QPushButton(strings.EDIT_OPEN)
-        self._open.clicked.connect(self._choose_file)
-        row.addWidget(self._open)
+        self._import = QPushButton(strings.EDIT_IMPORT)
+        self._import.setToolTip(strings.EDIT_IMPORT_TIP)
+        self._import.clicked.connect(self._choose_files)
+        row.addWidget(self._import)
 
-        self._file_label = QLabel(strings.EDIT_NO_FILE)
-        self._file_label.setProperty("role", "dim")
-        row.addWidget(self._file_label, 1)
+        self._pool_box = QComboBox()
+        self._pool_box.setMinimumWidth(260)
+        self._pool_box.setToolTip(strings.EDIT_POOL_TIP)
+        row.addWidget(self._pool_box, 1)
 
-        # A tela cheia mora aqui, e não na barra de transporte: lá os botões já
-        # ocupam a largura toda, e esta linha tem espaço sobrando.
+        self._insert = QPushButton(strings.EDIT_INSERT)
+        self._insert.setToolTip(strings.EDIT_INSERT_TIP)
+        self._insert.clicked.connect(self._insert_selected_media)
+        row.addWidget(self._insert)
+
+        self._collapse = QPushButton(strings.EDIT_COLLAPSE)
+        self._collapse.setToolTip(strings.EDIT_COLLAPSE_TIP)
+        self._collapse.clicked.connect(self._toggle_collapsed)
+        row.addWidget(self._collapse)
+
         self._fullscreen_button = QPushButton(strings.EDIT_FULLSCREEN)
         self._fullscreen_button.setToolTip(strings.EDIT_FULLSCREEN_TIP)
         self._fullscreen_button.clicked.connect(self._toggle_fullscreen)
@@ -285,7 +316,6 @@ class EditPanel(QWidget):
         column = QVBoxLayout(box)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(6)
-
         self._preview = _Preview()
         self._preview.double_clicked.connect(self._toggle_fullscreen)
         column.addWidget(self._preview, 1)
@@ -299,10 +329,6 @@ class EditPanel(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
 
-        # Números em fonte monoespaçada: num tipo proporcional o "1" é mais
-        # estreito que o "8", e o cronômetro se mexe sozinho a cada quadro.
-        # A largura fixa (ver :meth:`_lock_readouts`) resolve a outra metade do
-        # problema — o texto crescendo empurrava a fileira de botões inteira.
         mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self._time_label = QLabel(
             strings.EDIT_POSITION.format(
@@ -317,9 +343,6 @@ class EditPanel(QWidget):
         row.addWidget(self._frame_label)
         row.addStretch(1)
 
-        # Setas simples, e não os símbolos de transporte do Unicode (⏮ ⏪): estes
-        # últimos têm apresentação de emoji em boa parte dos sistemas e saem
-        # coloridos no meio de uma barra de botões monocromática.
         self._buttons: list[QPushButton] = []
         specs = (
             ("|◀◀", strings.EDIT_TO_START, lambda: self._seek_to(0.0)),
@@ -333,14 +356,10 @@ class EditPanel(QWidget):
         for text, tip, slot in specs:
             button = QPushButton(text)
             button.setToolTip(tip)
-            # Largura para os três símbolos de "|◀◀" caberem sem corte: com 46
-            # px o Qt encurtava o rótulo e o botão de início ficava igual ao de
-            # voltar um segundo.
             button.setFixedWidth(56)
             button.clicked.connect(slot)
             row.addWidget(button)
             self._buttons.append(button)
-        # O botão do meio é o de reprodução: guardado para trocar o ícone.
         self._play_button = self._buttons[3]
         self._play_button.setProperty("role", "primary")
 
@@ -360,7 +379,6 @@ class EditPanel(QWidget):
         return box
 
     def _build_volume(self) -> QWidget:
-        """Mudo e volume, ajustáveis com a reprodução em andamento."""
         box = QWidget()
         box.setProperty("role", "plain")
         row = QHBoxLayout(box)
@@ -379,79 +397,82 @@ class EditPanel(QWidget):
         self._volume.setValue(self._settings.preview_volume)
         self._volume.setFixedWidth(110)
         self._volume.setToolTip(strings.EDIT_VOLUME)
-        # Enquanto arrasta, só o som muda; a preferência é gravada ao soltar,
-        # senão cada pixel do arrasto escreveria o arquivo de configuração.
         self._volume.valueChanged.connect(self._on_volume)
-        self._volume.sliderReleased.connect(self._save_audio_prefs)
         row.addWidget(self._volume)
         self._refresh_volume_label()
         return box
 
-    def _build_timeline_group(self) -> QWidget:
-        """A linha do tempo e seus controles, sem moldura de grupo.
-
-        A moldura custaria quase 60 px de recuo interno — que aqui saem direto
-        da altura da prévia, o painel que o usuário fica olhando. E ela não
-        agrupa nada: a própria trilha, desenhada, já é a fronteira visual.
-        """
-        group = QWidget()
-        group.setProperty("role", "plain")
-        column = QVBoxLayout(group)
-        column.setSpacing(6)
+    def _build_timeline_area(self) -> QWidget:
+        box = QWidget()
+        box.setProperty("role", "plain")
+        column = QVBoxLayout(box)
         column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(6)
 
         column.addLayout(self._build_toolbar())
+
+        # A linha do tempo cresce com o número de trilhas, e a partir de certo
+        # ponto ela empurraria a exportação para fora da vista. Numa área de
+        # rolagem, ela para de crescer e passa a rolar — como em qualquer editor
+        # com mais trilhas do que tela.
+        self._timeline_area = QScrollArea()
+        self._timeline_area.setWidgetResizable(True)
+        self._timeline_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        # Sem teto: quem decide quanto das trilhas fica à vista é o divisor. O
+        # piso garante uma trilha de cada espécie inteira.
+        self._timeline_area.setMinimumHeight(_TIMELINE_MIN_HEIGHT)
+        self._timeline_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
 
         self._timeline = Timeline(self._colors)
         self._timeline.setToolTip(strings.EDIT_TIMELINE_HINT)
         self._timeline.scrubbed.connect(self._on_scrub)
         self._timeline.edit_started.connect(self._remember)
-        self._timeline.clips_edited.connect(self._on_clips_edited)
-        self._timeline.selection_changed.connect(lambda _: self._sync_clip_fields())
+        self._timeline.edit_finished.connect(self._on_edit_finished)
+        self._timeline.clip_moved.connect(self._on_clip_moved)
+        self._timeline.clip_resized.connect(self._on_clip_resized)
+        self._timeline.clip_selected.connect(self._on_clip_selected)
+        self._timeline.track_mute_clicked.connect(self._toggle_track_mute)
+        self._timeline.menu_requested.connect(self._show_menu)
         self._timeline.view_changed.connect(self._on_view_changed)
-        column.addWidget(self._timeline)
+        self._timeline_area.setWidget(self._timeline)
+        column.addWidget(self._timeline_area)
 
         self._scroll = QScrollBar(Qt.Orientation.Horizontal)
         self._scroll.valueChanged.connect(self._on_scrollbar)
         column.addWidget(self._scroll)
 
-        column.addLayout(self._build_clip_fields())
-        return group
+        column.addLayout(self._build_clip_row())
+        return box
 
     def _build_toolbar(self) -> QHBoxLayout:
+        """Barra curta de propósito.
+
+        Dividir, excluir, copiar, colar, separar áudio e criar trilha moram no
+        **botão direito** sobre o que elas afetam — é onde se procura por elas
+        depois de já ter o bloco na mão, e cada uma que sai daqui é uma coisa a
+        menos entre a imagem e a linha do tempo. Aqui ficam só as que não têm
+        alvo: desfazer, refazer e o zoom.
+        """
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
 
-        # Sem ícone: a aplicação inteira é de texto, e um par de emojis aqui
-        # seria a única coisa colorida da janela.
-        self._split = QPushButton(strings.EDIT_SPLIT)
-        self._split.setToolTip(f"{strings.EDIT_SPLIT} (S)")
-        self._split.clicked.connect(self._split_here)
-        row.addWidget(self._split)
-
-        self._delete = QPushButton(strings.EDIT_DELETE)
-        self._delete.setToolTip(f"{strings.EDIT_DELETE} (Del)")
-        self._delete.clicked.connect(self._delete_selected)
-        row.addWidget(self._delete)
-
-        self._undo = QPushButton("↶")
-        self._undo.setToolTip(f"{strings.EDIT_UNDO} (Ctrl+Z)")
-        self._undo.setFixedWidth(40)
-        self._undo.clicked.connect(self._undo_edit)
-        row.addWidget(self._undo)
-
-        self._redo = QPushButton("↷")
-        self._redo.setToolTip(f"{strings.EDIT_REDO} (Ctrl+Shift+Z)")
-        self._redo.setFixedWidth(40)
-        self._redo.clicked.connect(self._redo_edit)
-        row.addWidget(self._redo)
+        self._undo = self._tool(row, "↶", "Ctrl+Z", self._undo_edit, strings.EDIT_UNDO, 40)
+        self._redo = self._tool(
+            row, "↷", "Ctrl+Shift+Z", self._redo_edit, strings.EDIT_REDO, 40
+        )
 
         row.addStretch(1)
         self._count_label = QLabel("")
         self._count_label.setProperty("role", "dim")
         row.addWidget(self._count_label)
         row.addStretch(1)
+        hint = QLabel(strings.EDIT_MENU_HINT)
+        hint.setProperty("role", "dim")
+        row.addWidget(hint)
+        row.addSpacing(10)
 
         for text, tip, slot in (
             ("−", strings.EDIT_ZOOM_OUT, lambda: self._zoom(1 / _ZOOM_FACTOR)),
@@ -463,106 +484,94 @@ class EditPanel(QWidget):
             button.clicked.connect(slot)
             row.addWidget(button)
         fit = QPushButton(strings.EDIT_ZOOM_FIT)
-        fit.clicked.connect(lambda: self._timeline.set_view(0.0, self._duration))
+        fit.setToolTip(strings.EDIT_ZOOM_FIT_TIP)
+        # Por lambda: a barra é montada antes da linha do tempo existir.
+        fit.clicked.connect(lambda: self._timeline.fit())
         row.addWidget(fit)
         return row
 
-    def _build_clip_fields(self) -> QHBoxLayout:
+    @staticmethod
+    def _tool(
+        row: QHBoxLayout,
+        text: str,
+        shortcut: str,
+        slot: Callable[[], None],
+        tip: str = "",
+        width: int = 0,
+    ) -> QPushButton:
+        button = QPushButton(text)
+        button.setToolTip(f"{tip or text}  ({shortcut})" if shortcut else (tip or text))
+        if width:
+            button.setFixedWidth(width)
+        button.clicked.connect(slot)
+        row.addWidget(button)
+        return button
+
+    def _build_clip_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
 
-        self._start_field = self._timecode_field(strings.EDIT_FIELD_TIP)
-        self._end_field = self._timecode_field(strings.EDIT_FIELD_TIP)
+        self._start_field = self._timecode_field()
+        self._end_field = self._timecode_field()
         self._start_field.editingFinished.connect(lambda: self._apply_field("inicio"))
         self._end_field.editingFinished.connect(lambda: self._apply_field("fim"))
 
-        mark_start = QPushButton(strings.EDIT_MARK_HERE.format(key="I"))
-        mark_start.setToolTip(strings.EDIT_MARK_START)
-        mark_start.clicked.connect(lambda: self._mark("inicio"))
-        mark_end = QPushButton(strings.EDIT_MARK_HERE.format(key="O"))
-        mark_end.setToolTip(strings.EDIT_MARK_END)
-        mark_end.clicked.connect(lambda: self._mark("fim"))
-
         row.addWidget(QLabel(strings.EDIT_CLIP_START))
         row.addWidget(self._start_field)
-        row.addWidget(mark_start)
-        row.addSpacing(10)
         row.addWidget(QLabel(strings.EDIT_CLIP_END))
         row.addWidget(self._end_field)
-        row.addWidget(mark_end)
         row.addSpacing(10)
 
-        self._duration_label = QLabel(strings.EDIT_CLIP_NONE)
-        self._duration_label.setProperty("role", "dim")
-        row.addWidget(self._duration_label, 1)
-        self._mark_buttons = [mark_start, mark_end]
+        row.addWidget(QLabel(strings.EDIT_GAIN))
+        self._gain = QDoubleSpinBox()
+        self._gain.setRange(MIN_GAIN_DB, MAX_GAIN_DB)
+        self._gain.setSingleStep(0.5)
+        self._gain.setDecimals(1)
+        self._gain.setSuffix(" dB")
+        self._gain.setFixedWidth(96)
+        self._gain.setToolTip(strings.EDIT_GAIN_TIP)
+        self._gain.valueChanged.connect(self._on_gain)
+        self._gain.editingFinished.connect(self._end_gain_session)
+        row.addWidget(self._gain)
+
+        self._clip_mute = QCheckBox(strings.EDIT_CLIP_MUTE)
+        self._clip_mute.setToolTip(strings.EDIT_CLIP_MUTE_TIP)
+        self._clip_mute.toggled.connect(self._on_clip_mute)
+        row.addWidget(self._clip_mute)
+
+        row.addSpacing(10)
+        self._clip_label = QLabel(strings.EDIT_CLIP_NONE)
+        self._clip_label.setProperty("role", "dim")
+        row.addWidget(self._clip_label, 1)
         return row
 
     @staticmethod
-    def _timecode_field(tip: str) -> QLineEdit:
+    def _timecode_field() -> QLineEdit:
         field = QLineEdit()
-        field.setToolTip(tip)
-        # Largura de "0:00:00,000" com folga: o campo é de tamanho fixo porque
-        # o conteúdo dele também é.
+        field.setToolTip(strings.EDIT_FIELD_TIP)
         field.setFixedWidth(110)
         field.setAlignment(Qt.AlignmentFlag.AlignCenter)
         return field
 
     def _build_export_row(self) -> QWidget:
-        """A faixa de exportação, sem moldura de grupo.
-
-        Fora de um ``QGroupBox`` de propósito: a moldura custaria quase 60 px de
-        recuo interno numa aba que já disputa altura com a fila, e o que ela
-        agruparia são duas linhas que se explicam sozinhas — como o botão de
-        adicionar à fila da aba de download, que também vive solto.
-        """
-        group = QWidget()
-        group.setProperty("role", "plain")
-        column = QVBoxLayout(group)
+        box = QWidget()
+        box.setProperty("role", "plain")
+        column = QVBoxLayout(box)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(6)
 
         choices = QHBoxLayout()
         choices.setContentsMargins(0, 0, 0, 0)
         choices.setSpacing(14)
-        choices.addWidget(QLabel(strings.EDIT_EXPORT_LABEL))
-        self._join = QRadioButton(strings.EDIT_OUTPUT_JOIN)
-        self._join.setChecked(True)
-        self._each = QRadioButton(strings.EDIT_OUTPUT_EACH)
-        choices.addWidget(self._join)
-        choices.addWidget(self._each)
-        choices.addSpacing(16)
         choices.addWidget(QLabel(strings.EDIT_CUT_LABEL))
-
-        self._exact = QRadioButton(strings.EDIT_MODE_EXACT)
-        self._exact.setChecked(True)
-        self._exact.setToolTip(strings.EDIT_MODE_TIP)
-        self._fast = QRadioButton(strings.EDIT_MODE_FAST)
+        self._fast = QCheckBox(strings.EDIT_MODE_FAST)
         self._fast.setToolTip(strings.EDIT_MODE_TIP)
-        choices.addWidget(self._exact)
+        self._fast.toggled.connect(self._on_mode_changed)
         choices.addWidget(self._fast)
         choices.addStretch(1)
         column.addLayout(choices)
 
-        # Dois grupos declarados, e não a exclusão automática do Qt: ela vale
-        # entre irmãos do mesmo pai, e como as quatro opções dividem a mesma
-        # linha, escolher "corte rápido" desmarcava "um vídeo só".
-        self._output_group = QButtonGroup(self)
-        self._output_group.addButton(self._join)
-        self._output_group.addButton(self._each)
-        self._output_group.buttonToggled.connect(self._update_plan)
-
-        self._mode_group = QButtonGroup(self)
-        self._mode_group.addButton(self._exact)
-        self._mode_group.addButton(self._fast)
-        # Conectado ao grupo, e não a um dos botões: o ``toggled`` do que era
-        # marcado chega antes de o outro se marcar, e ler o estado ali dentro
-        # devolveria o modo de antes.
-        self._mode_group.buttonToggled.connect(self._on_mode_changed)
-
-        # Plano e aviso à esquerda, ação à direita, na mesma linha: são três
-        # linhas de altura numa aba que já disputa cada pixel com a fila.
         actions = QHBoxLayout()
         actions.setSpacing(12)
         texts = QVBoxLayout()
@@ -586,22 +595,22 @@ class EditPanel(QWidget):
         self._export.clicked.connect(self._enqueue)
         actions.addWidget(self._export)
         column.addLayout(actions)
-        return group
+        return box
 
     def _install_shortcuts(self) -> None:
-        """Atalhos de teclado do editor, com o alcance do painel.
+        """Atalhos do editor, com o alcance do painel.
 
         As setas ficam de fora: elas pertencem à linha do tempo, que só as
-        recebe quando tem o foco (ver ``Timeline.keyPressEvent``). Um atalho de
-        janela para elas roubaria as setas de todo campo de texto da aba.
+        recebe quando tem o foco. Um atalho de janela para elas roubaria as
+        setas de todo campo de texto da aba.
         """
         for keys, slot in (
             ("Space", self._toggle_play),
             ("S", self._split_here),
             ("Ctrl+B", self._split_here),
             ("Del", self._delete_selected),
-            ("I", lambda: self._mark("inicio")),
-            ("O", lambda: self._mark("fim")),
+            ("Ctrl+C", self._copy_clip),
+            ("Ctrl+V", self._paste_clip),
             (",", lambda: self._step_frame(-1)),
             (".", lambda: self._step_frame(+1)),
             ("Ctrl+Z", self._undo_edit),
@@ -618,20 +627,55 @@ class EditPanel(QWidget):
         """Filtra os atalhos de uma tecla antes de deixá-los agir.
 
         Sem a primeira guarda, digitar um timecode dispararia as ações letra a
-        letra — "S" dividiria o trecho no meio da digitação de "0:00:15".
-
-        A segunda existe porque a janela de tela cheia é filha deste painel, e o
-        alcance do atalho a acompanha: sem ela, um Espaço lá seria contado duas
-        vezes, aqui e no player.
+        letra. A segunda existe porque a janela de tela cheia é filha deste
+        painel e o alcance do atalho a acompanha: sem ela, um Espaço lá seria
+        contado duas vezes.
         """
-        if isinstance(QApplication.focusWidget(), QLineEdit):
+        # Campo de texto, número ou lista: todos usam teclas que também são
+        # atalhos daqui — o espaço abre a lista de mídias, as letras entram no
+        # timecode.
+        if isinstance(
+            QApplication.focusWidget(), (QLineEdit, QDoubleSpinBox, QComboBox)
+        ):
             return
         if self._on_fullscreen:
             return
         slot()
 
     # ------------------------------------------------------------------
-    # Abertura do arquivo
+    # Estado derivado
+    # ------------------------------------------------------------------
+
+    @property
+    def _duration(self) -> float:
+        return self._project.duration
+
+    @property
+    def _fps(self) -> float:
+        return self._project.fps
+
+    @property
+    def _position(self) -> float:
+        return self._timeline.position
+
+    @property
+    def _has_video(self) -> bool:
+        return self._project.has_video
+
+    @property
+    def _has_sound(self) -> bool:
+        return self._project.has_sound and self._audio.available
+
+    @property
+    def _playable(self) -> bool:
+        return not self._project.is_empty
+
+    @property
+    def _on_fullscreen(self) -> bool:
+        return self._fullscreen is not None and self._fullscreen.isVisible()
+
+    # ------------------------------------------------------------------
+    # Importação
     # ------------------------------------------------------------------
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
@@ -643,148 +687,400 @@ class EditPanel(QWidget):
             Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()
         ]
         if paths:
-            self.open_file(paths[0])
+            self.import_files(paths, insert=True)
             event.acceptProposedAction()
 
-    def _choose_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, strings.EDIT_OPEN, str(Path.home()), strings.EDIT_FILE_FILTER
+    def _choose_files(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, strings.EDIT_IMPORT, str(Path.home()), strings.EDIT_FILE_FILTER
         )
-        if path:
-            self.open_file(Path(path))
+        if paths:
+            self.import_files([Path(p) for p in paths], insert=True)
 
-    def apply_settings(self, settings: Settings) -> None:
-        """Adota as preferências recém-salvas pelo diálogo de configurações.
-
-        O diálogo devolve um objeto novo, e sem esta troca o painel continuaria
-        gravando por cima dele o estado antigo ao mexer no volume — desfazendo o
-        que o usuário acabou de configurar noutra tela.
-        """
-        self._settings = settings
-        self._audio.set_volume(settings.preview_volume)
-        self._audio.set_muted(settings.preview_muted)
-        self._volume.setValue(settings.preview_volume)
-        self._mute.setChecked(settings.preview_muted)
-
-    def open_file(self, path: Path) -> None:
+    def import_files(self, paths: list[Path], *, insert: bool = False) -> None:
+        """Inspeciona os arquivos, guarda no acervo e opcionalmente insere."""
         tools = self._ensure_tools()
         if tools is None:
             return
-        try:
-            media = probe_file(path, tools)
-        except VideoManagerError as exc:
-            QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(exc))
-            return
-        if not media.duration:
+
+        rejected: list[str] = []
+        added: list[MediaRef] = []
+        for path in paths:
+            if any(ref.path == path for ref in self._pool):
+                added.append(next(r for r in self._pool if r.path == path))
+                continue
+            try:
+                local = probe_file(path, tools)
+            except VideoManagerError as exc:
+                rejected.append(f"{path.name}: {exc}")
+                continue
+            reference = media_ref(local)
+            if reference.kind is not MediaKind.IMAGE and not reference.duration:
+                rejected.append(f"{path.name}: não informa duração")
+                continue
+            self._probed[path] = local
+            self._pool.append(reference)
+            added.append(reference)
+
+        if rejected:
             QMessageBox.warning(
                 self,
-                strings.DIALOG_ERROR_TITLE,
-                f"“{path.name}” não informa duração e não pode ser recortado.",
+                strings.DIALOG_WARNING_TITLE,
+                strings.EDIT_IMPORT_REJECTED + "\n\n" + "\n".join(rejected),
             )
+        if not added:
             return
 
-        self._stop_playback()
-        self._media = media
-        self._audio.load(path)
-        self._keyframes = ()
-        self._history.clear()
-        self._future.clear()
-        self._file_label.setText(self._describe_file(media))
-        self._timeline.load(media.duration, self._fps)
-        self._timeline.set_keyframes(())
-        # Um arquivo só de áudio não tem quadro para mostrar; quem serve de guia
-        # é a forma de onda embaixo da trilha, e a tela diz isso em vez de ficar
-        # preta sem explicação.
-        self._preview.setText("" if self._has_video else strings.EDIT_AUDIO_ONLY)
-        self._request_frame(force=True)
-        # A tira e a onda saem pelo temporizador que ``Timeline.load`` já
-        # disparou ao anunciar a janela visível nova.
-        self._scan_keyframes()
-        self._update_controls()
-        self.changed.emit()
+        self._refresh_pool()
+        self._pool_box.setCurrentIndex(self._pool.index(added[-1]))
+        if insert:
+            self._remember()
+            for reference in added:
+                self._place(reference)
+            self._after_edit(refit=True)
+
+    def _refresh_pool(self) -> None:
+        self._syncing = True
+        try:
+            current = self._pool_box.currentIndex()
+            self._pool_box.clear()
+            for reference in self._pool:
+                self._pool_box.addItem(reference.label)
+            self._pool_box.setCurrentIndex(min(max(0, current), len(self._pool) - 1))
+        finally:
+            self._syncing = False
+
+    def _place(self, reference: MediaRef, at: float | None = None) -> None:
+        """Coloca a mídia numa trilha compatível, a partir do instante dado.
+
+        Procura a primeira trilha em que o bloco caiba inteiro; se não houver
+        nenhuma, cria uma trilha nova em vez de empurrar o que já está lá — o
+        que o usuário montou não se mexe sozinho.
+        """
+        self._project = fit_canvas(self._project, reference)
+        clip = Clip(
+            media=reference,
+            start=max(0.0, self._position if at is None else at),
+            duration=reference.natural_duration,
+        )
+        index = self._free_track(clip)
+        if index is None:
+            kind = TrackKind.VIDEO if reference.has_video else TrackKind.AUDIO
+            self._project = self._project.with_track(kind)
+            index = self._project.track_index(
+                self._project.tracks[0 if kind is TrackKind.VIDEO else -1].track_id
+            )
+        self._project = self._project.with_clip(index, clip)
+        self._timeline.select(clip.clip_id)
+
+    def _free_track(self, clip: Clip) -> int | None:
+        for index, track in enumerate(self._project.tracks):
+            if not accepts(track.kind, clip):
+                continue
+            floor, ceiling = track.free_range(clip.start)
+            if floor <= clip.start and clip.end <= ceiling:
+                return index
+        return None
+
+    def _insert_selected_media(self) -> None:
+        index = self._pool_box.currentIndex()
+        if not 0 <= index < len(self._pool):
+            return
+        self._remember()
+        self._place(self._pool[index])
+        self._after_edit()
+
+    # ------------------------------------------------------------------
+    # Menu do botão direito
+    # ------------------------------------------------------------------
+
+    def _show_menu(self, kind: str, track_index: int, clip_id: int, position) -> None:
+        self.build_menu(kind, track_index, clip_id).exec(position)
+
+    def build_menu(self, kind: str, track_index: int, clip_id: int) -> QMenu:
+        """Monta o menu com o que faz sentido para o que foi clicado.
+
+        Um menu que oferece "separar áudio" sobre um bloco sem som, ou "excluir
+        trilha" sobre o vazio, obriga a ler tudo para descobrir o que serve —
+        aqui cada item só aparece quando tem o que fazer.
+
+        Montar e exibir são separados de propósito: abrir o menu inicia um laço
+        de eventos próprio, e o que se quer conferir é a lista de opções, não o
+        laço.
+        """
+        menu = QMenu(self)
+        found = self._project.find(clip_id) if clip_id >= 0 else None
+        clip = found[1] if found else None
+
+        if clip is not None:
+            self._act(menu, f"{strings.EDIT_SPLIT}  (S)", self._split_here,
+                      enabled=clip.contains(self._position))
+            self._act(menu, f"{strings.EDIT_COPY}  (Ctrl+C)", self._copy_clip)
+            self._act(menu, f"{strings.EDIT_DELETE}  (Del)", self._delete_selected)
+            menu.addSeparator()
+            if clip.media.has_audio and clip.media.kind is not MediaKind.AUDIO:
+                self._act(
+                    menu, strings.EDIT_DETACH, self._detach_audio,
+                    enabled=not clip.detached, tip=strings.EDIT_DETACH_TIP,
+                )
+            if clip.can_adjust_sound:
+                self._act(
+                    menu,
+                    strings.EDIT_CLIP_UNMUTE if clip.muted else strings.EDIT_CLIP_MUTE,
+                    lambda: self._on_clip_mute(not clip.muted),
+                )
+
+        if clip is None and self._clipboard is not None:
+            self._act(menu, f"{strings.EDIT_PASTE}  (Ctrl+V)", self._paste_clip)
+
+        if track_index >= 0:
+            menu.addSeparator()
+            track = self._project.tracks[track_index]
+            self._act(
+                menu,
+                strings.EDIT_TRACK_UNMUTE if track.muted else strings.EDIT_TRACK_MUTE,
+                lambda: self._toggle_track_mute(track_index),
+            )
+            self._act(
+                menu,
+                strings.EDIT_DELETE_TRACK.format(name=track.name),
+                lambda: self._remove_track(track_index),
+                tip=strings.EDIT_DELETE_TRACK_TIP,
+            )
+
+        menu.addSeparator()
+        self._act(menu, strings.EDIT_ADD_VIDEO_TRACK_FULL,
+                  lambda: self._add_track(TrackKind.VIDEO))
+        self._act(menu, strings.EDIT_ADD_AUDIO_TRACK_FULL,
+                  lambda: self._add_track(TrackKind.AUDIO))
+        return menu
 
     @staticmethod
-    def _describe_file(media: LocalMedia) -> str:
-        pieces = [media.path.name]
-        video = media.video
-        if video is not None and video.width and video.height:
-            pieces.append(f"{video.width}×{video.height}")
-        if video is not None and video.fps:
-            pieces.append(f"{video.fps:.6g} fps")
-        pieces.append(format_timecode(media.duration, milliseconds=False))
-        pieces.append(format_size(media.size))
-        return "   ·   ".join(pieces)
+    def _act(
+        menu: QMenu,
+        text: str,
+        slot: Callable[[], None],
+        *,
+        enabled: bool = True,
+        tip: str = "",
+    ) -> None:
+        action = menu.addAction(text)
+        action.setEnabled(enabled)
+        if tip:
+            action.setToolTip(tip)
+        action.triggered.connect(slot)
 
-    def _scan_keyframes(self) -> None:
-        if self._media is None:
+    def _remove_track(self, track_index: int) -> None:
+        """Apaga a trilha. Com blocos dentro, pergunta antes."""
+        if not 0 <= track_index < len(self._project.tracks):
             return
-        tools = self._ensure_tools()
-        if tools is None:
-            return
-        worker = KeyframeWorker(self._media.path, tools)
-        worker.signals.keyframes.connect(self._on_keyframes)
-        self._runner.start(worker, worker.signals.done)
-
-    def _on_keyframes(self, times: object) -> None:
-        self._keyframes = tuple(times) if isinstance(times, tuple) else ()
-        self._timeline.set_keyframes(self._keyframes)
-        for button in (self._prev_key, self._next_key):
-            button.setEnabled(bool(self._keyframes))
-        self._update_plan()
+        track = self._project.tracks[track_index]
+        if track.clips:
+            answer = QMessageBox.question(
+                self,
+                strings.EDIT_DELETE_TRACK_TITLE,
+                strings.EDIT_DELETE_TRACK_BODY.format(
+                    name=track.name, count=len(track.clips)
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self._remember()
+        self._apply(self._project.without_track(track_index))
 
     # ------------------------------------------------------------------
-    # Estado derivado
+    # Edição
     # ------------------------------------------------------------------
 
-    @property
-    def _duration(self) -> float:
-        return self._media.duration or 0.0 if self._media else 0.0
+    def _remember(self) -> None:
+        self._history.append(self._project)
+        self._future.clear()
+        del self._history[:-60]
 
-    @property
-    def _fps(self) -> float | None:
-        video = self._media.video if self._media else None
-        return video.fps if video else None
+    def _apply(self, project: Project, *, refit: bool = False) -> None:
+        self._project = project
+        self._after_edit(refit=refit)
 
-    @property
-    def _has_video(self) -> bool:
-        return self._media is not None and has_real_video(self._media)
+    def _after_edit(self, *, refit: bool = False) -> None:
+        self._timeline.set_project(self._project, refit=refit)
+        self._refresh_clip_fields()
+        self._refresh_controls()
+        self._view_timer.start()
+        self._request_frame(force=True)
+        self.changed.emit()
 
-    @property
-    def _position(self) -> float:
-        return self._timeline.position
+    def _on_clip_moved(self, clip_id: int, track_index: int, start: float) -> None:
+        self._project = self._project.moved(clip_id, track_index, start)
+        self._timeline.set_project(self._project)
+
+    def _on_clip_resized(self, clip_id: int, edge: str, seconds: float) -> None:
+        self._project = self._project.resized(clip_id, edge, seconds)
+        self._timeline.set_project(self._project)
+
+    def _on_edit_finished(self) -> None:
+        self._after_edit()
+
+    def _toggle_track_mute(self, index: int) -> None:
+        self._remember()
+        track = self._project.tracks[index]
+        self._apply(self._project.with_track_muted(index, not track.muted))
+
+    def _add_track(self, kind: TrackKind) -> None:
+        self._remember()
+        self._apply(self._project.with_track(kind))
+
+    def _split_here(self) -> None:
+        position = self._position
+        clip = next(
+            (c for c in self._project.clips if c.contains(position)), None
+        )
+        selected = self._timeline.selected_clip
+        if selected is not None and selected.contains(position):
+            clip = selected
+        if clip is None:
+            return
+        self._remember()
+        self._apply(self._project.split(clip.clip_id, position))
+
+    def _delete_selected(self) -> None:
+        clip = self._timeline.selected_clip
+        if clip is None:
+            return
+        self._remember()
+        self._apply(self._project.without_clip(clip.clip_id))
+
+    def _detach_audio(self) -> None:
+        clip = self._timeline.selected_clip
+        if clip is None or not clip.media.has_audio:
+            return
+        self._remember()
+        self._apply(self._project.detached_audio(clip.clip_id))
+
+    def _copy_clip(self) -> None:
+        clip = self._timeline.selected_clip
+        if clip is not None:
+            self._clipboard = clip
+            self._refresh_controls()
+
+    def _paste_clip(self) -> None:
+        """Cola no cursor, numa trilha que aceite e onde caiba."""
+        if self._clipboard is None:
+            return
+        self._remember()
+        pasted = replace(
+            self._clipboard, start=self._position, clip_id=next_clip_id()
+        )
+        index = self._free_track(pasted)
+        if index is None:
+            kind = TrackKind.VIDEO if pasted.media.has_video else TrackKind.AUDIO
+            project = self._project.with_track(kind)
+            index = 0 if kind is TrackKind.VIDEO else len(project.tracks) - 1
+            self._project = project
+        self._project = self._project.with_clip(index, pasted)
+        self._timeline.select(pasted.clip_id)
+        self._after_edit()
+
+    def _undo_edit(self) -> None:
+        if not self._history:
+            return
+        self._future.append(self._project)
+        self._apply(self._history.pop())
+
+    def _redo_edit(self) -> None:
+        if not self._future:
+            return
+        self._history.append(self._project)
+        self._apply(self._future.pop())
+
+    # -- propriedades do bloco -------------------------------------------
+
+    def _on_gain(self, value: float) -> None:
+        """Aplica o volume ao bloco, agrupando o arrasto num passo de desfazer.
+
+        Um ``QDoubleSpinBox`` avisa a cada passo de meio decibel: sem o
+        agrupamento, ajustar de 0 a −6 dB enfileiraria doze desfazeres, e voltar
+        atrás exigiria doze Ctrl+Z para desfazer uma decisão só.
+        """
+        clip = self._timeline.selected_clip
+        if self._syncing or clip is None or abs(clip.gain_db - value) < 0.01:
+            return
+        if self._gain_session != clip.clip_id:
+            self._remember()
+            self._gain_session = clip.clip_id
+        self._apply(self._project.with_updated_clip(clip.clip_id, gain_db=value))
+
+    def _end_gain_session(self) -> None:
+        """Fecha o agrupamento: o próximo ajuste vira um desfazer novo."""
+        self._gain_session = -1
+
+    def _on_clip_mute(self, muted: bool) -> None:
+        clip = self._timeline.selected_clip
+        if self._syncing or clip is None or clip.muted == muted:
+            return
+        self._remember()
+        self._apply(self._project.with_updated_clip(clip.clip_id, muted=muted))
+
+    def _apply_field(self, edge: str) -> None:
+        clip = self._timeline.selected_clip
+        if clip is None:
+            return
+        field = self._start_field if edge == "inicio" else self._end_field
+        value = parse_timecode(field.text())
+        if value is None:
+            self._refresh_clip_fields()
+            return
+        self._remember()
+        self._apply(self._project.resized(clip.clip_id, edge, value))
+
+    def _on_clip_selected(self, _clip_id: int) -> None:
+        self._end_gain_session()
+        self._refresh_clip_fields()
+
+    def _refresh_clip_fields(self) -> None:
+        clip = self._timeline.selected_clip
+        self._syncing = True
+        try:
+            self._start_field.setText(format_timecode(clip.start) if clip else "")
+            self._end_field.setText(format_timecode(clip.end) if clip else "")
+            self._gain.setValue(clip.gain_db if clip else 0.0)
+            self._clip_mute.setChecked(bool(clip and clip.muted))
+        finally:
+            self._syncing = False
+
+        if clip is None:
+            self._clip_label.setText(strings.EDIT_CLIP_NONE)
+            return
+        info = strings.EDIT_CLIP_INFO.format(
+            name=clip.media.name, duration=format_span(clip.duration)
+        )
+        if clip.detached:
+            info = f"{info} · {strings.EDIT_CLIP_DETACHED}"
+        self._clip_label.setText(info)
 
     # ------------------------------------------------------------------
     # Prévia
     # ------------------------------------------------------------------
 
-    @property
-    def _on_fullscreen(self) -> bool:
-        return self._fullscreen is not None and self._fullscreen.isVisible()
-
-    def _preview_size(self, *, playing: bool = False) -> tuple[int, int]:
+    def _preview_size(self) -> tuple[int, int]:
         """Tamanho a pedir ao ffmpeg para a superfície que está à frente.
 
-        Em tela cheia, a reprodução usa um teto menor que o quadro parado. É a
-        mesma troca que os editores fazem com arquivos de prova: decodificar em
-        resolução cheia trinta vezes por segundo custa muito mais do que se
-        ganha numa imagem em movimento, e ao pausar o quadro exato vem inteiro.
+        O mesmo tamanho para o quadro parado e para a reprodução: pedir menor e
+        ampliar na exibição — o que se fazia em tela cheia — devolve uma imagem
+        borrada, que se lê como perda de qualidade do vídeo e não como escolha
+        da prévia. Medido: 1920×1080 a 60 fps atravessa o cano sem atrasar.
         """
-        video = self._media.video if self._media else None
         area = self._fullscreen.size() if self._on_fullscreen else self._preview.size()
-        if self._on_fullscreen:
-            teto = _FULLSCREEN_PLAYING_WIDTH if playing else _FULLSCREEN_MAX_WIDTH
-        else:
-            teto = _PREVIEW_MAX_WIDTH
+        ceiling = _FULLSCREEN_MAX_WIDTH if self._on_fullscreen else _PREVIEW_MAX_WIDTH
         return fit_size(
-            video.width if video else None,
-            video.height if video else None,
-            min(teto, max(160, area.width())),
+            self._project.width,
+            self._project.height,
+            min(ceiling, max(160, area.width())),
             max(120, area.height()),
         )
 
     def _request_frame(self, *, force: bool = False) -> None:
-        """Pede o quadro do cursor, no máximo um por vez (ver o topo do módulo)."""
-        if self._media is None or self._playing or not self._has_video:
+        if self._project.is_empty or self._playing:
             return
         self._wanted = self._position
         if force:
@@ -795,16 +1091,16 @@ class EditPanel(QWidget):
 
     def _start_frame(self) -> None:
         tools = self._ensure_tools()
-        if tools is None or self._media is None or self._wanted is None:
+        if tools is None or self._wanted is None:
             return
         self._frame_busy = True
         self._rendered = self._wanted
         self._frame_token = next(self._tokens)
+        size = self._preview_size()
         worker = FrameWorker(
-            self._media.path,
-            seek_time(self._wanted, self._fps),
-            self._preview_size(),
-            tools,
+            frame_command(self._project, self._wanted, size, tools),
+            size,
+            self._wanted,
             self._frame_token,
         )
         worker.signals.frame.connect(self._on_frame)
@@ -813,23 +1109,17 @@ class EditPanel(QWidget):
 
     def _on_frame_done(self) -> None:
         self._frame_busy = False
-        # O cursor pode ter andado enquanto o quadro era gerado: aí o pedido
-        # seguinte sai agora, já com a posição atual.
         if self._wanted is not None and self._wanted != self._rendered:
             self._start_frame()
 
     def _on_frame(self, token: int, frame: object) -> None:
         if token not in (self._frame_token, self._play_token):
-            return  # quadro de um pedido que já não interessa
+            return
         self._show_frame(frame)
         if token != self._play_token or not self._playing:
             return
         self._shown_frame = frame.seconds
-        # Sem som, o fluxo de quadros é o único relógio que existe e é ele quem
-        # move o cursor. Com som, quem move é o tique do áudio — deixar os dois
-        # mexendo faria o cursor tremer entre dois tempos ligeiramente
-        # diferentes.
-        if not self._has_sound:
+        if not self._audio.playing:
             self._timeline.set_position(frame.seconds)
             self._update_time_labels()
 
@@ -849,12 +1139,36 @@ class EditPanel(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        if self._media is not None:
+        if not self._project.is_empty:
             self._resize_timer.start()
             self._view_timer.start()
 
+    def _toggle_collapsed(self) -> None:
+        """Retrai a prévia para a linha do tempo ficar com a janela.
+
+        Em vez de esconder a imagem, ela encolhe: durante um trabalho de
+        montagem o que se olha é a trilha, mas perder a referência do que está
+        no cursor atrapalharia mais do que ajuda.
+        """
+        self._collapsed = not self._collapsed
+        self._preview.setMinimumHeight(
+            _PREVIEW_COLLAPSED if self._collapsed else _PREVIEW_MIN_HEIGHT
+        )
+        total = sum(self._split_view.sizes())
+        if self._collapsed:
+            # Recolhe a imagem ao mínimo e passa **todo** o resto às trilhas.
+            top = self._player_box.minimumSizeHint().height()
+            self._split_view.setSizes([top, max(0, total - top)])
+        else:
+            self._split_view.setSizes([total // 2, total - total // 2])
+        self._collapse.setText(
+            strings.EDIT_EXPAND if self._collapsed else strings.EDIT_COLLAPSE
+        )
+        self._resize_timer.start()
+        self.changed.emit()
+
     # ------------------------------------------------------------------
-    # Miniaturas e forma de onda
+    # Miniaturas e onda, por bloco
     # ------------------------------------------------------------------
 
     def _on_view_changed(self) -> None:
@@ -862,63 +1176,151 @@ class EditPanel(QWidget):
         self._view_timer.start()
 
     def _refresh_backdrop(self) -> None:
-        """Refaz a tira de miniaturas e a onda para o trecho visível."""
+        """Pede as imagens dos blocos visíveis que ainda não servem.
+
+        Cada bloco tem as suas: a tira sai da mídia dele, no trecho dele. Um
+        bloco fora da vista não é gerado — numa edição longa, isso é a diferença
+        entre uma dúzia de chamadas ao ffmpeg e centenas.
+
+        Refaz também quando o bloco foi cortado (o trecho de origem mudou) ou
+        quando ele cresceu bastante na tela: aproximar sem refazer deixaria as
+        mesmas poucas miniaturas esticadas, cada vez mais borradas.
+        """
         tools = self._ensure_tools()
-        if self._media is None or tools is None:
+        if tools is None:
             return
-        width = max(200, self._timeline.width())
         start, end = self._timeline.view
+        for track in self._project.tracks:
+            for clip in track.clips:
+                if clip.end < start or clip.start > end:
+                    continue
+                if not self._strip_is_stale(clip, track.kind):
+                    continue
+                if track.kind is TrackKind.VIDEO:
+                    self._request_thumbs(clip, tools)
+                elif clip.media.has_audio:
+                    self._request_wave(clip, tools)
 
-        # A capa embutida de um MP3 conta como trilha de vídeo para o ffprobe;
-        # gerar uma tira dela repetiria a mesma imagem quarenta vezes.
-        if self._has_video:
-            if self._strip_worker is not None:
-                self._strip_worker.cancel()
-            count = max(1, min(40, round(width / FILM_CELL_WIDTH)))
-            self._strip_token = next(self._tokens)
-            self._timeline.set_strip(start, end, count)
-            worker = FilmstripWorker(
-                self._media.path,
-                start,
-                end,
-                count,
-                (FILM_CELL_WIDTH, FILM_HEIGHT),
-                tools,
-                self._strip_token,
-            )
-            worker.signals.strip.connect(self._on_strip)
-            self._runner.start(worker, worker.signals.done)
-            self._strip_worker = worker
+    def _strip_window(self, clip: Clip) -> tuple[float, float]:
+        """Trecho de origem que precisa de imagem: só o pedaço à vista.
 
-        if self._media.has_audio:
-            self._wave_token = next(self._tokens)
-            worker_wave = WaveformWorker(
-                self._media.path,
-                start,
-                end - start,
-                (width, WAVE_HEIGHT),
-                self._colors["accent"],
-                tools,
-                self._wave_token,
-            )
-            worker_wave.signals.waveform.connect(
-                lambda token, png, a=start, b=end: self._on_waveform(token, png, a, b)
-            )
-            self._runner.start(worker_wave, worker_wave.signals.done)
+        Um bloco de duas horas com doze miniaturas espalhadas por ele não diz
+        nada quando se aproxima em dez segundos. Gerando só o que está na tela,
+        as mesmas doze imagens cobrem o que se está olhando — e um bloco longo
+        fora da vista deixa de custar qualquer coisa.
+        """
+        start, end = self._timeline.view
+        begin = max(clip.start, start)
+        finish = min(clip.end, end)
+        if finish <= begin:
+            return clip.in_point, clip.out_point
+        return clip.source_time(begin), clip.source_time(finish)
 
-    def _on_strip(self, token: int, index: int, frame: object) -> None:
-        if token != self._strip_token:
+    def _strip_is_stale(self, clip: Clip, kind: TrackKind) -> bool:
+        current = self._timeline.strip_range(clip.clip_id)
+        if current is None:
+            return True
+        if clip.is_image:
+            return False
+
+        begin, finish = self._strip_window(clip)
+        tolerance = max(0.05, (finish - begin) * 0.02)
+        if begin < current[0] - tolerance or finish > current[1] + tolerance:
+            return True  # a vista saiu do que já foi gerado
+        if kind is not TrackKind.VIDEO:
+            return False
+        # Refaz quando o trecho à vista couber no dobro do detalhe atual: sem
+        # esse passo grosso, cada movimento da roda do mouse geraria imagens que
+        # o movimento seguinte descartaria.
+        coberto = max(1e-6, current[1] - current[0])
+        return (finish - begin) * 2 <= coberto
+
+    def _thumb_count(self, clip: Clip) -> int:
+        if clip.is_image:
+            return 1
+        return max(1, min(_MAX_THUMBS, round(self._clip_pixels(clip) / FILM_CELL_WIDTH)))
+
+    def _clip_pixels(self, clip: Clip) -> float:
+        """Largura em pixels da parte do bloco que está à vista."""
+        start, end = self._timeline.view
+        span = max(1e-6, end - start)
+        visivel = max(0.0, min(clip.end, end) - max(clip.start, start))
+        return max(1.0, visivel / span * max(1, self._timeline.width() - 120))
+
+    def _request_thumbs(self, clip: Clip, tools: FFmpegTools) -> None:
+        # Uma imagem não tem trecho de origem para percorrer: uma miniatura só,
+        # esticada por todo o bloco. Sem isso a tira cobriria uma fatia mínima
+        # dele e o resto ficaria em branco.
+        begin, finish = self._strip_window(clip)
+        count = self._thumb_count(clip)
+        token = next(self._tokens)
+        self._cancel_strip(clip.clip_id)
+        self._strip_tokens[clip.clip_id] = token
+        self._timeline.set_strip(clip.clip_id, begin, finish, count)
+        worker = FilmstripWorker(
+            clip.media.path,
+            begin,
+            begin if clip.is_image else finish,
+            count,
+            (FILM_CELL_WIDTH, VIDEO_TRACK_HEIGHT - 14),
+            tools,
+            token,
+        )
+        worker.signals.strip.connect(
+            lambda tok, index, frame, cid=clip.clip_id: self._on_thumb(
+                tok, cid, index, frame
+            )
+        )
+        self._runner.start(worker, worker.signals.done)
+        self._strip_workers[clip.clip_id] = worker
+
+    def _cancel_strip(self, clip_id: int) -> None:
+        """Interrompe a geração anterior de miniaturas deste bloco.
+
+        O token já descartaria as imagens atrasadas, mas o ffmpeg continuaria
+        gerando cada uma delas: aproximar três vezes seguidas deixaria três
+        gerações disputando a fila de trabalho.
+        """
+        worker = self._strip_workers.pop(clip_id, None)
+        if worker is not None:
+            worker.cancel()
+
+    def _on_thumb(self, token: int, clip_id: int, index: int, frame: object) -> None:
+        if self._strip_tokens.get(clip_id) != token:
             return
-        self._timeline.set_strip_image(
-            index, image_from_frame(frame.data, frame.width, frame.height)
+        self._timeline.set_thumb(
+            clip_id, index, image_from_frame(frame.data, frame.width, frame.height)
         )
 
-    def _on_waveform(self, token: int, png: bytes, start: float, end: float) -> None:
-        if token != self._wave_token:
+    def _request_wave(self, clip: Clip, tools: FFmpegTools) -> None:
+        token = next(self._tokens)
+        self._strip_tokens[clip.clip_id] = token
+        begin, finish = self._strip_window(clip)
+        width = int(min(_WAVE_MAX_WIDTH, max(80, self._clip_pixels(clip))))
+        worker = WaveformWorker(
+            clip.media.path,
+            begin,
+            max(0.05, finish - begin),
+            (width, AUDIO_TRACK_HEIGHT - 14),
+            self._colors["accent"],
+            tools,
+            token,
+        )
+        worker.signals.waveform.connect(
+            lambda tok, png, c=clip.clip_id, a=begin, b=finish: self._on_wave(
+                tok, c, a, b, png
+            )
+        )
+        self._runner.start(worker, worker.signals.done)
+
+    def _on_wave(
+        self, token: int, clip_id: int, begin: float, finish: float, png: bytes
+    ) -> None:
+        if self._strip_tokens.get(clip_id) != token:
             return
         image = QImage()
         if image.loadFromData(png, "PNG"):
-            self._timeline.set_waveform(image, start, end)
+            self._timeline.set_wave(clip_id, begin, finish, image)
 
     # ------------------------------------------------------------------
     # Navegação
@@ -930,24 +1332,14 @@ class EditPanel(QWidget):
         self._update_time_labels()
 
     def _seek_to(self, seconds: float) -> None:
-        if self._media is None:
+        if self._project.is_empty:
             return
         self._stop_playback()
         self._timeline.set_position(seconds)
-        # O som acompanha o cursor mesmo parado: sem isto, o play seguinte
-        # começaria pedindo ao player para saltar, e o primeiro instante sairia
-        # do lugar errado.
-        self._audio.seek(self._position)
         self._request_frame()
         self._update_time_labels()
 
     def _scrub_to(self, seconds: float) -> None:
-        """Arrasto da barra de posição da tela cheia.
-
-        Diferente dos botões de pular quadro ou segundo: ali parar é o
-        esperado, aqui o vídeo deve continuar de onde a barra foi solta — é o
-        que qualquer player faz.
-        """
         self._resume_wanted = self._resume_wanted or self._playing
         self._seek_to(seconds)
 
@@ -964,8 +1356,6 @@ class EditPanel(QWidget):
 
     def _jump_keyframe(self, direction: int) -> None:
         if direction < 0:
-            # Um quadro atrás do cursor, senão "anterior" devolveria o keyframe
-            # em que já estamos e o botão não faria nada.
             target = keyframe_at_or_before(
                 self._keyframes, self._position - frame_step(self._fps)
             )
@@ -973,30 +1363,6 @@ class EditPanel(QWidget):
             target = keyframe_after(self._keyframes, self._position)
         if target is not None:
             self._seek_to(target)
-
-    def _lock_readouts(self) -> None:
-        """Fixa a largura dos números pelo maior valor que este arquivo terá.
-
-        Medido no arquivo aberto, e não num gabarito de duas horas: um vídeo de
-        um minuto não precisa reservar espaço para a casa das horas, e esse
-        espaço faz falta para os botões na mesma linha.
-        """
-        biggest = format_timecode(self._duration)
-        text = strings.EDIT_POSITION.format(current=biggest, total=biggest)
-        self._time_label.setFixedWidth(
-            QFontMetrics(self._time_label.font()).horizontalAdvance(text) + 6
-        )
-
-        frames = (
-            strings.EDIT_FRAME_NUMBER.format(
-                index=frame_index(self._duration, self._fps)
-            )
-            if self._fps
-            else ""
-        )
-        self._frame_label.setFixedWidth(
-            QFontMetrics(self._frame_label.font()).horizontalAdvance(frames) + 6
-        )
 
     def _update_time_labels(self) -> None:
         self._time_label.setText(
@@ -1006,84 +1372,43 @@ class EditPanel(QWidget):
             )
         )
         self._frame_label.setText(
-            strings.EDIT_FRAME_NUMBER.format(
-                index=frame_index(self._position, self._fps)
-            )
-            if self._fps
-            else ""
+            strings.EDIT_FRAME_NUMBER.format(index=frame_index(self._position, self._fps))
         )
         self._sync_fullscreen()
 
-    # ------------------------------------------------------------------
-    # Tela cheia
-    # ------------------------------------------------------------------
+    def _lock_readouts(self) -> None:
+        """Fixa a largura dos números pelo maior valor deste projeto.
 
-    def _toggle_fullscreen(self) -> None:
-        if self._on_fullscreen:
-            self._fullscreen.close()
-            return
-        if self._media is None or not self._has_video:
-            return
-
-        if self._fullscreen is None:
-            self._fullscreen = FullscreenPreview(self)
-            self._fullscreen.play_toggled.connect(self._toggle_play)
-            self._fullscreen.stepped.connect(self._step_frame)
-            self._fullscreen.seeked.connect(self._scrub_to)
-            self._fullscreen.seek_finished.connect(self._resume_after_scrub)
-            self._fullscreen.volume_changed.connect(self._volume.setValue)
-            self._fullscreen.mute_toggled.connect(self._mute.setChecked)
-            self._fullscreen.closed.connect(self._on_fullscreen_closed)
-
-        self._fullscreen.set_audio(
-            self._has_sound, self._volume.value(), self._mute.isChecked()
+        Em tipo proporcional o "1" é mais estreito que o "8": sem largura fixa,
+        a barra de transporte inteira treme a cada quadro.
+        """
+        biggest = format_timecode(self._duration)
+        text = strings.EDIT_POSITION.format(current=biggest, total=biggest)
+        self._time_label.setFixedWidth(
+            QFontMetrics(self._time_label.font()).horizontalAdvance(text) + 6
         )
-        self._fullscreen.showFullScreen()
-        self._fullscreen.activateWindow()
-        self._fullscreen.setFocus()
-        self._sync_fullscreen()
-        # A superfície mudou de tamanho: o que está na tela veio pequeno demais
-        # e é pedido de novo, agora na resolução da tela.
-        self._restart_frames()
-
-    def _on_fullscreen_closed(self) -> None:
-        """Volta a desenhar no painel, no tamanho dele."""
-        self._restart_frames()
-
-    def _restart_frames(self) -> None:
-        """Refaz a imagem para a superfície atual, tocando ou parada."""
-        if self._playing:
-            clip = self._clip_at(self._position)
-            self._start_frames(self._position, clip.end if clip else self._duration)
-        else:
-            self._request_frame(force=True)
-
-    def _sync_fullscreen(self) -> None:
-        if self._on_fullscreen:
-            self._fullscreen.set_state(self._position, self._duration, self._playing)
-
-    # ------------------------------------------------------------------
-    # Som
-    # ------------------------------------------------------------------
-
-    @property
-    def _has_sound(self) -> bool:
-        return (
-            self._media is not None
-            and self._media.has_audio
-            and self._audio.available
+        frames = strings.EDIT_FRAME_NUMBER.format(
+            index=frame_index(self._duration, self._fps)
         )
+        self._frame_label.setFixedWidth(
+            QFontMetrics(self._frame_label.font()).horizontalAdvance(frames) + 6
+        )
+
+    # ------------------------------------------------------------------
+    # Som e reprodução
+    # ------------------------------------------------------------------
 
     def _on_volume(self, value: int) -> None:
         self._audio.set_volume(value)
         self._settings.preview_volume = value
         self._refresh_volume_label()
+        self._schedule_prefs_save()
 
     def _on_mute(self, muted: bool) -> None:
         self._audio.set_muted(muted)
         self._settings.preview_muted = muted
         self._refresh_volume_label()
-        self._save_audio_prefs()
+        self._schedule_prefs_save()
 
     def _refresh_volume_label(self) -> None:
         silent = self._mute.isChecked() or self._volume.value() == 0
@@ -1092,22 +1417,23 @@ class EditPanel(QWidget):
             strings.EDIT_UNMUTE if self._mute.isChecked() else strings.EDIT_MUTE
         )
 
+    def _schedule_prefs_save(self) -> None:
+        """Grava as preferências depois que o ajuste parar.
+
+        O volume muda a cada pixel de arrasto — e em dois lugares, aqui e na
+        tela cheia. Gravar em cada passo escreveria o arquivo dezenas de vezes
+        por segundo; esperar o controle parar grava uma vez só, e continua
+        gravando mesmo quando o ajuste veio da outra tela.
+        """
+        self._prefs_timer.start()
+
     def _save_audio_prefs(self) -> None:
         try:
             self._settings.save()
         except OSError:
-            # Perder a preferência de volume é um incômodo; interromper a edição
-            # por causa dela seria um defeito.
+            # Perder a preferência de volume é um incômodo; interromper a
+            # edição por causa dela seria um defeito.
             pass
-
-    # ------------------------------------------------------------------
-    # Reprodução
-    # ------------------------------------------------------------------
-
-    @property
-    def _playable(self) -> bool:
-        """Um arquivo só de áudio também se reproduz: o que anda é o cursor."""
-        return self._media is not None and (self._has_video or self._has_sound)
 
     def _toggle_play(self) -> None:
         if not self._playable:
@@ -1118,48 +1444,37 @@ class EditPanel(QWidget):
         self._start_playback(self._position)
 
     def _start_playback(self, seconds: float) -> None:
-        if self._media is None:
+        tools = self._ensure_tools()
+        if tools is None or self._project.is_empty:
             return
-        clips = self._timeline.clips
-        if not clips:
-            return
-        # No fim do arquivo, reproduzir recomeça do primeiro trecho — é o que
-        # todo player faz, e o que permite reconferir o corte sem voltar à mão.
         if seconds >= self._duration - frame_step(self._fps):
-            seconds = clips[0].start
-        clip = self._clip_at(seconds)
-        if clip is None:
-            # Cursor num vão: o que foi apagado não se reproduz, então a prévia
-            # começa no trecho seguinte.
-            clip = next((item for item in clips if item.start >= seconds), None)
-            if clip is None:
-                return
-            seconds = clip.start
-            self._timeline.set_position(seconds)
+            seconds = 0.0
+            self._timeline.set_position(0.0)
 
         self._playing = True
         self._refresh_play_button()
-        self._start_frames(seconds, clip.end)
-        if self._has_sound:
-            self._audio.play(seconds)
-            self._tick.start()
+        self._start_frames(seconds)
+        command = audio_command(self._project, seconds, tools)
+        if command is not None and self._audio.available:
+            self._audio.start(command, seconds)
+        self._tick.start()
 
-    def _start_frames(self, seconds: float, until: float) -> None:
-        """Abre o fluxo de quadros a partir de um instante."""
+    def _start_frames(self, seconds: float) -> None:
         tools = self._ensure_tools()
-        if tools is None or self._media is None or not self._has_video:
+        if tools is None or not self._has_video:
             return
         if self._playback is not None:
             self._playback.cancel()
         self._shown_frame = seconds
         self._play_token = next(self._tokens)
+        size = self._preview_size()
+        fps = preview_fps(self._fps)
         worker = PlaybackWorker(
-            self._media.path,
+            playback_command(self._project, seconds, size, tools, fps=fps),
             seconds,
-            self._preview_size(playing=True),
-            tools,
+            size,
             self._play_token,
-            stop_at=until,
+            fps=fps,
         )
         worker.signals.frame.connect(self._on_frame)
         worker.signals.done.connect(
@@ -1168,80 +1483,43 @@ class EditPanel(QWidget):
         self._runner.start(worker, worker.signals.done)
         self._playback = worker
 
-    def _on_audio_tick(self) -> None:
-        """O relógio do som arrasta o cursor, o trecho e a imagem atrás dele.
-
-        Enquanto há som, é ele quem diz onde a reprodução está: o ouvido percebe
-        um engasgo de vinte milissegundos no áudio, e não percebe um quadro
-        repetido na imagem. Com a tela seguindo o som, um computador que não dá
-        conta de decodificar em tempo real perde quadros — e continua tocando no
-        tempo certo, que é o comportamento de qualquer player.
-        """
-        if not self._playing or not self._has_sound:
+    def _on_tick(self) -> None:
+        if not self._playing:
             return
-        position = self._audio.position
-        self._timeline.set_position(position)
-        self._update_time_labels()
-
-        clip = self._clip_at(position)
-        if clip is None or position >= clip.end:
-            self._advance_clip(position)
-            return
-
-        # A imagem se corrige contra o som quando os dois se afastam demais.
-        drift = abs(self._shown_frame - position)
-        agora = self._audio.position
-        if (
-            self._has_video
-            and drift > _MAX_DRIFT
-            and agora - self._resynced_at > _RESYNC_COOLDOWN
-        ):
-            self._resynced_at = agora
-            self._start_frames(position, clip.end)
-
-    def _advance_clip(self, position: float) -> None:
-        """Salta o que foi apagado e segue no trecho seguinte."""
-        following = next(
-            (clip for clip in self._timeline.clips if clip.start > position), None
-        )
-        if following is None:
+        if self._audio.playing:
+            position = self._audio.position
+            self._timeline.set_position(position)
+            self._update_time_labels()
+            drift = abs(self._shown_frame - position)
+            if (
+                self._has_video
+                and drift > _MAX_DRIFT
+                and position - self._resynced_at > _RESYNC_COOLDOWN
+            ):
+                self._resynced_at = position
+                self._start_frames(position)
+        if self._position >= self._duration - 1e-3:
             self._stop_playback()
-            return
-        self._timeline.set_position(following.start)
-        if self._has_sound:
-            self._audio.seek(following.start)
-            self._start_frames(following.start, following.end)
-        else:
-            self._start_playback(following.start)
 
     def _on_playback_done(self, token: int) -> None:
-        """O fluxo de quadros acabou.
-
-        Sem som, é este o sinal de que o trecho terminou — o fluxo é o único
-        relógio que existe. Com som, quem decide a passagem de trecho é o tique
-        do áudio, e aqui não há nada a fazer: os quadros acabaram porque o
-        trecho está no fim, ou porque uma correção de sincronia trocou o fluxo.
-        """
-        if token != self._play_token or not self._playing or self._has_sound:
+        """O fluxo de quadros acabou: sem som, é ele quem diz que terminou."""
+        if token != self._play_token or not self._playing or self._audio.playing:
             return
-        self._advance_clip(self._position)
+        self._stop_playback()
 
     def _stop_playback(self) -> None:
         self._tick.stop()
-        self._audio.pause()
+        self._audio.stop()
         if self._playback is not None:
             self._playback.cancel()
             self._playback = None
         if self._playing:
             self._playing = False
             self._play_token = 0
-            # O quadro parado é pedido de novo: o último quadro do fluxo é o de
-            # onde a reprodução parou, mas em tamanho e instante aproximados.
             self._request_frame(force=True)
         self._refresh_play_button()
 
     def _refresh_play_button(self) -> None:
-        """Ícone e dica do botão central, que muda de papel conforme o estado."""
         self._play_button.setEnabled(self._playable)
         self._play_button.setText("❚❚" if self._playing else "▶")
         if not self._playable:
@@ -1251,108 +1529,46 @@ class EditPanel(QWidget):
         self._play_button.setToolTip(f"{label}  (Espaço)")
 
     # ------------------------------------------------------------------
-    # Edição dos trechos
+    # Tela cheia
     # ------------------------------------------------------------------
 
-    def _clip_at(self, seconds: float) -> Segment | None:
-        return next(
-            (clip for clip in self._timeline.clips if clip.contains(seconds)), None
+    def _toggle_fullscreen(self) -> None:
+        if self._on_fullscreen:
+            self._fullscreen.close()
+            return
+        if not self._has_video:
+            return
+        if self._fullscreen is None:
+            self._fullscreen = FullscreenPreview(self)
+            self._fullscreen.play_toggled.connect(self._toggle_play)
+            self._fullscreen.stepped.connect(self._step_frame)
+            self._fullscreen.seeked.connect(self._scrub_to)
+            self._fullscreen.seek_finished.connect(self._resume_after_scrub)
+            self._fullscreen.volume_changed.connect(self._volume.setValue)
+            self._fullscreen.mute_toggled.connect(self._mute.setChecked)
+            self._fullscreen.closed.connect(self._restart_frames)
+
+        self._fullscreen.set_audio(
+            self._has_sound, self._volume.value(), self._mute.isChecked()
         )
+        self._fullscreen.showFullScreen()
+        self._fullscreen.activateWindow()
+        self._fullscreen.setFocus()
+        self._sync_fullscreen()
+        self._restart_frames()
 
-    def _remember(self) -> None:
-        """Guarda o estado atual para o desfazer."""
-        self._history.append(self._timeline.clips)
-        self._future.clear()
-        del self._history[:-50]
+    def _restart_frames(self) -> None:
+        if self._playing:
+            self._start_frames(self._position)
+        else:
+            self._request_frame(force=True)
 
-    def _split_here(self) -> None:
-        """A tesoura: divide no cursor o trecho que estiver embaixo dele."""
-        clips = self._timeline.clips
-        position = self._position
-        index = next(
-            (i for i, clip in enumerate(clips) if clip.contains(position)), -1
-        )
-        if index < 0:
-            return
-        pieces = clips[index].split_at(position)
-        if len(pieces) == 1:
-            return  # cursor colado na ponta: não há o que dividir
-        self._remember()
-        self._timeline.set_clips(
-            clips[:index] + pieces + clips[index + 1:], selected=index + 1
-        )
-        self._after_edit()
-
-    def _delete_selected(self) -> None:
-        clips = self._timeline.clips
-        index = self._timeline.selected
-        if not 0 <= index < len(clips):
-            return
-        self._remember()
-        self._timeline.set_clips(
-            clips[:index] + clips[index + 1:], selected=min(index, len(clips) - 2)
-        )
-        self._after_edit()
-
-    def _undo_edit(self) -> None:
-        if not self._history:
-            return
-        self._future.append(self._timeline.clips)
-        self._timeline.set_clips(self._history.pop())
-        self._after_edit()
-
-    def _redo_edit(self) -> None:
-        if not self._future:
-            return
-        self._history.append(self._timeline.clips)
-        self._timeline.set_clips(self._future.pop())
-        self._after_edit()
-
-    def _on_clips_edited(self) -> None:
-        self._after_edit()
-        self._request_frame(force=True)
-
-    def _after_edit(self) -> None:
-        self._sync_clip_fields()
-        self._update_controls()
-
-    def _mark(self, edge: str) -> None:
-        """Move a ponta do trecho selecionado para o cursor (teclas I e O)."""
-        self._move_edge(edge, self._position)
-
-    def _apply_field(self, edge: str) -> None:
-        """Aplica o timecode digitado à ponta correspondente."""
-        field = self._start_field if edge == "inicio" else self._end_field
-        value = parse_timecode(field.text())
-        if value is None:
-            self._sync_clip_fields()  # devolve o valor válido de antes
-            return
-        self._move_edge(edge, min(max(0.0, value), self._duration))
-
-    def _move_edge(self, edge: str, seconds: float) -> None:
-        """Caminho único das duas formas de mover uma ponta sem arrastar.
-
-        Quem decide até onde a ponta pode ir é a linha do tempo, que é dona dos
-        trechos e conhece os vizinhos — a mesma regra do arrasto da alça.
-        """
-        if self._timeline.selected_clip is None:
-            return
-        self._remember()
-        if not self._timeline.set_edge(self._timeline.selected, edge, seconds):
-            self._history.pop()
-            return
-        self._after_edit()
-
-    def _sync_clip_fields(self) -> None:
-        clip = self._timeline.selected_clip
-        self._start_field.setText(format_timecode(clip.start) if clip else "")
-        self._end_field.setText(format_timecode(clip.end) if clip else "")
-        self._duration_label.setText(
-            format_span(clip.duration) if clip else strings.EDIT_CLIP_NONE
-        )
+    def _sync_fullscreen(self) -> None:
+        if self._on_fullscreen:
+            self._fullscreen.set_state(self._position, self._duration, self._playing)
 
     # ------------------------------------------------------------------
-    # Zoom e barra de rolagem
+    # Zoom e rolagem
     # ------------------------------------------------------------------
 
     def _zoom(self, factor: float) -> None:
@@ -1366,8 +1582,6 @@ class EditPanel(QWidget):
             self._scroll.setPageStep(int(span * 1000))
             self._scroll.setRange(0, max(0, int((self._duration - span) * 1000)))
             self._scroll.setValue(int(start * 1000))
-            # Sem trecho escondido não há o que rolar: a barra fica desabilitada
-            # em vez de sumir, para a linha do tempo não pular de altura.
             self._scroll.setEnabled(span < self._duration)
         finally:
             self._syncing = False
@@ -1383,82 +1597,84 @@ class EditPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _on_mode_changed(self) -> None:
-        fast = self._fast.isChecked()
-        self._timeline.set_show_keyframes(fast)
-        # Juntar trechos exige recodificar: no modo rápido a opção sai de cena
-        # em vez de falhar depois, já com a tarefa na fila.
-        allowed = not fast or len(self._timeline.clips) < 2
-        self._join.setEnabled(allowed)
-        if not allowed and self._join.isChecked():
-            self._each.setChecked(True)
-        self._update_plan()
+        self._timeline.update()
+        self._refresh_plan()
 
-    def _current_target(self, segments: tuple[Segment, ...]) -> TrimTarget:
-        mode = CutMode.FAST if self._fast.isChecked() else CutMode.EXACT
-        anchor = (
-            keyframe_at_or_before(self._keyframes, segments[0].start)
-            if mode is CutMode.FAST and segments
-            else None
-        )
+    def _fast_available(self) -> bool:
+        """O corte sem recodificar só sobrevive enquanto a edição for um recorte.
+
+        Um arquivo, blocos na ordem, nenhum volume mexido, nada sobreposto: é o
+        caso em que copiar os dados ainda produz o resultado pedido. Qualquer
+        montagem além disso precisa de composição, e composição recodifica.
+        """
+        segments = simple_trim(self._project)
+        return bool(segments) and len(segments) == 1
+
+    def _trim_target(self) -> TrimTarget | None:
+        segments = simple_trim(self._project)
+        if not segments or len(segments) != 1:
+            return None
+        clip = self._project.clips[0]
+        anchor = keyframe_at_or_before(self._keyframes, segments[0].start)
         return TrimTarget(
             segments=segments,
-            container=self._container(),
-            mode=mode,
+            container=clip.media.path.suffix.lstrip(".").lower() or "mp4",
+            mode=CutMode.FAST,
             anchor=anchor,
+            hardware=self._settings.hardware_encoder,
         )
 
-    def _container(self) -> str:
-        """O recorte preserva o formato da origem.
+    def _main_clip(self) -> Clip | None:
+        """O bloco que dá nome e formato à saída.
 
-        Trocar de container é o trabalho da aba de conversão, e misturá-lo aqui
-        traria de volta a pergunta que o recorte não precisa fazer: o codec de
-        origem cabe no formato novo?
+        É o primeiro da trilha de vídeo **mais baixa** — a principal, onde fica
+        o material de base. Pegar o primeiro bloco de qualquer trilha faria uma
+        montagem inteira herdar o nome de uma foto sobreposta.
         """
-        suffix = self._media.path.suffix.lstrip(".").lower() if self._media else "mp4"
-        return suffix or "mp4"
+        for track in reversed(self._project.video_tracks):
+            if track.clips:
+                return track.sorted_clips()[0]
+        clips = self._project.clips
+        return clips[0] if clips else None
 
-    def _export_targets(self) -> list[tuple[TrimTarget, str]]:
-        """Os pedidos a enfileirar, com o sufixo do nome de cada arquivo."""
-        clips = self._timeline.clips
-        if not clips:
-            return []
-        # Com um trecho só as duas opções dão no mesmo: um arquivo, sem junção.
-        joining = self._join.isChecked() and self._join.isEnabled()
-        if joining or len(clips) == 1:
-            return [(self._current_target(clips), strings.EDIT_SUFFIX_ONE)]
-        return [
-            (
-                self._current_target((clip,)),
-                strings.EDIT_SUFFIX_MANY.format(index=number),
-            )
-            for number, clip in enumerate(clips, start=1)
-        ]
+    def _container(self) -> str:
+        video = self._main_clip()
+        if video is None or not video.media.has_video:
+            return "m4a"
+        suffix = video.media.path.suffix.lstrip(".").lower()
+        # Uma imagem não dá container de saída: um projeto que começa por foto
+        # sai em mp4, que é o que qualquer aparelho abre.
+        return "mp4" if not suffix or video.media.kind is MediaKind.IMAGE else suffix
 
-    def _update_plan(self) -> None:
-        targets = self._export_targets()
-        if self._media is None or not targets:
+    def _refresh_plan(self) -> None:
+        fast = self._fast.isChecked() and self._fast_available()
+        if self._project.is_empty:
             self._plan.setText("")
             self._warning.setVisible(False)
             self._export.setEnabled(False)
-            self.changed.emit()
             return
 
-        first = targets[0][0]
-        plan = describe_trim(self._media, first)
-        if len(targets) > 1:
-            plan = f"{len(targets)} arquivos · {plan}"
+        if fast:
+            target = self._trim_target()
+            plan = strings.EDIT_PLAN_FAST.format(
+                container=target.container,
+                duration=format_span(target.output_duration),
+            )
+            self._warning.setText(self._drift_text(target))
+        else:
+            plan = describe_export(
+                self._project, self._container(), self._settings.hardware_encoder
+            )
+            self._warning.setText(
+                "" if self._fast_available() else strings.EDIT_FAST_UNAVAILABLE
+                if self._fast.isChecked()
+                else ""
+            )
         self._plan.setText(strings.EDIT_PLAN.format(plan=plan))
-
-        self._warning.setText(self._warning_text(first))
         self._warning.setVisible(bool(self._warning.text()))
         self._export.setEnabled(True)
-        self.changed.emit()
 
-    def _warning_text(self, target: TrimTarget) -> str:
-        if target.mode is not CutMode.FAST:
-            return ""
-        if len(self._timeline.clips) > 1:
-            return strings.EDIT_JOIN_NEEDS_REENCODE
+    def _drift_text(self, target: TrimTarget) -> str:
         if target.anchor is None:
             return ""
         if target.drift < frame_step(self._fps):
@@ -1467,86 +1683,169 @@ class EditPanel(QWidget):
             time=format_timecode(target.anchor), delta=format_span(target.drift)
         )
 
-    def _update_controls(self) -> None:
-        loaded = self._media is not None
-        clips = self._timeline.clips
-        for widget in (
-            *self._buttons,
-            *self._mark_buttons,
-            self._split,
-            self._delete,
-            self._start_field,
-            self._end_field,
-            self._timeline,
-            self._scroll,
-        ):
-            widget.setEnabled(loaded)
-        if loaded:
-            for button in (self._prev_key, self._next_key):
-                button.setEnabled(bool(self._keyframes))
-        self._refresh_play_button()
-        # O controle de volume some de cena quando não há som para controlar —
-        # arquivo sem trilha de áudio, ou pacote sem o módulo de multimídia.
-        for widget in (self._mute, self._volume):
-            widget.setEnabled(self._has_sound)
-        # Sem imagem não há o que ampliar.
-        self._fullscreen_button.setEnabled(loaded and self._has_video)
-        if self._on_fullscreen:
-            self._fullscreen.set_audio(
-                self._has_sound, self._volume.value(), self._mute.isChecked()
-            )
-        self._undo.setEnabled(bool(self._history))
-        self._redo.setEnabled(bool(self._future))
-        self._delete.setEnabled(loaded and len(clips) > 1)
-        self._count_label.setText(
-            strings.EDIT_CLIP_COUNT.format(
-                count=len(clips),
-                duration=format_span(sum(clip.duration for clip in clips)),
-            )
-            if loaded
-            else ""
-        )
-        self._open.setText(strings.EDIT_REPLACE if loaded else strings.EDIT_OPEN)
-        self._lock_readouts()
-        self._update_time_labels()
-        self._sync_clip_fields()
-        self._sync_scrollbar()
-        self._on_mode_changed()
-
     def _enqueue(self) -> None:
-        if self._media is None:
-            return
         tools = self._ensure_tools()
         if tools is None:
             return
-        targets = self._export_targets()
-        if not targets:
+        if self._project.is_empty:
             QMessageBox.information(
                 self, strings.DIALOG_WARNING_TITLE, strings.EDIT_NO_CLIPS
             )
             return
 
-        dest_dir = (
-            None
-            if self._same_folder.isChecked()
-            else self._settings.resolved_download_dir()
+        main = self._main_clip()
+        source = main.media.path if main else self._project.clips[0].media.path
+        local = self._probed.get(source)
+        if local is None:
+            try:
+                local = probe_file(source, tools)
+            except VideoManagerError as exc:
+                QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(exc))
+                return
+
+        fast = self._fast.isChecked() and self._fast_available()
+        target = self._trim_target() if fast else Composition(
+            self._project, self._container(), self._settings.hardware_encoder
         )
-        jobs: list[Job] = []
-        for target, suffix in targets:
-            destination = output_path(self._media.path, target, dest_dir, suffix)
-            jobs.append(
-                Job(
-                    url=str(self._media.path),
-                    title=destination.name,
-                    description=describe_trim(self._media, target),
-                    kind=JobKind.TRIM,
-                    opts={
-                        "media": self._media,
-                        "target": target,
-                        "destination": destination,
-                        "tools": tools,
-                    },
-                    warnings=(self._warning.text(),) if self._warning.text() else (),
+        dest_dir = (
+            None if self._same_folder.isChecked() else self._settings.resolved_download_dir()
+        )
+        destination = output_path(
+            source,
+            target,
+            dest_dir,
+            strings.EDIT_SUFFIX_ONE if fast else strings.EDIT_SUFFIX_EDIT,
+        )
+        job = Job(
+            url=str(source),
+            title=destination.name,
+            description=(
+                strings.EDIT_PLAN_FAST.format(
+                    container=target.container,
+                    duration=format_span(target.output_duration),
                 )
+                if fast
+                else describe_export(
+                    self._project, self._container(), self._settings.hardware_encoder
+                )
+            ),
+            kind=JobKind.TRIM,
+            opts={
+                "media": local,
+                "target": target,
+                "destination": destination,
+                "tools": tools,
+            },
+            warnings=(self._warning.text(),) if self._warning.text() else (),
+        )
+        self.jobs_ready.emit([job])
+
+    # ------------------------------------------------------------------
+    # Sincronização geral
+    # ------------------------------------------------------------------
+
+    def shutdown(self) -> None:
+        """Encerra o que a aba deixou rodando fora do processo.
+
+        A prévia mantém até dois ffmpeg vivos — o fluxo de quadros e o da
+        mixagem —, e eles não morrem só porque a janela fechou: ficariam
+        consumindo CPU até perceberem o cano fechado. Fechar a janela é o
+        último momento em que alguém pode mandá-los parar.
+        """
+        self._stop_playback()
+        for clip_id in list(self._strip_workers):
+            self._cancel_strip(clip_id)
+        if self._fullscreen is not None:
+            self._fullscreen.close()
+
+    def apply_settings(self, settings: Settings) -> None:
+        """Adota as preferências recém-salvas pelo diálogo de configurações."""
+        self._settings = settings
+        self._audio.set_volume(settings.preview_volume)
+        self._audio.set_muted(settings.preview_muted)
+        self._volume.setValue(settings.preview_volume)
+        self._mute.setChecked(settings.preview_muted)
+
+    def _refresh_all(self) -> None:
+        self._timeline.set_project(self._project)
+        self._refresh_controls()
+        self._refresh_clip_fields()
+
+    def _refresh_controls(self) -> None:
+        loaded = not self._project.is_empty
+        clip = self._timeline.selected_clip
+        for widget in (*self._buttons, self._scroll):
+            widget.setEnabled(loaded)
+        self._insert.setEnabled(bool(self._pool))
+        for field in (self._start_field, self._end_field):
+            field.setEnabled(clip is not None)
+        # Volume e mudo só onde há som para ajustar. Num bloco cujo áudio foi
+        # separado eles ficam desligados de propósito: o som agora é o do outro
+        # bloco, e é lá que ele se ajusta — oferecer o controle aqui seria
+        # oferecer um botão que não faz nada.
+        adjustable = clip is not None and clip.can_adjust_sound
+        self._gain.setEnabled(adjustable)
+        self._clip_mute.setEnabled(adjustable)
+        tip = (
+            strings.EDIT_GAIN_DETACHED
+            if clip is not None and clip.detached
+            else strings.EDIT_GAIN_TIP
+        )
+        self._gain.setToolTip(tip)
+        self._clip_mute.setToolTip(
+            tip if clip is not None and clip.detached else strings.EDIT_CLIP_MUTE_TIP
+        )
+
+        for button in (self._prev_key, self._next_key):
+            button.setEnabled(bool(self._keyframes) and self._fast_available())
+        self._refresh_play_button()
+        for widget in (self._mute, self._volume):
+            widget.setEnabled(self._audio.available)
+        self._fullscreen_button.setEnabled(self._has_video)
+        self._collapse.setEnabled(True)
+
+        self._fast.setEnabled(self._fast_available())
+        if not self._fast_available() and self._fast.isChecked():
+            self._fast.setChecked(False)
+
+        self._count_label.setText(
+            strings.EDIT_TRACK_COUNT.format(
+                tracks=len(self._project.tracks),
+                clips=len(self._project.clips),
+                duration=format_span(self._duration),
             )
-        self.jobs_ready.emit(jobs)
+            if loaded
+            else ""
+        )
+        self._lock_readouts()
+        self._update_time_labels()
+        self._sync_scrollbar()
+        self._refresh_plan()
+        self._scan_keyframes()
+
+    def _scan_keyframes(self) -> None:
+        """Mapeia os keyframes da mídia única, quando ainda houver uma só.
+
+        Só o corte rápido usa isso, e ele só existe enquanto a edição for um
+        recorte de um arquivo — daí o mapeamento não acontecer numa montagem com
+        várias mídias, onde não teria uso.
+        """
+        if not self._fast_available():
+            return
+        source = self._project.clips[0].media.path
+        if source == self._keyframe_source:
+            return
+        tools = self._ensure_tools()
+        if tools is None:
+            return
+        self._keyframe_source = source
+        worker = KeyframeWorker(source, tools)
+        worker.signals.keyframes.connect(self._on_keyframes)
+        self._runner.start(worker, worker.signals.done)
+
+    def _on_keyframes(self, times: object) -> None:
+        self._keyframes = tuple(times) if isinstance(times, tuple) else ()
+        for button in (self._prev_key, self._next_key):
+            button.setEnabled(bool(self._keyframes) and self._fast_available())
+        self._refresh_plan()
+
