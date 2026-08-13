@@ -90,9 +90,18 @@ class TestVideo:
     def test_cada_bloco_e_ajustado_a_tela(self) -> None:
         # Um vídeo de outro tamanho entra inteiro, com tarja, em vez de esticado.
         texto = filtros(projeto(video_track(clip(OUTRO))))
-        assert "scale=1920:1080:force_original_aspect_ratio=decrease" in texto
         assert "pad=1920:1080" in texto
         assert "setsar=1" in texto
+
+    def test_o_encaixe_mede_a_forma_exibida_e_nao_a_guardada(self) -> None:
+        # ``force_original_aspect_ratio`` mede a proporção em pixels guardados e
+        # ignora a proporção do pixel: com o ``setsar=1`` logo depois, um rip de
+        # DVD (720×480 exibido em 16:9) saía achatado. ``dar`` é a proporção de
+        # exibição, que já traz o pixel embutido.
+        texto = filtros(projeto(video_track(clip(OUTRO))))
+        assert "min(1920,1080*dar)" in texto
+        assert "min(1080,1920/dar)" in texto
+        assert "force_original_aspect_ratio" not in texto
 
     def test_bloco_entra_no_instante_em_que_foi_colocado(self) -> None:
         texto = filtros(projeto(video_track(clip(start=4.0, duration=6.0))))

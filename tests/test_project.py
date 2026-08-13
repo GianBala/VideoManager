@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from videomanager.core.converter import LocalMedia, LocalStream
 from videomanager.core.project import (
     IMAGE_DURATION,
     Clip,
@@ -22,7 +23,9 @@ from videomanager.core.project import (
     Track,
     TrackKind,
     accepts,
+    display_width,
     fit_canvas,
+    media_ref,
     new_project,
 )
 
@@ -107,6 +110,42 @@ class TestTela:
         )
         projeto = fit_canvas(new_project(), estranho)
         assert projeto.width % 2 == 0 and projeto.height % 2 == 0
+
+
+class TestPixelNaoQuadrado:
+    """Mídia que guarda a imagem espremida — rip de DVD, filmadora antiga.
+
+    O arquivo tem 720×480 e um pixel 32:27 que manda exibir em 16:9. Medindo só
+    a largura guardada, a edição nascia com a proporção errada e a imagem
+    achatada, sem nada falhar.
+    """
+
+    def midia(self, sar: float | None) -> LocalMedia:
+        return LocalMedia(
+            path=Path("/m/dvd.mpg"),
+            duration=60.0,
+            format_name="mpeg",
+            size=None,
+            streams=(
+                LocalStream(
+                    index=0, kind="video", codec="mpeg2video", width=720,
+                    height=480, fps=29.97, sar=sar,
+                ),
+            ),
+        )
+
+    def test_a_largura_guardada_vira_a_de_exibicao(self) -> None:
+        assert display_width(720, 32 / 27) == 854
+        assert media_ref(self.midia(32 / 27)).width == 854
+
+    def test_pixel_quadrado_nao_mexe_em_nada(self) -> None:
+        assert display_width(1920, 1.0) == 1920
+        assert media_ref(self.midia(1.0)).width == 720
+
+    def test_pixel_desconhecido_e_tratado_como_quadrado(self) -> None:
+        # É o que o ffmpeg faz, e a conta tem de concordar com ele.
+        assert display_width(1920, None) == 1920
+        assert media_ref(self.midia(None)).width == 720
 
 
 class TestBloco:

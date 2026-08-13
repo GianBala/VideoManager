@@ -261,6 +261,16 @@ def gerar_video(path: Path, tools, *, duracao: float = 4.0, canais: int = 2) -> 
     return path
 
 
+def _sar_of(stream: dict) -> float:
+    """Proporção do pixel de um stream, como o ffprobe a escreve ("32:27")."""
+    texto = str(stream.get("sample_aspect_ratio") or "1:1")
+    numerador, _, denominador = texto.partition(":")
+    try:
+        return float(numerador) / float(denominador)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 1.0
+
+
 def volume_medio(path: Path, tools) -> float:
     saida = subprocess.run(
         [tools.ffmpeg_str, "-hide_banner", "-nostdin", "-i", str(path),
@@ -344,6 +354,42 @@ class TestExportacaoDaEdicao:
         formato, streams = ffprobe_streams(saida, tools)
         assert float(formato["duration"]) == pytest.approx(8.0, abs=0.2)
         assert stream_of(streams, "audio") is not None
+
+    def test_pixel_nao_quadrado_sai_com_a_forma_certa(self, tmp_path: Path, tools) -> None:
+        """Rip de DVD e filmadora antiga guardam a imagem espremida.
+
+        O arquivo tem 720×480 com pixel 32:27, que manda exibir em 16:9. O
+        encaixe media a proporção em pixels guardados e o ``setsar=1`` logo
+        depois fixava pixel quadrado: a imagem saía 3:2, achatada. Nada falhava
+        — nem duração, nem streams, nem código de saída.
+        """
+        from videomanager.core.composer import Composition
+        from videomanager.core.converter import Converter, probe_file
+        from videomanager.core.project import media_ref, new_project
+
+        origem = tmp_path / "anamorfico.mp4"
+        subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y",
+             "-f", "lavfi", "-i", "testsrc2=size=720x480:rate=30:duration=2",
+             "-vf", "setsar=32/27", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+             str(origem)],
+            check=True,
+        )
+        local = probe_file(origem, tools)
+        assert local.video is not None and local.video.sar == pytest.approx(32 / 27)
+
+        projeto = new_project(media_ref(local))
+        assert projeto.width == 854, "a tela nasce com a forma exibida"
+
+        saida = tmp_path / "corrigido.mp4"
+        Converter(local, Composition(projeto, "mp4"), saida, tools).run()
+        _, streams = ffprobe_streams(saida, tools)
+        video = stream_of(streams, "video")
+        assert video is not None
+        exibido = video["width"] / video["height"] * _sar_of(video)
+        assert exibido == pytest.approx(16 / 9, abs=0.01), (
+            "a fonte é exibida em 16:9 e tem de continuar 16:9"
+        )
 
     def test_previa_de_audio_sai_na_taxa_que_a_placa_espera(
         self, tmp_path: Path, tools
