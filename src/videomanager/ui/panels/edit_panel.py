@@ -96,6 +96,7 @@ from ...workers.preview_worker import (
 from ...workers.runner import WorkerRunner
 from .. import strings
 from ..audio_preview import AudioPreview
+from ..fullscreen_preview import FullscreenPreview
 from ..theme import palette
 from .timeline import (
     FILM_CELL_WIDTH,
@@ -115,6 +116,10 @@ _PREVIEW_MIN_HEIGHT = 160
 # janela maximizada em 1080p sem nunca ser ele o limite — quem manda no tamanho
 # é a altura disponível, senão sobraria tarja preta dos lados de propósito.
 _PREVIEW_MAX_WIDTH = 1280
+# Tetos da tela cheia: o quadro parado vem em resolução de tela, a reprodução
+# vem menor e é ampliada na exibição (ver :meth:`EditPanel._preview_size`).
+_FULLSCREEN_MAX_WIDTH = 1920
+_FULLSCREEN_PLAYING_WIDTH = 1280
 
 # Espera antes de refazer miniaturas e onda depois de mexer no zoom. Um zoom é
 # uma sequência de passos da roda do mouse; sem a pausa, cada passo dispararia
@@ -144,6 +149,9 @@ class _Preview(QLabel):
     de segundo entre redimensionar a janela e o quadro novo chegar.
     """
 
+    # Duplo clique abre a tela cheia, como em qualquer player.
+    double_clicked = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -156,6 +164,9 @@ class _Preview(QLabel):
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(480, _PREVIEW_MIN_HEIGHT)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        self.double_clicked.emit()
 
 
 class EditPanel(QWidget):
@@ -196,9 +207,13 @@ class EditPanel(QWidget):
         self._playing = False
         self._playback: PlaybackWorker | None = None
         self._strip_worker: FilmstripWorker | None = None
+        # Criada na primeira vez que for pedida: quem só recorta sem ampliar
+        # nunca paga por ela.
+        self._fullscreen: FullscreenPreview | None = None
         self._syncing = False
         self._shown_frame = 0.0
         self._resynced_at = 0.0
+        self._resume_wanted = False
 
         # O som sai pelo Qt e a imagem pelo ffmpeg; quem manda no tempo é o som
         # (ver ui/audio_preview.py). O tique lê o relógio do áudio e arrasta a
@@ -255,6 +270,13 @@ class EditPanel(QWidget):
         self._file_label = QLabel(strings.EDIT_NO_FILE)
         self._file_label.setProperty("role", "dim")
         row.addWidget(self._file_label, 1)
+
+        # A tela cheia mora aqui, e não na barra de transporte: lá os botões já
+        # ocupam a largura toda, e esta linha tem espaço sobrando.
+        self._fullscreen_button = QPushButton(strings.EDIT_FULLSCREEN)
+        self._fullscreen_button.setToolTip(strings.EDIT_FULLSCREEN_TIP)
+        self._fullscreen_button.clicked.connect(self._toggle_fullscreen)
+        row.addWidget(self._fullscreen_button)
         return box
 
     def _build_player(self) -> QWidget:
@@ -265,6 +287,7 @@ class EditPanel(QWidget):
         column.setSpacing(6)
 
         self._preview = _Preview()
+        self._preview.double_clicked.connect(self._toggle_fullscreen)
         column.addWidget(self._preview, 1)
         column.addWidget(self._build_transport())
         return box
@@ -584,19 +607,26 @@ class EditPanel(QWidget):
             ("Ctrl+Z", self._undo_edit),
             ("Ctrl+Shift+Z", self._redo_edit),
             ("Ctrl+Y", self._redo_edit),
+            ("F", self._toggle_fullscreen),
+            ("F11", self._toggle_fullscreen),
         ):
             shortcut = QShortcut(QKeySequence(keys), self)
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            shortcut.activated.connect(lambda slot=slot: self._if_not_typing(slot))
+            shortcut.activated.connect(lambda slot=slot: self._dispatch(slot))
 
-    @staticmethod
-    def _if_not_typing(slot: Callable[[], None]) -> None:
-        """Ignora o atalho enquanto o foco está num campo de texto.
+    def _dispatch(self, slot: Callable[[], None]) -> None:
+        """Filtra os atalhos de uma tecla antes de deixá-los agir.
 
-        Sem esta guarda, digitar um timecode dispararia as ações de uma letra
-        por vez — "S" dividiria o trecho no meio da digitação de "0:00:15".
+        Sem a primeira guarda, digitar um timecode dispararia as ações letra a
+        letra — "S" dividiria o trecho no meio da digitação de "0:00:15".
+
+        A segunda existe porque a janela de tela cheia é filha deste painel, e o
+        alcance do atalho a acompanha: sem ela, um Espaço lá seria contado duas
+        vezes, aqui e no player.
         """
         if isinstance(QApplication.focusWidget(), QLineEdit):
+            return
+        if self._on_fullscreen:
             return
         slot()
 
@@ -727,13 +757,28 @@ class EditPanel(QWidget):
     # Prévia
     # ------------------------------------------------------------------
 
-    def _preview_size(self) -> tuple[int, int]:
+    @property
+    def _on_fullscreen(self) -> bool:
+        return self._fullscreen is not None and self._fullscreen.isVisible()
+
+    def _preview_size(self, *, playing: bool = False) -> tuple[int, int]:
+        """Tamanho a pedir ao ffmpeg para a superfície que está à frente.
+
+        Em tela cheia, a reprodução usa um teto menor que o quadro parado. É a
+        mesma troca que os editores fazem com arquivos de prova: decodificar em
+        resolução cheia trinta vezes por segundo custa muito mais do que se
+        ganha numa imagem em movimento, e ao pausar o quadro exato vem inteiro.
+        """
         video = self._media.video if self._media else None
-        area = self._preview.size()
+        area = self._fullscreen.size() if self._on_fullscreen else self._preview.size()
+        if self._on_fullscreen:
+            teto = _FULLSCREEN_PLAYING_WIDTH if playing else _FULLSCREEN_MAX_WIDTH
+        else:
+            teto = _PREVIEW_MAX_WIDTH
         return fit_size(
             video.width if video else None,
             video.height if video else None,
-            min(_PREVIEW_MAX_WIDTH, max(160, area.width())),
+            min(teto, max(160, area.width())),
             max(120, area.height()),
         )
 
@@ -790,6 +835,9 @@ class EditPanel(QWidget):
 
     def _show_frame(self, frame: object) -> None:
         pixmap = pixmap_from_frame(frame.data, frame.width, frame.height)
+        if self._on_fullscreen:
+            self._fullscreen.set_frame(pixmap)
+            return
         area = self._preview.size()
         if pixmap.width() > area.width() or pixmap.height() > area.height():
             pixmap = pixmap.scaled(
@@ -886,8 +934,27 @@ class EditPanel(QWidget):
             return
         self._stop_playback()
         self._timeline.set_position(seconds)
+        # O som acompanha o cursor mesmo parado: sem isto, o play seguinte
+        # começaria pedindo ao player para saltar, e o primeiro instante sairia
+        # do lugar errado.
+        self._audio.seek(self._position)
         self._request_frame()
         self._update_time_labels()
+
+    def _scrub_to(self, seconds: float) -> None:
+        """Arrasto da barra de posição da tela cheia.
+
+        Diferente dos botões de pular quadro ou segundo: ali parar é o
+        esperado, aqui o vídeo deve continuar de onde a barra foi solta — é o
+        que qualquer player faz.
+        """
+        self._resume_wanted = self._resume_wanted or self._playing
+        self._seek_to(seconds)
+
+    def _resume_after_scrub(self) -> None:
+        if self._resume_wanted:
+            self._resume_wanted = False
+            self._start_playback(self._position)
 
     def _nudge(self, seconds: float) -> None:
         self._seek_to(self._position + seconds)
@@ -945,6 +1012,55 @@ class EditPanel(QWidget):
             if self._fps
             else ""
         )
+        self._sync_fullscreen()
+
+    # ------------------------------------------------------------------
+    # Tela cheia
+    # ------------------------------------------------------------------
+
+    def _toggle_fullscreen(self) -> None:
+        if self._on_fullscreen:
+            self._fullscreen.close()
+            return
+        if self._media is None or not self._has_video:
+            return
+
+        if self._fullscreen is None:
+            self._fullscreen = FullscreenPreview(self)
+            self._fullscreen.play_toggled.connect(self._toggle_play)
+            self._fullscreen.stepped.connect(self._step_frame)
+            self._fullscreen.seeked.connect(self._scrub_to)
+            self._fullscreen.seek_finished.connect(self._resume_after_scrub)
+            self._fullscreen.volume_changed.connect(self._volume.setValue)
+            self._fullscreen.mute_toggled.connect(self._mute.setChecked)
+            self._fullscreen.closed.connect(self._on_fullscreen_closed)
+
+        self._fullscreen.set_audio(
+            self._has_sound, self._volume.value(), self._mute.isChecked()
+        )
+        self._fullscreen.showFullScreen()
+        self._fullscreen.activateWindow()
+        self._fullscreen.setFocus()
+        self._sync_fullscreen()
+        # A superfície mudou de tamanho: o que está na tela veio pequeno demais
+        # e é pedido de novo, agora na resolução da tela.
+        self._restart_frames()
+
+    def _on_fullscreen_closed(self) -> None:
+        """Volta a desenhar no painel, no tamanho dele."""
+        self._restart_frames()
+
+    def _restart_frames(self) -> None:
+        """Refaz a imagem para a superfície atual, tocando ou parada."""
+        if self._playing:
+            clip = self._clip_at(self._position)
+            self._start_frames(self._position, clip.end if clip else self._duration)
+        else:
+            self._request_frame(force=True)
+
+    def _sync_fullscreen(self) -> None:
+        if self._on_fullscreen:
+            self._fullscreen.set_state(self._position, self._duration, self._playing)
 
     # ------------------------------------------------------------------
     # Som
@@ -1040,7 +1156,7 @@ class EditPanel(QWidget):
         worker = PlaybackWorker(
             self._media.path,
             seconds,
-            self._preview_size(),
+            self._preview_size(playing=True),
             tools,
             self._play_token,
             stop_at=until,
@@ -1373,6 +1489,12 @@ class EditPanel(QWidget):
         # arquivo sem trilha de áudio, ou pacote sem o módulo de multimídia.
         for widget in (self._mute, self._volume):
             widget.setEnabled(self._has_sound)
+        # Sem imagem não há o que ampliar.
+        self._fullscreen_button.setEnabled(loaded and self._has_video)
+        if self._on_fullscreen:
+            self._fullscreen.set_audio(
+                self._has_sound, self._volume.value(), self._mute.isChecked()
+            )
         self._undo.setEnabled(bool(self._history))
         self._redo.setEnabled(bool(self._future))
         self._delete.setEnabled(loaded and len(clips) > 1)
