@@ -19,6 +19,7 @@ ABOUT_BODY = (
 # --- abas --------------------------------------------------------------------
 TAB_DOWNLOAD = "Download"
 TAB_CONVERT = "Convert"
+TAB_EDIT = "Editar"
 
 # --- menus -------------------------------------------------------------------
 MENU_FILE = "&Arquivo"
@@ -125,6 +126,7 @@ QUEUE_LOG_TITLE = "Detalhes técnicos — {title}"
 # --- status bar --------------------------------------------------------------
 STATUS_COUNTS = "{active} em andamento · {pending} na fila · {done} concluídos"
 STATUS_FFMPEG = "ffmpeg: {source}"
+STATUS_ENQUEUED = "{count} tarefa(s) adicionada(s) à fila — acompanhe na aba Download"
 
 # --- playlist ----------------------------------------------------------------
 PLAYLIST_TITLE = "Selecionar itens da playlist"
@@ -152,6 +154,103 @@ CONVERT_PLAN = "O que vai acontecer: {plan}"
 CONVERT_RESIZE = "Redimensionar para"
 CONVERT_KEEP = "Manter original"
 CONVERT_NO_FILES = "Escolha ao menos um arquivo."
+
+# --- editor de vídeo ---------------------------------------------------------
+EDIT_OPEN = "Abrir vídeo…"
+EDIT_REPLACE = "Trocar arquivo…"
+EDIT_EMPTY = (
+    "Abra um vídeo para recortar.\n"
+    "Você também pode arrastar o arquivo para cá."
+)
+EDIT_FILE_FILTER = (
+    "Vídeo (*.mp4 *.mkv *.webm *.avi *.mov *.flv *.wmv *.m4v *.ts *.mpg *.mpeg);;"
+    "Áudio (*.mp3 *.m4a *.aac *.opus *.ogg *.flac *.wav);;Todos (*)"
+)
+EDIT_NO_FILE = "Nenhum arquivo aberto."
+EDIT_AUDIO_ONLY = (
+    "Arquivo só de áudio.\n"
+    "Use a forma de onda na linha do tempo para achar os pontos de corte."
+)
+EDIT_NO_PLAYBACK = "Não há imagem nem som para reproduzir neste arquivo"
+
+# transporte
+EDIT_PLAY = "Reproduzir"
+EDIT_PAUSE = "Pausar"
+EDIT_TO_START = "Ir para o início"
+EDIT_TO_END = "Ir para o fim"
+EDIT_PREV_FRAME = "Quadro anterior"
+EDIT_NEXT_FRAME = "Próximo quadro"
+EDIT_BACK = "Voltar 1 s"
+EDIT_FORWARD = "Avançar 1 s"
+EDIT_PREV_KEY = (
+    "Keyframe anterior — o ponto de corte rápido mais próximo antes do cursor"
+)
+EDIT_NEXT_KEY = "Próximo keyframe — o ponto de corte rápido logo à frente"
+EDIT_PREV_KEY_SHORT = "◁ keyframe"
+EDIT_NEXT_KEY_SHORT = "keyframe ▷"
+EDIT_POSITION = "{current}  /  {total}"
+EDIT_FRAME_NUMBER = "quadro {index}"
+EDIT_VOLUME = "Volume da prévia"
+EDIT_MUTE = "Silenciar"
+EDIT_UNMUTE = "Voltar o som"
+EDIT_SOUND = "♪"
+EDIT_MUTED = "✕"
+
+# barra da linha do tempo
+EDIT_SPLIT = "Dividir"
+EDIT_DELETE = "Excluir trecho"
+EDIT_UNDO = "Desfazer"
+EDIT_REDO = "Refazer"
+EDIT_ZOOM_IN = "Aproximar"
+EDIT_ZOOM_OUT = "Afastar"
+EDIT_ZOOM_FIT = "Ver tudo"
+EDIT_TIMELINE_HINT = (
+    "Arraste o cursor para navegar · roda do mouse aproxima · Shift+roda desloca · "
+    "arraste as pontas do trecho para ajustar"
+)
+
+# trecho selecionado
+EDIT_CLIP_START = "Início"
+EDIT_CLIP_END = "Fim"
+EDIT_CLIP_NONE = "Nenhum trecho selecionado."
+EDIT_CLIP_COUNT = "{count} trecho(s) · {duration} no total"
+EDIT_MARK_START = "Trazer o início do trecho para o cursor"
+EDIT_MARK_END = "Trazer o fim do trecho para o cursor"
+EDIT_MARK_HERE = "Marcar ({key})"
+EDIT_FIELD_TIP = "Tempo no formato h:mm:ss,mmm — digite e pressione Enter"
+
+# exportação
+EDIT_EXPORT_LABEL = "Exportar:"
+EDIT_CUT_LABEL = "Corte:"
+EDIT_OUTPUT_JOIN = "Um vídeo só (junta os trechos)"
+EDIT_OUTPUT_EACH = "Um arquivo por trecho"
+EDIT_MODE_EXACT = "Corte exato (recodifica)"
+EDIT_MODE_FAST = "Corte rápido (sem recodificar)"
+EDIT_MODE_TIP = (
+    "Vídeo comprimido só pode ser cortado sem recodificar em um keyframe, que "
+    "aparece a cada poucos segundos.\n"
+    "O corte exato começa no quadro marcado, mas recodifica o trecho — leva "
+    "tempo e custa um pouco de qualidade.\n"
+    "O corte rápido copia os dados como estão: sai em segundos e sem perda "
+    "nenhuma, mas começa no keyframe anterior ao ponto marcado."
+)
+EDIT_PLAN = "O que vai acontecer: {plan}"
+EDIT_DRIFT = (
+    "Sem recodificar, o corte vai começar em {time} — {delta} antes do ponto "
+    "marcado."
+)
+EDIT_DRIFT_NONE = (
+    "O ponto marcado cai num keyframe: mesmo sem recodificar, o corte sai exato."
+)
+EDIT_JOIN_NEEDS_REENCODE = (
+    "Juntar vários trechos num arquivo só exige recodificar; com o corte rápido, "
+    "cada trecho vira um arquivo."
+)
+EDIT_SAME_FOLDER = "Salvar na mesma pasta do arquivo original"
+EDIT_EXPORT = "Adicionar à fila"
+EDIT_NO_CLIPS = "Não sobrou nenhum trecho para exportar."
+EDIT_SUFFIX_ONE = " (corte)"
+EDIT_SUFFIX_MANY = " (corte {index})"
 
 # --- configurações -----------------------------------------------------------
 SETTINGS_TITLE = "Configurações"
