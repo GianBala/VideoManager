@@ -81,6 +81,12 @@ def plan_segments(composition: Composition) -> int:
 # fatia pequena evita a barra parar em 100% enquanto ainda há passos por fazer.
 _SEGMENTS_SHARE = 0.92
 
+# Verbo mostrado na fila. Difere do "Exportando" da tabela ``_PHASES`` de
+# ``converter.py`` de propósito: esta exportação custa dezenas de vezes o tempo
+# de uma normal, e dizer **por quê** é o que separa "está travado" de "está
+# fazendo a coisa cara que eu pedi".
+_PHASE = "Interpolando"
+
 
 class ParallelExport:
     """Executa uma :class:`Composition` interpolada em trechos paralelos."""
@@ -126,10 +132,17 @@ class ParallelExport:
 
     def run(self) -> Path:
         self._destination.parent.mkdir(parents=True, exist_ok=True)
-        # O trabalho todo acontece num diretório temporário próprio, e o destino
-        # só recebe arquivo pronto: uma exportação interrompida no meio não pode
+        # O trabalho acontece num diretório temporário próprio, e o destino só
+        # recebe arquivo pronto: uma exportação interrompida no meio não pode
         # deixar meio arquivo com o nome do certo.
-        temp = Path(tempfile.mkdtemp(prefix="videomanager-export-"))
+        #
+        # O temporário fica **ao lado do destino**, e não no do sistema, por dois
+        # motivos. Em muitas distribuições ``/tmp`` é tmpfs, ou seja memória: uma
+        # exportação de vários GB passaria inteira pela RAM, que é exatamente o
+        # recurso que esta aplicação já esgotou uma vez. E o destino pode estar
+        # noutro disco — no Windows quase sempre está —, o que transformaria a
+        # entrega final numa cópia do arquivo inteiro em vez de um rename.
+        temp = Path(tempfile.mkdtemp(prefix=".videomanager-", dir=self._destination.parent))
         try:
             return self._build(temp)
         finally:
@@ -159,15 +172,28 @@ class ParallelExport:
             )
 
         lista = temp / "trechos.txt"
-        # Um caminho por linha, com aspas simples escapadas como o demuxer pede.
+        # **Só o nome do arquivo**, não o caminho inteiro. O demuxer resolve
+        # nomes relativos a partir da pasta da lista, que é esta mesma, e assim a
+        # sintaxe dele nunca encosta no caminho escolhido pelo usuário: uma pasta
+        # chamada "vídeos do joão's" fazia a emenda falhar com "No such file or
+        # directory", porque a aspa simples fecha a string do formato. Os nomes
+        # aqui são gerados logo acima e não têm como conter nada disso.
         lista.write_text(
-            "".join(f"file '{str(p).replace(chr(39), chr(39) * 3)}'\n" for p in partes),
-            encoding="utf-8",
+            "".join(f"file '{p.name}'\n" for p in partes), encoding="utf-8"
         )
         video = temp / f"video.{self._composition.container}"
         self._step(concat_args(lista, video, self._tools), "emendar os trechos")
+        # Os trechos já viraram um arquivo só: mantê-los até o fim dobraria o
+        # espaço que a exportação ocupa no pico, sem servir para nada.
+        for parte in partes:
+            parte.unlink(missing_ok=True)
 
-        som = temp / "som.m4a"
+        # O som intermediário vai no **mesmo container** da saída, e não num
+        # ".m4a" fixo: o codec é escolhido a partir do container (um .webm sai
+        # em Opus), e Opus não cabe num .m4a. Com o nome fixo, exportar um
+        # .webm interpolado falhava na hora de gerar o som — e só ele, porque o
+        # caminho serial escreve tudo num arquivo só e nunca passa por aqui.
+        som = temp / f"som.{self._composition.container}"
         args = audio_only_args(
             self._composition.project, som, self._tools,
             container=self._composition.container,
@@ -268,7 +294,7 @@ class ParallelExport:
         percent = min(100.0, seconds * 100.0 * share / duracao) if duracao else None
         self._on_progress(
             Progress(
-                phase="Interpolando",
+                phase=_PHASE,
                 percent=percent,
                 downloaded_bytes=None,
                 indeterminate=percent is None,
