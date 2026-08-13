@@ -51,3 +51,20 @@ class ConvertSignals(QObject):
     finished = Signal(int, object)  # job_id, Path
     failed = Signal(int, str)
     cancelled = Signal(int)
+
+
+class PreviewSignals(QObject):
+    """Imagens da aba de edição, prontas para a tela.
+
+    ``token`` identifica o pedido: navegar arrasta o cursor e dispara vários
+    pedidos por segundo, e sem ele um quadro de um pedido antigo chegaria depois
+    do atual e apareceria na tela como um salto para trás.
+    """
+
+    frame = Signal(int, object)  # token, RawFrame
+    strip = Signal(int, int, object)  # token, índice na tira, RawFrame
+    waveform = Signal(int, bytes)  # token, PNG
+    keyframes = Signal(object)  # tuple[float, ...]
+    # Emitido sempre, inclusive em falha: é por ele que o WorkerRunner solta a
+    # referência do worker (ver workers/runner.py).
+    done = Signal()
