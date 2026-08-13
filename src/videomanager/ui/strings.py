@@ -301,8 +301,9 @@ EDIT_INTERPOLATE = "Interpolar movimento"
 EDIT_INTERPOLATE_TIP = (
     "Inventa os quadros que faltam, em vez de repetir os que existem: é a "
     "única forma de um material de 24 fps sair de fato mais fluido a 60.\n"
-    "Custa caro — medido, 38 vezes o tempo de exportação — e o que ela inventa "
-    "aparece: movimento rápido, oclusão e corte de cena saem deformados.\n"
+    "Custa caro — medido, de 17 a 45 vezes o tempo de exportação, conforme a "
+    "máquina possa ou não dividir o trabalho — e o que ela inventa aparece: "
+    "movimento rápido, oclusão e corte de cena saem deformados.\n"
     "A prévia continua mostrando os quadros repetidos; interpolar em tempo "
     "real não caberia no ritmo da reprodução."
 )
@@ -310,9 +311,10 @@ EDIT_INTERPOLATE_OFF = (
     "Só há o que interpolar quando algum bloco está abaixo da taxa da tela."
 )
 EDIT_INTERPOLATE_WARN = (
-    "Interpolar multiplica o tempo da exportação (medido: 38×), deforma o que "
-    "se move depressa e reserva cerca de {memory} de memória — reduza a tela se "
-    "for demais para esta máquina."
+    "Interpolar multiplica o tempo da exportação (medido: 17× dividindo o "
+    "trabalho entre os núcleos, 45× sem dividir), deforma o que se move "
+    "depressa e reserva cerca de {memory} de memória — reduza a tela se for "
+    "demais para esta máquina."
 )
 
 # exportação
