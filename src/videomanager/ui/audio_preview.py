@@ -1,123 +1,251 @@
-"""Som da prévia da aba de edição.
+"""Som da prévia: a mixagem do projeto, tocada enquanto se edita.
 
-**Por que o áudio vem do Qt e a imagem vem do ffmpeg.** As duas exigências são
-opostas. A imagem precisa ser o **quadro exato** do corte, e um player entrega o
-quadro que conseguir — daí o ffmpeg desenhar cada quadro (ver ``core/preview``).
-O som precisa sair **contínuo e no ritmo certo**, alimentando a placa de áudio
-sem falhas de milissegundos, que é justamente o que um ``QMediaPlayer`` faz e o
-que um cano de processo externo não faz sem um mixador próprio.
+**O que sai pelos alto-falantes é a mesma mixagem que o arquivo exportado vai
+ter** — todas as trilhas somadas, com o volume em decibéis de cada bloco e os
+mudos aplicados. Isso é possível porque quem mistura é o ffmpeg, com o mesmo
+grafo da exportação (ver ``core/composer.py``), e aqui só se toca o PCM que sai
+dele. Um player de arquivo não daria conta: ele abre **um** arquivo, e uma
+edição com duas trilhas de áudio não é um arquivo.
 
-Juntar os dois exige um relógio, e o relógio é o **áudio**: ouvido nota um
-engasgo de 20 ms no som e não nota um quadro repetido na imagem. Então o
-``position()`` deste player é a posição da reprodução, e a imagem se corrige
-contra ele (ver ``EditPanel._on_audio_tick``).
+**O caminho é um cano com pressão de volta.** Uma thread lê o ffmpeg em pedaços
+e enfileira; um temporizador na interface despeja no ``QAudioSink`` só o que
+couber na fila dele. A thread nunca escreve na placa e a interface nunca lê do
+cano — que é o que impede um ffmpeg lento de congelar a janela. A fila é curta
+de propósito: cheia, ela segura o ffmpeg, em vez de deixar a memória crescer com
+áudio que só vai tocar daqui a dez minutos.
 
-**Nada aqui pode derrubar a aba.** O módulo de multimídia do Qt pode faltar no
-pacote, o sistema pode não ter servidor de som, o arquivo pode não ter trilha de
-áudio: em todos esses casos :attr:`available` é falso e a aba segue funcionando
-com a prévia muda, que é como ela nasceu. Por isso o import fica dentro de um
-``try`` e todo o resto do módulo trata a ausência como estado normal.
+**O relógio da reprodução é este módulo.** ``QAudioSink.processedUSecs()`` conta
+o que a placa realmente consumiu, e é a única medida honesta de "onde a
+reprodução está": o relógio de parede adianta quando o computador não dá conta,
+e o resultado seria imagem à frente do som.
+
+Nada aqui pode derrubar a aba: sem o módulo de multimídia no pacote, sem
+dispositivo de som ou sem trilha audível no projeto, :attr:`available` é falso e
+a prévia toca muda, como nasceu.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import queue
+import subprocess
+import threading
 
-from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
+
+from ..core.binaries import subprocess_kwargs
+from ..core.composer import CHANNELS, SAMPLE_RATE
 
 try:  # pragma: no cover - depende do que foi empacotado
     from PySide6.QtCore import QLoggingCategory
-    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+    from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 
     # O backend de multimídia do Qt despeja a estrutura do arquivo no stderr a
-    # cada abertura — o mesmo ruído que o resto do aplicativo silencia (ver o
-    # logger do yt-dlp em core/probe.py).
+    # cada abertura — o mesmo ruído que o resto do aplicativo silencia.
     QLoggingCategory.setFilterRules("qt.multimedia.ffmpeg*=false")
     MULTIMEDIA_AVAILABLE = True
 except ImportError:  # pragma: no cover
-    QAudioOutput = QMediaPlayer = None  # type: ignore[assignment]
+    QAudioFormat = QAudioSink = QMediaDevices = None  # type: ignore[assignment]
     MULTIMEDIA_AVAILABLE = False
+
+# Tamanho do pedaço lido do ffmpeg. 8 KB são ~42 ms de áudio: pequeno o
+# bastante para a fila reagir depressa a um cancelamento, grande o bastante para
+# não transformar a leitura numa sucessão de chamadas de sistema.
+_CHUNK = 8192
+# Fila curta: cerca de meio segundo de áudio adiantado. Além disso o ffmpeg fica
+# bloqueado escrevendo, que é exatamente o que se quer.
+_QUEUE_CHUNKS = 24
+# De quanto em quanto tempo a interface abastece a placa.
+_FEED_MS = 20
+
+_BYTES_PER_SECOND = SAMPLE_RATE * CHANNELS * 2  # s16le
 
 
 class AudioPreview(QObject):
-    """Trilha de áudio do arquivo em edição, com volume e posição próprios."""
+    """Toca a mixagem do projeto a partir de um instante."""
 
-    # A reprodução terminou sozinha (fim do arquivo) ou falhou.
+    # A reprodução terminou sozinha (o áudio acabou) ou falhou.
     stopped = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._player = None
-        self._output = None
+        self._sink = None
+        self._device = None
+        self._process: subprocess.Popen | None = None
+        self._reader: threading.Thread | None = None
+        self._chunks: queue.Queue[bytes | None] = queue.Queue(_QUEUE_CHUNKS)
+        # Sobra do pedaço que não coube na placa no tique anterior.
+        self._pending: bytes | None = None
+        self._stopping = threading.Event()
+        self._origin = 0.0
+        self._finished = False
+        # Cada início e cada parada abrem uma geração nova. Avisos agendados
+        # numa geração anterior são descartados (ver :meth:`_emit_stopped`).
+        self._generation = 0
         self._volume = 0.7
         self._muted = False
-        self._failed = False
 
-        if not MULTIMEDIA_AVAILABLE:
-            return
-        try:
-            self._player = QMediaPlayer(self)
-            self._output = QAudioOutput(self)
-            self._player.setAudioOutput(self._output)
-            self._player.errorOccurred.connect(self._on_error)
-        except Exception:  # noqa: BLE001 - sem áudio o editor continua servindo
-            self._player = self._output = None
-            self._failed = True
+        self._feed = QTimer(self)
+        self._feed.setInterval(_FEED_MS)
+        self._feed.timeout.connect(self._pump)
 
     # ------------------------------------------------------------------
 
     @property
     def available(self) -> bool:
-        """Se há som para oferecer. Falso desliga o controle de volume na tela."""
-        return self._player is not None and not self._failed
-
-    def _on_error(self, *_: object) -> None:
-        """Uma falha do backend desliga o som, não a aba.
-
-        Acontece com arquivo sem trilha de áudio, codec que o backend não
-        conhece e máquina sem servidor de som. Em todos, continuar mostrando os
-        quadros é melhor que interromper a edição.
-        """
-        self._failed = True
-        self.stopped.emit()
-
-    def load(self, path: Path) -> None:
-        if self._player is None:
-            return
-        self._failed = False
-        self._player.setSource(QUrl.fromLocalFile(str(path)))
-        self._apply_volume()
-
-    def play(self, seconds: float) -> None:
-        if not self.available:
-            return
-        # A posição é definida antes de tocar: começar do zero e corrigir depois
-        # deixaria escapar um estalo do início do arquivo.
-        self._player.setPosition(max(0, int(seconds * 1000)))
-        self._player.play()
-
-    def pause(self) -> None:
-        if self._player is not None:
-            self._player.pause()
-
-    def stop(self) -> None:
-        if self._player is not None:
-            self._player.stop()
-
-    def seek(self, seconds: float) -> None:
-        if self._player is not None:
-            self._player.setPosition(max(0, int(seconds * 1000)))
-
-    @property
-    def position(self) -> float:
-        """Posição em segundos — o relógio da reprodução."""
-        return self._player.position() / 1000 if self._player is not None else 0.0
+        """Se há como tocar som nesta máquina e neste pacote."""
+        if not MULTIMEDIA_AVAILABLE:
+            return False
+        return not QMediaDevices.defaultAudioOutput().isNull()
 
     @property
     def playing(self) -> bool:
-        if self._player is None:
+        return self._sink is not None and not self._finished
+
+    @property
+    def position(self) -> float:
+        """Instante da edição que está saindo pela placa, em segundos."""
+        if self._sink is None:
+            return self._origin
+        return self._origin + self._sink.processedUSecs() / 1_000_000
+
+    # ------------------------------------------------------------------
+
+    def start(self, command: list[str], at: float) -> bool:
+        """Começa a tocar a mixagem produzida por ``command``, situada em ``at``."""
+        self.stop()
+        if not self.available:
             return False
-        return self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+
+        try:
+            kwargs = subprocess_kwargs()
+            kwargs["stderr"] = subprocess.DEVNULL
+            process = subprocess.Popen(command, **kwargs)
+        except OSError:
+            return False
+
+        fmt = QAudioFormat()
+        fmt.setSampleRate(SAMPLE_RATE)
+        fmt.setChannelCount(CHANNELS)
+        fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
+        device = QMediaDevices.defaultAudioOutput()
+        if not device.isFormatSupported(fmt):
+            process.terminate()
+            return False
+
+        self._origin = at
+        self._finished = False
+        self._stopping.clear()
+        self._chunks = queue.Queue(_QUEUE_CHUNKS)
+        self._pending = None
+        self._process = process
+        self._reader = threading.Thread(target=self._read, args=(process,), daemon=True)
+        self._reader.start()
+
+        self._sink = QAudioSink(device, fmt, self)
+        self._apply_volume()
+        self._device = self._sink.start()
+        self._feed.start()
+        return True
+
+    def _read(self, process: subprocess.Popen) -> None:
+        """Lê o ffmpeg em pedaços, na thread — a interface nunca toca no cano."""
+        try:
+            assert process.stdout is not None
+            while not self._stopping.is_set():
+                data = process.stdout.read(_CHUNK)
+                if not data:
+                    break
+                # Com prazo: sem ele, um cancelamento com a fila cheia deixaria
+                # esta thread pendurada até alguém consumir.
+                while not self._stopping.is_set():
+                    try:
+                        self._chunks.put(data, timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                self._chunks.put_nowait(None)  # marca o fim do fluxo
+            except queue.Full:
+                pass
+
+    def _pump(self) -> None:
+        """Abastece a placa com o que já chegou, sem nunca esperar por dados.
+
+        **O que a placa não aceita fica guardado para o próximo tique.** O
+        ``write`` de um ``QAudioSink`` grava no máximo ``bytesFree()`` e
+        descarta o excedente em silêncio — e áudio descartado não soa como
+        falha, soa como som acelerado: o conteúdo corre à frente do relógio.
+        Medido antes desta correção: 48% do PCM perdido, som ao dobro da
+        velocidade.
+        """
+        if self._sink is None or self._device is None:
+            return
+        while True:
+            free = self._sink.bytesFree()
+            if free <= 0:
+                return
+            if self._pending is None:
+                try:
+                    chunk = self._chunks.get_nowait()
+                except queue.Empty:
+                    return
+                if chunk is None:
+                    self._finish()
+                    return
+                self._pending = chunk
+            written = self._device.write(self._pending[:free])
+            if written <= 0:
+                return
+            self._pending = self._pending[written:] or None
+
+    def _finish(self) -> None:
+        """O áudio acabou: avisa quem ouve e desmonta o que sobrou.
+
+        A placa ainda tem o fim do som na fila dela, então o desligamento espera
+        esse resto ser consumido — cortar aqui truncaria a última palavra.
+        """
+        self._finished = True
+        self._feed.stop()
+        remaining = 0
+        if self._sink is not None:
+            remaining = max(0, self._sink.bufferSize() - self._sink.bytesFree())
+        # A espera carrega a geração em que foi agendada: sem isso, quem parasse
+        # e voltasse a tocar nesse intervalo veria a reprodução nova ser
+        # encerrada pelo aviso da anterior.
+        generation = self._generation
+        QTimer.singleShot(
+            int(remaining / _BYTES_PER_SECOND * 1000) + 60,
+            lambda: self._emit_stopped(generation),
+        )
+
+    def _emit_stopped(self, generation: int) -> None:
+        if generation != self._generation:
+            return
+        self.stop()
+        self.stopped.emit()
+
+    def stop(self) -> None:
+        self._generation += 1
+        self._feed.stop()
+        self._stopping.set()
+        if self._sink is not None:
+            self._sink.stop()
+            self._sink.deleteLater()
+            self._sink = None
+        self._device = None
+        if self._process is not None and self._process.poll() is None:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=2)
+            except subprocess.SubprocessError:
+                self._process.kill()
+        self._process = None
+        self._reader = None
+        self._pending = None
+        self._finished = False
 
     # ------------------------------------------------------------------
 
@@ -130,9 +258,5 @@ class AudioPreview(QObject):
         self._apply_volume()
 
     def _apply_volume(self) -> None:
-        if self._output is None:
-            return
-        # Silenciar por volume zero, e não por ``setMuted``: o Qt lembra do mudo
-        # entre trocas de arquivo de formas diferentes conforme o backend, e um
-        # editor que abre mudo sem dizer por quê parece quebrado.
-        self._output.setVolume(0.0 if self._muted else self._volume)
+        if self._sink is not None:
+            self._sink.setVolume(0.0 if self._muted else self._volume)
