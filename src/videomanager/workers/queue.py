@@ -13,7 +13,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThreadPool, Signal
 
 from ..core.downloader import PHASE_DOWNLOADING, DownloadResult, Progress
-from ..core.job import Job, JobKind, JobStatus
+from ..core.job import Job, JobStatus
 from ..core.settings import Settings
 from .convert_worker import ConvertWorker
 from .download_worker import DownloadWorker
@@ -73,7 +73,7 @@ class JobQueue(QObject):
 
     def _start(self, job: Job) -> None:
         worker: DownloadWorker | ConvertWorker
-        if job.kind is JobKind.CONVERT:
+        if job.kind.runs_ffmpeg_locally:
             worker = ConvertWorker(job)
         else:
             worker = DownloadWorker(job)
