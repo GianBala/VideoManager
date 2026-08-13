@@ -85,6 +85,11 @@ class Settings:
     # --- interface ---
     theme: str = "dark"
     window_geometry: str = ""  # QByteArray serializado em base64
+    # Volume da prévia da aba de edição, de 0 a 100. Guardado porque é ajustado
+    # pelo ambiente em que se edita (fone, caixa, escritório), e não pelo vídeo:
+    # reencontrar o volume de ontem a cada abertura seria trabalho repetido.
+    preview_volume: int = 70
+    preview_muted: bool = False
 
     # ------------------------------------------------------------------
     # Persistência

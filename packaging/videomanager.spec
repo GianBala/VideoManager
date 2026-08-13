@@ -51,12 +51,17 @@ a = Analysis(
     hookspath=[],
     runtime_hooks=[],
     # Módulos Qt que a aplicação não usa. Excluí-los tira dezenas de MB.
+    #
+    # QtMultimedia **não** está na lista, ainda que seja o mais pesado deles:
+    # é ele que toca o som da prévia na aba de edição (ver ui/audio_preview.py).
+    # Cortar áudio de um editor de vídeo para economizar espaço seria economizar
+    # no lugar errado. Ele traz junto o próprio backend de mídia do Qt, que o
+    # hook do PySide6 coleta em PySide6/Qt/plugins/multimedia.
     excludes=[
         "tkinter",
         "PySide6.QtWebEngineCore",
         "PySide6.QtWebEngineWidgets",
         "PySide6.Qt3DCore",
-        "PySide6.QtMultimedia",
         "PySide6.QtQuick",
         "PySide6.QtQml",
         "PySide6.QtCharts",
