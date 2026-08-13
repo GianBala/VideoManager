@@ -447,9 +447,16 @@ class Project:
     def moved(self, clip_id: int, track_index: int, start: float) -> Project:
         """Move um bloco no tempo e, se pedido, para outra trilha.
 
-        A posição é acomodada no vão livre mais próximo em vez de recusada: o
-        arrasto continua respondendo ao mouse, e o bloco simplesmente encosta no
-        vizinho em vez de sumir de volta para onde estava.
+        Duas regras, e ambas existem para o arrasto **sempre** ter uma resposta:
+
+        **Onde não cabe, encosta.** A posição é acomodada no vão livre mais
+        próximo em vez de recusada — o bloco encosta no vizinho em vez de sumir
+        de volta para onde estava.
+
+        **Por cima do vizinho, troca de lugar.** Sem isso não havia como
+        reordenar uma sequência: dois blocos encostados não deixam vão nenhum
+        entre eles, então arrastar o segundo para antes do primeiro caía sempre
+        na regra de cima e não fazia nada — nenhum gesto reordenava a edição.
         """
         found = self.find(clip_id)
         if found is None or not 0 <= track_index < len(self.tracks):
@@ -460,6 +467,10 @@ class Project:
             return self
 
         start = max(0.0, start)
+        if origin == track_index:
+            swapped = self._swapped(track_index, clip, start)
+            if swapped is not None:
+                return swapped
         ignore = clip_id if origin == track_index else None
         options = [
             min(max(floor, start), ceiling - clip.duration)
@@ -475,6 +486,65 @@ class Project:
         if origin == track_index:
             return self.with_updated_clip(clip_id, start=start)
         return self.without_clip(clip_id).with_clip(track_index, moved)
+
+    def _swapped(self, track_index: int, moving: Clip, start: float) -> Project | None:
+        """Troca ``moving`` de lugar com o vizinho do lado para onde ele vai.
+
+        **O gatilho é a ponta da frente passar do meio do vizinho** — a ponta
+        esquerda quando se arrasta para trás, a direita quando se arrasta para a
+        frente. Passar do meio é a intenção inequívoca de ficar do outro lado;
+        antes disso o gesto é justapor, que é o mais comum de todos e não pode
+        virar troca sem querer.
+
+        Não serve medir pelo meio do bloco **arrastado**: um bloco mais longo
+        que o vizinho encosta no zero antes de o meio dele alcançar o vizinho, e
+        aí nenhum arrasto reordenava mais nada.
+
+        Os dois ficam dentro do espaço que já ocupavam juntos, encostados no
+        começo dele. Como esse espaço nunca cresce, a troca não tem como
+        esbarrar num terceiro bloco — e por isso não precisa de exceção.
+
+        Os dois lados são exatamente complementares: o ponto que dispara a troca
+        num sentido é o mesmo que a desfaz no outro. É o que impede os blocos de
+        ficarem trocando de lugar sozinhos enquanto a mão está parada em cima
+        dele.
+
+        ``None`` quando não há troca a fazer: aí vale a acomodação no vão.
+        """
+        others = [
+            clip
+            for clip in self.tracks[track_index].clips
+            if clip.clip_id != moving.clip_id
+        ]
+        if start < moving.start:
+            partner = max(
+                (c for c in others if c.start < moving.start),
+                key=lambda c: c.start,
+                default=None,
+            )
+            passed = partner is not None and start < partner.start + partner.duration / 2
+        elif start > moving.start:
+            partner = min(
+                (c for c in others if c.start > moving.start),
+                key=lambda c: c.start,
+                default=None,
+            )
+            passed = (
+                partner is not None
+                and start + moving.duration > partner.start + partner.duration / 2
+            )
+        else:
+            return None
+        if partner is None or not passed:
+            return None
+
+        first, second = (
+            (moving, partner) if moving.start > partner.start else (partner, moving)
+        )
+        base = min(moving.start, partner.start)
+        return self.with_updated_clip(first.clip_id, start=base).with_updated_clip(
+            second.clip_id, start=base + first.duration
+        )
 
     def resized(self, clip_id: int, edge: str, seconds: float) -> Project:
         """Arrasta uma das pontas do bloco, respeitando a mídia e os vizinhos."""
