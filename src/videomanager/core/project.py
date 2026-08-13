@@ -108,6 +108,19 @@ class MediaRef:
         return f"{self.name}  ·  {self.kind.value}"
 
 
+def display_width(width: int | None, sar: float | None) -> int | None:
+    """Largura com que a imagem é exibida, dado o pixel do arquivo.
+
+    Pixel quadrado (ou desconhecido, que o ffmpeg trata como quadrado) devolve a
+    largura como está — que é o caso de praticamente toda mídia atual.
+    """
+    if not width:
+        return None
+    if not sar or abs(sar - 1.0) < 1e-3:
+        return width
+    return max(2, round(width * sar / 2) * 2)
+
+
 def media_ref(local: LocalMedia) -> MediaRef:
     """Constrói a referência a partir de um arquivo já inspecionado.
 
@@ -132,7 +145,11 @@ def media_ref(local: LocalMedia) -> MediaRef:
         path=local.path,
         kind=kind,
         duration=None if kind is MediaKind.IMAGE else local.duration,
-        width=video.width if video else None,
+        # Largura de **exibição**, e não a de armazenamento: um rip de DVD
+        # guarda 720×480 para aparecer em 16:9, e é a forma exibida que decide o
+        # formato da tela do projeto. Guardar a largura crua fazia a edição
+        # nascer com a proporção errada e a imagem achatada.
+        width=display_width(video.width, video.sar) if video else None,
         height=video.height if video else None,
         fps=video.fps if video else None,
         has_audio=local.has_audio,
