@@ -72,12 +72,13 @@ from ...core.composer import (
     can_interpolate,
     describe_export,
     frame_command,
+    interpolation_bytes,
     playback_command,
     simple_trim,
 )
 from ...core.converter import LocalMedia, output_path, probe_file
 from ...core.errors import VideoManagerError
-from ...core.humanize import format_rate
+from ...core.humanize import format_rate, format_size
 from ...core.job import Job, JobKind
 from ...core.preview import fit_size, preview_fps
 from ...core.project import (
@@ -1943,7 +1944,12 @@ class EditPanel(QWidget):
     def _compose_warning(self) -> str:
         """O que precisa ser dito antes de a exportação entrar na fila."""
         if self._interpolating:
-            return strings.EDIT_INTERPOLATE_WARN
+            # A memória entra no aviso porque é o número que decide se dá para
+            # exportar: ela sai da tela escolhida, que está no controle logo
+            # acima, e uma máquina que não a tem não fica lenta — ela cai.
+            return strings.EDIT_INTERPOLATE_WARN.format(
+                memory=format_size(interpolation_bytes(self._project))
+            )
         if self._fast.isChecked() and not self._fast_available():
             return strings.EDIT_FAST_UNAVAILABLE
         return ""
