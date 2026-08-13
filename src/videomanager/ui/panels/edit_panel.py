@@ -115,7 +115,7 @@ from ...workers.preview_worker import (
     WaveformWorker,
 )
 from ...workers.runner import WorkerRunner
-from .. import strings
+from .. import icons, strings
 from ..audio_preview import AudioPreview
 from ..fullscreen_preview import FullscreenPreview
 from ..theme import palette
@@ -174,6 +174,13 @@ _RATE_PRESETS = (24.0, 25.0, 30.0, 50.0, 60.0)
 # vídeo, e o material que se edita costuma ser o mais pesado que a máquina tem.
 _LIVE_WORKERS = 2        # o quadro parado e a reprodução, que nunca esperam
 _BACKGROUND_WORKERS = 2  # tira, onda e keyframes, que podem esperar
+
+# Respiro entre os botões que agem sobre a edição inteira (desfazer, refazer) e
+# os que agem sobre o bloco selecionado (dividir, excluir). Sem ele os quatro se
+# leem como um grupo só, e o usuário procura em "desfazer" o alvo que "excluir"
+# tem. É mais que o espaçamento normal da barra, que é 6.
+_TOOL_GROUP_GAP = 22
+
 
 
 def _bounded_pool(parent: QObject, threads: int) -> QThreadPool:
@@ -549,6 +556,19 @@ class EditPanel(QWidget):
         self._redo = self._tool(
             row, "↷", "Ctrl+Shift+Z", self._redo_edit, strings.EDIT_REDO, 40
         )
+
+        row.addSpacing(_TOOL_GROUP_GAP)
+        # Ícone e não texto: a barra inteira é de símbolos (↶ ↷ − +), e "Excluir
+        # bloco" por extenso ao lado deles teria o dobro da largura de tudo que
+        # está ali. O que diz o nome é a dica, como nos outros.
+        self._split_button = self._tool(
+            row, "", "S", self._split_here, strings.EDIT_SPLIT, 40
+        )
+        self._split_button.setIcon(icons.scissors(self._colors["text"]))
+        self._delete_button = self._tool(
+            row, "", "Del", self._delete_selected, strings.EDIT_DELETE, 40
+        )
+        self._delete_button.setIcon(icons.trash(self._colors["text"]))
 
         row.addStretch(1)
         self._count_label = QLabel("")
@@ -1583,10 +1603,27 @@ class EditPanel(QWidget):
     # Navegação
     # ------------------------------------------------------------------
 
+    def _refresh_clip_actions(self) -> None:
+        """Estado dos atalhos que dependem do bloco **e do cursor**.
+
+        Separado de :meth:`_refresh_controls` porque o cursor anda a cada
+        movimento do mouse: refazer a barra inteira a cada passo custaria muito
+        mais do que estes dois botões valem. Eles seguem exatamente o que o menu
+        do botão direito oferece — dividir só onde o cursor está dentro do bloco,
+        excluir só com bloco escolhido —, porque um botão que não faz nada é pior
+        que botão nenhum.
+        """
+        clip = self._timeline.selected_clip
+        self._split_button.setEnabled(
+            clip is not None and clip.contains(self._position)
+        )
+        self._delete_button.setEnabled(clip is not None)
+
     def _on_scrub(self, seconds: float) -> None:
         self._stop_playback()
         self._request_frame()
         self._update_time_labels()
+        self._refresh_clip_actions()
 
     def _seek_to(self, seconds: float) -> None:
         if self._project.is_empty:
@@ -1595,6 +1632,7 @@ class EditPanel(QWidget):
         self._timeline.set_position(seconds)
         self._request_frame()
         self._update_time_labels()
+        self._refresh_clip_actions()
 
     def _scrub_to(self, seconds: float) -> None:
         self._resume_wanted = self._resume_wanted or self._playing
@@ -2114,6 +2152,8 @@ class EditPanel(QWidget):
         self._clip_mute.setToolTip(
             tip if clip is not None and clip.detached else strings.EDIT_CLIP_MUTE_TIP
         )
+
+        self._refresh_clip_actions()
 
         for button in (self._prev_key, self._next_key):
             button.setEnabled(bool(self._keyframes) and self._fast_available())
