@@ -37,10 +37,23 @@ from .errors import BinaryDownloadError, BinaryNotFoundError, JobCancelled
 # Builds estáticas do BtbN. Usamos a variante GPL porque é a única que inclui
 # libx264/libx265 e libmp3lame — sem elas não há como recodificar para H.264
 # nem para MP3, que são justamente os alvos mais pedidos.
+#
+# **Ramo estável (n7.1), e não o master.** As builds de master acompanham o
+# ffmpeg em desenvolvimento e são ligadas aos cabeçalhos de codec mais recentes
+# da NVIDIA: a de agosto/2026 exige a API NVENC 13.1, que só existe em drivers
+# 610 ou mais novos. O resultado é uma placa perfeitamente capaz recusando
+# codificar — medido aqui com um driver 580, que é a série corrente:
+#
+#     "Driver does not support the required nvenc API version.
+#      Required: 13.1  Found: 13.0"
+#
+# A build estável, com o mesmo driver, codifica sem reclamar. Empacotar o ramo
+# de desenvolvimento troca estabilidade por novidades que este aplicativo não
+# usa, e cobra isso justamente de quem tem placa de vídeo.
 _ARCHIVES: dict[str, str] = {
-    "linux64": "ffmpeg-master-latest-linux64-gpl.tar.xz",
-    "linuxarm64": "ffmpeg-master-latest-linuxarm64-gpl.tar.xz",
-    "win64": "ffmpeg-master-latest-win64-gpl.zip",
+    "linux64": "ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz",
+    "linuxarm64": "ffmpeg-n7.1-latest-linuxarm64-gpl-7.1.tar.xz",
+    "win64": "ffmpeg-n7.1-latest-win64-gpl-7.1.zip",
 }
 _RELEASE_BASE = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/"
 
