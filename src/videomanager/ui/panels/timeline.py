@@ -65,6 +65,9 @@ _MIN_VIEW = 0.4
 # sem querer, pelo tremor da mão no clique.
 _DRAG_SLACK = 4
 
+# Altura mínima do widget: régua, uma trilha de vídeo e uma de áudio inteiras.
+_FLOOR_HEIGHT = RULER_HEIGHT + VIDEO_TRACK_HEIGHT + AUDIO_TRACK_HEIGHT + 20
+
 # Até onde se pode afastar **além** do fim da edição. Parar em "cabe tudo" deixa
 # a linha do tempo sem vazio nenhum depois do último bloco — e é justamente
 # nesse vazio que se solta um bloco para o fim, ou que se olha uma montagem
@@ -146,8 +149,16 @@ class Timeline(QWidget):
         self._pan_origin: QPointF | None = None
         self._pan_start = 0.0
 
-        self.setMinimumHeight(RULER_HEIGHT + VIDEO_TRACK_HEIGHT + AUDIO_TRACK_HEIGHT + 20)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(_FLOOR_HEIGHT)
+        # **Cresce até o fim da área**, em vez de parar onde as trilhas acabam.
+        # Com altura fixa, o vazio abaixo da última trilha não pertencia a este
+        # widget: era do painel, e o clique com o botão direito ali não chegava
+        # aqui — o menu de criar trilha só aparecia em cima das trilhas, que é
+        # justamente onde ele serve menos. Medido numa janela de 1200 px: 488 px
+        # da área de trilhas ficavam mortos.
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding
+        )
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -166,14 +177,20 @@ class Timeline(QWidget):
         # Imagens de blocos que não existem mais saem da memória junto com eles.
         alive = {clip.clip_id for clip in project.clips}
         self._strips = {k: v for k, v in self._strips.items() if k in alive}
-        self.setFixedHeight(self._needed_height())
+        # Piso, e não altura fixa: com muitas trilhas é ele que faz a área de
+        # rolagem rolar, e com poucas o widget se estica até o fim da área — o
+        # que mantém o vazio abaixo das trilhas clicável.
+        self.setMinimumHeight(self._needed_height())
         self.update()
 
     def _needed_height(self) -> int:
         total = RULER_HEIGHT + 6
         for track in self._project.tracks:
             total += self._track_height(track.kind) + TRACK_GAP
-        return max(self.minimumHeight(), total + 4)
+        # O piso é a constante, e **não** ``self.minimumHeight()``: lendo a
+        # altura corrente, cada chamada partiria da anterior e a linha do tempo
+        # nunca encolheria ao se excluir uma trilha.
+        return max(_FLOOR_HEIGHT, total + 4)
 
     @staticmethod
     def _track_height(kind: TrackKind) -> int:
