@@ -780,3 +780,129 @@ class TestTiraDeMiniaturas:
         assert abertos[0].poll() is not None, (
             "o ffmpeg continuou vivo depois de a tira ser abandonada"
         )
+
+
+class TestInterpolacaoEmTrechos:
+    """O arquivo paralelo tem de ser o mesmo que o serial produziria.
+
+    O ``minterpolate`` é de uma thread só (medido: 110% de CPU em vinte
+    núcleos), e dividir a linha do tempo é a única forma de usar o resto da
+    máquina — medido, 43,7 s para 16,6 s em quatro trechos.
+
+    O risco dessa troca não é falhar: é sair um arquivo **quase** certo, com uma
+    trepidação a cada emenda ou o som deslocado, e isso não aparece em duração,
+    em contagem de quadros nem em código de saída. Por isso a conferência aqui é
+    contra o arquivo serial, quadro a quadro.
+    """
+
+    def fonte(self, path: Path, tools, *, duracao: float = 6.0) -> Path:
+        subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y",
+             "-f", "lavfi", "-i", f"testsrc2=s=640x360:r=24:d={duracao}",
+             "-f", "lavfi", "-i", f"sine=f=440:d={duracao}",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+             "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(path)],
+            check=True,
+        )
+        return path
+
+    def exporta(self, origem: Path, destino: Path, tools, trechos: int) -> Path:
+        from videomanager.core import parallel_export
+        from videomanager.core.composer import Composition
+        from videomanager.core.converter import Converter, probe_file
+        from videomanager.core.project import media_ref, new_project
+
+        projeto = replace(new_project(media_ref(probe_file(origem, tools))), fps=60.0)
+        comp = Composition(projeto, "mp4", interpolate=True)
+        # O número de trechos é fixado no teste: ele depende da memória livre da
+        # máquina, e um teste que mudasse de caminho conforme a carga não
+        # afirmaria nada.
+        original = parallel_export.plan_segments
+        parallel_export.plan_segments = lambda _c: trechos
+        try:
+            from videomanager.core import converter as mod
+            mod.plan_segments = lambda _c: trechos
+            return Converter(probe_file(origem, tools), comp, destino, tools).run()
+        finally:
+            parallel_export.plan_segments = original
+            mod.plan_segments = original
+
+    def distintas(self, path: Path, tools) -> int:
+        saida = subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "info", "-i", str(path),
+             "-vf", "mpdecimate", "-loglevel", "debug", "-f", "null", "-"],
+            capture_output=True, text=True,
+        ).stderr
+        return saida.count("keep pts")
+
+    def test_o_paralelo_e_o_serial_produzem_o_mesmo_arquivo(
+        self, tmp_path: Path, tools
+    ) -> None:
+        origem = self.fonte(tmp_path / "fonte.mp4", tools)
+        serial = self.exporta(origem, tmp_path / "serial.mp4", tools, 1)
+        paralelo = self.exporta(origem, tmp_path / "paralelo.mp4", tools, 3)
+
+        fs, ss = ffprobe_streams(serial, tools)
+        fp, sp = ffprobe_streams(paralelo, tools)
+        assert float(fp["duration"]) == pytest.approx(float(fs["duration"]), abs=0.05)
+
+        vs, vp = stream_of(ss, "video"), stream_of(sp, "video")
+        assert (vp["width"], vp["height"]) == (vs["width"], vs["height"])
+        assert int(vp["nb_frames"]) == int(vs["nb_frames"]), (
+            "dividir não pode mudar quantos quadros saem"
+        )
+
+        # A afirmação que importa: a interpolação continua íntegra nas emendas.
+        # Sem a sobra que cada trecho decodifica além do próprio fim, o ``tpad``
+        # clona os últimos quadros e esta conta cai — medido, 464 contra 476.
+        assert self.distintas(paralelo, tools) == self.distintas(serial, tools), (
+            "as emendas perderam quadros interpolados"
+        )
+
+    def test_o_som_atravessa_inteiro_e_no_mesmo_volume(
+        self, tmp_path: Path, tools
+    ) -> None:
+        # O som sai num passe só justamente para não ser emendado: emendar AAC
+        # em ponto arbitrário produz salto ou estalo, que não aparece em
+        # nenhuma contagem.
+        origem = self.fonte(tmp_path / "fonte.mp4", tools)
+        serial = self.exporta(origem, tmp_path / "serial.mp4", tools, 1)
+        paralelo = self.exporta(origem, tmp_path / "paralelo.mp4", tools, 3)
+
+        _f, sp = ffprobe_streams(paralelo, tools)
+        audio = stream_of(sp, "audio")
+        assert audio is not None, "o som não pode sumir na divisão"
+        assert float(audio["duration"]) == pytest.approx(6.0, abs=0.15)
+        assert volume_medio(paralelo, tools) == pytest.approx(
+            volume_medio(serial, tools), abs=0.5
+        )
+
+    def test_cancelar_mata_os_trechos_e_nao_deixa_arquivo(
+        self, tmp_path: Path, tools
+    ) -> None:
+        """Desistir precisa alcançar todos os processos, não só um.
+
+        A exportação paralela abre vários ffmpeg; um cancelamento que parasse
+        apenas o primeiro deixaria os outros queimando a máquina até o fim, e é
+        exatamente o tipo de sobra que já esgotou a memória daqui.
+        """
+        import threading
+
+        from videomanager.core.composer import Composition
+        from videomanager.core.converter import Converter, probe_file
+        from videomanager.core.errors import JobCancelled
+        from videomanager.core.project import media_ref, new_project
+
+        origem = self.fonte(tmp_path / "fonte.mp4", tools, duracao=20.0)
+        projeto = replace(new_project(media_ref(probe_file(origem, tools))), fps=60.0)
+        destino = tmp_path / "cancelada.mp4"
+        conv = Converter(
+            probe_file(origem, tools),
+            Composition(projeto, "mp4", interpolate=True),
+            destino,
+            tools,
+        )
+        threading.Timer(2.0, conv.cancel).start()
+        with pytest.raises(JobCancelled):
+            conv.run()
+        assert not destino.exists(), "cancelar não pode deixar arquivo no destino"

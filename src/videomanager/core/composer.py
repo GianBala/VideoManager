@@ -650,6 +650,164 @@ def interpolation_bytes(project: Project) -> int:
     return total
 
 
+# Quanto de um trecho paralelo é decodificado **além** do fim dele, só para o
+# ``minterpolate`` ter o quadro seguinte na hora de inventar os últimos. Sem essa
+# sobra, cada emenda perde os quadros que o ``tpad`` clonou: medido, 476 imagens
+# distintas com sobra contra 464 sem ela, num vídeo cortado em quatro — doze
+# quadros, exatamente quatro por emenda.
+_SEGMENT_TAIL = 0.5
+
+# Piso de duração de um trecho. Abaixo disto o que se paga para abrir um
+# processo, decodificar a sobra e concatenar come o que se ganha dividindo.
+_MIN_SEGMENT = 2.0
+
+# Teto de trechos simultâneos. Mais que isto não acelera — o gargalo passa a ser
+# a leitura do mesmo arquivo por todos eles — e multiplica a memória sem retorno.
+_MAX_SEGMENTS = 8
+
+# Fração da memória disponível que a exportação pode reservar. O resto fica para
+# o sistema e para o que mais estiver aberto: o número que ``available_bytes``
+# devolve é um palpite honesto do instante, não uma promessa para os próximos
+# minutos, e errar aqui é derrubar a máquina — não ficar lento.
+_MEMORY_SHARE = 0.5
+
+
+def interpolation_segments(
+    project: Project,
+    *,
+    available: int | None,
+    cores: int,
+) -> int:
+    """Em quantos trechos paralelos a interpolação deste projeto pode ser feita.
+
+    O ``minterpolate`` é **de uma thread só** — medido, 110% de CPU numa máquina
+    de vinte núcleos — e é o filtro mais caro que esta aplicação usa. Dividir a
+    linha do tempo e interpolar os pedaços ao mesmo tempo é a única forma de usar
+    o resto da máquina: medido, 43,7 s para 16,6 s em quatro trechos (2,6×), com
+    a saída indistinguível da serial (SSIM 0,997, as mesmas 476 imagens
+    distintas).
+
+    Devolver ``1`` significa "faça do jeito de sempre, num comando só", e é a
+    resposta para tudo que não se encaixa: projeto sem o que interpolar, curto
+    demais para dividir, máquina sem núcleos sobrando — e, principalmente,
+    **memória desconhecida**. Cada trecho carrega um ``minterpolate`` inteiro, e
+    foi exatamente essa memória que já derrubou a máquina uma vez: onde não dá
+    para perguntar quanta há, o caminho seguro é não multiplicar nada.
+    """
+    custo = interpolation_bytes(project)
+    if custo <= 0 or project.duration < _MIN_SEGMENT * 2:
+        return 1
+    if available is None:
+        return 1
+
+    por_memoria = int(available * _MEMORY_SHARE) // custo
+    por_duracao = int(project.duration // _MIN_SEGMENT)
+    return max(1, min(_MAX_SEGMENTS, cores, por_memoria, por_duracao))
+
+
+def segment_bounds(duration: float, segments: int) -> tuple[tuple[float, float], ...]:
+    """Início e duração de cada trecho, cobrindo a edição inteira sem sobrepor.
+
+    O último absorve o resto da divisão, em vez de todos carregarem um pedaço da
+    sobra: assim a soma das durações é exatamente a do projeto, e não uma soma de
+    arredondamentos que erra o fim por alguns milissegundos.
+    """
+    if segments <= 1:
+        return ((0.0, duration),)
+    passo = duration / segments
+    return tuple(
+        (i * passo, passo if i < segments - 1 else duration - i * passo)
+        for i in range(segments)
+    )
+
+
+def segment_video_args(
+    project: Project,
+    at: float,
+    span: float,
+    destination: Path,
+    tools: FFmpegTools,
+    *,
+    container: str = "mp4",
+    hardware: str = hwaccel.SOFTWARE,
+) -> list[str]:
+    """Um trecho da composição, **só vídeo**, para ser concatenado depois.
+
+    O grafo é montado com uma sobra no fim (:data:`_SEGMENT_TAIL`) e a saída é
+    cortada em ``span``: é a sobra que dá ao ``minterpolate`` o quadro seguinte
+    de que ele precisa para inventar os últimos do trecho. Sem ela a emenda perde
+    quadros interpolados, e o que aparece no lugar são clones.
+
+    Áudio não entra aqui de propósito. Emendar trilhas codificadas em pontos
+    arbitrários produz salto ou estalo na junção, porque o quadro de áudio não
+    termina onde o corte cai; o som sai num passe só, que é barato.
+    """
+    graph = build_graph(
+        project, at=at, span=span + _SEGMENT_TAIL, want_audio=False, interpolate=True
+    )
+    if not graph.video_label:
+        raise ConversionError("O trecho não tem imagem para exportar.")
+    family = hwaccel.family_for(container)
+    encoder = hwaccel.resolve(family, hardware, tools)
+    args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y", "-progress", "pipe:1"]
+    args += [*encoder.device, *graph.inputs]
+    filters = list(graph.filters)
+    video_label = graph.video_label
+    if encoder.filter_suffix:
+        filters.append(f"{video_label}{encoder.filter_suffix}[vhw]")
+        video_label = "[vhw]"
+    args += ["-filter_complex", ";".join(filters)]
+    args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality]
+    # ``-t`` na saída, e não ``-frames:v``: a conta que interessa é a do tempo,
+    # e é ela que faz a soma dos trechos bater com a duração do projeto.
+    return args + ["-an", "-t", f"{span:.6f}", str(destination)]
+
+
+def concat_args(
+    parts: Path, destination: Path, tools: FFmpegTools
+) -> list[str]:
+    """Emenda os trechos **sem recodificar**, pelo demuxer ``concat``.
+
+    Todos saíram do mesmo encoder com os mesmos parâmetros e cada um começa em
+    keyframe, que são as condições para copiar os dados em vez de decodificar
+    tudo de novo — o que jogaria fora o tempo que a divisão economizou.
+    """
+    return [
+        tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", "-y",
+        "-f", "concat", "-safe", "0", "-i", str(parts),
+        "-c", "copy", str(destination),
+    ]
+
+
+def audio_only_args(
+    project: Project, destination: Path, tools: FFmpegTools, *, container: str = "mp4"
+) -> list[str] | None:
+    """A mixagem inteira num passe só, ou ``None`` se a edição não tem som."""
+    graph = build_graph(project, want_video=False)
+    if not graph.audio_label:
+        return None
+    args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", "-y"]
+    args += [*graph.inputs, "-filter_complex", ";".join(graph.filters)]
+    args += ["-map", graph.audio_label, *encode_audio_args(container)]
+    return args + [str(destination)]
+
+
+def mux_args(
+    video: Path, audio: Path | None, destination: Path, tools: FFmpegTools
+) -> list[str]:
+    """Junta imagem e som já prontos, copiando os dois."""
+    args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", "-y", "-i", str(video)]
+    if audio is not None:
+        args += ["-i", str(audio)]
+    args += ["-c", "copy"]
+    if audio is not None:
+        # ``-shortest``: a mixagem pode passar do fim da imagem por alguns
+        # milissegundos de arredondamento, e um arquivo mais longo que o vídeo
+        # termina em tela preta.
+        args += ["-shortest"]
+    return args + [str(destination)]
+
+
 def describe_export(
     project: Project,
     container: str,
