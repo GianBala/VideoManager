@@ -520,6 +520,17 @@ class TestThreadsDaPrevia:
     def test_o_teto_nunca_passa_do_que_a_maquina_tem(self) -> None:
         assert 1 <= decode_threads() <= min(8, os.cpu_count() or 8)
 
+    def test_a_entrada_de_imagem_continua_valida(self) -> None:
+        # Uma foto entra com "-loop 1 -framerate X -t Y" antes do "-i", e o
+        # limite é enfiado no meio disso. Os argumentos de entrada não podem
+        # perder a ordem que o ffmpeg exige.
+        foto = projeto(video_track(clip(FOTO, start=0.0, duration=5.0)))
+        args = frame_command(foto, 1.0, (640, 360), TOOLS)
+        i = args.index("-i")
+        assert args[i - 2 : i] == ["-threads", str(decode_threads())]
+        assert "-loop" in args and args[args.index("-loop") + 1] == "1"
+        assert args.index("-loop") < args.index("-threads") < i
+
 
 class TestCaminhoRapido:
     def test_um_arquivo_intacto_ainda_e_um_recorte(self) -> None:

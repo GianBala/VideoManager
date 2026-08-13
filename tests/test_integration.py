@@ -877,6 +877,90 @@ class TestInterpolacaoEmTrechos:
             volume_medio(serial, tools), abs=0.5
         )
 
+
+    def test_o_container_do_projeto_vale_para_o_som_intermediario(
+        self, tmp_path: Path, tools
+    ) -> None:
+        """Um projeto .webm sai em Opus, e Opus não cabe num .m4a.
+
+        O som da exportação paralela é gerado num arquivo à parte, e o codec
+        dele é escolhido a partir do container de saída. Com um nome fixo
+        ".m4a", exportar um .webm interpolado falhava na hora de gerar o som —
+        e só ele: o caminho serial escreve tudo num arquivo só e nunca passa por
+        aqui. É o tipo de defeito que não aparece em nenhum projeto .mp4.
+        """
+        from videomanager.core.composer import Composition
+        from videomanager.core.converter import Converter, probe_file
+        from videomanager.core.project import media_ref, new_project
+
+        origem = tmp_path / "fonte.webm"
+        subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y",
+             "-f", "lavfi", "-i", "testsrc2=s=320x180:r=24:d=6",
+             "-f", "lavfi", "-i", "sine=f=440:d=6",
+             "-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8",
+             "-c:a", "libopus", "-shortest", str(origem)],
+            check=True,
+        )
+        projeto = replace(new_project(media_ref(probe_file(origem, tools))), fps=60.0)
+        destino = tmp_path / "saida.webm"
+
+        from videomanager.core import converter as mod
+        original = mod.plan_segments
+        mod.plan_segments = lambda _c: 3
+        try:
+            Converter(
+                probe_file(origem, tools),
+                Composition(projeto, "webm", interpolate=True),
+                destino, tools,
+            ).run()
+        finally:
+            mod.plan_segments = original
+
+        _f, streams = ffprobe_streams(destino, tools)
+        audio = stream_of(streams, "audio")
+        assert audio is not None and audio["codec_name"] == "opus", (
+            "o som do .webm precisa atravessar a exportação paralela"
+        )
+
+
+    def test_pasta_de_destino_com_aspa_no_nome(self, tmp_path: Path, tools) -> None:
+        """Uma pasta chamada "vídeos do joão's" não pode quebrar a emenda.
+
+        A lista que o demuxer ``concat`` lê põe cada arquivo entre aspas
+        simples, e uma aspa no caminho fechava a string: a exportação falhava
+        com "No such file or directory" apontando para um caminho cortado ao
+        meio. A lista passou a citar só o nome do arquivo — que é gerado aqui e
+        nunca tem nada especial —, então a sintaxe do ffmpeg deixou de encostar
+        no caminho que o usuário escolheu.
+        """
+        from videomanager.core import converter as mod
+        from videomanager.core.composer import Composition
+        from videomanager.core.converter import Converter, probe_file
+        from videomanager.core.project import media_ref, new_project
+
+        origem = self.fonte(tmp_path / "fonte.mp4", tools)
+        pasta = tmp_path / "vídeos do joão's [2026]"
+        pasta.mkdir()
+        projeto = replace(new_project(media_ref(probe_file(origem, tools))), fps=60.0)
+
+        original = mod.plan_segments
+        mod.plan_segments = lambda _c: 2
+        try:
+            destino = Converter(
+                probe_file(origem, tools),
+                Composition(projeto, "mp4", interpolate=True),
+                pasta / "saida.mp4", tools,
+            ).run()
+        finally:
+            mod.plan_segments = original
+
+        formato, _s = ffprobe_streams(destino, tools)
+        assert float(formato["duration"]) == pytest.approx(6.0, abs=0.2)
+        assert not [p for p in pasta.iterdir() if p.is_dir()], (
+            "o diretório de trabalho não pode sobrar na pasta do usuário"
+        )
+
     def test_cancelar_mata_os_trechos_e_nao_deixa_arquivo(
         self, tmp_path: Path, tools
     ) -> None:
