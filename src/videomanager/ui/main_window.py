@@ -1,9 +1,13 @@
-"""Janela principal: duas abas de trabalho sobre uma fila só.
+"""Janela principal: três abas de trabalho sobre uma fila só.
 
 **Download** — endereço e destino no topo, qualidade à esquerda, perfis rápidos
-à direita — e **Convert**, para arquivos que já estão no disco. As duas
-enfileiram no mesmo lugar, e por isso a **fila fica fora das abas**, embaixo:
-trocar de aba nunca esconde o que está em andamento.
+à direita —, **Convert**, para arquivos que já estão no disco, e **Editar**, que
+recorta vídeo. As três enfileiram no mesmo lugar, e por isso a **fila fica fora
+das abas**, embaixo: trocar de aba não esconde o que está em andamento.
+
+A exceção é o editor, onde a fila sai de cena para o vídeo ocupar a janela: ali
+não se fica esperando tarefa, se trabalha — e a barra de status continua
+contando o que roda (ver :meth:`MainWindow._on_tab_changed`).
 
 As duas linhas do topo da aba de download ("de onde" e "para onde") dividem a
 mesma grade: rótulos numa coluna, campos noutra, botões encostados na direita.
@@ -16,7 +20,7 @@ import tempfile
 from pathlib import Path
 
 import yt_dlp
-from PySide6.QtCore import QEvent, Qt, QUrl
+from PySide6.QtCore import QEvent, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -53,6 +57,7 @@ from ..workers.runner import WorkerRunner
 from . import strings
 from .ffmpeg_setup import ensure_ffmpeg
 from .panels.convert_panel import ConvertPanel
+from .panels.edit_panel import EditPanel
 from .panels.media_card import MediaCard
 from .panels.profiles_panel import Profile, ProfilesPanel
 from .panels.quality_panel import QualityPanel
@@ -61,12 +66,15 @@ from .playlist_dialog import PlaylistDialog
 from .settings_dialog import SettingsDialog
 from .theme import qpalette, stylesheet
 
-# Índice da aba de download, a primeira criada.
+# Índices das abas, na ordem em que são criadas.
 _TAB_DOWNLOAD = 0
+_TAB_EDIT = 2
 # Sem margem lateral: o conteúdo da aba fica na mesma coluna da fila, que está
 # fora das abas. Em cima, só o respiro que separa da barra de abas.
 _TAB_MARGINS = (0, 10, 0, 0)
 _TAB_SPACING = 10
+# Quanto tempo o aviso de "adicionado à fila" fica na barra de status.
+_ENQUEUED_MS = 5000
 
 
 class MainWindow(QMainWindow):
@@ -84,10 +92,13 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_DISPLAY_NAME} {__version__}")
         # Altura escolhida para caber a aba inteira sem rolagem — barra de abas,
-        # cabeçalho e controles — com a fila mostrando quatro linhas. Em telas
-        # mais baixas o painel de controles rola: é para isso que ele está numa
-        # área de rolagem.
-        self.resize(1180, 860)
+        # cabeçalho e controles — com a fila mostrando quatro linhas. Quem manda
+        # na conta é a aba de edição, a mais alta das três: cada pixel a mais
+        # aqui vira prévia maior lá (ver :meth:`_balance_panes`), e abaixo disto
+        # o editor nasceria com o botão de exportar fora da vista. O teto é a
+        # tela de 1080p com barra de tarefas. Em telas mais baixas o painel
+        # rola, que é para isso que ele está numa área de rolagem.
+        self.resize(1180, 1000)
 
         self._queue = JobQueue(settings, self)
         self._queue.counts_changed.connect(self._update_status)
@@ -107,14 +118,19 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
-        # A fila fica fora das abas, embaixo: as duas alimentam a mesma fila, e
-        # trocar de aba não pode esconder o que está em andamento.
+        # A fila fica fora das abas, embaixo: todas alimentam a mesma fila, e
+        # trocar de aba não pode esconder o que está em andamento — salvo no
+        # editor, onde ela dá lugar à prévia (ver :meth:`_on_tab_changed`).
         self._tabs = QTabWidget()
         self._tabs.addTab(self._build_download_tab(), strings.TAB_DOWNLOAD)
         self._convert = ConvertPanel(self._settings, self._tools_for_convert)
         self._convert.jobs_ready.connect(self._submit_jobs)
         self._convert.changed.connect(self._balance_panes)
         self._tabs.addTab(self._wrap_tab(self._convert), strings.TAB_CONVERT)
+        self._edit = EditPanel(self._settings, self._tools_for_convert)
+        self._edit.jobs_ready.connect(self._submit_jobs)
+        self._edit.changed.connect(self._balance_panes)
+        self._tabs.addTab(self._wrap_tab(self._edit), strings.TAB_EDIT)
 
         self._vertical = QSplitter(Qt.Orientation.Vertical)
         self._vertical.addWidget(self._tabs)
@@ -130,6 +146,9 @@ class MainWindow(QMainWindow):
         self._vertical.setChildrenCollapsible(False)
         self._vertical.installEventFilter(self)
         self._vertical.splitterMoved.connect(self._on_split_moved)
+        # A divisão do editor é diferente da das outras abas (ver
+        # :meth:`_balance_panes`), então trocar de aba pede um novo cálculo.
+        self._tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self._vertical, 1)
 
     def _build_download_tab(self) -> QWidget:
@@ -167,14 +186,34 @@ class MainWindow(QMainWindow):
     def _on_split_moved(self, *_: int) -> None:
         self._split_by_user = not self._balancing
 
-    def _tabs_height(self) -> int:
-        """Altura pedida pelas abas: a maior das duas, para as duas caberem.
+    def _on_tab_changed(self, index: int) -> None:
+        """A fila sai de cena no editor, e a janela inteira vira área de trabalho.
 
-        É a mesma para as duas de propósito. A fila fica sempre na mesma linha,
-        o divisor não pula ao trocar de aba, e nenhuma das duas nasce cortada —
-        que era o que acontecia quando a altura vinha só da aba de download e a
-        de conversão precisava de mais. Quem quiser outra divisão arrasta o
+        A regra da fila sempre à vista existe para as duas abas que **produzem**
+        tarefas e vão embora: quem manda baixar quer acompanhar. O editor é o
+        contrário — é onde se fica, e cada pixel que a fila ocupa lá sai da
+        imagem que está sendo cortada.
+
+        Nada se perde: a barra de status continua contando o que está em
+        andamento, na fila e concluído, e a fila volta inteira em qualquer outra
+        aba, com as tarefas que entraram enquanto ela estava escondida.
+        """
+        self._queue_panel.setVisible(index != _TAB_EDIT)
+        self._balance_panes()
+
+    def _tabs_height(self) -> int:
+        """Altura pedida pelas abas: a maior de todas, para todas caberem.
+
+        É a mesma para todas de propósito. A fila fica sempre na mesma linha, o
+        divisor não pula ao trocar de aba, e nenhuma delas nasce cortada — que
+        era o que acontecia quando a altura vinha só da aba de download e a de
+        conversão precisava de mais. Quem quiser outra divisão arrasta o
         divisor; a partir daí a escolha é do usuário.
+
+        A aba de edição pede mais que as outras, e é ela quem manda quando cabe:
+        o teto continua sendo a altura mínima da fila (ver :meth:`_balance_panes`),
+        então em tela baixa ninguém fica sem espaço — o editor é que passa a
+        rolar.
         """
         page = self._tabs.widget(_TAB_DOWNLOAD)
         # A barra de abas entra na conta: o que o divisor reparte é o QTabWidget
@@ -194,7 +233,8 @@ class MainWindow(QMainWindow):
         )
         download = inner + self._header.sizeHint().height() + _TAB_SPACING + controls
         convert = inner + self._pane_height(self._convert)
-        return chrome + max(download, convert)
+        edit = inner + self._pane_height(self._edit)
+        return chrome + max(download, convert, edit)
 
     @staticmethod
     def _pane_height(pane: QWidget) -> int:
@@ -226,6 +266,11 @@ class MainWindow(QMainWindow):
         Quando a janela é baixa demais para os dois, a fila fica com o mínimo
         dela e os controles passam a rolar.
 
+        **Na aba de edição não há divisão**: a fila fica escondida (ver
+        :meth:`_on_tab_changed`) e a janela inteira é do editor, onde toda
+        altura sobrando vira prévia maior. Nas outras duas, sobra vira espaço
+        vazio — os controles têm tamanho natural e param de crescer.
+
         Vale enquanto o usuário não arrastar o divisor: a partir daí a divisão é
         escolha dele e não se mexe mais.
         """
@@ -237,9 +282,14 @@ class MainWindow(QMainWindow):
             # muda a altura pedida quando o pedido de layout é entregue. Sem
             # entregá-lo aqui, mede-se o painel de antes da mudança.
             QApplication.sendPostedEvents(None, int(QEvent.Type.LayoutRequest))
+            if not self._queue_panel.isVisible():
+                # Fila escondida (aba de edição): não há divisão a fazer, o
+                # painel de cima recebe a janela toda.
+                self._vertical.setSizes([self._vertical.height(), 0])
+                return
             total = self._vertical.height() - self._vertical.handleWidth()
-            floor = self._queue_panel.minimumSizeHint().height()
-            top = max(0, min(self._tabs_height(), total - floor))
+            available = total - self._queue_panel.minimumSizeHint().height()
+            top = max(0, min(self._tabs_height(), available))
             self._vertical.setSizes([top, total - top])
         finally:
             self._balancing = False
@@ -526,6 +576,16 @@ class MainWindow(QMainWindow):
     def _submit_jobs(self, jobs: list[Job]) -> None:
         for job in jobs:
             self._queue.submit(job)
+        if not jobs:
+            return
+        # Aviso na barra de status porque na aba de edição a fila está
+        # escondida: sem ele, clicar em "Adicionar à fila" não teria resposta
+        # nenhuma na tela. O texto sai depois de alguns segundos e a barra volta
+        # a mostrar as contagens.
+        self.statusBar().showMessage(
+            strings.STATUS_ENQUEUED.format(count=len(jobs)), _ENQUEUED_MS
+        )
+        QTimer.singleShot(_ENQUEUED_MS + 100, self._update_status)
 
     # ------------------------------------------------------------------
     # Configurações e engine
@@ -551,6 +611,7 @@ class MainWindow(QMainWindow):
         self._settings = dialog.result_settings()
         self._settings.save()
         self._queue.apply_settings(self._settings)
+        self._edit.apply_settings(self._settings)
         self._dest.setText(self._settings.download_dir)
         if self._settings.theme != previous_theme:
             app = QApplication.instance()
