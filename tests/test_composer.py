@@ -13,11 +13,12 @@ o usuário vê na tela antes de exportar.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
-from videomanager.core.binaries import FFmpegTools
+from videomanager.core.binaries import FFmpegTools, decode_threads
 from videomanager.core.composer import (
     SAMPLE_RATE,
     audio_command,
@@ -469,6 +470,55 @@ class TestComandos:
     def test_projeto_so_de_audio_nao_grava_video(self) -> None:
         args = export_args(projeto(audio_track(clip(ESTEREO))), DEST, TOOLS)
         assert "-c:v" not in args
+
+
+class TestThreadsDaPrevia:
+    """O teto de threads vale para a prévia, e só para ela.
+
+    O padrão do ffmpeg é uma thread por núcleo. Numa máquina de vinte núcleos,
+    montar vinte threads para devolver **um** quadro custa mais do que
+    decodificá-lo: medido no quadro composto, 1,31 s e 3,93 s de CPU no padrão
+    contra 1,01 s e 3,12 s com o teto a 1080p, e 6,22 s / 40,08 s contra
+    5,46 s / 26,52 s em HEVC 4K. Mais rápido e com menos CPU — e a CPU que sobra
+    é a da exportação que estiver correndo ao lado.
+    """
+
+    def dois_blocos(self) -> Project:
+        # Dois arquivos no mesmo instante: é o caso que revela um limite posto
+        # uma vez só na frente do comando, que valeria apenas para o primeiro.
+        return projeto(
+            video_track(clip(VIDEO, start=0.0, duration=10.0)),
+            video_track(clip(OUTRO, start=0.0, duration=10.0)),
+        )
+
+    def entradas_sem_limite(self, args: list[str]) -> list[int]:
+        return [
+            i for i, a in enumerate(args)
+            if a == "-i" and args[i - 2 : i] != ["-threads", str(decode_threads())]
+        ]
+
+    def test_o_quadro_parado_limita_todas_as_entradas(self) -> None:
+        args = frame_command(self.dois_blocos(), 1.0, (640, 360), TOOLS)
+        assert args.count("-i") == 2, "as duas entradas precisam estar no comando"
+        assert not self.entradas_sem_limite(args), (
+            "``-threads`` é opção de entrada: uma vez só na frente limitaria "
+            "apenas o primeiro arquivo"
+        )
+
+    def test_a_exportacao_continua_com_todos_os_nucleos(self) -> None:
+        # Aqui o que se quer é o arquivo pronto antes, e todo núcleo é bem-vindo.
+        args = export_args(self.dois_blocos(), DEST, TOOLS)
+        assert "-threads" not in args
+
+    def test_a_reproducao_nao_e_apertada(self) -> None:
+        # O relógio já limita o trabalho dela — decodifica na velocidade em que
+        # consome —, e apertar as threads só arriscaria não acompanhar o
+        # material mais pesado.
+        args = playback_command(self.dois_blocos(), 0.0, (640, 360), TOOLS, fps=30)
+        assert "-threads" not in args
+
+    def test_o_teto_nunca_passa_do_que_a_maquina_tem(self) -> None:
+        assert 1 <= decode_threads() <= min(8, os.cpu_count() or 8)
 
 
 class TestCaminhoRapido:

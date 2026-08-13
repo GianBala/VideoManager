@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import hwaccel
-from .binaries import FFmpegTools
+from .binaries import FFmpegTools, decode_thread_args
 from .errors import ConversionError
 from .project import Clip, MediaKind, Project, TrackKind
 from .trimmer import (
@@ -433,6 +433,26 @@ def export_args(
     return args + tail_args(container, destination)
 
 
+def _limited_inputs(inputs: list[str]) -> list[str]:
+    """Repete o teto de threads de decodificação antes de **cada** entrada.
+
+    ``-threads`` é opção de entrada e vale para a que vem logo depois: pôr uma
+    vez só na frente limitaria o primeiro arquivo e deixaria os outros no padrão.
+
+    Vale para o quadro parado da prévia, e não para a exportação nem para a
+    reprodução. Na exportação o que se quer é o arquivo pronto antes, e todo
+    núcleo é bem-vindo. Na reprodução o relógio já limita o trabalho — ela
+    decodifica na velocidade em que consome —, e apertar as threads ali só
+    arriscaria não acompanhar o material mais pesado.
+    """
+    limitados: list[str] = []
+    for arg in inputs:
+        if arg == "-i":
+            limitados += decode_thread_args()
+        limitados.append(arg)
+    return limitados
+
+
 def frame_command(
     project: Project,
     at: float,
@@ -452,7 +472,8 @@ def frame_command(
         project, at=at, span=1.0 / max(1.0, project.fps), want_audio=False
     )
     args = [
-        tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", *graph.inputs
+        tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error",
+        *_limited_inputs(graph.inputs),
     ]
     filters = list(graph.filters)
     if graph.video_label:
