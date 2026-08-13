@@ -23,8 +23,10 @@ Usa **yt-dlp** para extração e **ffmpeg** para processamento.
   arrastável, tesoura dividindo no ponto do cursor, alças nas pontas de cada
   trecho, zoom com a roda do mouse e desfazer. Reprodução **com som**, volume
   ajustável durante a edição, e navegação **quadro a quadro** — o que está na
-  tela é exatamente o quadro em que o corte vai cair. Exporta os trechos unidos
-  num arquivo só ou cada um no seu.
+  tela é exatamente o quadro em que o corte vai cair. A prévia abre em **tela
+  cheia** (tecla `F` ou duplo clique), com a barra de controles esmaecendo
+  sozinha depois de alguns segundos parada e voltando ao primeiro movimento do
+  mouse. Exporta os trechos unidos num arquivo só ou cada um no seu.
 - **Playlists e canais** em lote, com seleção item a item.
 - **Legendas** (inclusive automáticas), em arquivo separado ou embutidas.
 - **Cookies do navegador** para mídias privadas, com restrição de idade, de
@@ -77,8 +79,8 @@ abrem o executável gerado para conferir que ele realmente sobe.
 Um arquivo só, sem instalação: baixe, dê permissão de execução, clique.
 
 ```bash
-chmod +x Video_Manager-0.2.0-x86_64.AppImage
-./Video_Manager-0.2.0-x86_64.AppImage
+chmod +x Video_Manager-0.3.0-x86_64.AppImage
+./Video_Manager-0.3.0-x86_64.AppImage
 ```
 
 Ele envelopa o mesmo pacote do `build_linux.sh`, então tem tudo dentro: Python,
@@ -98,7 +100,7 @@ O AppImage não se instala no menu do sistema sozinho; para isso existe o
 não montar por falta de FUSE na máquina, roda assim mesmo:
 
 ```bash
-./Video_Manager-0.2.0-x86_64.AppImage --appimage-extract-and-run
+./Video_Manager-0.3.0-x86_64.AppImage --appimage-extract-and-run
 ```
 
 ## Como o projeto está organizado
