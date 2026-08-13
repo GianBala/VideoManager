@@ -66,6 +66,12 @@ _TO_STEREO = "aformat=channel_layouts=stereo"
 # mostrar, senão o ffmpeg sai sem escrever nada e a prévia fica sem explicação.
 _MIN_CANVAS = 0.04
 
+# Sobra clonada no fim de um bloco interpolado (ver :func:`_rate_chain`). Meio
+# segundo cobre com folga os poucos quadros que o filtro não consegue produzir,
+# e nada disso aparece: a sobreposição é desligada no fim do bloco.
+_INTERPOLATE_TAIL = 0.5
+
+
 
 @dataclass(frozen=True)
 class Composition:
@@ -80,6 +86,9 @@ class Composition:
     # Preferência de codificação por placa, resolvida na hora de gravar (com
     # queda para software quando ela não abrir). Ver ``core/hwaccel.py``.
     hardware: str = hwaccel.SOFTWARE
+    # Inventar os quadros que faltam ao subir a taxa, em vez de repetir os que
+    # existem. Só na exportação: ver :func:`_rate_chain`.
+    interpolate: bool = False
 
     @property
     def extension(self) -> str:
@@ -150,14 +159,51 @@ def _input_args(piece: _Piece, fps: float) -> list[str]:
     return ["-ss", f"{piece.seek:.6f}", "-i", str(clip.media.path)]
 
 
-def _video_chain(piece: _Piece, project: Project, fps: float) -> str:
+def _rate_chain(piece: _Piece, fps: float, interpolate: bool) -> str:
+    """Como este bloco chega à taxa da tela.
+
+    O normal é ``fps``, que **duplica ou descarta quadros inteiros**: subir de 24
+    para 60 assim entrega um arquivo de 60 fps com 24 imagens por segundo (e uma
+    cadência 2-3-2-3, que treme mais que os 24 originais). É o comportamento
+    certo por padrão — é instantâneo e não inventa nada.
+
+    ``minterpolate`` estima o movimento e **sintetiza** os quadros que faltam;
+    é a única forma de ganhar fluidez de verdade. Medido nesta máquina, 5 s a
+    24→60 fps: 0,15 s duplicando contra 5,73 s interpolando (38×), com 296 dos
+    300 quadros distintos contra 120. Em troca, ela inventa pixels — movimento
+    rápido, oclusão e corte de cena saem deformados —, e por isso é escolha
+    explícita e nunca o padrão.
+
+    Só entra onde há o que interpolar: um bloco que já está na taxa da tela (ou
+    acima dela) pagaria a estimativa de movimento para nada, e uma imagem parada
+    não tem movimento nenhum a estimar.
+    """
+    origem = piece.clip.media.fps
+    if interpolate and origem and origem < fps - 0.01:
+        # ``tpad`` repõe o fim: para inventar um quadro, o filtro precisa do
+        # **seguinte**, e por isso ele entrega alguns quadros a menos do que
+        # recebeu. Medido: 236 de 240. O bloco acabava antes da hora e o que
+        # aparecia no lugar era o fundo preto da composição — duração certa,
+        # contagem de quadros certa, nenhum erro, e o último décimo de segundo
+        # preto. O excedente clonado não vaza: a sobreposição já é desligada no
+        # fim do bloco.
+        return (
+            f"minterpolate=fps={fps:.6f}:mi_mode=mci:mc_mode=aobmc:vsbmc=1,"
+            f"tpad=stop_mode=clone:stop_duration={_INTERPOLATE_TAIL}"
+        )
+    return f"fps={fps:.6f}"
+
+
+def _video_chain(
+    piece: _Piece, project: Project, fps: float, interpolate: bool = False
+) -> str:
     """Ajusta um bloco ao formato da tela e o coloca no instante certo."""
     steps = [f"trim=duration={piece.duration:.6f}"]
     if piece.offset > 0:
         steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
     else:
         steps.append("setpts=PTS-STARTPTS")
-    steps.append(f"fps={fps:.6f}")
+    steps.append(_rate_chain(piece, fps, interpolate))
     steps.append(_fit_scale(project.width, project.height))
     steps.append(
         f"pad={project.width}:{project.height}:(ow-iw)/2:(oh-ih)/2:color=black"
@@ -219,8 +265,15 @@ def build_graph(
     fps: float | None = None,
     want_video: bool = True,
     want_audio: bool = True,
+    interpolate: bool = False,
 ) -> Graph:
-    """Traduz o projeto num grafo de filtros do ffmpeg."""
+    """Traduz o projeto num grafo de filtros do ffmpeg.
+
+    ``interpolate`` é pedido **só pela exportação**: ele multiplica o tempo de
+    codificação por dezenas, e o mesmo grafo alimenta o quadro parado e a
+    reprodução da prévia, que precisam sair na hora. É a única coisa que a
+    prévia não mostra do resultado, e a aba diz isso ao lado do controle.
+    """
     fps = fps or project.fps
     pieces = _pieces(project, at, span)
     duration = span if span is not None else max(_MIN_CANVAS, project.duration - at)
@@ -249,7 +302,7 @@ def build_graph(
         )
         current = "[base]"
         for order, piece in enumerate(video_parts):
-            filters.append(_video_chain(piece, project, fps))
+            filters.append(_video_chain(piece, project, fps, interpolate))
             start, end = piece.offset, piece.offset + piece.duration
             label = f"[o{order}]"
             filters.append(
@@ -294,12 +347,13 @@ def export_args(
     *,
     container: str = "mp4",
     hardware: str = hwaccel.SOFTWARE,
+    interpolate: bool = False,
 ) -> list[str]:
     """Comando que grava o projeto inteiro em um arquivo."""
     if project.is_empty:
         raise ConversionError("Não há nada na linha do tempo para exportar.")
 
-    graph = build_graph(project)
+    graph = build_graph(project, interpolate=interpolate)
     family = hwaccel.family_for(container)
     encoder = hwaccel.resolve(family, hardware, tools)
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y"]
@@ -481,8 +535,21 @@ def as_trim_target(
     )
 
 
+def can_interpolate(project: Project) -> bool:
+    """Se há bloco abaixo da taxa da tela — o único caso com o que interpolar."""
+    return any(
+        clip.media.fps and clip.media.fps < project.fps - 0.01
+        for track in project.video_tracks
+        for clip in track.clips
+        if clip.has_image
+    )
+
+
 def describe_export(
-    project: Project, container: str, hardware: str = hwaccel.SOFTWARE
+    project: Project,
+    container: str,
+    hardware: str = hwaccel.SOFTWARE,
+    interpolate: bool = False,
 ) -> str:
     """Resumo do que a exportação vai produzir."""
     videos = sum(len(track.clips) for track in project.video_tracks)
@@ -494,6 +561,8 @@ def describe_export(
         parts.append(f"{audios} de áudio")
     if project.has_video:
         parts.append(f"{project.width}×{project.height} · {project.fps:g} fps")
+    if interpolate and can_interpolate(project):
+        parts.append("movimento interpolado (lento)")
     if hardware != hwaccel.SOFTWARE:
         parts.append("placa de vídeo, se disponível")
     parts.append(f"{format_span(project.duration)} de duração")
