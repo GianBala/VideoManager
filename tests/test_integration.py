@@ -235,6 +235,138 @@ def test_arquivo_de_saida_nunca_sobrescreve_a_origem(tools, arquivo_local: Path)
     assert destino.resolve() != arquivo_local.resolve()
 
 
+# ---------------------------------------------------------------------------
+# Edição multipista
+#
+# Estes não tocam a rede — precisam só do ffmpeg —, mas moram aqui porque
+# compartilham a regra que dá sentido ao arquivo: **conferir o resultado com o
+# ffprobe, e não a ausência de exceção**. Foi assim que se descobriu que a
+# mixagem tirava 3 dB do material mono sem ninguém pedir; um teste que apenas
+# executasse a exportação teria passado.
+# ---------------------------------------------------------------------------
+
+
+def gerar_video(path: Path, tools, *, duracao: float = 4.0, canais: int = 2) -> Path:
+    layout = "stereo" if canais == 2 else "mono"
+    subprocess.run(
+        [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y",
+         "-f", "lavfi", "-i", f"testsrc2=size=320x240:rate=30:duration={duracao}",
+         "-f", "lavfi", "-i",
+         f"sine=frequency=440:duration={duracao}:sample_rate=48000",
+         "-af", f"aformat=channel_layouts={layout}",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+         "-shortest", str(path)],
+        check=True, capture_output=True,
+    )
+    return path
+
+
+def volume_medio(path: Path, tools) -> float:
+    saida = subprocess.run(
+        [tools.ffmpeg_str, "-hide_banner", "-nostdin", "-i", str(path),
+         "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True,
+    ).stderr
+    linha = next(l for l in saida.splitlines() if "mean_volume:" in l)
+    return float(linha.split("mean_volume:")[1].split("dB")[0])
+
+
+class TestExportacaoDaEdicao:
+    def test_ganho_em_decibeis_sai_exato_no_arquivo(self, tmp_path: Path, tools) -> None:
+        """0 dB tem de significar "não mexe", e -6 dB tem de ser -6 dB.
+
+        A conversão de layout do ffmpeg normaliza a potência e tira 3 dB de
+        material mono. O defeito não levanta erro, não aparece na duração e não
+        aparece em nenhuma tela: só medindo.
+        """
+        from videomanager.core.composer import Composition
+        from videomanager.core.converter import Converter, probe_file
+        from videomanager.core.project import media_ref, new_project
+
+        for canais in (1, 2):
+            origem = gerar_video(tmp_path / f"fonte{canais}.mp4", tools, canais=canais)
+            projeto = new_project(media_ref(probe_file(origem, tools)))
+            alvo = projeto.clips[0]
+
+            neutro = tmp_path / f"neutro{canais}.mp4"
+            Converter(probe_file(origem, tools), Composition(projeto, "mp4"),
+                      neutro, tools).run()
+            assert volume_medio(neutro, tools) == pytest.approx(
+                volume_medio(origem, tools), abs=0.6
+            ), f"0 dB alterou o som ({canais} canal/canais)"
+
+            baixado = tmp_path / f"baixo{canais}.mp4"
+            Converter(
+                probe_file(origem, tools),
+                Composition(projeto.with_updated_clip(alvo.clip_id, gain_db=-6.0), "mp4"),
+                baixado, tools,
+            ).run()
+            assert volume_medio(baixado, tools) == pytest.approx(
+                volume_medio(neutro, tools) - 6.0, abs=0.6
+            ), f"-6 dB não saiu -6 dB ({canais} canal/canais)"
+
+    def test_bloco_mudo_e_trilha_muda_nao_chegam_ao_arquivo(
+        self, tmp_path: Path, tools
+    ) -> None:
+        from videomanager.core.composer import Composition
+        from videomanager.core.converter import Converter, probe_file
+        from videomanager.core.project import media_ref, new_project
+
+        origem = gerar_video(tmp_path / "fonte.mp4", tools)
+        projeto = new_project(media_ref(probe_file(origem, tools)))
+        calado = projeto.with_updated_clip(projeto.clips[0].clip_id, muted=True)
+
+        saida = tmp_path / "mudo.mp4"
+        Converter(probe_file(origem, tools), Composition(calado, "mp4"), saida, tools).run()
+        _, streams = ffprobe_streams(saida, tools)
+        assert stream_of(streams, "video") is not None, "a imagem continua"
+        assert stream_of(streams, "audio") is None, "o som calado não foi gravado"
+
+    def test_montagem_de_duas_trilhas_tem_a_duracao_da_mais_longa(
+        self, tmp_path: Path, tools
+    ) -> None:
+        from videomanager.core.composer import Composition
+        from videomanager.core.project import Clip, media_ref, new_project
+        from videomanager.core.converter import Converter, probe_file
+
+        curto = gerar_video(tmp_path / "curto.mp4", tools, duracao=3.0)
+        longo = gerar_video(tmp_path / "longo.mp4", tools, duracao=6.0)
+        projeto = new_project(media_ref(probe_file(curto, tools)))
+        som = media_ref(probe_file(longo, tools))
+        # O áudio do segundo arquivo entra numa trilha própria, começando aos 2 s.
+        projeto = projeto.with_clip(
+            len(projeto.tracks) - 1,
+            Clip(media=som, start=2.0, duration=6.0),
+        )
+
+        saida = tmp_path / "montagem.mp4"
+        Converter(probe_file(curto, tools), Composition(projeto, "mp4"), saida, tools).run()
+        formato, streams = ffprobe_streams(saida, tools)
+        assert float(formato["duration"]) == pytest.approx(8.0, abs=0.2)
+        assert stream_of(streams, "audio") is not None
+
+    def test_previa_de_audio_sai_na_taxa_que_a_placa_espera(
+        self, tmp_path: Path, tools
+    ) -> None:
+        """O contrato entre o compositor e a saída de som.
+
+        A prévia toca PCM cru: se a taxa, o número de canais ou o formato
+        mudarem de um lado sem o outro, o som toca acelerado ou lento em vez de
+        falhar — foi exatamente esse o defeito relatado (som ao dobro).
+        """
+        from videomanager.core.composer import CHANNELS, SAMPLE_RATE, audio_command
+        from videomanager.core.converter import probe_file
+        from videomanager.core.project import media_ref, new_project
+
+        origem = gerar_video(tmp_path / "fonte.mp4", tools, duracao=3.0)
+        projeto = new_project(media_ref(probe_file(origem, tools)))
+        pcm = subprocess.run(
+            audio_command(projeto, 0.0, tools), capture_output=True
+        ).stdout
+        esperado = projeto.duration * SAMPLE_RATE * CHANNELS * 2  # s16le
+        assert len(pcm) == pytest.approx(esperado, rel=0.02)
+
+
 class TestCodificacaoPorPlaca:
     """A placa precisa **obedecer** ao número de qualidade, não só aceitar o argumento.
 
