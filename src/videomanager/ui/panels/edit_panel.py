@@ -87,7 +87,7 @@ from ...core.project import (
     Project,
     TrackKind,
     accepts,
-    fit_canvas,
+    auto_canvas,
     media_ref,
     new_project,
     next_clip_id,
@@ -757,7 +757,6 @@ class EditPanel(QWidget):
         nenhuma, cria uma trilha nova em vez de empurrar o que já está lá — o
         que o usuário montou não se mexe sozinho.
         """
-        self._project = fit_canvas(self._project, reference)
         clip = Clip(
             media=reference,
             start=max(0.0, self._position if at is None else at),
@@ -771,6 +770,10 @@ class EditPanel(QWidget):
                 self._project.tracks[0 if kind is TrackKind.VIDEO else -1].track_id
             )
         self._project = self._project.with_clip(index, clip)
+        # A tela é medida depois de o bloco entrar, e sobre a edição inteira:
+        # é o que impede a ordem de importação de decidir a qualidade do
+        # resultado (ver :func:`auto_canvas`).
+        self._project = auto_canvas(self._project)
         self._timeline.select(clip.clip_id)
 
     def _free_track(self, clip: Clip) -> int | None:

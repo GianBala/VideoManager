@@ -44,6 +44,18 @@ IMAGE_DURATION = 5.0
 MIN_GAIN_DB = -60.0
 MAX_GAIN_DB = 12.0
 
+# Tela de uma edição que ainda não tem imagem nenhuma.
+DEFAULT_WIDTH = 1920
+DEFAULT_HEIGHT = 1080
+DEFAULT_FPS = 30.0
+
+# Teto da taxa escolhida **automaticamente**. Acima de 60 fps o ganho é
+# imperceptível e o custo não é: um clipe de câmera lenta a 240 fps levaria a
+# exportação inteira para 240 fps — arquivo e tempo de codificação oito vezes
+# maiores — por ter sido arrastado para a linha do tempo. Pedir mais que isso
+# continua possível, mas explicitamente, pela escolha de taxa da tela.
+MAX_AUTO_FPS = 60.0
+
 _clip_ids = itertools.count(1)
 _track_ids = itertools.count(1)
 
@@ -298,9 +310,9 @@ class Project:
     """A edição inteira: trilhas, blocos e o formato da tela."""
 
     tracks: tuple[Track, ...] = ()
-    width: int = 1920
-    height: int = 1080
-    fps: float = 30.0
+    width: int = DEFAULT_WIDTH
+    height: int = DEFAULT_HEIGHT
+    fps: float = DEFAULT_FPS
 
     # -- leitura ---------------------------------------------------------
 
@@ -617,25 +629,50 @@ def new_project(media: MediaRef | None = None) -> Project:
     if media is None:
         return project
 
-    project = fit_canvas(project, media)
     clip = Clip(media=media, start=0.0, duration=media.natural_duration)
     index = 0 if media.has_video else 1
-    return project.with_clip(index, clip)
+    # A tela sai da mesma regra que vale do segundo arquivo em diante, e não de
+    # uma conta própria do começo: duas contas para a mesma decisão acabam
+    # discordando, e nenhum leitor saberia qual delas manda.
+    return auto_canvas(project.with_clip(index, clip))
 
 
-def fit_canvas(project: Project, media: MediaRef) -> Project:
-    """Ajusta o formato da tela ao primeiro vídeo que entrar.
+def _even(value: int) -> int:
+    """Codificadores trabalham em blocos de dois pixels e recusam ímpar."""
+    return max(2, value - value % 2)
 
-    Sem isto, um vídeo vertical de celular sairia com tarjas pretas dos dois
-    lados numa tela 16:9 que ninguém pediu.
+
+def auto_canvas(project: Project) -> Project:
+    """Ajusta a tela ao material, escolhendo o que não rebaixa nenhum bloco.
+
+    A **maior** imagem e a **maior** taxa entre os blocos: assim nenhum deles é
+    reduzido nem tem quadro descartado, e o que perde é só o material menor, que
+    é ampliado. Decidir pelo primeiro bloco — como era — fazia a ordem de
+    importação decidir a qualidade do resultado inteiro: entrar com um clipe
+    480p rebaixava para 480p todo o material 4K que viesse depois, sem aviso e
+    sem volta a não ser esvaziando a linha do tempo.
+
+    **Foto não define a tela quando há vídeo.** Uma imagem de 6000 px levaria a
+    edição inteira para um tamanho que ninguém pediu, e ampliar uma foto custa
+    muito menos que ampliar um vídeo.
+
+    Sem imagem nenhuma, volta ao padrão: é o que faz a próxima importação
+    definir a tela de novo, em vez de herdar a de um material que já saiu.
     """
-    if project.has_video or media.kind is MediaKind.AUDIO:
-        return project
-    if not media.width or not media.height:
-        return project
+    visible = [clip for track in project.video_tracks for clip in track.clips
+               if clip.has_image]
+    videos = [c for c in visible if c.media.kind is MediaKind.VIDEO] or visible
+    sized = [c.media for c in videos if c.media.width and c.media.height]
+    if not sized:
+        return replace(
+            project, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, fps=DEFAULT_FPS
+        )
+
+    biggest = max(sized, key=lambda media: (media.width or 0) * (media.height or 0))
+    rates = [media.fps for media in sized if media.fps]
     return replace(
         project,
-        width=media.width - media.width % 2,
-        height=media.height - media.height % 2,
-        fps=media.fps or project.fps,
+        width=_even(biggest.width or DEFAULT_WIDTH),
+        height=_even(biggest.height or DEFAULT_HEIGHT),
+        fps=min(max(rates), MAX_AUTO_FPS) if rates else DEFAULT_FPS,
     )
