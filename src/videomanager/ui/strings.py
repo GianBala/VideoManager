@@ -377,6 +377,7 @@ SETTINGS_ENCODER_TIP = (
     "Se a placa escolhida não abrir na hora de gravar, a tarefa sai em software "
     "sozinha, em vez de falhar."
 )
+SETTINGS_ENCODER_TESTING = "Verificando o que esta máquina aceita…"
 SETTINGS_ENCODER_TEST = "Testar agora"
 SETTINGS_ENCODER_TEST_TIP = (
     "Manda a placa codificar um quadro de verdade. É o único jeito de saber: "
