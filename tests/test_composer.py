@@ -328,6 +328,24 @@ class TestCaminhoRapido:
         assert simple_trim(projeto(video_track(clip(), muted=True))) is None
 
 
+    def test_tela_diferente_da_origem_nao_e_recorte(self) -> None:
+        # Copiar os dados entrega a imagem como ela está no arquivo: a tela
+        # pedida seria ignorada, e o arquivo sairia diferente do que o editor
+        # anuncia. Melhor a tela desligar o corte rápido do que mentir.
+        outra = Project(
+            tracks=(video_track(clip()),), width=1280, height=720, fps=30.0
+        )
+        assert simple_trim(outra) is None
+
+    def test_taxa_diferente_da_origem_nao_e_recorte(self) -> None:
+        outra = Project(
+            tracks=(video_track(clip()),), width=1920, height=1080, fps=24.0
+        )
+        assert simple_trim(outra) is None
+
+    def test_tela_igual_a_origem_continua_sendo_recorte(self) -> None:
+        assert simple_trim(projeto(video_track(clip()))) is not None
+
     def test_som_separado_nao_e_recorte(self) -> None:
         # Copiar os dados levaria a imagem junto do bloco que só tem som: o que
         # está na tela deixaria de ser o que sai do arquivo.

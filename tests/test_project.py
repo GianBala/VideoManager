@@ -16,6 +16,7 @@ import pytest
 from videomanager.core.converter import LocalMedia, LocalStream
 from videomanager.core.project import (
     IMAGE_DURATION,
+    MAX_AUTO_FPS,
     Clip,
     MediaKind,
     MediaRef,
@@ -23,8 +24,8 @@ from videomanager.core.project import (
     Track,
     TrackKind,
     accepts,
+    auto_canvas,
     display_width,
-    fit_canvas,
     media_ref,
     new_project,
 )
@@ -83,24 +84,72 @@ class TestMidia:
 
 
 class TestTela:
-    def test_o_primeiro_video_define_o_formato(self) -> None:
+    """A tela do projeto, que decide o tamanho e a taxa do arquivo exportado.
+
+    A regra é **o maior bloco**, e não o primeiro. Com o primeiro, a ordem de
+    importação decidia a qualidade do resultado inteiro — entrar com um clipe
+    480p rebaixava para 480p todo o material 4K que viesse depois — e a única
+    saída era esvaziar a linha do tempo e recomeçar.
+    """
+
+    def test_o_video_define_o_formato(self) -> None:
         # Sem isto, um vídeo vertical de celular sairia com tarja preta dos dois
         # lados numa tela 16:9 que ninguém pediu.
         vertical = MediaRef(
             path=Path("/m/v.mp4"), kind=MediaKind.VIDEO, duration=10, width=1080,
             height=1920, fps=30,
         )
-        projeto = fit_canvas(new_project(), vertical)
+        projeto = new_project(vertical)
         assert (projeto.width, projeto.height) == (1080, 1920)
 
-    def test_o_segundo_video_nao_muda_mais(self) -> None:
-        projeto = new_project(VIDEO)
-        depois = fit_canvas(projeto, MUDO)
-        assert (depois.width, depois.height) == (1920, 1080)
+    def test_o_maior_bloco_manda_e_nao_o_primeiro(self) -> None:
+        pequeno = MediaRef(
+            path=Path("/m/p.mp4"), kind=MediaKind.VIDEO, duration=10, width=640,
+            height=480, fps=30,
+        )
+        projeto = auto_canvas(montado(clip(pequeno), clip(VIDEO, start=10.0)))
+        assert (projeto.width, projeto.height) == (1920, 1080)
+
+    def test_a_maior_taxa_manda(self) -> None:
+        rapido = MediaRef(
+            path=Path("/m/r.mp4"), kind=MediaKind.VIDEO, duration=10, width=640,
+            height=480, fps=60,
+        )
+        projeto = auto_canvas(montado(clip(VIDEO), clip(rapido, start=10.0)))
+        assert projeto.fps == 60, "nenhum bloco perde quadro"
+
+    def test_taxa_altissima_nao_arrasta_a_edicao_junto(self) -> None:
+        # Um clipe de câmera lenta a 240 fps levaria o arquivo inteiro para 240
+        # fps só por ter sido arrastado para a linha do tempo.
+        lenta = MediaRef(
+            path=Path("/m/l.mp4"), kind=MediaKind.VIDEO, duration=5, width=1920,
+            height=1080, fps=240,
+        )
+        assert auto_canvas(montado(clip(lenta))).fps == MAX_AUTO_FPS
 
     def test_audio_nao_define_formato(self) -> None:
-        projeto = fit_canvas(new_project(), SOM)
+        projeto = new_project(SOM)
         assert (projeto.width, projeto.height) == (1920, 1080)
+
+    def test_foto_nao_manda_onde_ha_video(self) -> None:
+        # Ampliar uma foto custa muito menos que ampliar um vídeo, e uma imagem
+        # de 6000 px levaria a edição para um tamanho que ninguém pediu.
+        enorme = MediaRef(
+            path=Path("/m/g.png"), kind=MediaKind.IMAGE, width=6000, height=4000
+        )
+        projeto = auto_canvas(montado(clip(VIDEO), clip(enorme, start=10.0)))
+        assert (projeto.width, projeto.height) == (1920, 1080)
+
+    def test_so_fotos_definem_a_tela(self) -> None:
+        projeto = auto_canvas(montado(clip(FOTO)))
+        assert (projeto.width, projeto.height) == (800, 600)
+
+    def test_edicao_vazia_volta_ao_padrao(self) -> None:
+        # É o que faz a próxima importação definir a tela, em vez de herdar a de
+        # um material que já saiu da edição.
+        projeto = new_project(VIDEO)
+        vazio = auto_canvas(projeto.without_clip(projeto.clips[0].clip_id))
+        assert (vazio.width, vazio.height, vazio.fps) == (1920, 1080, 30.0)
 
     def test_dimensoes_saem_pares(self) -> None:
         # Codecs de vídeo trabalham em blocos de dois pixels e recusam ímpar.
@@ -108,7 +157,7 @@ class TestTela:
             path=Path("/m/x.mp4"), kind=MediaKind.VIDEO, duration=5, width=1281,
             height=721, fps=30,
         )
-        projeto = fit_canvas(new_project(), estranho)
+        projeto = new_project(estranho)
         assert projeto.width % 2 == 0 and projeto.height % 2 == 0
 
 

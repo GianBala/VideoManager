@@ -443,6 +443,15 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
         return None
     if first.kind is MediaKind.IMAGE:
         return None
+    # Copiar os dados entrega a imagem como ela está no arquivo: uma tela pedida
+    # em outro tamanho ou outra taxa seria simplesmente ignorada, e o arquivo
+    # sairia diferente do que a tela do editor anuncia.
+    if first.width and first.height and (
+        (project.width, project.height) != (first.width, first.height)
+    ):
+        return None
+    if first.fps and abs(project.fps - first.fps) > 0.01:
+        return None
     if len(project.video_tracks) > 1 and sum(
         1 for track in project.video_tracks if track.clips
     ) > 1:
