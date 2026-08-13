@@ -172,6 +172,12 @@ class Clip:
     # significa que o som agora se ajusta noutro lugar — e é o que permite à
     # tela dizer isso, em vez de oferecer um controle de volume que não faz nada.
     detached: bool = False
+    # Este bloco carrega **só o som** da mídia: é o bloco que "separar áudio"
+    # cria. Sem a marca, um bloco de trilha de áudio cuja mídia também tem
+    # imagem continuava passando por bloco de vídeo — a composição desenhava a
+    # imagem dele por cima da montagem, a trilha de áudio recusava recebê-lo de
+    # volta num arrasto e colar mandava o som para a trilha de vídeo.
+    audio_only: bool = False
     # Identidade estável, preservada por ``dataclasses.replace``: é por ela que
     # a seleção, o cache de miniaturas e o desfazer reconhecem o mesmo bloco
     # depois de qualquer alteração.
@@ -188,6 +194,15 @@ class Clip:
     @property
     def has_sound(self) -> bool:
         return self.media.has_audio and not self.muted and not self.detached
+
+    @property
+    def has_image(self) -> bool:
+        """Se este bloco contribui com imagem para a composição.
+
+        Não basta a mídia ter vídeo: o bloco de "separar áudio" nasce do mesmo
+        arquivo e não mostra nada.
+        """
+        return self.media.has_video and not self.audio_only
 
     @property
     def can_adjust_sound(self) -> bool:
@@ -536,6 +551,7 @@ class Project:
             duration=clip.duration,
             in_point=clip.in_point,
             gain_db=clip.gain_db,
+            audio_only=True,
         )
         return project.with_clip(target, detached)
 
@@ -569,10 +585,15 @@ def accepts(kind: TrackKind, clip: Clip) -> bool:
     Áudio não sobe para trilha de vídeo (não há o que mostrar) e imagem ou vídeo
     não descem para trilha de áudio (o som deles, quando existe, é separado por
     "separar áudio").
+
+    Quem decide é o **bloco**, não a mídia dele: o bloco criado por "separar
+    áudio" vem de um arquivo com imagem e mesmo assim é áudio. Enquanto isso
+    saía da mídia, esse bloco não podia ser arrastado nem dentro da própria
+    trilha, e colar mandava o som para a trilha de vídeo.
     """
     if kind is TrackKind.VIDEO:
-        return clip.media.has_video
-    return clip.media.kind is MediaKind.AUDIO
+        return clip.has_image
+    return clip.media.kind is MediaKind.AUDIO or clip.audio_only
 
 
 def _default_name(project: Project, kind: TrackKind) -> str:

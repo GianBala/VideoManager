@@ -209,6 +209,44 @@ class TestMover:
         assert projeto.clips[0].start == 0.0
 
 
+class TestSomSeparadoEUmBlocoDeAudio:
+    """O bloco que "separar áudio" cria é áudio, mesmo vindo de um arquivo com
+    imagem.
+
+    Enquanto essa espécie saía da mídia, ele não podia ser arrastado nem dentro
+    da própria trilha, copiar e colar o mandava para a trilha de vídeo, e a
+    composição desenhava o vídeo dele por cima da montagem.
+    """
+
+    def separado(self) -> tuple[Project, Clip]:
+        projeto = montado(clip(VIDEO, start=0.0, duration=10.0))
+        projeto = projeto.detached_audio(projeto.clips[0].clip_id)
+        som = [c for t in projeto.audio_tracks for c in t.clips][0]
+        return projeto, som
+
+    def test_a_trilha_de_audio_aceita_e_a_de_video_nao(self) -> None:
+        _, som = self.separado()
+        assert som.audio_only
+        assert accepts(TrackKind.AUDIO, som)
+        assert not accepts(TrackKind.VIDEO, som)
+
+    def test_nao_mostra_imagem(self) -> None:
+        projeto, som = self.separado()
+        assert not som.has_image
+        assert projeto.tracks[0].clips[0].has_image, "o bloco de vídeo continua sendo"
+
+    def test_pode_ser_movido_na_propria_trilha(self) -> None:
+        projeto, som = self.separado()
+        destino = projeto.track_index(projeto.audio_tracks[0].track_id)
+        movido = projeto.moved(som.clip_id, destino, 4.0)
+        assert movido.find(som.clip_id)[1].start == pytest.approx(4.0)  # type: ignore[index]
+
+    def test_continua_com_som(self) -> None:
+        projeto, som = self.separado()
+        assert som.has_sound and som.can_adjust_sound
+        assert projeto.has_sound
+
+
 class TestPontas:
     def test_encurtar_pelo_fim(self) -> None:
         projeto = montado(clip(start=0.0, duration=10.0))

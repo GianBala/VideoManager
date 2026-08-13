@@ -328,6 +328,47 @@ class TestCaminhoRapido:
         assert simple_trim(projeto(video_track(clip(), muted=True))) is None
 
 
+    def test_som_separado_nao_e_recorte(self) -> None:
+        # Copiar os dados levaria a imagem junto do bloco que só tem som: o que
+        # está na tela deixaria de ser o que sai do arquivo.
+        so_o_som = projeto(audio_track(clip(audio_only=True)))
+        assert simple_trim(so_o_som) is None
+
+
+class TestSomSeparado:
+    """O bloco de "separar áudio" entra na mixagem e **não** na imagem.
+
+    Ele vem de um arquivo com vídeo, e enquanto a espécie saía da mídia o
+    compositor o tratava como bloco de imagem: desenhava o vídeo dele por cima
+    da montagem inteira, no instante em que o som estivesse, e ainda pagava a
+    decodificação de um vídeo que ninguém pediu.
+    """
+
+    def montagem(self) -> Project:
+        return projeto(
+            video_track(clip(VIDEO, start=0.0, duration=10.0, detached=True)),
+            audio_track(clip(VIDEO, start=4.0, duration=10.0, audio_only=True)),
+        )
+
+    def test_nao_entra_na_imagem(self) -> None:
+        graph = build_graph(self.montagem())
+        assert graph.filters is not None
+        assert sum(1 for f in graph.filters if "overlay" in f) == 1, (
+            "só o bloco da trilha de vídeo é sobreposto"
+        )
+
+    def test_entra_na_mixagem(self) -> None:
+        graph = build_graph(self.montagem())
+        assert graph.audio_label is not None
+        assert "[1:a]" in ";".join(graph.filters), "o som do bloco separado é o que toca"
+
+    def test_o_video_de_origem_ficou_sem_som(self) -> None:
+        # O som saiu do bloco de vídeo: entrar duas vezes na mixagem dobraria o
+        # volume de tudo que foi separado.
+        graph = build_graph(self.montagem())
+        assert "[0:a]" not in ";".join(graph.filters)
+
+
 class TestDescricao:
     def test_conta_o_que_vai_para_o_arquivo(self) -> None:
         texto = describe_export(
