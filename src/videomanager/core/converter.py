@@ -30,6 +30,7 @@ from pathlib import Path
 from .binaries import FFmpegTools, subprocess_kwargs
 from .downloader import Progress
 from .errors import ConversionError, JobCancelled
+from .composer import Composition, describe_export, export_args
 from .trimmer import TrimTarget, build_trim_args, describe_trim
 
 # --- alvos de áudio ---------------------------------------------------------
@@ -188,7 +189,7 @@ class VideoTarget:
 # muda é a montagem dos argumentos, e todo o resto — progresso lido do ffmpeg,
 # cancelamento, limpeza da saída parcial — vale igual. O módulo ``trimmer``
 # depende deste, e nunca o contrário, para a dependência continuar de mão única.
-ConversionTarget = AudioTarget | VideoTarget | TrimTarget
+ConversionTarget = AudioTarget | VideoTarget | TrimTarget | Composition
 
 
 # ---------------------------------------------------------------------------
@@ -496,6 +497,16 @@ def build_args(
         return build_audio_args(media, target, destination, tools)
     if isinstance(target, TrimTarget):
         return build_trim_args(media, target, destination, tools)
+    if isinstance(target, Composition):
+        # A composição não tem "arquivo de origem": as mídias estão dentro do
+        # projeto, e ``media`` só existe aqui para as outras conversões.
+        return export_args(
+            target.project,
+            destination,
+            tools,
+            container=target.container,
+            hardware=target.hardware,
+        )
     return build_video_args(media, target, destination, tools)
 
 
@@ -505,13 +516,15 @@ def output_duration(media: LocalMedia, target: ConversionTarget) -> float | None
     Só um recorte tem duração diferente da origem, e é justamente onde usar a
     duração do arquivo faria a barra parar em 3% numa tarefa concluída.
     """
-    if isinstance(target, TrimTarget):
+    if isinstance(target, (TrimTarget, Composition)):
         return target.output_duration or None
     return media.duration
 
 
 def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
     """Resumo do que a conversão vai fazer, para exibir antes de começar."""
+    if isinstance(target, Composition):
+        return describe_export(target.project, target.container, target.hardware)
     if isinstance(target, TrimTarget):
         return describe_trim(media, target)
     if isinstance(target, AudioTarget):
@@ -545,6 +558,14 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
 # Linhas do -progress: "chave=valor". out_time_us é preferido a out_time_ms
 # porque em várias versões do ffmpeg o campo "ms" é reportado em microssegundos
 # — uma inconsistência antiga que já causou barras de progresso 1000x erradas.
+# Verbo que a fila mostra enquanto a tarefa corre. Sai daqui, e não de um
+# ``if`` no meio do laço de progresso, para acrescentar um alvo novo não exigir
+# mexer no código que lê o ffmpeg.
+_PHASES = {
+    TrimTarget: "Recortando",
+    Composition: "Exportando",
+}
+
 _PROGRESS_LINE = re.compile(r"^(\w+)=(.*)$")
 _TIMESTAMP = re.compile(r"^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$")
 
@@ -611,7 +632,7 @@ class Converter:
             percent = min(100.0, seconds * 100.0 / duration)
         self._on_progress(
             Progress(
-                phase="Recortando" if isinstance(self._target, TrimTarget) else "Convertendo",
+                phase=_PHASES.get(type(self._target), "Convertendo"),
                 percent=percent,
                 downloaded_bytes=size,
                 indeterminate=percent is None,
