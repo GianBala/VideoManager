@@ -33,7 +33,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
@@ -169,6 +169,26 @@ _CANVAS_PRESETS = (
 )
 _RATE_PRESETS = (24.0, 25.0, 30.0, 50.0, 60.0)
 
+# Vagas de ffmpeg da aba (ver o construtor). Números pequenos e de propósito: o
+# que limita aqui não é o processador, é a memória — cada worker decodifica
+# vídeo, e o material que se edita costuma ser o mais pesado que a máquina tem.
+_LIVE_WORKERS = 2        # o quadro parado e a reprodução, que nunca esperam
+_BACKGROUND_WORKERS = 2  # tira, onda e keyframes, que podem esperar
+
+
+def _bounded_pool(parent: QObject, threads: int) -> QThreadPool:
+    """Uma fila própria, com teto — nunca a global.
+
+    ``QThreadPool.globalInstance()`` dimensiona por núcleo, o que é a conta certa
+    para trabalho que ocupa um núcleo e a errada para trabalho que abre um
+    processo de ffmpeg: ali cada vaga custa a memória de um decodificador
+    inteiro, e as vagas todas juntas custam mais do que a máquina tem.
+    """
+    pool = QThreadPool(parent)
+    pool.setMaxThreadCount(threads)
+    return pool
+
+
 def _wrapping_label(role: str) -> QLabel:
     """Rótulo que quebra linha **e** cobra do layout a altura que isso exige.
 
@@ -236,7 +256,20 @@ class EditPanel(QWidget):
         self.setAcceptDrops(True)
         self._settings = settings
         self._ensure_tools = ensure_tools
-        self._runner = WorkerRunner()
+        # Duas filas, e nenhuma delas é a global. Todo worker daqui abre um
+        # ffmpeg, e a global tem uma vaga por núcleo — 20 nesta máquina. Uma
+        # linha do tempo com quatro blocos disparava quatro tiras e quatro ondas
+        # de uma vez: **oito ffmpeg**, ~900 MB cada, todos decodificando o mesmo
+        # material que ninguém ainda pediu para ver. Foi o que, somado a uma
+        # exportação, esgotou a memória da máquina e derrubou a sessão.
+        #
+        # A separação existe porque as duas esperas são diferentes. Quadro e
+        # reprodução respondem ao usuário e não podem ficar atrás de trabalho de
+        # fundo numa fila só — duas vagas, que é exatamente o que eles usam (um
+        # quadro por vez, uma reprodução por vez). Tira, onda e keyframes são de
+        # fundo, aparecem preenchendo e podem esperar.
+        self._runner = WorkerRunner(_bounded_pool(self, _LIVE_WORKERS))
+        self._background = WorkerRunner(_bounded_pool(self, _BACKGROUND_WORKERS))
         self._colors = palette(settings.theme)
 
         self._project = new_project()
@@ -1495,7 +1528,7 @@ class EditPanel(QWidget):
                 tok, cid, index, frame
             )
         )
-        self._runner.start(worker, worker.signals.done)
+        self._background.start(worker, worker.signals.done)
         self._strip_workers[clip.clip_id] = worker
 
     def _cancel_strip(self, clip_id: int) -> None:
@@ -1535,7 +1568,7 @@ class EditPanel(QWidget):
                 tok, c, a, b, png
             )
         )
-        self._runner.start(worker, worker.signals.done)
+        self._background.start(worker, worker.signals.done)
 
     def _on_wave(
         self, token: int, clip_id: int, begin: float, finish: float, png: bytes
@@ -2139,7 +2172,7 @@ class EditPanel(QWidget):
         self._keyframe_source = source
         worker = KeyframeWorker(source, tools)
         worker.signals.keyframes.connect(self._on_keyframes)
-        self._runner.start(worker, worker.signals.done)
+        self._background.start(worker, worker.signals.done)
 
     def _on_keyframes(self, times: object) -> None:
         self._keyframes = tuple(times) if isinstance(times, tuple) else ()
