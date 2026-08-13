@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -261,6 +262,31 @@ def gerar_video(path: Path, tools, *, duracao: float = 4.0, canais: int = 2) -> 
     return path
 
 
+def distintos(path: Path, tools) -> int:
+    """Quantas imagens **diferentes** o arquivo tem, e não quantos quadros.
+
+    O ``mpdecimate`` descarta o quadro que repete o anterior. Comparar hashes
+    não serviria: a recodificação com perdas faz o quadro repetido não sair byte
+    a byte igual, e todos pareceriam distintos.
+    """
+    saida = subprocess.run(
+        [tools.ffmpeg_str, "-hide_banner", "-i", str(path), "-vf", "mpdecimate",
+         "-loglevel", "info", "-f", "null", "-"],
+        capture_output=True, text=True,
+    ).stderr
+    return int(saida.split("frame=")[-1].split()[0])
+
+
+def _rate_of(path: Path, tools) -> tuple[float, int, float]:
+    formato, streams = ffprobe_streams(path, tools)
+    video = stream_of(streams, "video")
+    assert video is not None
+    num, den = video["r_frame_rate"].split("/")
+    return float(num) / float(den), int(video.get("nb_frames") or 0), float(
+        formato["duration"]
+    )
+
+
 def _sar_of(stream: dict) -> float:
     """Proporção do pixel de um stream, como o ffprobe a escreve ("32:27")."""
     texto = str(stream.get("sample_aspect_ratio") or "1:1")
@@ -418,6 +444,58 @@ class TestExportacaoDaEdicao:
         assert brilho_medio(saida, tools, 1.0) > 100, "a imagem existe onde ela está"
         assert brilho_medio(saida, tools, 6.0) < 10, (
             "onde só há som, a tela é preta — não o vídeo do bloco de áudio"
+        )
+
+    def test_subir_a_taxa_sozinho_nao_cria_fluidez(self, tmp_path: Path, tools) -> None:
+        """24 fps exportado a 60 fps **não** fica mais fluido — e a opção existe.
+
+        Sem interpolar, o arquivo tem 60 quadros por segundo e 24 imagens por
+        segundo: os outros 36 são cópias. É o defeito mais fácil de não ver —
+        duração certa, taxa certa no container, nenhum erro — e o único jeito de
+        afirmar qualquer coisa aqui é contar as imagens **distintas**.
+        """
+        from videomanager.core.composer import Composition
+        from videomanager.core.converter import Converter, probe_file
+        from videomanager.core.project import media_ref, new_project
+
+        duracao = 2.0
+        origem = tmp_path / "cinema.mp4"
+        subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-f", "lavfi",
+             "-i", f"testsrc2=size=320x180:rate=24:duration={duracao}",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+             "-pix_fmt", "yuv420p", str(origem)],
+            check=True,
+        )
+        projeto = replace(new_project(media_ref(probe_file(origem, tools))), fps=60.0)
+        assert distintos(origem, tools) == 48, "a fonte tem 24 imagens por segundo"
+
+        duplicado = tmp_path / "duplicado.mp4"
+        Converter(
+            probe_file(origem, tools), Composition(projeto, "mp4"), duplicado, tools
+        ).run()
+        taxa, _quadros, _dur = _rate_of(duplicado, tools)
+        assert taxa == 60, "o container declara 60 fps"
+        assert distintos(duplicado, tools) == 48, (
+            "duplicar quadros não cria imagem nenhuma: a fluidez continua a de 24"
+        )
+
+        interpolado = tmp_path / "interpolado.mp4"
+        Converter(
+            probe_file(origem, tools),
+            Composition(projeto, "mp4", interpolate=True),
+            interpolado,
+            tools,
+        ).run()
+        assert distintos(interpolado, tools) > 100, (
+            "interpolando, os quadros que faltavam passam a existir"
+        )
+        # Para inventar um quadro, o filtro precisa do seguinte — e por isso
+        # entrega alguns a menos do que recebeu (medido: 236 de 240). O bloco
+        # acabava antes da hora e o fundo preto da composição aparecia no lugar:
+        # duração certa, contagem certa, nenhum erro, e o fim preto.
+        assert brilho_medio(interpolado, tools, duracao - 0.05) > 10, (
+            "o fim do bloco interpolado não pode sair preto"
         )
 
     def test_pixel_nao_quadrado_sai_com_a_forma_certa(self, tmp_path: Path, tools) -> None:

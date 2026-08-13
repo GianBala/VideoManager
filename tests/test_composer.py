@@ -22,6 +22,7 @@ from videomanager.core.composer import (
     SAMPLE_RATE,
     audio_command,
     build_graph,
+    can_interpolate,
     describe_export,
     export_args,
     frame_command,
@@ -206,6 +207,80 @@ class TestAudio:
         graph = build_graph(projeto(video_track(clip(VIDEO, muted=True))))
         assert graph.audio_label is None
         assert graph.video_label is not None, "a imagem continua"
+
+
+class TestInterpolacao:
+    """Inventar os quadros que faltam, em vez de repetir os que existem.
+
+    O padrão duplica: subir 24 para 60 entrega um arquivo de 60 fps com 24
+    imagens por segundo (medido). Interpolar é a única forma de ganhar fluidez
+    de verdade, custa 38× o tempo de exportação (medido) e deforma o que se move
+    depressa — por isso é escolha explícita, nunca o padrão, e não vale para a
+    prévia.
+    """
+
+    def lento(self, fps: float = 24.0) -> MediaRef:
+        return MediaRef(
+            path=Path("/m/cinema.mp4"), kind=MediaKind.VIDEO, duration=30.0,
+            width=1920, height=1080, fps=fps, has_audio=True, channels=2,
+        )
+
+    def em_60(self, *clips: Clip) -> Project:
+        return Project(
+            tracks=(video_track(*clips),), width=1920, height=1080, fps=60.0
+        )
+
+    def test_por_padrao_duplica_quadros(self) -> None:
+        texto = filtros(self.em_60(clip(self.lento())))
+        assert "fps=60.000000" in texto
+        assert "minterpolate" not in texto
+
+    def test_quando_pedida_inventa_os_quadros(self) -> None:
+        texto = filtros(self.em_60(clip(self.lento())), interpolate=True)
+        assert "minterpolate=fps=60.000000" in texto
+        assert "mi_mode=mci" in texto, "sem modo de compensação não há quadro novo"
+
+    def test_o_fim_do_bloco_e_reposto(self) -> None:
+        # O filtro precisa do quadro seguinte para inventar um, e entrega menos
+        # quadros do que recebe: sem repor, o bloco acabava antes da hora e o
+        # fundo preto da composição aparecia no lugar.
+        texto = filtros(self.em_60(clip(self.lento())), interpolate=True)
+        assert "tpad=stop_mode=clone" in texto
+        assert texto.index("minterpolate") < texto.index("tpad"), "reposição vem depois"
+
+    def test_bloco_que_ja_esta_na_taxa_nao_paga_a_conta(self) -> None:
+        # Estimar movimento para chegar onde já se está é custo puro.
+        texto = filtros(self.em_60(clip(self.lento(60.0))), interpolate=True)
+        assert "minterpolate" not in texto
+
+    def test_imagem_parada_nao_tem_movimento_a_estimar(self) -> None:
+        texto = filtros(self.em_60(clip(FOTO)), interpolate=True)
+        assert "minterpolate" not in texto
+
+    def test_a_previa_nunca_interpola(self) -> None:
+        # O mesmo grafo alimenta o quadro parado e a reprodução, que precisam
+        # sair na hora: 38× o tempo não cabe no ritmo de uma prévia.
+        projeto = self.em_60(clip(self.lento()))
+        for comando in (
+            frame_command(projeto, 1.0, (640, 360), TOOLS),
+            playback_command(projeto, 1.0, (640, 360), TOOLS, fps=60),
+        ):
+            assert "minterpolate" not in " ".join(comando)
+
+    def test_so_ha_o_que_interpolar_abaixo_da_taxa_da_tela(self) -> None:
+        assert can_interpolate(self.em_60(clip(self.lento())))
+        assert not can_interpolate(self.em_60(clip(self.lento(60.0))))
+        assert not can_interpolate(self.em_60(clip(FOTO)))
+        assert not can_interpolate(projeto(audio_track(clip(ESTEREO))))
+
+    def test_o_resumo_anuncia_o_que_vai_custar(self) -> None:
+        projeto_lento = self.em_60(clip(self.lento()))
+        assert "interpolado" in describe_export(projeto_lento, "mp4", interpolate=True)
+        assert "interpolado" not in describe_export(projeto_lento, "mp4")
+        # Pedir onde não há o que interpolar não pode anunciar o que não vai
+        # acontecer.
+        rapido = self.em_60(clip(self.lento(60.0)))
+        assert "interpolado" not in describe_export(rapido, "mp4", interpolate=True)
 
 
 class TestJanela:
