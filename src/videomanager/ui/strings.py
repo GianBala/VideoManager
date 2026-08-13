@@ -278,6 +278,42 @@ EDIT_CLIP_MUTE_TIP = (
 )
 EDIT_FIELD_TIP = "Tempo no formato h:mm:ss,mmm — digite e pressione Enter"
 
+# tela do projeto
+EDIT_CANVAS = "Tela:"
+EDIT_CANVAS_RATE = "Taxa:"
+EDIT_CANVAS_AUTO = "Automática · segue o material"
+EDIT_CANVAS_RATE_AUTO = "Automática"
+EDIT_CANVAS_SIZE = "{width} × {height}"
+EDIT_CANVAS_FPS = "{fps} fps"
+EDIT_CANVAS_TIP = (
+    "O tamanho do vídeo exportado. Todo bloco é encaixado nela inteiro, com "
+    "tarja preta onde sobra — nada é esticado nem cortado.\n"
+    "Automática usa o maior bloco da edição, para não rebaixar o melhor "
+    "material por causa da ordem em que os arquivos entraram."
+)
+EDIT_CANVAS_RATE_TIP = (
+    "Os quadros por segundo do vídeo exportado. Blocos de outra taxa têm "
+    "quadros duplicados ou descartados para chegar nela — não há invenção de "
+    "movimento, então trocar a taxa de um material não o deixa mais fluido.\n"
+    "Automática usa a maior taxa da edição, até 60 fps."
+)
+EDIT_INTERPOLATE = "Interpolar movimento"
+EDIT_INTERPOLATE_TIP = (
+    "Inventa os quadros que faltam, em vez de repetir os que existem: é a "
+    "única forma de um material de 24 fps sair de fato mais fluido a 60.\n"
+    "Custa caro — medido, 38 vezes o tempo de exportação — e o que ela inventa "
+    "aparece: movimento rápido, oclusão e corte de cena saem deformados.\n"
+    "A prévia continua mostrando os quadros repetidos; interpolar em tempo "
+    "real não caberia no ritmo da reprodução."
+)
+EDIT_INTERPOLATE_OFF = (
+    "Só há o que interpolar quando algum bloco está abaixo da taxa da tela."
+)
+EDIT_INTERPOLATE_WARN = (
+    "Interpolar multiplica o tempo da exportação (medido: 38×) e deforma o que "
+    "se move depressa."
+)
+
 # exportação
 EDIT_CUT_LABEL = "Corte:"
 EDIT_MODE_FAST = "Corte rápido (sem recodificar)"
