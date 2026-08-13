@@ -26,6 +26,8 @@ from yt_dlp.cookies import SUPPORTED_BROWSERS
 from ..core import hwaccel
 from ..core.binaries import find_tools
 from ..core.settings import Settings
+from ..workers.hwaccel_worker import HardwareProbeWorker
+from ..workers.runner import WorkerRunner
 from . import strings
 from .theme import FIELD_WIDTH
 
@@ -39,6 +41,9 @@ class SettingsDialog(QDialog):
 
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # A sondagem da placa corre fora da thread da interface (ver
+        # :meth:`_describe_encoder`).
+        self._runner = WorkerRunner()
         self.setWindowTitle(strings.SETTINGS_TITLE)
         # Largura suficiente para o caminho de destino caber ao lado da coluna
         # de rótulos, que é comum às três abas.
@@ -96,7 +101,24 @@ class SettingsDialog(QDialog):
         A escolha do usuário é uma preferência; quem decide é a máquina. Um
         diálogo que só ecoasse "NVIDIA (NVENC)" esconderia que o driver é antigo
         demais e que a exportação vai sair em software de qualquer forma.
+
+        A resposta sai de uma sondagem que **codifica um quadro de verdade**, e
+        isso custa até 3,4 s nesta máquina — o VAAPI daqui aborta o processo, e
+        um aborto demora mais que uma recusa. Feita aqui, direto, esse tempo era
+        de janela congelada: o diálogo abria travado, e o botão de testar de novo
+        travava outra vez. Agora a sondagem corre fora, e a linha diz que está
+        verificando enquanto isso — que é a resposta honesta nesse intervalo.
         """
+        tools = find_tools()
+        if tools is None or hwaccel.probes_ready(tools):
+            self._show_encoder_state()
+            return
+        self._encoder_state.setText(strings.SETTINGS_ENCODER_TESTING)
+        worker = HardwareProbeWorker(tools)
+        worker.signals.done.connect(self._show_encoder_state)
+        self._runner.start(worker, worker.signals.done)
+
+    def _show_encoder_state(self) -> None:
         escolha = self._encoder.currentData() or hwaccel.SOFTWARE
         self._encoder_state.setText(hwaccel.describe(escolha, find_tools()))
 

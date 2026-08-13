@@ -210,6 +210,18 @@ def forget_probes() -> None:
     _probed.clear()
 
 
+def probes_ready(tools: FFmpegTools | None, family: str = "h264") -> bool:
+    """Se perguntar por esta família já é instantâneo.
+
+    Existe para a interface saber se pode responder na hora ou se precisa sair
+    da frente e sondar noutra thread. Ser conservador aqui não custa nada: no
+    máximo a tela vai por um caminho assíncrono que teria sido dispensável.
+    """
+    if tools is None:
+        return True
+    return all(enc.name in _probed for enc in _HARDWARE.get(family, {}).values())
+
+
 def software_encoder(family: str) -> Encoder:
     return _SOFTWARE.get(family, _SOFTWARE["h264"])
 

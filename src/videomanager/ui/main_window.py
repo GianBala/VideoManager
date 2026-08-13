@@ -40,7 +40,8 @@ from PySide6.QtWidgets import (
 )
 
 from .. import APP_DISPLAY_NAME, __version__
-from ..core.binaries import FFmpegTools
+from ..core import hwaccel
+from ..core.binaries import FFmpegTools, find_tools
 from ..core.job import Job, JobStatus
 from ..core.models import FormatMatrix, MediaInfo, PlaylistInfo
 from ..core.selector import (
@@ -51,6 +52,7 @@ from ..core.selector import (
 )
 from ..core.settings import Settings
 from ..workers.engine_worker import EngineUpdateWorker
+from ..workers.hwaccel_worker import HardwareProbeWorker
 from ..workers.probe_worker import ProbeWorker
 from ..workers.queue import JobQueue
 from ..workers.runner import WorkerRunner
@@ -76,6 +78,11 @@ _TAB_SPACING = 10
 # Quanto tempo o aviso de "adicionado à fila" fica na barra de status.
 _ENQUEUED_MS = 5000
 
+# Espera antes de sondar a placa. A janela aparece primeiro: a sondagem abre
+# processos de ffmpeg, e disputá-los com a montagem da tela atrasaria
+# justamente o que o usuário está esperando ver.
+_PROBE_DELAY_MS = 1500
+
 
 class MainWindow(QMainWindow):
     def __init__(self, settings: Settings) -> None:
@@ -84,6 +91,9 @@ class MainWindow(QMainWindow):
         self._tools: FFmpegTools | None = None
         self._media: MediaInfo | None = None
         self._runner = WorkerRunner()
+        # A sondagem da placa é uma vez por execução (ver
+        # :meth:`_warm_hardware_probe`).
+        self._probed_hardware = False
         self._split_by_user = False
         self._balancing = False
         # Diretório temporário próprio: mantém .part e fragmentos fora da pasta
@@ -106,6 +116,9 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_menu()
         self._update_status()
+        # Depois de a janela aparecer, e não durante a montagem: o que se ganha
+        # é tempo na primeira exportação, e não vale pagá-lo na abertura.
+        QTimer.singleShot(_PROBE_DELAY_MS, self._warm_hardware_probe)
 
     # ------------------------------------------------------------------
     # Montagem
@@ -534,7 +547,35 @@ class MainWindow(QMainWindow):
             return True
         self._tools = ensure_ffmpeg(self)
         self._update_status()
+        # O ffmpeg acabou de aparecer: a sondagem da placa, que na abertura não
+        # tinha o que sondar, passa a ter.
+        self._warm_hardware_probe()
         return self._tools is not None
+
+    def _warm_hardware_probe(self) -> None:
+        """Sonda os encoders de placa em segundo plano, uma vez por execução.
+
+        A sondagem manda codificar um quadro de verdade, e custa de 0,5 s a
+        3,4 s nesta máquina — o VAAPI daqui aborta o processo, e um aborto
+        demora mais que uma recusa. Esse tempo caía no começo da primeira
+        exportação, que é quando o usuário está esperando o resultado. Fazê-la
+        aqui não a torna mais barata; muda quem espera por ela.
+
+        Só acontece para quem pediu placa. Com a preferência em software não há
+        nada a resolver na exportação, e sondar seria gastar processos por uma
+        resposta que ninguém vai consultar — as configurações, que consultam,
+        sondam por conta própria e sem travar (ver ``settings_dialog``).
+        """
+        if self._probed_hardware or self._settings.hardware_encoder == hwaccel.SOFTWARE:
+            return
+        # ``find_tools`` não provisiona nem abre diálogo: sem ffmpeg à mão,
+        # simplesmente não há o que sondar ainda.
+        tools = self._tools or find_tools()
+        if tools is None:
+            return
+        self._probed_hardware = True
+        worker = HardwareProbeWorker(tools)
+        self._runner.start(worker, worker.signals.done)
 
     # ------------------------------------------------------------------
     # Playlists
