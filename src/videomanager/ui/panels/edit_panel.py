@@ -542,11 +542,20 @@ class EditPanel(QWidget):
     def _build_toolbar(self) -> QHBoxLayout:
         """Barra curta de propósito.
 
-        Dividir, excluir, copiar, colar, separar áudio e criar trilha moram no
-        **botão direito** sobre o que elas afetam — é onde se procura por elas
-        depois de já ter o bloco na mão, e cada uma que sai daqui é uma coisa a
-        menos entre a imagem e a linha do tempo. Aqui ficam só as que não têm
-        alvo: desfazer, refazer e o zoom.
+        Copiar, colar, separar áudio e criar trilha moram no **botão direito**
+        sobre o que elas afetam — é onde se procura por elas depois de já ter o
+        bloco na mão, e cada uma que sai daqui é uma coisa a menos entre a
+        imagem e a linha do tempo.
+
+        Dividir e excluir são a exceção, e por frequência: são as duas operações
+        que se repetem dezenas de vezes ao montar uma sequência, e abrir um menu
+        para cada uma custa mais que o espaço de dois botões. Continuam no menu
+        também — o atalho não substitui o lugar onde elas se procuram.
+
+        Os dois ficam **afastados** de desfazer e refazer porque não são a mesma
+        coisa: desfazer age sobre a edição inteira e está sempre disponível;
+        estes agem sobre o bloco selecionado e se desligam sem ele. Colados,
+        pareceriam quatro botões do mesmo grupo.
         """
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -1565,8 +1574,13 @@ class EditPanel(QWidget):
     def _on_thumb(self, token: int, clip_id: int, index: int, frame: object) -> None:
         if self._strip_tokens.get(clip_id) != token:
             return
+        # O quadro carrega o instante de origem que ele mostra, e é por ele que
+        # a linha do tempo guarda a imagem: a posição na tira muda de
+        # significado a cada zoom, o instante não (ver ``timeline._Strip``).
         self._timeline.set_thumb(
-            clip_id, index, image_from_frame(frame.data, frame.width, frame.height)
+            clip_id,
+            frame.seconds,
+            image_from_frame(frame.data, frame.width, frame.height),
         )
 
     def _request_wave(self, clip: Clip, tools: FFmpegTools) -> None:
