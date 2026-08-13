@@ -40,6 +40,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import hwaccel
 from .binaries import FFmpegTools, subprocess_kwargs
 from .errors import ConversionError
 
@@ -86,7 +87,7 @@ _ENCODER_NAMES = {
 
 # Capa de MP3 e miniatura embutida aparecem como trilha de vídeo. Recodificá-las
 # como vídeo produz um arquivo de uma imagem só, com horas de duração.
-_IMAGE_CODECS = {"mjpeg", "png", "bmp", "gif", "webp"}
+IMAGE_CODECS = {"mjpeg", "png", "bmp", "gif", "webp"}
 
 # Qualidade do corte exato. Alta de propósito: quem recorta quer o mesmo vídeo
 # mais curto, não uma versão pior dele. (Na aba de conversão o objetivo é outro,
@@ -274,6 +275,9 @@ class TrimTarget:
     container: str = "mp4"
     mode: CutMode = CutMode.EXACT
     anchor: float | None = None
+    # Preferência de codificação por placa. Fica no pedido, e não numa variável
+    # global, porque é o pedido que atravessa a fila até o worker.
+    hardware: str = hwaccel.SOFTWARE
 
     @property
     def extension(self) -> str:
@@ -402,7 +406,7 @@ def nearest_keyframe(times: tuple[float, ...], seconds: float) -> float | None:
 def has_real_video(media: LocalMedia) -> bool:
     """Se há trilha de vídeo de verdade, e não a capa embutida de um áudio."""
     stream = media.video
-    return stream is not None and stream.codec.lower() not in _IMAGE_CODECS
+    return stream is not None and stream.codec.lower() not in IMAGE_CODECS
 
 
 def _source_fps(media: LocalMedia) -> float | None:
@@ -441,6 +445,27 @@ def _video_encode_args(encoder: str) -> list[str]:
     return ["-c:v", encoder]
 
 
+def encode_video_args(
+    container: str,
+    *,
+    hardware: str = hwaccel.SOFTWARE,
+    tools: FFmpegTools | None = None,
+) -> list[str]:
+    """Argumentos de codificação de vídeo para este container.
+
+    Público porque o compositor da linha do tempo (``core/composer.py``) grava
+    com as mesmas escolhas do recorte. A escolha do encoder passa pelo
+    ``hwaccel``, que sonda a placa antes de usá-la e cai para software quando
+    ela não abre — sem isso, uma preferência guardada numa máquina viraria
+    exportação falhada noutra.
+    """
+    return hwaccel.encode_args(hwaccel.family_for(container), hardware, tools)
+
+
+def encode_audio_args(container: str) -> list[str]:
+    return _audio_encode_args(_audio_encoder(container))
+
+
 def _validate(media: LocalMedia, target: TrimTarget) -> None:
     if not target.segments:
         raise ConversionError("Não há nenhum trecho para exportar.")
@@ -462,7 +487,7 @@ def _validate(media: LocalMedia, target: TrimTarget) -> None:
         )
 
 
-def _tail_args(container: str, destination: Path) -> list[str]:
+def tail_args(container: str, destination: Path) -> list[str]:
     args: list[str] = []
     if container == "mp4":
         # Índice no começo: permite começar a assistir antes de o arquivo todo
@@ -510,14 +535,19 @@ def build_single_args(
         args += ["-c", "copy", "-avoid_negative_ts", "make_zero"]
     else:
         if has_video:
-            args += _video_encode_args(_video_encoder(target.container))
+            family = hwaccel.family_for(target.container)
+            encoder = hwaccel.resolve(family, target.hardware, tools)
+            args[1:1] = list(encoder.device)
+            if encoder.filter_suffix:
+                args += ["-vf", f"format=nv12,{encoder.filter_suffix}"]
+            args += ["-c:v", encoder.name, *encoder.quality]
         if media.has_audio:
             # O áudio é recodificado junto: copiá-lo manteria os quadros de som
             # inteiros da origem, que começam antes do corte e empurram a
             # imagem para fora de sincronia logo no primeiro segundo.
             args += _audio_encode_args(_audio_encoder(target.container))
 
-    return args + _tail_args(target.container, destination)
+    return args + tail_args(target.container, destination)
 
 
 def build_join_args(
@@ -568,11 +598,18 @@ def build_join_args(
         "-filter_complex", ";".join(steps),
     ]
     if has_video:
-        args += ["-map", "[v]"] + _video_encode_args(_video_encoder(target.container))
+        family = hwaccel.family_for(target.container)
+        encoder = hwaccel.resolve(family, target.hardware, tools)
+        args[1:1] = list(encoder.device)
+        if encoder.filter_suffix:
+            steps[-1] = steps[-1].replace("[v]", "[vsw]")
+            steps.append(f"[vsw]{encoder.filter_suffix}[v]")
+            args[args.index("-filter_complex") + 1] = ";".join(steps)
+        args += ["-map", "[v]", "-c:v", encoder.name, *encoder.quality]
     if has_audio:
         args += ["-map", "[a]"] + _audio_encode_args(_audio_encoder(target.container))
 
-    return args + _tail_args(target.container, destination)
+    return args + tail_args(target.container, destination)
 
 
 def build_trim_args(
@@ -598,12 +635,14 @@ def describe_trim(media: LocalMedia, target: TrimTarget) -> str:
     else:
         # O codec anunciado é o da trilha que existe: dizer "recodifica em
         # H.264" ao recortar um MP3 descreveria um arquivo que não existe.
-        encoder = (
-            _video_encoder(target.container) if video
-            else _audio_encoder(target.container)
-        )
-        parts.append(
-            f"corte exato · recodifica em {_ENCODER_NAMES.get(encoder, encoder)}"
-        )
+        if video:
+            family = hwaccel.family_for(target.container)
+            nome = hwaccel.family_label(family)
+            if target.hardware != hwaccel.SOFTWARE:
+                nome += " (placa, se disponível)"
+        else:
+            encoder = _audio_encoder(target.container)
+            nome = _ENCODER_NAMES.get(encoder, encoder)
+        parts.append(f"corte exato · recodifica em {nome}")
     parts.append(f"{format_span(target.output_duration)} de duração")
     return " · ".join(parts)
