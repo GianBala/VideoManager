@@ -106,7 +106,6 @@ from ...core.trimmer import (
     frame_step,
     keyframe_after,
     keyframe_at_or_before,
-    parse_timecode,
 )
 from ...workers.preview_worker import (
     FilmstripWorker,
@@ -170,13 +169,16 @@ _CANVAS_PRESETS = (
 )
 _RATE_PRESETS = (24.0, 25.0, 30.0, 50.0, 60.0)
 
-# Largura das duas listas de saída. Medida, e não estimada: é a do texto mais
-# longo que cada uma pode mostrar — "Automática · segue o material (3840 × 2160)"
-# e "Automática (29,97 fps)" — mais a moldura e a seta, que somam 38 px no
-# Fusion. Os valores anteriores (210 e 130) cortavam justamente o item
-# automático, que é o que diz em que tela e em que taxa a edição está.
+# Piso das duas listas de saída, com folga. Quem paga um piso apertado é o
+# item "Automática" — o texto mais longo das duas listas, e justamente o que
+# diz em que tela e em que taxa a edição está. Medido com a fonte da
+# aplicação, que o QSS fixa em 10pt: "Automática · segue o material
+# (3840 × 2160)" pede 299 px e "Automática (29,97 fps)" pede 172, já com os
+# 38 px de moldura e seta do Fusion. Os valores anteriores, 210 e 130,
+# cortavam os dois. ``AdjustToContents``, logo abaixo, cobre o que passar
+# disto — uma taxa de três dígitos, um tamanho de tela maior.
 _CANVAS_BOX_WIDTH = 300
-_RATE_BOX_WIDTH = 175
+_RATE_BOX_WIDTH = 210
 
 # Vagas de ffmpeg da aba (ver o construtor). Números pequenos e de propósito: o
 # que limita aqui não é o processador, é a memória — cada worker decodifica
@@ -551,7 +553,6 @@ class EditPanel(QWidget):
         self._scroll.valueChanged.connect(self._on_scrollbar)
         column.addWidget(self._scroll)
 
-        column.addLayout(self._build_clip_row())
         return box
 
     def _build_toolbar(self) -> QHBoxLayout:
@@ -620,6 +621,14 @@ class EditPanel(QWidget):
         self._count_label = QLabel("")
         self._count_label.setProperty("role", "dim")
         row.addWidget(self._count_label)
+        # O bloco escolhido tinha uma faixa só para ele, com dois campos de
+        # timecode e o nome do arquivo. Os campos saíram — as pontas se
+        # ajustam pelas alças, pelos botões de apagar e pela tesoura, todos
+        # no cursor — e o nome fica aqui, sem custar altura nenhuma.
+        row.addSpacing(10)
+        self._clip_label = QLabel(strings.EDIT_CLIP_NONE)
+        self._clip_label.setProperty("role", "dim")
+        row.addWidget(self._clip_label)
         row.addStretch(1)
 
         # O volume do bloco mora aqui, e não na linha dos timecodes: ali ele
@@ -674,38 +683,6 @@ class EditPanel(QWidget):
         row.addWidget(button)
         return button
 
-    def _build_clip_row(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
-
-        self._start_field = self._timecode_field()
-        self._end_field = self._timecode_field()
-        self._start_field.editingFinished.connect(lambda: self._apply_field("inicio"))
-        self._end_field.editingFinished.connect(lambda: self._apply_field("fim"))
-
-        row.addWidget(QLabel(strings.EDIT_CLIP_START))
-        row.addWidget(self._start_field)
-        row.addWidget(QLabel(strings.EDIT_CLIP_END))
-        row.addWidget(self._end_field)
-        # O volume subiu para a barra da linha do tempo e o mudo saiu daqui: ele
-        # continua no menu do botão direito, sobre o bloco que ele cala, que é
-        # onde se procura por ele. Os dois juntos custavam uma faixa da altura
-        # da aba — e altura, aqui, é tamanho de prévia.
-        row.addSpacing(10)
-        self._clip_label = QLabel(strings.EDIT_CLIP_NONE)
-        self._clip_label.setProperty("role", "dim")
-        row.addWidget(self._clip_label, 1)
-        return row
-
-    @staticmethod
-    def _timecode_field() -> QLineEdit:
-        field = QLineEdit()
-        field.setToolTip(strings.EDIT_FIELD_TIP)
-        field.setFixedWidth(110)
-        field.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        return field
-
     def _build_export_row(self) -> QWidget:
         box = QWidget()
         box.setProperty("role", "plain")
@@ -730,6 +707,9 @@ class EditPanel(QWidget):
         self._canvas_box = QComboBox()
         self._canvas_box.setToolTip(strings.EDIT_CANVAS_TIP)
         self._canvas_box.setMinimumWidth(_CANVAS_BOX_WIDTH)
+        self._canvas_box.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
         self._canvas_box.currentIndexChanged.connect(self._on_canvas_choice)
         canvas.addWidget(self._canvas_box)
         canvas.addSpacing(10)
@@ -737,6 +717,9 @@ class EditPanel(QWidget):
         self._rate_box = QComboBox()
         self._rate_box.setToolTip(strings.EDIT_CANVAS_RATE_TIP)
         self._rate_box.setMinimumWidth(_RATE_BOX_WIDTH)
+        self._rate_box.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
         self._rate_box.currentIndexChanged.connect(self._on_rate_choice)
         canvas.addWidget(self._rate_box)
         canvas.addSpacing(10)
@@ -1261,18 +1244,6 @@ class EditPanel(QWidget):
         self._remember()
         self._apply(self._project.with_updated_clip(clip.clip_id, muted=muted))
 
-    def _apply_field(self, edge: str) -> None:
-        clip = self._timeline.selected_clip
-        if clip is None:
-            return
-        field = self._start_field if edge == "inicio" else self._end_field
-        value = parse_timecode(field.text())
-        if value is None:
-            self._refresh_clip_fields()
-            return
-        self._remember()
-        self._apply(self._project.resized(clip.clip_id, edge, value))
-
     def _on_clip_selected(self, _clip_id: int) -> None:
         self._end_gain_session()
         self._refresh_clip_fields()
@@ -1286,8 +1257,6 @@ class EditPanel(QWidget):
         clip = self._timeline.selected_clip
         self._syncing = True
         try:
-            self._start_field.setText(format_timecode(clip.start) if clip else "")
-            self._end_field.setText(format_timecode(clip.end) if clip else "")
             self._gain.setValue(clip.gain_db if clip else 0.0)
         finally:
             self._syncing = False
@@ -2246,8 +2215,6 @@ class EditPanel(QWidget):
         for widget in (*self._buttons, self._scroll):
             widget.setEnabled(loaded)
         self._insert.setEnabled(bool(self._pool))
-        for field in (self._start_field, self._end_field):
-            field.setEnabled(clip is not None)
         # Volume só onde há som para ajustar. Num bloco cujo áudio foi
         # separado ele fica desligado de propósito: o som agora é o do outro
         # bloco, e é lá que ele se ajusta — oferecer o controle aqui seria
