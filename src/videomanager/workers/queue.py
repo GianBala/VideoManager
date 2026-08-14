@@ -34,6 +34,22 @@ from .download_worker import DownloadWorker
 _LOCAL_JOBS = 1
 
 
+def _size_of(path: Path | None) -> int | None:
+    """Tamanho do arquivo produzido, medido uma vez só.
+
+    Aqui, e não na hora de desenhar a linha: a coluna que mostra esse número é
+    repintada a cada atualização de progresso das outras tarefas, e perguntar ao
+    disco ali punha duas chamadas de sistema em cada quadro — perceptível quando
+    o destino é uma pasta de rede.
+    """
+    if path is None:
+        return None
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
 class JobQueue(QObject):
     """Dona de todas as tarefas e única a mudar o estado delas.
 
@@ -150,6 +166,7 @@ class JobQueue(QObject):
             return
         job.progress = None
         job.result_path = None
+        job.result_size = None
         self._start(job)
         self.counts_changed.emit()
 
@@ -191,6 +208,7 @@ class JobQueue(QObject):
                 job.title = result.title
         elif isinstance(result, Path):
             job.result_path = result
+        job.result_size = _size_of(job.result_path)
         self._workers.pop(job_id, None)
         self.job_changed.emit(job)
         self.counts_changed.emit()

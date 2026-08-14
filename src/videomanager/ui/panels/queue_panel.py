@@ -113,9 +113,9 @@ class QueueModel(QAbstractTableModel):
     def _speed_text(job: Job) -> str:
         progress = job.progress
         if job.status is JobStatus.DONE:
-            return format_size(job.result_path.stat().st_size) if (
-                job.result_path and job.result_path.exists()
-            ) else DASH
+            # Número medido uma vez, quando a tarefa terminou (ver
+            # ``Job.result_size``): esta função roda a cada repintura de célula.
+            return format_size(job.result_size) if job.result_size else DASH
         if progress is None:
             return DASH
         pieces: list[str] = []
