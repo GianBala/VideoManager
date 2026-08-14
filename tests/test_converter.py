@@ -256,16 +256,21 @@ class TestDescricao:
 
 
 class TestOutputPath:
-    def test_extensao_vem_do_alvo(self) -> None:
-        destino = output_path(Path("/m/video.mp4"), AudioTarget(codec="mp3"), Path("/saida"))
-        assert destino == Path("/saida/video.mp3")
+    """O nome de saída. Todos usam ``tmp_path`` porque a função **reserva** o
+    nome criando o arquivo, e não apenas o calcula — ver
+    :class:`TestReservaDoDestino`."""
 
-    def test_m4a_para_aac_e_alac(self) -> None:
-        assert output_path(Path("/m/a.mp4"), AudioTarget(codec="aac"), Path("/s")).suffix == ".m4a"
-        assert output_path(Path("/m/a.mp4"), AudioTarget(codec="alac"), Path("/s")).suffix == ".m4a"
+    def test_extensao_vem_do_alvo(self, tmp_path: Path) -> None:
+        destino = output_path(tmp_path / "video.mp4", AudioTarget(codec="mp3"), tmp_path)
+        assert destino == tmp_path / "video.mp3"
 
-    def test_vorbis_sai_como_ogg(self) -> None:
-        assert output_path(Path("/m/a.mp4"), AudioTarget(codec="vorbis"), Path("/s")).suffix == ".ogg"
+    def test_m4a_para_aac_e_alac(self, tmp_path: Path) -> None:
+        assert output_path(tmp_path / "a.mp4", AudioTarget(codec="aac"), tmp_path).suffix == ".m4a"
+        assert output_path(tmp_path / "b.mp4", AudioTarget(codec="alac"), tmp_path).suffix == ".m4a"
+
+    def test_vorbis_sai_como_ogg(self, tmp_path: Path) -> None:
+        destino = output_path(tmp_path / "a.mp4", AudioTarget(codec="vorbis"), tmp_path)
+        assert destino.suffix == ".ogg"
 
     def test_nunca_sobrescreve_a_origem(self, tmp_path: Path) -> None:
         """Converter um MP3 para MP3 com outro bitrate é pedido legítimo.
@@ -284,6 +289,50 @@ class TestOutputPath:
         (tmp_path / "video.mp3").write_bytes(b"ja existe")
         destino = output_path(tmp_path / "video.mp4", AudioTarget(codec="mp3"), tmp_path)
         assert destino.name == "video (2).mp3"
+
+
+class TestReservaDoDestino:
+    """O nome é reservado no ato, e não apenas consultado.
+
+    ``output_path`` é chamado ao **enfileirar**, e o ffmpeg grava minutos
+    depois: enquanto era só uma consulta ao disco, duas tarefas da mesma origem
+    recebiam o mesmo caminho e a segunda sobrescrevia o resultado pronto da
+    primeira — sem aviso, e com o ``-y`` do ffmpeg contra o qual não havia
+    defesa.
+    """
+
+    def test_dois_pedidos_da_mesma_origem_nao_colidem(self, tmp_path: Path) -> None:
+        origem = tmp_path / "video.mp4"
+        origem.write_bytes(b"origem")
+        alvo = AudioTarget(codec="mp3")
+
+        primeiro = output_path(origem, alvo, tmp_path)
+        segundo = output_path(origem, alvo, tmp_path)
+
+        assert primeiro != segundo
+        assert primeiro.name == "video.mp3"
+        assert segundo.name == "video (2).mp3"
+
+    def test_a_reserva_existe_em_disco(self, tmp_path: Path) -> None:
+        # É o arquivo vazio que segura o nome; sem ele a consulta seguinte
+        # devolveria o mesmo caminho.
+        destino = output_path(tmp_path / "a.mp4", AudioTarget(codec="mp3"), tmp_path)
+        assert destino.is_file()
+        assert destino.stat().st_size == 0
+
+    def test_pasta_de_destino_e_criada(self, tmp_path: Path) -> None:
+        destino = output_path(
+            tmp_path / "a.mp4", AudioTarget(codec="mp3"), tmp_path / "nova" / "pasta"
+        )
+        assert destino.parent.is_dir()
+
+    def test_pasta_impossivel_vira_erro_do_dominio(self, tmp_path: Path) -> None:
+        # Uma pasta que não dá para criar precisa falhar com mensagem
+        # apresentável ao enfileirar, e não com OSError cru dentro de um slot.
+        bloqueio = tmp_path / "arquivo"
+        bloqueio.write_bytes(b"nao sou pasta")
+        with pytest.raises(ConversionError):
+            output_path(tmp_path / "a.mp4", AudioTarget(codec="mp3"), bloqueio / "dentro")
 
 
 class TestProporcaoDoPixel:

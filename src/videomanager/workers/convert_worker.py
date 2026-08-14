@@ -42,16 +42,26 @@ class ConvertWorker(QRunnable):
     def run(self) -> None:
         job_id = self._job.job_id
         if self._cancel_requested:
+            # Cancelada ainda na espera da fila: o nome de saída já estava
+            # reservado (ver ``converter.output_path``) e precisa ser devolvido,
+            # senão sobra na pasta do usuário um arquivo de zero byte com o nome
+            # do resultado que ele não vai ter.
+            self._converter.discard_reservation()
             emit_safely(self.signals.cancelled, job_id)
             return
 
         try:
             path = self._converter.run()
         except JobCancelled:
+            self._converter.discard_reservation()
             emit_safely(self.signals.cancelled, job_id)
         except VideoManagerError as exc:
+            # Também aqui: uma falha antes de o ffmpeg abrir (alvo impossível,
+            # pasta sem permissão) não passa pela limpeza de saída parcial.
+            self._converter.discard_reservation()
             emit_safely(self.signals.failed, job_id, str(exc))
         except Exception as exc:  # noqa: BLE001
+            self._converter.discard_reservation()
             emit_safely(
                 self.signals.failed,
                 job_id,
