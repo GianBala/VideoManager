@@ -35,6 +35,7 @@ from __future__ import annotations
 import bisect
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -317,7 +318,12 @@ class TrimTarget:
 
 
 def keyframe_times(
-    path: Path, tools: FFmpegTools, *, limit: int = 50_000, timeout: int = 180
+    path: Path,
+    tools: FFmpegTools,
+    *,
+    limit: int = 50_000,
+    timeout: int = 180,
+    register: Callable[[subprocess.Popen], None] | None = None,
 ) -> tuple[float, ...]:
     """Instantes em que o corte sem recodificar pode começar.
 
@@ -326,6 +332,12 @@ def keyframe_times(
     para depois jogá-lo fora. Num vídeo de vinte segundos a diferença é
     imperceptível; num de duas horas é a diferença entre a interface responder e
     a interface esperar.
+
+    ``register`` entrega o processo a quem chamou, para poder interrompê-lo.
+    Este é o mais demorado dos trabalhos de fundo da aba — num arquivo de duas
+    horas ele percorre o índice inteiro —, e o destrutor do ``QThreadPool``
+    espera as threads dele: sem poder matá-lo, fechar a janela logo depois de
+    importar um arquivo longo segurava a saída do aplicativo até o prazo acabar.
     """
     command = [
         tools.ffprobe_str,
@@ -337,8 +349,23 @@ def keyframe_times(
         str(path),
     ]
     try:
-        proc = subprocess.run(command, timeout=timeout, check=False, **subprocess_kwargs())
-    except (OSError, subprocess.SubprocessError) as exc:
+        proc = subprocess.Popen(command, **subprocess_kwargs())
+    except OSError as exc:
+        raise ConversionError(f"Falha ao mapear os keyframes: {exc}") from exc
+    if register is not None:
+        register(proc)
+    try:
+        stdout, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        proc.communicate()
+        raise ConversionError(
+            "O ffprobe passou do tempo ao mapear os keyframes deste arquivo."
+        ) from exc
+    except OSError as exc:
+        # O processo pode ter ficado de pé: matá-lo antes de subir o erro.
+        proc.kill()
+        proc.communicate()
         raise ConversionError(f"Falha ao mapear os keyframes: {exc}") from exc
 
     if proc.returncode != 0:
@@ -347,7 +374,7 @@ def keyframe_times(
         )
 
     times: list[float] = []
-    for line in (proc.stdout or b"").decode("utf-8", "replace").splitlines():
+    for line in (stdout or b"").decode("utf-8", "replace").splitlines():
         moment = _keyframe_line(line)
         if moment is None:
             continue

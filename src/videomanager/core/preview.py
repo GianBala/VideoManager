@@ -26,7 +26,7 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -106,23 +106,47 @@ def filmstrip_times(start: float, end: float, count: int) -> tuple[float, ...]:
     return tuple(start + step * (index + 0.5) for index in range(count))
 
 
-def _run(command: list[str], timeout: int) -> bytes:
+# Recebe o processo recém-aberto, para quem chamou poder interrompê-lo. Ver
+# :func:`_run`.
+Register = Callable[[subprocess.Popen], None]
+
+
+def _run(command: list[str], timeout: int, register: Register | None = None) -> bytes:
     """Executa o ffmpeg e devolve o que ele escreveu na saída.
 
     Falha silenciosa de propósito: imagem de prévia é cosmética. Quando não sai
     nada — arquivo protegido, instante além do fim, ffmpeg antigo demais para um
     filtro — a interface mantém o que já estava na tela, o que é bem melhor que
     um diálogo de erro no meio de uma navegação.
+
+    ``register`` existe porque estes processos precisam morrer quando a janela
+    fecha. O ``QThreadPool`` espera as threads dele no destrutor, então um
+    ffmpeg de prazo longo aqui segurava o fechamento do aplicativo pelo prazo
+    inteiro, com a janela já fora da tela e nada explicando a espera.
     """
     try:
-        proc = subprocess.run(command, timeout=timeout, check=False, **subprocess_kwargs())
-    except (OSError, subprocess.SubprocessError):
+        proc = subprocess.Popen(command, **subprocess_kwargs())
+    except OSError:
         return b""
-    return proc.stdout or b"" if proc.returncode == 0 else b""
+    if register is not None:
+        register(proc)
+    try:
+        stdout, _ = proc.communicate(timeout=timeout)
+    except (subprocess.TimeoutExpired, OSError):
+        # Nos dois casos o processo pode continuar de pé, e sair daqui sem matá-lo
+        # deixaria um ffmpeg decodificando para ninguém até o fim do arquivo.
+        proc.kill()
+        proc.communicate()
+        return b""
+    return stdout or b"" if proc.returncode == 0 else b""
 
 
 def frame_from_command(
-    command: list[str], size: tuple[int, int], *, timeout: int = 60
+    command: list[str],
+    size: tuple[int, int],
+    *,
+    timeout: int = 60,
+    register: Register | None = None,
 ) -> RawFrame | None:
     """Um quadro cru produzido por um comando já montado.
 
@@ -132,7 +156,7 @@ def frame_from_command(
     ordem certa.
     """
     width, height = size
-    frame = RawFrame(_run(command, timeout), width, height)
+    frame = RawFrame(_run(command, timeout, register), width, height)
     return frame if frame.is_complete else None
 
 
@@ -143,6 +167,7 @@ def render_frame(
     tools: FFmpegTools,
     *,
     timeout: int = 30,
+    register: Register | None = None,
 ) -> RawFrame | None:
     """O quadro exibido no instante ``seconds``, escalado para ``size``.
 
@@ -167,7 +192,7 @@ def render_frame(
         "-pix_fmt", "rgb24",
         "pipe:1",
     ]
-    data = _run(command, timeout)
+    data = _run(command, timeout, register)
     frame = RawFrame(data, width, height, seconds)
     return frame if frame.is_complete else None
 
@@ -236,6 +261,7 @@ def filmstrip_frames(
     tools: FFmpegTools,
     *,
     timeout: int = 120,
+    register: Register | None = None,
 ) -> Iterator[tuple[int, RawFrame]]:
     """As miniaturas de um trecho, na ordem, cada uma assim que sai.
 
@@ -257,7 +283,7 @@ def filmstrip_frames(
 
     vistos: set[int] = set()
     if _one_pass_worth_it(times):
-        for index, frame in _stream_strip(path, times, size, tools, timeout):
+        for index, frame in _stream_strip(path, times, size, tools, timeout, register):
             vistos.add(index)
             yield index, frame
 
@@ -267,7 +293,7 @@ def filmstrip_frames(
     for index, moment in enumerate(times):
         if index in vistos:
             continue
-        frame = render_frame(path, moment, size, tools)
+        frame = render_frame(path, moment, size, tools, register=register)
         if frame is not None:
             yield index, frame
 
@@ -278,6 +304,7 @@ def _stream_strip(
     size: tuple[int, int],
     tools: FFmpegTools,
     timeout: int,
+    register: Register | None = None,
 ) -> Iterator[tuple[int, RawFrame]]:
     """Lê a tira do cano, um quadro por vez, e encerra o ffmpeg ao sair.
 
@@ -293,6 +320,8 @@ def _stream_strip(
         process = subprocess.Popen(_strip_command(path, times, size, tools), **kwargs)
     except OSError:
         return
+    if register is not None:
+        register(process)
     try:
         assert process.stdout is not None
         for index, moment in enumerate(times):
@@ -321,6 +350,7 @@ def render_waveform(
     start: float = 0.0,
     duration: float | None = None,
     timeout: int = 120,
+    register: Register | None = None,
 ) -> bytes:
     """Forma de onda do áudio, em PNG com fundo transparente.
 
@@ -360,7 +390,7 @@ def render_waveform(
         "-vcodec", "png",
         "pipe:1",
     ]
-    return _run(command, timeout)
+    return _run(command, timeout, register)
 
 
 class FramePump:
