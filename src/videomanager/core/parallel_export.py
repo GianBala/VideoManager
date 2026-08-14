@@ -81,6 +81,16 @@ def plan_segments(composition: Composition) -> int:
 # fatia pequena evita a barra parar em 100% enquanto ainda há passos por fazer.
 _SEGMENTS_SHARE = 0.92
 
+# Onde as etapas finais (emendar, gerar som, juntar) ficam registradas enquanto
+# correm. Índice negativo de propósito: elas dividem o mesmo registro dos
+# trechos — que é o que ``cancel`` percorre — sem colidir com os índices deles.
+_STEP_SLOT = -1
+
+# Prazo de uma etapa final. Todas as três copiam dados e levam segundos mesmo
+# num projeto longo; meia hora é folga tão larga que só se esgota quando alguma
+# coisa travou de verdade. Sem prazo, o travamento era permanente.
+_STEP_TIMEOUT = 1800
+
 # Verbo mostrado na fila. Difere do "Exportando" da tabela ``_PHASES`` de
 # ``converter.py`` de propósito: esta exportação custa dezenas de vezes o tempo
 # de uma normal, e dizer **por quê** é o que separa "está travado" de "está
@@ -105,7 +115,13 @@ class ParallelExport:
         self._tools = tools
         self._bounds = segment_bounds(composition.project.duration, segments)
         self._on_progress = on_progress
+        # Duas bandeiras, e não uma: ``_cancelled`` é a desistência do usuário e
+        # ``_aborted`` é "pare tudo", que também vale quando um trecho falha.
+        # Confundir as duas fazia a falha de um trecho ser relatada como
+        # cancelamento — e o usuário via "Cancelado" numa tarefa que ninguém
+        # cancelou, sem a causa em lugar nenhum.
         self._cancelled = False
+        self._aborted = False
         self._lock = threading.Lock()
         self._processes: dict[int, subprocess.Popen] = {}
         # Quanto de cada trecho já saiu, em segundos. A barra é a soma disto
@@ -118,11 +134,29 @@ class ParallelExport:
 
     def cancel(self) -> None:
         self._cancelled = True
+        self._abort()
+
+    def _abort(self) -> None:
+        """Derruba tudo que estiver correndo, seja por desistência ou por falha."""
+        self._aborted = True
         with self._lock:
             correntes = list(self._processes.values())
         for process in correntes:
             if process.poll() is None:
                 process.terminate()
+
+    def _fail(self, detalhe: str) -> None:
+        """Registra a falha de um trecho e derruba os irmãos.
+
+        Cada trecho carrega um ``minterpolate`` inteiro, e a interpolação custa
+        dezenas de vezes uma exportação normal. Esperar os sete outros
+        terminarem por causa de um erro que já apareceu no primeiro segundo
+        gastava a única vaga da fila local por dezenas de minutos, e a memória
+        junto, para produzir um arquivo que não vai existir.
+        """
+        with self._lock:
+            self._errors.append(detalhe)
+        self._abort()
 
     def _check_cancelled(self) -> None:
         if self._cancelled:
@@ -160,11 +194,14 @@ class ParallelExport:
         for thread in threads:
             thread.join()
 
-        self._check_cancelled()
+        # A falha vem **antes** da conferência de cancelamento: quem falha
+        # derruba os irmãos, e ler o cancelamento primeiro faria toda falha de
+        # trecho aparecer como "Cancelado", sem causa nenhuma na tela.
         if self._errors:
             raise ConversionError(
                 f"O ffmpeg falhou ao interpolar um dos trechos: {self._errors[0]}"
             )
+        self._check_cancelled()
         faltando = [p for p in partes if not p.exists()]
         if faltando:
             raise ConversionError(
@@ -216,6 +253,10 @@ class ParallelExport:
     def _render(self, index: int, destino: Path) -> None:
         """Um trecho, do começo ao fim, na própria thread."""
         at, span = self._bounds[index]
+        if self._aborted:
+            # Outro trecho já falhou (ou o usuário desistiu) antes desta thread
+            # sair do lugar: não há por que abrir mais um ffmpeg.
+            return
         try:
             args = segment_video_args(
                 self._composition.project, at, span, destino, self._tools,
@@ -223,7 +264,7 @@ class ParallelExport:
                 hardware=self._composition.hardware,
             )
         except ConversionError as exc:
-            self._errors.append(str(exc))
+            self._fail(str(exc))
             return
 
         kwargs = subprocess_kwargs()
@@ -232,12 +273,12 @@ class ParallelExport:
         try:
             process = subprocess.Popen(args, text=True, bufsize=1, **kwargs)
         except OSError as exc:
-            self._errors.append(str(exc))
+            self._fail(str(exc))
             return
 
         with self._lock:
             self._processes[index] = process
-        if self._cancelled:
+        if self._aborted:
             # A desistência pode ter chegado entre o Popen e o registro; sem
             # esta conferência o processo ficaria rodando sozinho.
             process.terminate()
@@ -250,7 +291,7 @@ class ParallelExport:
         try:
             assert process.stdout is not None
             for line in process.stdout:
-                if self._cancelled:
+                if self._aborted:
                     process.terminate()
                     break
                 match = _PROGRESS_LINE.match(line.strip())
@@ -264,19 +305,48 @@ class ParallelExport:
             with self._lock:
                 self._processes.pop(index, None)
 
-        if process.returncode != 0 and not self._cancelled:
-            self._errors.append(_last_line(cauda))
+        # ``_aborted`` e não ``_cancelled``: um trecho que morreu porque outro
+        # falhou também sai com código diferente de zero, e relatar isso
+        # esconderia a causa de verdade atrás de um erro derivado.
+        if process.returncode != 0 and not self._aborted:
+            self._fail(_last_line(cauda))
 
-    def _step(self, args: list[str], what: str) -> None:
-        """Um passo curto e sem progresso — emendar, gerar som, juntar."""
+    def _step(self, args: list[str], what: str, *, timeout: int = _STEP_TIMEOUT) -> None:
+        """Um passo curto e sem progresso — emendar, gerar som, juntar.
+
+        Registrado na mesma lista dos trechos e com prazo, coisas que faltavam
+        aqui e existiam lá. Sem o registro, ``cancel`` não alcançava estes
+        processos: "Cancelar" durante "gerar o som" — que percorre a linha do
+        tempo inteira — não fazia nada até a etapa acabar. E sem o prazo, um
+        ffmpeg preso ocupava para sempre a **única** vaga da fila local
+        (``_LOCAL_JOBS = 1``), travando toda conversão seguinte da sessão.
+        """
         self._check_cancelled()
         try:
-            proc = subprocess.run(args, check=False, **subprocess_kwargs())
+            proc = subprocess.Popen(args, **subprocess_kwargs())
         except OSError as exc:
             raise ConversionError(f"Não foi possível {what}: {exc}") from exc
+
+        with self._lock:
+            self._processes[_STEP_SLOT] = proc
+        if self._aborted:
+            proc.terminate()
+        try:
+            _, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            raise ConversionError(
+                f"O ffmpeg passou de {timeout // 60} min para {what} e foi "
+                "interrompido."
+            ) from None
+        finally:
+            with self._lock:
+                self._processes.pop(_STEP_SLOT, None)
+
         self._check_cancelled()
         if proc.returncode != 0:
-            detalhe = (proc.stderr or b"").decode("utf-8", "replace").strip()
+            detalhe = (stderr or b"").decode("utf-8", "replace").strip()
             raise ConversionError(f"O ffmpeg falhou ao {what}: {detalhe[-300:]}")
 
     # -- progresso --------------------------------------------------------
