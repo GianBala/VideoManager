@@ -336,11 +336,22 @@ class Timeline(QWidget):
             return _EMPTY_VIEW
         return max(duration * _MAX_VIEW_FACTOR, duration + _MAX_VIEW_MARGIN)
 
+    def max_view_start(self, span: float) -> float:
+        """Começo mais à direita que uma janela deste tamanho pode ter.
+
+        O começo pode passar do fim da edição, mas nunca ao ponto de sumir com o
+        conteúdo: sempre sobra um pedaço dele na tela para voltar. É nesse vazio
+        à direita que se solta um bloco para o fim.
+
+        Fica exposto porque a barra de navegação precisa do **mesmo** limite: com
+        um teto próprio, ela parava antes de onde a roda do mouse chegava, e o
+        pedaço da direita ficava sem como alcançar por ela.
+        """
+        return max(0.0, self._project.duration - span * _KEEP_VISIBLE)
+
     def set_view(self, start: float, end: float) -> None:
         span = max(_MIN_VIEW, min(end - start, self._max_span))
-        # O começo pode passar do fim da edição, mas nunca ao ponto de sumir com
-        # o conteúdo: sempre sobra um pedaço dele na tela para voltar.
-        ceiling = max(0.0, self._project.duration - span * _KEEP_VISIBLE)
+        ceiling = self.max_view_start(span)
         self._view_start = max(0.0, min(start, ceiling))
         self._view_end = self._view_start + span
         self.update()

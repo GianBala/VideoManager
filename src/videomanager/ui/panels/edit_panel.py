@@ -192,6 +192,10 @@ _TOOL_GROUP_GAP = 22
 # Distância entre o volume do bloco e o grupo de zoom, na outra ponta da barra.
 _VOLUME_ZOOM_GAP = 72
 
+# Em quantos passos uma seta da barra de navegação atravessa a janela visível.
+# Dez dá um passo curto o bastante para ajustar e longo o bastante para andar.
+_SCROLL_STEPS = 10
+
 
 
 def _bounded_pool(parent: QObject, threads: int) -> QThreadPool:
@@ -1991,14 +1995,32 @@ class EditPanel(QWidget):
         self._timeline.zoom(factor, self._position)
 
     def _sync_scrollbar(self) -> None:
+        """Põe a barra de navegação de acordo com a janela visível.
+
+        Duas coisas aqui já foram defeito, e as duas apareciam só com zoom.
+
+        **O limite é o da própria linha do tempo** (``max_view_start``), e não
+        "o conteúdo encostado na borda direita". A roda do mouse podia levar a
+        vista mais para a direita do que a barra alcançava — medido com zoom de
+        6,6×, 0,9 s a mais —, e o vazio depois do último bloco, que é onde se
+        solta um bloco para o fim, não tinha como ser alcançado por ela.
+
+        **O passo simples é uma fatia da janela**, e não o padrão do Qt. A escala
+        é em milissegundos, então o passo padrão (1) movia a vista **um
+        milissegundo** por clique de seta ou de roda: a barra parecia travada.
+        """
         start, end = self._timeline.view
         span = end - start
+        ceiling = self._timeline.max_view_start(span)
         self._syncing = True
         try:
-            self._scroll.setPageStep(int(span * 1000))
-            self._scroll.setRange(0, max(0, int((self._duration - span) * 1000)))
-            self._scroll.setValue(int(start * 1000))
-            self._scroll.setEnabled(span < self._duration)
+            self._scroll.setPageStep(round(span * 1000))
+            self._scroll.setSingleStep(max(1, round(span * 1000 / _SCROLL_STEPS)))
+            # Arredondar, e não truncar: truncando, o último milissegundo da
+            # edição ficava fora do alcance da barra.
+            self._scroll.setRange(0, max(0, round(ceiling * 1000)))
+            self._scroll.setValue(round(start * 1000))
+            self._scroll.setEnabled(ceiling > 0)
         finally:
             self._syncing = False
 
