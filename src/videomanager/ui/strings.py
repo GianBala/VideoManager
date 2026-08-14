@@ -264,8 +264,6 @@ EDIT_TIMELINE_HINT = (
 )
 
 # trecho selecionado
-EDIT_CLIP_START = "Início"
-EDIT_CLIP_END = "Fim"
 EDIT_CLIP_NONE = "Nenhum bloco selecionado."
 EDIT_CLIP_INFO = "{name} · {duration}"
 EDIT_GAIN = "Volume do bloco"
@@ -281,7 +279,6 @@ EDIT_GAIN_DETACHED = (
     "O som deste bloco foi separado para uma trilha própria — é lá que o "
     "volume dele se ajusta agora."
 )
-EDIT_FIELD_TIP = "Tempo no formato h:mm:ss,mmm — digite e pressione Enter"
 
 # tela do projeto
 EDIT_CANVAS = "Tela:"
