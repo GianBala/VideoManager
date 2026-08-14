@@ -22,11 +22,13 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from platformdirs import user_data_dir
@@ -83,17 +85,56 @@ def exe_name(stem: str) -> str:
     return f"{stem}.exe" if is_windows() else stem
 
 
+# Variáveis de caminho de biblioteca que o bootloader do PyInstaller reescreve.
+# Ver :func:`clean_env`.
+_LIBRARY_PATH_VARS = ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "LIBPATH", "SHLIB_PATH")
+
+
+def clean_env() -> dict[str, str]:
+    """Ambiente do processo, **sem** o caminho de bibliotecas do empacotador.
+
+    O bootloader do PyInstaller aponta ``LD_LIBRARY_PATH`` para a pasta interna
+    do pacote, e todo processo filho herda isso. O ``AppRun`` do AppImage evita
+    exportar a variável justamente por isso, mas não adianta: quem a define é o
+    bootloader, depois dele.
+
+    O estrago é concreto, porque a pasta interna traz a ``libavcodec`` do
+    QtMultimedia — mesmo ``SONAME`` da do ffmpeg. Um ffmpeg ligado
+    dinamicamente (o do sistema, ou uma build *shared*) carrega a biblioteca do
+    Qt em vez da própria e **perde os codecs que ela não tem**. Medido nesta
+    máquina: de 230 encoders para 190, sem ``libx264``, ``libx265`` nem
+    ``libmp3lame`` — exatamente os três que fazem esta aplicação escolher a
+    variante GPL. E não falha de forma visível: o ``-encoders`` some com eles
+    enquanto o banner de configuração, que é compilado dentro do executável e
+    não da biblioteca, continua anunciando que os tem.
+
+    Quando havia um valor antes do empacotamento, o bootloader o guarda em
+    ``*_ORIG`` e é ele que vale; quando não havia, a variável simplesmente não
+    deve existir para o filho.
+    """
+    env = dict(os.environ)
+    for var in _LIBRARY_PATH_VARS:
+        original = env.pop(f"{var}_ORIG", None)
+        if original:
+            env[var] = original
+        else:
+            env.pop(var, None)
+    return env
+
+
 def subprocess_kwargs() -> dict:
     """Argumentos padrão para todo processo externo que a aplicação inicia.
 
     ``stdin=DEVNULL`` é essencial para o ffmpeg: se ele herdar o stdin do
     processo pai, consome a entrada e pode travar. ``CREATE_NO_WINDOW`` evita a
-    janela de console piscando no Windows.
+    janela de console piscando no Windows. O ambiente vai limpo do caminho de
+    bibliotecas do empacotador (ver :func:`clean_env`).
     """
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
+        "env": clean_env(),
     }
     if is_windows():
         kwargs["creationflags"] = _CREATE_NO_WINDOW
@@ -238,6 +279,16 @@ def _stream_download(
     request = Request(url, headers={"User-Agent": f"{APP_NAME}/instalador"})
     try:
         with urlopen(request, timeout=60) as response:  # noqa: S310 - URL fixa e https
+            # O urllib segue redirecionamento em silêncio, **inclusive de https
+            # para http**. Como o que vem por aqui é um executável de 130 MB que
+            # a aplicação vai rodar, a conferência é no endereço final e não no
+            # pedido: sem ela, quem estiver no meio do caminho decide o que é
+            # instalado.
+            if urlparse(response.geturl()).scheme != "https":
+                raise BinaryDownloadError(
+                    "O download do ffmpeg foi redirecionado para uma conexão "
+                    "sem criptografia e foi interrompido."
+                )
             raw_length = response.headers.get("Content-Length")
             total = int(raw_length) if raw_length and raw_length.isdigit() else None
             received = 0
@@ -316,14 +367,22 @@ def download_tools(
 
     Não há verificação por hash fixo porque a tag ``latest`` do BtbN é um alvo
     móvel: qualquer hash embutido aqui quebraria na próxima build publicada. A
-    integridade é garantida pelo HTTPS e, principalmente, por executar
-    ``ffmpeg -version`` no fim — que detecta download truncado ou arquitetura
-    errada, coisas que um hash desatualizado não detectaria.
+    integridade é garantida pelo HTTPS — conferido **no endereço final**, depois
+    dos redirecionamentos, ver :func:`_stream_download` — e, principalmente, por
+    executar ``ffmpeg -version`` no fim, que detecta download truncado ou
+    arquitetura errada, coisas que um hash desatualizado não detectaria.
     """
     url = download_url()
     target = managed_dir()
     target.mkdir(parents=True, exist_ok=True)
-    archive = target / f"download{'.zip' if url.endswith('.zip') else '.tar.xz'}"
+    # Nome único, e não "download.tar.xz": duas janelas abertas ao mesmo tempo
+    # escreviam no mesmo arquivo, e a que terminasse primeiro extraía o que a
+    # outra ainda estava baixando.
+    handle, raw = tempfile.mkstemp(
+        dir=target, prefix="download-", suffix=".zip" if url.endswith(".zip") else ".tar.xz"
+    )
+    os.close(handle)
+    archive = Path(raw)
 
     try:
         _stream_download(url, archive, progress, cancelled)
