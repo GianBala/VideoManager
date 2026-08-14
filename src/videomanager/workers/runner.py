@@ -35,6 +35,25 @@ class WorkerRunner:
             signal.connect(lambda *_, ref=worker: self._alive.discard(ref))
         self._pool.start(worker)
 
+    def cancel_all(self) -> None:
+        """Pede a interrupção de todo worker vivo que saiba ser interrompido.
+
+        Existe para o fechamento da janela. O destrutor do ``QThreadPool``
+        chama ``waitForDone()`` sem prazo, então um worker que esteja esperando
+        um ffmpeg de prazo longo — a onda são 120 s, os keyframes 180 s —
+        segurava a saída do aplicativo por todo esse tempo, com a janela já fora
+        da tela e nada explicando a espera.
+
+        A lista vem daqui, e não de um registro próprio de cada painel, porque
+        ``_alive`` já é exatamente "começou e ainda não terminou". Quem não sabe
+        cancelar é ignorado em silêncio: é o caso de um trabalho curto demais
+        para valer a pena interromper.
+        """
+        for worker in list(self._alive):
+            cancel = getattr(worker, "cancel", None)
+            if callable(cancel):
+                cancel()
+
     @property
     def active(self) -> int:
         return len(self._alive)
