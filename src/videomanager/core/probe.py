@@ -70,6 +70,13 @@ _LOGIN_HINTS = (
     "requires authentication",
     "confirm your age",
     "age-restricted",
+    # Formas específicas do extrator do Instagram: ele nunca diz "login
+    # required" nesses casos, mas o problema é o mesmo — sem cookies, o
+    # Instagram redireciona anônimos para a tela de login após poucos pedidos.
+    "redirected to the login page",
+    "rate-limit for accessing posts anonymously",
+    "empty media response",
+    "only available for registered users",
 )
 
 
