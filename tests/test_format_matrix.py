@@ -475,3 +475,21 @@ def test_soundcloud_e_so_audio() -> None:
     assert matrix.audio
     assert matrix.best_audio_bitrate == pytest.approx(128, abs=1)
     assert matrix.audio[0].best.filesize_is_estimated is True, "veio como filesize_approx"
+
+
+def test_instagram_progressivo_sem_chave_vcodec_ainda_e_video() -> None:
+    """Regressão: os formatos "0"/"1"/"2" do Instagram não declaram ``vcodec``
+    (nem nula) e não têm dimensão nenhuma — só a extensão ``mp4`` os salva de
+    virar não-mídia. Sem eles, restam só as variantes DASH conhecidas.
+    """
+    raw = fixture_formats("instagram_reel")
+    progressivos = {f["format_id"] for f in raw if "vcodec" not in f}
+    assert progressivos == {"0", "1", "2"}
+
+    matrix = build_matrix(raw)
+    ids = {f.format_id for c in matrix.video for f in c.formats}
+    assert progressivos <= ids, "formatos sem vcodec declarado foram descartados"
+    for choice in matrix.video:
+        if choice.height is None:
+            assert all(f.format_id in progressivos for f in choice.formats)
+            assert choice.family is None

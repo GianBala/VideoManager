@@ -22,6 +22,7 @@ FIXTURE_NAMES = (
     "archive_muxed",
     "hls_no_metadata",
     "soundcloud_audio",
+    "instagram_reel",
 )
 
 

@@ -52,6 +52,12 @@ _DROP_FROM_ROOT = (
     "chapters",
     "description",
     "formats_sort_fields",
+    # O Instagram devolve comentários (com usuário e texto de terceiros) mesmo
+    # numa extração só de metadados. O parser nunca lê isso, e versionar dados
+    # pessoais de quem comentou não tem motivo.
+    "comments",
+    "comment_count",
+    "like_count",
 )
 
 
