@@ -70,6 +70,74 @@ a = Analysis(
     noarchive=False,
 )
 
+# --- poda do que é coletado por dependência transitiva ------------------------
+#
+# ``excludes`` acima só alcança **módulos Python**. As bibliotecas C entram por
+# outro caminho: o analisador segue o grafo de dependências e traz tudo que
+# alguém declara precisar, sem perguntar se aquilo chega a ser carregado.
+#
+# O caso extremo é o tema GTK. ``platformthemes/libqgtk3.so`` tem 236 KB e
+# arrasta 15 MB de GTK, cairo, pango e atk — e a aplicação nunca o usa: ela
+# força o estilo Fusion e pinta a própria paleta (``ui/theme.py``), então nada
+# do que esse plugin decide sobrevive ao QSS. O que se perde ao tirá-lo é o
+# seletor de arquivos do GTK, no lugar do qual entra o do próprio Qt (ou o do
+# portal, cujo plugin continua no pacote).
+#
+# A lista saiu do fecho transitivo de dependências a partir das raízes reais —
+# o executável, as extensões C do Python e os plugins Qt que a aplicação pode
+# carregar. Tudo aqui é inalcançável a partir delas: medido, 24,8 MB. Depois da
+# poda, conferido que nenhum arquivo remanescente tem NEEDED pendente e que a
+# janela abre numa sessão X11 de verdade sem uma linha de erro.
+#
+# **``libmvec.so.1`` não entra**, por mais que o grafo do Qt a mostre como
+# órfã: ela é NEEDED do ffmpeg empacotado, que resolve pelo sistema numa máquina
+# atual e falharia numa glibc mais antiga — que é justamente o que um AppImage
+# promete atender.
+_PODAR = {
+    # tema GTK e tudo que só ele alcança
+    "libqgtk3.so",
+    "libgtk-3.so.0", "libgdk-3.so.0", "libcairo.so.2", "libcairo-gobject.so.2",
+    "libepoxy.so.0", "libpixman-1.so.0", "libharfbuzz.so.0", "libgraphite2.so.3",
+    "libpango-1.0.so.0", "libpangocairo-1.0.so.0", "libpangoft2-1.0.so.0",
+    "libgdk_pixbuf-2.0.so.0", "libatk-1.0.so.0", "libatk-bridge-2.0.so.0",
+    "libatspi.so.0", "libjpeg.so.8", "libfribidi.so.0", "libXi.so.6",
+    # PDF como formato de imagem: a prévia é rgb24 cru e a onda é PNG
+    "libqpdf.so", "libQt6Pdf.so.6",
+    # teclado virtual: isto se opera com teclado e mouse
+    "libqtvirtualkeyboardplugin.so",
+    "libQt6VirtualKeyboard.so.6", "libQt6VirtualKeyboardQml.so.6",
+    # plataformas de embarcado e quiosque; ficam xcb, wayland, minimal e
+    # offscreen — offscreen não sai porque é o que packaging/smoke_run.sh usa
+    "libqlinuxfb.so", "libqvnc.so", "libqvkkhrdisplay.so", "libqeglfs.so",
+    "libqminimalegl.so",
+    "libQt6EglFSDeviceIntegration.so.6", "libQt6EglFsKmsSupport.so.6",
+    # formatos de imagem que nada abre; ficam png (embutido no Qt), jpeg, webp
+    # (miniaturas de site vêm nesses dois), gif, ico e svg
+    "libqtiff.so", "libqtga.so", "libqwbmp.so", "libqicns.so",
+}
+_PODAR_PASTAS = ("plugins/egldeviceintegrations", "plugins/generic")
+
+# Traduções do Qt: 124 idiomas, 7,1 MB, para uma interface que só existe em
+# pt-BR. Ficam as de português e as de inglês, que é o recurso do Qt quando o
+# idioma do sistema não é nenhum dos dois.
+_IDIOMAS = ("_pt", "_pt_BR", "_en")
+
+
+def _manter(entrada) -> bool:
+    destino = str(entrada[0]).replace(os.sep, "/")
+    nome = Path(destino).name
+    if nome in _PODAR:
+        return False
+    if any(pasta in destino for pasta in _PODAR_PASTAS):
+        return False
+    if "Qt/translations/" in destino:
+        return Path(destino).stem.endswith(_IDIOMAS)
+    return True
+
+
+a.binaries = [entrada for entrada in a.binaries if _manter(entrada)]
+a.datas = [entrada for entrada in a.datas if _manter(entrada)]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

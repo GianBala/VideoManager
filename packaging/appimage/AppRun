@@ -6,6 +6,12 @@
 # e a variável seria herdada pelo ffmpeg, que passaria a carregar a libstdc++ do
 # pacote em vez da do sistema.
 #
+# Não exportá-la aqui, porém, **não basta**: o bootloader a define depois deste
+# script, e todo processo filho a herda. Quem desfaz isso é
+# core/binaries.clean_env(), aplicada a todo processo externo que a aplicação
+# inicia — sem ela, um ffmpeg ligado dinamicamente carregava a libavcodec do
+# QtMultimedia e perdia libx264, libx265 e libmp3lame em silêncio.
+#
 # readlink -f é o que faz a conta funcionar quando o AppImage é chamado por um
 # link simbólico: sem ele, $0 aponta para o link e HERE cai fora da imagem.
 set -eu

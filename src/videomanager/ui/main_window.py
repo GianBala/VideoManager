@@ -16,10 +16,10 @@ mesma grade: rótulos numa coluna, campos noutra, botões encostados na direita.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import yt_dlp
+from platformdirs import user_cache_dir
 from PySide6.QtCore import QEvent, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import APP_DISPLAY_NAME, __version__
+from .. import APP_DISPLAY_NAME, APP_NAME, __version__
 from ..core import hwaccel
 from ..core.binaries import FFmpegTools, find_tools
 from ..core.job import Job, JobStatus
@@ -51,7 +51,7 @@ from ..core.selector import (
     describe_request,
 )
 from ..core.settings import Settings
-from ..workers.engine_worker import EngineUpdateWorker
+from ..workers.engine_worker import EngineUpdateWorker, is_packaged
 from ..workers.hwaccel_worker import HardwareProbeWorker
 from ..workers.probe_worker import ProbeWorker
 from ..workers.queue import JobQueue
@@ -98,7 +98,15 @@ class MainWindow(QMainWindow):
         self._balancing = False
         # Diretório temporário próprio: mantém .part e fragmentos fora da pasta
         # de destino, que só recebe arquivo pronto.
-        self._temp_dir = Path(tempfile.gettempdir()) / "videomanager"
+        #
+        # Fica no cache do usuário, e **não** em /tmp, pelos mesmos dois motivos
+        # que levaram ``ParallelExport`` a fugir de lá. Em muitas distribuições
+        # /tmp é tmpfs, ou seja memória: um download de vários GB passaria
+        # inteiro pela RAM, que é o recurso que esta aplicação já esgotou uma
+        # vez. E "/tmp/videomanager" é um caminho fixo dentro de um diretório em
+        # que todo usuário da máquina escreve — quem chegasse antes decidiria o
+        # que há lá dentro, ou impediria o download por falta de permissão.
+        self._temp_dir = Path(user_cache_dir(APP_NAME, appauthor=False)) / "temp"
 
         self.setWindowTitle(f"{APP_DISPLAY_NAME} {__version__}")
         # Altura escolhida para caber a aba inteira sem rolagem — barra de abas,
@@ -431,7 +439,15 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(settings_action)
         update_action = QAction(strings.ACTION_UPDATE_ENGINE, self)
         update_action.triggered.connect(self._update_engine)
+        # Num pacote não há pip, e o yt-dlp vem embutido: o item fica à vista
+        # com a explicação na dica, em vez de sumir sem dizer por quê — a
+        # atualização da engine é o remédio que as próprias mensagens de erro
+        # recomendam, e some-lo deixaria essa recomendação sem destino.
+        if is_packaged():
+            update_action.setEnabled(False)
+            update_action.setToolTip(strings.DIALOG_ENGINE_PACKAGED)
         tools_menu.addAction(update_action)
+        tools_menu.setToolTipsVisible(True)
 
         help_menu = self.menuBar().addMenu(strings.MENU_HELP)
         about = QAction(strings.ACTION_ABOUT, self)
@@ -527,7 +543,10 @@ class MainWindow(QMainWindow):
         self._enqueue(self._media, request)
 
     def _enqueue(self, media: MediaInfo, request: VideoRequest | AudioRequest) -> None:
-        assert self._tools is not None
+        # Conferência de verdade, e não ``assert``: sob ``python -O`` o assert
+        # some e o que sobraria seria um ``AttributeError`` lá dentro.
+        if self._tools is None:
+            return
         dest = self._settings.resolved_download_dir()
         opts, plan = build_opts(
             request, media, self._settings, self._tools, dest, self._temp_dir
@@ -642,7 +661,7 @@ class MainWindow(QMainWindow):
 
     def _on_dest_edited(self) -> None:
         self._settings.download_dir = self._dest.text().strip() or self._settings.download_dir
-        self._settings.save()
+        self._save_settings()
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self._settings, self)
@@ -650,7 +669,7 @@ class MainWindow(QMainWindow):
             return
         previous_theme = self._settings.theme
         self._settings = dialog.result_settings()
-        self._settings.save()
+        self._save_settings()
         self._queue.apply_settings(self._settings)
         self._edit.apply_settings(self._settings)
         self._dest.setText(self._settings.download_dir)
@@ -662,6 +681,15 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _update_engine(self) -> None:
+        if is_packaged():
+            # O item de menu já nasce desligado; esta é a segunda tranca, para o
+            # caso de a ação chegar por outro caminho. Ver ``EngineUpdateWorker``:
+            # num pacote, o comando abriria uma segunda janela do aplicativo em
+            # vez de instalar coisa alguma.
+            QMessageBox.information(
+                self, strings.DIALOG_ENGINE_TITLE, strings.DIALOG_ENGINE_PACKAGED
+            )
+            return
         current = yt_dlp.version.__version__
         answer = QMessageBox.question(
             self,
@@ -739,9 +767,32 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
-        self._settings.save()
+        # Encerrar vem **antes** de salvar, e salvar não pode derrubar o
+        # encerramento. ``Settings.save`` propaga ``OSError`` de propósito
+        # (disco cheio, pasta de configuração somente leitura, perfil em rede
+        # fora do ar), e a exceção saindo daqui pulava as duas linhas seguintes
+        # — o ``QCloseEvent`` já nasce aceito, então a janela fechava assim
+        # mesmo e sobravam ffmpeg órfãos e gravação truncada, exatamente o que
+        # estas duas chamadas existem para evitar. Perder a última preferência é
+        # incômodo; isso era defeito.
+        #
         # A aba de edição tem processos próprios (prévia e mixagem) que a fila
         # não conhece: sem este aviso, eles ficam rodando depois da janela.
         self._edit.shutdown()
         self._queue.shutdown()
+        self._save_settings()
         event.accept()
+
+    def _save_settings(self) -> None:
+        """Grava as preferências sem deixar uma falha de disco virar defeito.
+
+        Todo lugar que salva passa por aqui: a gravação é secundária em relação
+        ao que o usuário estava fazendo, e um ``OSError`` cru dentro de um slot
+        do Qt vira traceback sem explicação nenhuma na tela.
+        """
+        try:
+            self._settings.save()
+        except OSError as exc:
+            self.statusBar().showMessage(
+                strings.STATUS_SETTINGS_FAILED.format(error=exc), _ENQUEUED_MS
+            )
