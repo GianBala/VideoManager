@@ -990,3 +990,94 @@ class TestInterpolacaoEmTrechos:
         with pytest.raises(JobCancelled):
             conv.run()
         assert not destino.exists(), "cancelar não pode deixar arquivo no destino"
+
+
+class TestReservaDoNomeComFfmpegDeVerdade:
+    """A reserva de saída sobrevive a uma gravação de verdade.
+
+    ``output_path`` deixou de apenas consultar o disco e passou a **criar** o
+    arquivo vazio que segura o nome — sem isso, dois cliques em "Exportar"
+    davam o mesmo caminho às duas tarefas e a segunda apagava o resultado da
+    primeira em silêncio.
+
+    O que se mede aqui é o outro lado dessa troca: que o ffmpeg escreve por cima
+    da reserva sem reclamar, nos dois caminhos de gravação — o comando único e a
+    exportação em trechos paralelos, que entrega o arquivo com um ``move`` sobre
+    o destino. Um teste de "não levantou exceção" não serviria: o modo de falha
+    seria justamente o arquivo de zero byte entregue como resultado.
+    """
+
+    def fonte(self, path: Path, tools) -> Path:
+        subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y",
+             "-f", "lavfi", "-i", "testsrc2=s=320x180:r=24:d=2",
+             "-f", "lavfi", "-i", "sine=f=440:d=2",
+             "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-shortest", str(path)],
+            check=True,
+        )
+        return path
+
+    def test_o_ffmpeg_grava_por_cima_da_reserva(self, tmp_path: Path, tools) -> None:
+        origem = self.fonte(tmp_path / "fonte.mp4", tools)
+        alvo = AudioTarget(codec="mp3", bitrate="128")
+
+        destino = output_path(origem, alvo, tmp_path)
+        assert destino.stat().st_size == 0, "a reserva nasce vazia"
+
+        resultado = Converter(probe_file(origem, tools), alvo, destino, tools).run()
+
+        formato, streams = ffprobe_streams(resultado, tools)
+        assert resultado == destino
+        assert stream_of(streams, "audio") is not None, "saiu com trilha de áudio"
+        assert float(formato["duration"]) == pytest.approx(2.0, abs=0.3)
+
+    def test_a_segunda_exportacao_nao_apaga_a_primeira(self, tmp_path: Path, tools) -> None:
+        origem = self.fonte(tmp_path / "fonte.mp4", tools)
+        alvo = AudioTarget(codec="mp3", bitrate="128")
+        media = probe_file(origem, tools)
+
+        # As duas reservas saem **antes** de qualquer gravação, que é a ordem em
+        # que a interface enfileira: era exatamente aí que as duas recebiam o
+        # mesmo caminho.
+        primeiro = output_path(origem, alvo, tmp_path)
+        segundo = output_path(origem, alvo, tmp_path)
+        assert primeiro != segundo
+
+        Converter(media, alvo, primeiro, tools).run()
+        Converter(media, alvo, segundo, tools).run()
+
+        assert primeiro.stat().st_size > 0, "o primeiro resultado continua lá"
+        assert segundo.stat().st_size > 0
+
+    def test_a_exportacao_em_trechos_entrega_sobre_a_reserva(
+        self, tmp_path: Path, tools
+    ) -> None:
+        # O caminho paralelo não grava no destino: ele monta num temporário e
+        # move por cima. Com o destino já existindo, esse ``move`` precisa
+        # substituir em vez de recusar.
+        from videomanager.core import converter as mod
+        from videomanager.core import parallel_export
+        from videomanager.core.composer import Composition
+        from videomanager.core.project import media_ref, new_project
+
+        origem = self.fonte(tmp_path / "fonte.mp4", tools)
+        media = probe_file(origem, tools)
+        projeto = replace(new_project(media_ref(media)), fps=48.0)
+        comp = Composition(projeto, "mp4", interpolate=True)
+
+        destino = output_path(origem, comp, tmp_path, " (editado)")
+        assert destino.stat().st_size == 0
+
+        original = parallel_export.plan_segments
+        parallel_export.plan_segments = mod.plan_segments = lambda _c: 2
+        try:
+            resultado = Converter(media, comp, destino, tools).run()
+        finally:
+            parallel_export.plan_segments = mod.plan_segments = original
+
+        formato, streams = ffprobe_streams(resultado, tools)
+        assert resultado == destino
+        assert destino.stat().st_size > 0, "a reserva virou arquivo de verdade"
+        assert stream_of(streams, "video") is not None
+        assert float(formato["duration"]) == pytest.approx(2.0, abs=0.3)

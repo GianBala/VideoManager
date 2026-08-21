@@ -9,6 +9,8 @@ pedidos deixa de interessar antes de terminar. Daí cada worker carregar um
 
 from __future__ import annotations
 
+import subprocess
+import threading
 from contextlib import closing
 from pathlib import Path
 
@@ -26,6 +28,43 @@ from ..core.preview import (
 )
 from ..core.trimmer import keyframe_times
 from .signals import PreviewSignals, emit_safely
+
+
+class _Interruption:
+    """Trava de cancelamento dos workers que abrem um ffmpeg e esperam por ele.
+
+    Composição, e não herança: um ``QRunnable`` do PySide6 misturado com outra
+    classe base cobra atenção de MRO que este punhado de linhas não justifica.
+
+    O que ela resolve é o fechamento da janela. O destrutor do ``QThreadPool``
+    espera as threads dele, e estes processos têm prazos longos — 120 s a onda,
+    180 s os keyframes: sem poder matá-los, fechar a aba de edição no meio de
+    um trabalho de fundo segurava a saída do aplicativo até o prazo acabar.
+    """
+
+    def __init__(self) -> None:
+        self._process: subprocess.Popen | None = None
+        self._cancelled = False
+        self._lock = threading.Lock()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def register(self, process: subprocess.Popen) -> None:
+        with self._lock:
+            self._process = process
+        if self._cancelled:
+            # A desistência chegou entre abrir e registrar: sem esta
+            # conferência o processo seguiria decodificando sozinho.
+            process.terminate()
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        with self._lock:
+            process = self._process
+        if process is not None and process.poll() is None:
+            process.terminate()
 
 
 class FrameWorker(QRunnable):
@@ -48,12 +87,18 @@ class FrameWorker(QRunnable):
         self._size = size
         self._seconds = seconds
         self._token = token
+        self._guard = _Interruption()
         self.signals = PreviewSignals()
+
+    def cancel(self) -> None:
+        self._guard.cancel()
 
     @Slot()
     def run(self) -> None:
         try:
-            frame = frame_from_command(self._command, self._size)
+            frame = frame_from_command(
+                self._command, self._size, register=self._guard.register
+            )
             if frame is not None:
                 emit_safely(
                     self.signals.frame, self._token, replace(frame, seconds=self._seconds)
@@ -88,11 +133,11 @@ class FilmstripWorker(QRunnable):
         self._size = size
         self._tools = tools
         self._token = token
-        self._cancelled = False
+        self._guard = _Interruption()
         self.signals = PreviewSignals()
 
     def cancel(self) -> None:
-        self._cancelled = True
+        self._guard.cancel()
 
     @Slot()
     def run(self) -> None:
@@ -100,13 +145,18 @@ class FilmstripWorker(QRunnable):
         # gerador, e é o fechamento que encerra o ffmpeg do passe único. Sair do
         # laço sem isso deixaria o processo decodificando o resto de um trecho
         # que ninguém vai ver — de novo o caso que enchia a máquina de ffmpeg.
+        #
+        # A trava vai junto porque o fechamento do gerador só acontece **entre**
+        # dois quadros: quem estivesse parado esperando a leitura de um deles
+        # ficaria ali até o quadro chegar.
         quadros = filmstrip_frames(
-            self._path, self._start, self._end, self._count, self._size, self._tools
+            self._path, self._start, self._end, self._count, self._size, self._tools,
+            register=self._guard.register,
         )
         try:
             with closing(quadros):
                 for index, frame in quadros:
-                    if self._cancelled:
+                    if self._guard.cancelled:
                         return
                     emit_safely(self.signals.strip, self._token, index, frame)
         finally:
@@ -134,7 +184,11 @@ class WaveformWorker(QRunnable):
         self._color = color
         self._tools = tools
         self._token = token
+        self._guard = _Interruption()
         self.signals = PreviewSignals()
+
+    def cancel(self) -> None:
+        self._guard.cancel()
 
     @Slot()
     def run(self) -> None:
@@ -148,6 +202,7 @@ class WaveformWorker(QRunnable):
                 color=self._color,
                 start=self._start,
                 duration=self._duration,
+                register=self._guard.register,
             )
             if png:
                 emit_safely(self.signals.waveform, self._token, png)
@@ -167,12 +222,19 @@ class KeyframeWorker(QRunnable):
         super().__init__()
         self._path = path
         self._tools = tools
+        self._guard = _Interruption()
         self.signals = PreviewSignals()
+
+    def cancel(self) -> None:
+        self._guard.cancel()
 
     @Slot()
     def run(self) -> None:
         try:
-            emit_safely(self.signals.keyframes, keyframe_times(self._path, self._tools))
+            emit_safely(
+                self.signals.keyframes,
+                keyframe_times(self._path, self._tools, register=self._guard.register),
+            )
         except VideoManagerError:
             # Um arquivo cujos keyframes não podem ser mapeados ainda pode ser
             # recortado: o modo exato não depende deles, e o modo rápido volta a

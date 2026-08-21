@@ -11,6 +11,7 @@ foi essa memória que já derrubou esta máquina uma vez.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -35,7 +36,9 @@ from videomanager.core.project import (
     Track,
     TrackKind,
 )
-from videomanager.core.parallel_export import plan_segments
+from videomanager.core import parallel_export
+from videomanager.core.errors import ConversionError, JobCancelled
+from videomanager.core.parallel_export import ParallelExport, plan_segments
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
 GIGA = 1024 ** 3
@@ -201,3 +204,150 @@ class TestMemoriaDisponivel:
         # conservador em vez de supor que há memória sobrando.
         monkeypatch.setattr(memory, "_MEMINFO", tmp_path / "nao-existe")
         assert memory._linux_available() is None
+
+
+class ProcessoDeMentira:
+    """O mínimo de um ``Popen`` para o laço das etapas finais.
+
+    Guarda se foi terminado ou morto, que é o que os testes de cancelamento
+    precisam afirmar — a alternativa seria abrir um ffmpeg de verdade e torcer
+    para ele demorar o bastante.
+    """
+
+    def __init__(self, codigo: int = 0, erro: bytes = b"", ao_esperar=None) -> None:
+        self.returncode = codigo
+        self._erro = erro
+        self._ao_esperar = ao_esperar
+        self.terminado = False
+        self.morto = False
+
+    def poll(self) -> int | None:
+        return self.returncode if (self.terminado or self.morto) else None
+
+    def terminate(self) -> None:
+        self.terminado = True
+
+    def kill(self) -> None:
+        self.morto = True
+
+    def communicate(self, timeout: float | None = None):
+        # Só a espera **com prazo** reage: a segunda chamada, sem prazo, é a que
+        # recolhe o processo depois do ``kill`` e sempre devolve, como no
+        # ``Popen`` de verdade.
+        if self._ao_esperar is not None and timeout is not None:
+            self._ao_esperar(self)
+        return (b"", self._erro)
+
+
+def exportacao(destino: Path, segments: int = 2) -> ParallelExport:
+    composicao = Composition(project=projeto(), container="mp4", interpolate=True)
+    return ParallelExport(composicao, destino, TOOLS, segments)
+
+
+class TestCancelamentoDasEtapasFinais:
+    """Emendar, gerar som e juntar não eram alcançáveis pelo cancelamento.
+
+    Elas rodavam fora do registro que o ``cancel`` percorre e sem prazo nenhum.
+    "Cancelar" durante "gerar o som" — que percorre a linha do tempo inteira —
+    não fazia nada até a etapa acabar; e um ffmpeg preso ali ocupava para sempre
+    a **única** vaga da fila local, travando toda conversão seguinte da sessão.
+    """
+
+    def test_a_etapa_fica_registrada_enquanto_corre(self, tmp_path: Path, monkeypatch) -> None:
+        export = exportacao(tmp_path / "saida.mp4")
+        visto: dict[str, bool] = {}
+
+        def cancelar_no_meio(processo: ProcessoDeMentira) -> None:
+            # Cancelamento chegando **durante** a etapa: só alcança o processo
+            # se ele estiver no registro.
+            export.cancel()
+            visto["terminado"] = processo.terminado
+
+        processo = ProcessoDeMentira(ao_esperar=cancelar_no_meio)
+        monkeypatch.setattr(
+            parallel_export.subprocess, "Popen", lambda *a, **k: processo
+        )
+
+        with pytest.raises(JobCancelled):
+            export._step(["ffmpeg"], "emendar os trechos")
+
+        assert visto["terminado"] is True, "o cancelamento alcançou a etapa"
+
+    def test_a_etapa_sai_do_registro_ao_terminar(self, tmp_path: Path, monkeypatch) -> None:
+        export = exportacao(tmp_path / "saida.mp4")
+        monkeypatch.setattr(
+            parallel_export.subprocess, "Popen", lambda *a, **k: ProcessoDeMentira()
+        )
+        export._step(["ffmpeg"], "emendar os trechos")
+        assert export._processes == {}, "nada fica pendurado no registro"
+
+    def test_etapa_travada_e_interrompida_pelo_prazo(self, tmp_path: Path, monkeypatch) -> None:
+        export = exportacao(tmp_path / "saida.mp4")
+
+        def travar(_processo: ProcessoDeMentira) -> None:
+            raise subprocess.TimeoutExpired(cmd="ffmpeg", timeout=1)
+
+        processo = ProcessoDeMentira(ao_esperar=travar)
+        monkeypatch.setattr(
+            parallel_export.subprocess, "Popen", lambda *a, **k: processo
+        )
+
+        with pytest.raises(ConversionError):
+            export._step(["ffmpeg"], "juntar imagem e som", timeout=1)
+        assert processo.morto is True, "não fica um ffmpeg vivo segurando a fila"
+
+
+class TestFalhaDeUmTrecho:
+    """Um trecho que falha derruba os irmãos — e é relatado como falha.
+
+    Cada trecho carrega um ``minterpolate`` inteiro, e a interpolação custa
+    dezenas de vezes uma exportação normal: esperar os outros sete terminarem
+    por causa de um erro do primeiro segundo gastava a única vaga da fila local
+    por dezenas de minutos, e a memória junto, por um arquivo que não vai
+    existir.
+    """
+
+    def test_a_falha_derruba_os_irmaos(self, tmp_path: Path) -> None:
+        export = exportacao(tmp_path / "saida.mp4", segments=4)
+        irmao = ProcessoDeMentira()
+        export._processes[0] = irmao
+
+        export._fail("Unknown encoder 'libx264'")
+
+        assert irmao.terminado is True
+        assert export._aborted is True
+
+    def test_falha_nao_e_relatada_como_cancelamento(self, tmp_path: Path, monkeypatch) -> None:
+        # Derrubar os irmãos usa a mesma bandeira do cancelamento; se as duas
+        # fossem a mesma coisa, toda falha de trecho apareceria como "Cancelado"
+        # e a causa não chegaria a lugar nenhum.
+        export = exportacao(tmp_path / "saida.mp4", segments=2)
+        monkeypatch.setattr(
+            export, "_render", lambda index, destino: export._fail("erro do ffmpeg")
+        )
+
+        with pytest.raises(ConversionError, match="erro do ffmpeg"):
+            export._build(tmp_path)
+
+        assert export._cancelled is False, "ninguém cancelou nada"
+
+    def test_desistir_continua_sendo_cancelamento(self, tmp_path: Path, monkeypatch) -> None:
+        export = exportacao(tmp_path / "saida.mp4", segments=2)
+        monkeypatch.setattr(export, "_render", lambda index, destino: export.cancel())
+
+        with pytest.raises(JobCancelled):
+            export._build(tmp_path)
+
+    def test_trecho_que_nasce_abortado_nao_abre_ffmpeg(self, tmp_path: Path, monkeypatch) -> None:
+        export = exportacao(tmp_path / "saida.mp4", segments=4)
+        export.cancel()
+        abriu: list[str] = []
+        monkeypatch.setattr(
+            parallel_export.subprocess,
+            "Popen",
+            lambda *a, **k: abriu.append("abriu") or ProcessoDeMentira(),
+        )
+
+        export._render(0, tmp_path / "trecho.mp4")
+
+        assert abriu == [], "não se abre um ffmpeg para trabalho já descartado"

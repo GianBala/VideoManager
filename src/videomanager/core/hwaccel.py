@@ -30,6 +30,7 @@ que venha a ser acrescentado.
 from __future__ import annotations
 
 import subprocess
+import threading
 from dataclasses import dataclass
 
 from .binaries import FFmpegTools, subprocess_kwargs
@@ -160,6 +161,14 @@ CHOICES: tuple[tuple[str, str], ...] = (
 # exportação só para descobrir o que já se sabe seria desperdício, e a resposta
 # não muda enquanto o programa está aberto.
 _probed: dict[str, bool] = {}
+# Uma sondagem por encoder de cada vez. Sem isto, as oito threads de uma
+# exportação em trechos paralelos chegam juntas ao cache frio e abrem oito
+# sondagens do mesmo encoder — e a mais cara delas é justamente a que falha,
+# porque o VAAPI desta máquina **aborta** o processo, o que demora mais que uma
+# recusa. O trinco é por encoder, então sondar a placa não segura quem já tem
+# resposta em cache.
+_probe_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
 
 
 def _probe_command(encoder: Encoder, tools: FFmpegTools) -> list[str]:
@@ -189,20 +198,32 @@ def probe(encoder: Encoder, tools: FFmpegTools, *, timeout: int = 20) -> bool:
     if cached is not None:
         return cached
 
-    try:
-        proc = subprocess.run(
-            _probe_command(encoder, tools),
-            timeout=timeout,
-            check=False,
-            **subprocess_kwargs(),
-        )
-        ok = proc.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        # Inclui o caso em que o próprio ffmpeg aborta — o VAAPI desta máquina
-        # morre por símbolo ausente na libva, e isso é uma resposta válida.
-        ok = False
-    _probed[encoder.name] = ok
-    return ok
+    with _lock_for(encoder.name):
+        # Conferido de novo com o trinco na mão: quem esperou aqui já pode ter
+        # a resposta que a outra thread acabou de gravar.
+        cached = _probed.get(encoder.name)
+        if cached is not None:
+            return cached
+        try:
+            proc = subprocess.run(
+                _probe_command(encoder, tools),
+                timeout=timeout,
+                check=False,
+                **subprocess_kwargs(),
+            )
+            ok = proc.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            # Inclui o caso em que o próprio ffmpeg aborta — o VAAPI desta
+            # máquina morre por símbolo ausente na libva, e isso é uma resposta
+            # válida.
+            ok = False
+        _probed[encoder.name] = ok
+        return ok
+
+
+def _lock_for(name: str) -> threading.Lock:
+    with _locks_guard:
+        return _probe_locks.setdefault(name, threading.Lock())
 
 
 def forget_probes() -> None:

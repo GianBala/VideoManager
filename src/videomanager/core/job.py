@@ -73,6 +73,13 @@ class Job:
     status: JobStatus = JobStatus.PENDING
     progress: Progress | None = None
     result_path: Path | None = None
+    # Tamanho do arquivo produzido, medido **uma vez**, quando a tarefa termina.
+    # A coluna de velocidade da fila mostrava isso perguntando ao disco a cada
+    # repintura de célula — duas chamadas de sistema por quadro, por tarefa
+    # concluída visível, e uma corrida entre o ``exists`` e o ``stat`` que
+    # levantava ``FileNotFoundError`` de dentro do modelo se o arquivo saísse do
+    # lugar nesse intervalo.
+    result_size: int | None = None
     error: str | None = None
     log: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
