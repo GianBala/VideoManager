@@ -2145,12 +2145,19 @@ class EditPanel(QWidget):
         dest_dir = (
             None if self._same_folder.isChecked() else self._settings.resolved_download_dir()
         )
-        destination = output_path(
-            source,
-            target,
-            dest_dir,
-            strings.EDIT_SUFFIX_ONE if fast else strings.EDIT_SUFFIX_EDIT,
-        )
+        try:
+            # Reserva o nome no ato (ver ``converter.output_path``): sem isso,
+            # dois cliques em "Exportar" produziam duas tarefas para o **mesmo**
+            # arquivo, e a segunda apagava o resultado da primeira em silêncio.
+            destination = output_path(
+                source,
+                target,
+                dest_dir,
+                strings.EDIT_SUFFIX_ONE if fast else strings.EDIT_SUFFIX_EDIT,
+            )
+        except VideoManagerError as exc:
+            QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(exc))
+            return
         job = Job(
             url=str(source),
             title=destination.name,
@@ -2189,10 +2196,18 @@ class EditPanel(QWidget):
         mixagem —, e eles não morrem só porque a janela fechou: ficariam
         consumindo CPU até perceberem o cano fechado. Fechar a janela é o
         último momento em que alguém pode mandá-los parar.
+
+        **O trabalho de fundo entra na conta.** O destrutor do ``QThreadPool``
+        chama ``waitForDone()`` sem prazo, e onda e keyframes esperam ffmpeg de
+        120 s e 180 s: enquanto eles não eram cancelados aqui, fechar a janela
+        logo depois de importar um arquivo longo deixava o processo pendurado
+        até o prazo acabar, sem janela e sem explicação.
         """
         self._stop_playback()
         for clip_id in list(self._strip_workers):
             self._cancel_strip(clip_id)
+        self._background.cancel_all()
+        self._runner.cancel_all()
         if self._fullscreen is not None:
             self._fullscreen.close()
 

@@ -57,12 +57,32 @@ class EngineUpdateSignals(QObject):
     failed = Signal(str)
 
 
+def is_packaged() -> bool:
+    """Se estamos rodando de dentro de um pacote do PyInstaller.
+
+    Público porque quem decide **não** oferecer a atualização é a interface, que
+    é onde mora o texto que explica isso ao usuário. Ver
+    :class:`EngineUpdateWorker`.
+    """
+    return bool(getattr(sys, "frozen", False))
+
+
 class EngineUpdateWorker(QRunnable):
     """Atualiza o yt-dlp no ambiente em que a aplicação está rodando.
 
     Usa o canal de pré-lançamento (``--pre``) porque é o recomendado pelo próprio
     projeto: extratores quebram quando as plataformas mudam, e as correções saem
     nas builds noturnas muito antes da versão estável seguinte.
+
+    **Nunca inicie isto num pacote — confira :func:`is_packaged` antes.**
+    ``sys.executable`` é o interpretador Python apenas quando se roda do
+    código-fonte; num pacote do PyInstaller ele é o próprio executável do Video
+    Manager, e não há pip embutido. O comando vira ``VideoManager -m pip install
+    …``, e esses argumentos o bootloader repassa como ``sys.argv``: o
+    ``QApplication`` ignora o que não reconhece e **abre uma segunda janela do
+    aplicativo**, enquanto a primeira fica dez minutos de prazo esperando uma
+    instalação que ninguém está fazendo. Vale igual para
+    :meth:`_installed_version`.
     """
 
     def __init__(self, current_version: str) -> None:

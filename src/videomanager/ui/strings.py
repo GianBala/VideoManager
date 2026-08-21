@@ -127,6 +127,9 @@ QUEUE_LOG_TITLE = "Detalhes técnicos — {title}"
 STATUS_COUNTS = "{active} em andamento · {pending} na fila · {done} concluídos"
 STATUS_FFMPEG = "ffmpeg: {source}"
 STATUS_ENQUEUED = "{count} tarefa(s) adicionada(s) à fila — acompanhe na aba Download"
+# Na barra de status, e não num diálogo: não poder gravar as preferências não
+# interrompe nada do que está em andamento.
+STATUS_SETTINGS_FAILED = "Não foi possível gravar as preferências: {error}"
 
 # --- playlist ----------------------------------------------------------------
 PLAYLIST_TITLE = "Selecionar itens da playlist"
@@ -424,3 +427,10 @@ DIALOG_ENGINE_DONE = (
 )
 DIALOG_ENGINE_UPTODATE = "O yt-dlp já está na versão mais recente ({version})."
 DIALOG_ENGINE_FAILED = "Falha ao atualizar:\n\n{error}"
+# Versão empacotada: não há pip por perto e o yt-dlp vem embutido. Ver
+# workers/engine_worker.py.
+DIALOG_ENGINE_PACKAGED = (
+    "Esta é uma versão empacotada: o yt-dlp vem embutido e é atualizado junto "
+    "com o aplicativo. Baixe a versão mais recente do Video Manager para "
+    "receber os extratores novos."
+)

@@ -416,7 +416,14 @@ class ConvertPanel(QWidget):
             if isinstance(target, AudioTarget) and not media.has_audio:
                 skipped.append(f"{media.path.name}: não tem trilha de áudio")
                 continue
-            destination = output_path(media.path, target, dest_dir)
+            try:
+                # Reserva o nome de saída no ato (ver ``converter.output_path``).
+                # Pasta sem permissão de escrita falha aqui, com o nome do
+                # arquivo à vista, em vez de sete minutos depois dentro da fila.
+                destination = output_path(media.path, target, dest_dir)
+            except VideoManagerError as exc:
+                skipped.append(f"{media.path.name}: {exc}")
+                continue
             jobs.append(
                 Job(
                     url=str(media.path),

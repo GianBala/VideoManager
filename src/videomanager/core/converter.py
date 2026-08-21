@@ -19,6 +19,7 @@ a entrada e pode travar esperando por dados que nunca chegam.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import threading
@@ -337,18 +338,42 @@ def output_path(
     ``suffix`` distingue saídas que nascem do mesmo arquivo — os vários trechos
     de um recorte — sem depender do contador, que só entra em cena quando o nome
     escolhido já existe.
+
+    **O nome é reservado, não apenas consultado.** Esta função é chamada ao
+    *enfileirar*, e o ffmpeg só grava minutos depois: "não existe agora" não diz
+    nada sobre o instante da gravação. Enquanto era só uma consulta, enfileirar
+    duas vezes a mesma origem devolvia o mesmo caminho para as duas tarefas, e a
+    segunda sobrescrevia o resultado já pronto da primeira — em silêncio, e com
+    o ``-y`` do ffmpeg contra o qual não havia defesa nenhuma. Criar o arquivo
+    vazio com ``O_EXCL`` fecha a janela: o nome deixa de estar livre no ato. O
+    arquivo de zero byte é sobrescrito pelo próprio ffmpeg, e a limpeza de saída
+    parcial em caso de falha ou cancelamento já existia.
     """
     directory = dest_dir or source.parent
     stem = f"{source.stem}{suffix}"
     candidate = directory / f"{stem}.{target.extension}"
     if candidate.resolve() == source.resolve():
         candidate = directory / f"{stem} (convertido).{target.extension}"
-    # Não sobrescreve arquivos já existentes.
+
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ConversionError(
+            f"Não foi possível usar a pasta de destino {directory}: {exc}"
+        ) from exc
+
     counter = 2
-    while candidate.exists():
-        candidate = directory / f"{stem} ({counter}).{target.extension}"
-        counter += 1
-    return candidate
+    while True:
+        try:
+            os.close(os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+            return candidate
+        except FileExistsError:
+            candidate = directory / f"{stem} ({counter}).{target.extension}"
+            counter += 1
+        except OSError as exc:
+            raise ConversionError(
+                f"Não foi possível criar o arquivo de saída em {directory}: {exc}"
+            ) from exc
 
 
 def build_audio_args(
@@ -638,6 +663,24 @@ class Converter:
         if parallel is not None:
             parallel.cancel()
 
+    def discard_reservation(self) -> None:
+        """Devolve o nome reservado por :func:`output_path`, se nada foi gravado.
+
+        Uma tarefa cancelada **antes de começar** nunca chega ao ``run``, e o
+        arquivo vazio que segurava o nome dela ficaria na pasta do usuário como
+        lixo — de zero byte, com o nome do resultado que ele não vai ter.
+
+        Só remove o que está vazio: um arquivo com conteúdo é resultado de
+        alguém e não se apaga por causa de uma reserva.
+        """
+        try:
+            if self._destination.is_file() and self._destination.stat().st_size == 0:
+                self._destination.unlink()
+        except OSError:
+            # Não poder limpar um arquivo vazio não é motivo para transformar um
+            # cancelamento em falha.
+            pass
+
     def _run_parallel(self, composition: Composition, segments: int) -> Path:
         """Entrega a exportação ao caminho de trechos paralelos.
 
@@ -718,6 +761,15 @@ class Converter:
 
         with self._lock:
             self._process = process
+        if self._cancelled:
+            # A desistência pode ter chegado entre o ``Popen`` e o registro: o
+            # ``cancel`` daquele instante leu ``self._process`` como ``None`` e
+            # não terminou nada. Sem esta conferência, a recuperação dependeria
+            # de o ffmpeg emitir a próxima linha de progresso — o que não
+            # acontece enquanto ele analisa uma entrada longa ou de rede, e nesse
+            # intervalo ele segue gravando depois de o usuário ter desistido.
+            # (Mesma conferência de ``ParallelExport._render``.)
+            process.terminate()
 
         # O stderr é drenado em paralelo, e não depois do stdout: os dois são
         # canos de capacidade limitada, e um ffmpeg que enchesse o de stderr
@@ -764,7 +816,12 @@ class Converter:
             detail = _last_error_line(stderr)
             raise ConversionError(f"O ffmpeg falhou na conversão: {detail}")
 
-        if not self._destination.exists():
+        # Vazio conta como ausente: :func:`output_path` reserva o nome criando um
+        # arquivo de zero byte, então "existe" deixou de significar "foi
+        # gravado". Sem esta conta, um ffmpeg que terminasse com código 0 sem
+        # escrever nada entregaria a reserva como se fosse o resultado.
+        if not self._destination.is_file() or self._destination.stat().st_size == 0:
+            self._destination.unlink(missing_ok=True)
             raise ConversionError(
                 "O ffmpeg terminou sem erro mas não gerou o arquivo de saída."
             )
