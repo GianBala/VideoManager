@@ -574,13 +574,13 @@ class Timeline(QWidget):
 
     def _eye_rect(self, index: int) -> QRectF:
         rect = self._header_rect(index)
-        track = self._project.tracks[index]
-        if track.kind is TrackKind.VIDEO:
-            return QRectF(rect.right() - 50, rect.center().y() - 10, 22, 20)
         return QRectF(rect.right() - 25, rect.center().y() - 10, 22, 20)
 
     def _mute_rect(self, index: int) -> QRectF:
         rect = self._header_rect(index)
+        track = self._project.tracks[index]
+        if track.kind is TrackKind.VIDEO:
+            return QRectF(rect.right() - 50, rect.center().y() - 10, 22, 20)
         return QRectF(rect.right() - 25, rect.center().y() - 10, 22, 20)
 
     def _paint_lane(self, painter: QPainter, index: int, track) -> None:
