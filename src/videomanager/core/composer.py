@@ -125,9 +125,18 @@ class _Piece:
 
 
 def render_text_to_image(clip: Clip) -> Path:
-    import sys
-    from PySide6.QtCore import QRect, Qt
-    from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QImage, QPainter
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import (
+        QBrush,
+        QColor,
+        QFont,
+        QFontMetrics,
+        QGuiApplication,
+        QImage,
+        QPainter,
+        QPainterPath,
+        QPen,
+    )
 
     if QGuiApplication.instance() is None:
         try:
@@ -141,10 +150,16 @@ def render_text_to_image(clip: Clip) -> Path:
 
     text = clip.text_content or "Texto"
     metrics = QFontMetrics(font)
-    rect = metrics.boundingRect(QRect(0, 0, 1920, 1080), int(Qt.TextFlag.TextWordWrap), text)
-    pad = 20
-    w = max(40, ((rect.width() + pad * 2 + 3) // 4) * 4)
-    h = max(40, ((rect.height() + pad * 2 + 3) // 4) * 4)
+    stroke_w = max(0, clip.stroke_width)
+    pad = 20 + stroke_w
+
+    lines = text.splitlines() if text else ["Texto"]
+    line_spacing = metrics.lineSpacing()
+    total_text_h = (len(lines) - 1) * line_spacing + metrics.ascent() + metrics.descent()
+    max_tw = max((metrics.horizontalAdvance(l) for l in lines), default=100)
+
+    w = max(40, ((max_tw + pad * 2 + 3) // 4) * 4)
+    h = max(40, ((total_text_h + pad * 2 + 3) // 4) * 4)
 
     img = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
     img.fill(Qt.GlobalColor.transparent)
@@ -152,9 +167,26 @@ def render_text_to_image(clip: Clip) -> Path:
     painter = QPainter(img)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-    painter.setFont(font)
-    painter.setPen(QColor(clip.text_color or "#ffffff"))
-    painter.drawText(QRect(0, 0, w, h), int(Qt.AlignmentFlag.AlignCenter), text)
+
+    start_y = (h - total_text_h) / 2 + metrics.ascent()
+    path = QPainterPath()
+    for i, line in enumerate(lines):
+        tw = metrics.horizontalAdvance(line)
+        lx = (w - tw) / 2
+        ly = start_y + i * line_spacing
+        path.addText(lx, ly, font, line)
+
+    if stroke_w > 0:
+        pen = QPen(
+            QColor(clip.stroke_color or "#000000"),
+            stroke_w * 2,
+            Qt.PenStyle.SolidLine,
+            Qt.PenCapStyle.RoundCap,
+            Qt.PenJoinStyle.RoundJoin,
+        )
+        painter.strokePath(path, pen)
+
+    painter.fillPath(path, QBrush(QColor(clip.text_color or "#ffffff")))
     painter.end()
 
     cache_dir = Path(tempfile.gettempdir()) / "videomanager_cache"

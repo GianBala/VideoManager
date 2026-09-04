@@ -552,3 +552,48 @@ def test_filter_selection_highlight_style(qapp: QApplication, dummy_tools: FFmpe
         panel.shutdown()
 
 
+def test_text_stroke_controls_and_bidirectional_sync(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        # 1. Configura texto com contorno ativo
+        panel._text_input.setText("Texto com Borda")
+        panel._stroke_checkbox.setChecked(True)
+        panel._stroke_spin.setValue(5)
+        panel._set_stroke_color("#e11d48")
+        panel._insert_text_clip()
+
+        track = panel._project.additional_tracks[0]
+        clip = track.clips[0]
+        assert clip.stroke_width == 5
+        assert clip.stroke_color == "#e11d48"
+
+        # 2. Deseleciona e seleciona novamente para testar sincronização na UI
+        panel._timeline.select(-1)
+        panel._timeline.select(clip.clip_id)
+        panel._refresh_clip_fields()
+
+        assert panel._stroke_checkbox.isChecked() is True
+        assert panel._stroke_spin.isEnabled() is True
+        assert panel._stroke_spin.value() == 5
+        assert panel._stroke_color == "#e11d48"
+
+        # 3. Edita espessura e cor do contorno
+        panel._stroke_spin.setValue(8)
+        panel._set_stroke_color("#000000")
+
+        updated = panel._project.find(clip.clip_id)[1]
+        assert updated.stroke_width == 8
+        assert updated.stroke_color == "#000000"
+
+        # 4. Desmarca o checkbox de contorno (stroke_width deve ir a 0)
+        panel._stroke_checkbox.setChecked(False)
+        assert panel._stroke_spin.isEnabled() is False
+        assert panel._stroke_color_indicator.isEnabled() is False
+
+        updated_no_stroke = panel._project.find(clip.clip_id)[1]
+        assert updated_no_stroke.stroke_width == 0
+    finally:
+        panel.shutdown()
+
+

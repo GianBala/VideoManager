@@ -206,6 +206,8 @@ class Clip:
     font_bold: bool = False
     font_italic: bool = False
     text_color: str = "#ffffff"
+    stroke_color: str = "#000000"
+    stroke_width: int = 0  # 0 significa sem contorno
     filter_name: str = ""  # "pb", "sepia", "contraste", "vinheta", "inverter"
     # Identidade estável, preservada por ``dataclasses.replace``: é por ela que
     # a seleção, o cache de miniaturas e o desfazer reconhecem o mesmo bloco
