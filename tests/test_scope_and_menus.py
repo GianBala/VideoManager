@@ -201,8 +201,9 @@ def test_edit_panel_splitter_anti_overlap_bounds(qapp: QApplication, dummy_tools
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
     try:
-        assert panel._player_box.minimumWidth() >= 920
+        assert panel._player_box.minimumWidth() >= 1040
         assert panel._media_box.minimumWidth() >= 200
+        assert panel._extras_box.minimumWidth() >= 260
         assert not panel._top_splitter.childrenCollapsible()
     finally:
         panel.shutdown()
