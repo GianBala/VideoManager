@@ -1032,6 +1032,107 @@ def test_properties_tab_opening_editing_and_closing(qapp: QApplication, dummy_to
         panel.shutdown()
 
 
+def test_properties_lock_ratio_independent_scaling(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    try:
+        panel._text_input.setText("Texto Proporção")
+        panel._insert_text_clip()
+        clip = panel._project.additional_tracks[0].clips[0]
+        panel._open_properties_tab(clip.clip_id)
+        pw = panel._properties_widget
+
+        # Proporção travada por padrão
+        assert pw._chk_lock_ratio.isChecked()
+        init_w = pw._spin_w.value()
+        init_h = pw._spin_h.value()
+        ratio = init_w / init_h
+
+        # Altera largura: altura deve mudar proporcionalmente
+        pw._spin_w.setValue(init_w * 2)
+        assert abs(pw._spin_h.value() - (init_h * 2)) <= 1
+        updated = panel._project.find(clip.clip_id)[1]
+        assert abs(updated.scale_x - updated.scale_y) < 0.01
+
+        # Agora desmarca a trava de proporção
+        pw._chk_lock_ratio.setChecked(False)
+        assert not pw._chk_lock_ratio.isChecked()
+
+        # Altera largura sem mudar altura
+        cur_h = pw._spin_h.value()
+        pw._spin_w.setValue(init_w * 3)
+        assert pw._spin_h.value() == cur_h
+        updated = panel._project.find(clip.clip_id)[1]
+        assert updated.scale_x > updated.scale_y
+
+        # Altera altura sem mudar largura
+        cur_w = pw._spin_w.value()
+        pw._spin_h.setValue(init_h * 4)
+        assert pw._spin_w.value() == cur_w
+        updated = panel._project.find(clip.clip_id)[1]
+        assert updated.scale_y > updated.scale_x
+    finally:
+        panel.shutdown()
+
+
+def test_properties_edit_when_deselected_reselects_and_updates_preview(
+    qapp: QApplication, dummy_tools: FFmpegTools
+) -> None:
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    try:
+        panel._text_input.setText("Item Desselecionado")
+        panel._insert_text_clip()
+        clip = panel._project.additional_tracks[0].clips[0]
+        panel._open_properties_tab(clip.clip_id)
+
+        # Desseleciona o item na timeline
+        panel._timeline.select(-1)
+        assert panel._timeline.selected == -1
+        assert panel._timeline.selected_clip is None
+
+        # Edita posição na aba de propriedades
+        panel._properties_widget._spin_x.setValue(400)
+
+        # O clipe deve ter sido re-selecionado automaticamente
+        assert panel._timeline.selected == clip.clip_id
+        assert panel._preview._active_clip is not None
+        assert panel._preview._active_clip.clip_id == clip.clip_id
+        assert abs(panel._preview._active_clip.x - (400 / panel._project.width)) < 0.001
+    finally:
+        panel.shutdown()
+
+
+def test_event_filter_extras_panel_no_deselection(
+    qapp: QApplication, dummy_tools: FFmpegTools
+) -> None:
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    try:
+        panel._text_input.setText("Item EventFilter")
+        panel._insert_text_clip()
+        clip = panel._project.additional_tracks[0].clips[0]
+        panel._open_properties_tab(clip.clip_id)
+        assert panel._timeline.selected == clip.clip_id
+
+        # Simula clique no fundo do QGroupBox de transformação da aba de propriedades
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(10, 10),
+            QPointF(10, 10),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        panel.eventFilter(panel._properties_widget._transform_group, event)
+
+        # Item deve continuar selecionado!
+        assert panel._timeline.selected == clip.clip_id
+    finally:
+        panel.shutdown()
+
+
+
 
 
 

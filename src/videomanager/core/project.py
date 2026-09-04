@@ -196,7 +196,9 @@ class Clip:
     # Posição e transformação para trilhas de adicionais
     x: float = 0.5  # Centro X normalizado (0.0 a 1.0)
     y: float = 0.5  # Centro Y normalizado (0.0 a 1.0)
-    scale: float = 1.0  # Fator de escala (1.0 = padrão)
+    scale: float = 1.0  # Fator de escala uniforme (1.0 = padrão)
+    scale_x: float = 1.0  # Escala horizontal (1.0 = padrão)
+    scale_y: float = 1.0  # Escala vertical (1.0 = padrão)
     rotation: float = 0.0  # Rotação em graus (0.0 a 360.0)
     # Metadados de sobreposições de adicionais
     overlay_type: str = "none"  # "none", "image", "text", "filter"
@@ -213,6 +215,11 @@ class Clip:
     # a seleção, o cache de miniaturas e o desfazer reconhecem o mesmo bloco
     # depois de qualquer alteração.
     clip_id: int = field(default_factory=next_clip_id, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.scale != 1.0 and self.scale_x == 1.0 and self.scale_y == 1.0:
+            object.__setattr__(self, "scale_x", self.scale)
+            object.__setattr__(self, "scale_y", self.scale)
 
     @property
     def end(self) -> float:
