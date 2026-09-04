@@ -804,7 +804,6 @@ class _FontSelectorWidget(QWidget):
         families = sorted(set(QFontDatabase.families()))
         for fam in families:
             item = QListWidgetItem(fam)
-            item.setFont(QFont(fam, 10))
             self._font_list.addItem(item)
             if fam == initial_family:
                 item.setSelected(True)
