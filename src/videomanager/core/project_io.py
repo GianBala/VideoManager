@@ -123,6 +123,8 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                     "font_bold": clip.font_bold,
                     "font_italic": clip.font_italic,
                     "text_color": clip.text_color,
+                    "stroke_color": clip.stroke_color,
+                    "stroke_width": clip.stroke_width,
                     "filter_name": clip.filter_name,
                     "media": _media_to_dict(clip.media, base_dir),
                 }
@@ -213,6 +215,8 @@ def project_from_dict(
                 font_bold=bool(c_data.get("font_bold", False)),
                 font_italic=bool(c_data.get("font_italic", False)),
                 text_color=str(c_data.get("text_color", "#ffffff")),
+                stroke_color=str(c_data.get("stroke_color", "#000000")),
+                stroke_width=int(c_data.get("stroke_width", 0)),
                 filter_name=str(c_data.get("filter_name", "")),
                 clip_id=int(c_data.get("clip_id", 0)),
             )
