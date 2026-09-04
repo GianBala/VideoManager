@@ -689,3 +689,35 @@ class TestHevcExport:
         idx_ac = args.index("-ac")
         assert args[idx_ac + 1] == "1"
 
+
+class TestVelocidadeEFiltros:
+    def test_velocidade_video_setpts(self) -> None:
+        proj = projeto(video_track(clip(VIDEO, speed=2.0)))
+        graph = build_graph(proj)
+        filter_str = ";".join(graph.filters)
+        assert "setpts=0.500000*(PTS-STARTPTS)" in filter_str
+
+    def test_velocidade_audio_atempo(self) -> None:
+        proj = projeto(audio_track(clip(ESTEREO, speed=1.5)))
+        graph = build_graph(proj, want_video=False, want_audio=True)
+        filter_str = ";".join(graph.filters)
+        assert "atempo=1.5000" in filter_str
+
+    def test_filtro_preto_e_branco(self) -> None:
+        c_filter = clip(VIDEO, overlay_type="filter", filter_name="pb")
+        t_add = Track(kind=TrackKind.ADDITIONAL, name="Adicionais 1", clips=(c_filter,))
+        proj = Project(tracks=(t_add, video_track(clip(VIDEO))))
+        graph = build_graph(proj)
+        filter_str = ";".join(graph.filters)
+        assert "hue=s=0" in filter_str
+
+    def test_sobreposicao_posicao_e_escala(self) -> None:
+        c_img = clip(FOTO, overlay_type="image", x=0.3, y=0.4, scale=1.5, rotation=45.0)
+        t_add = Track(kind=TrackKind.ADDITIONAL, name="Adicionais 1", clips=(c_img,))
+        proj = Project(tracks=(t_add, video_track(clip(VIDEO))))
+        graph = build_graph(proj)
+        filter_str = ";".join(graph.filters)
+        assert "scale=" in filter_str
+        assert "rotate=" in filter_str
+        assert "overlay=x='(0.3000*W-w/2)':y='(0.4000*H-h/2)'" in filter_str
+
