@@ -91,12 +91,15 @@ class Composition:
 
     project: Project
     container: str = "mp4"
+    family: str | None = None
     # Preferência de codificação por placa, resolvida na hora de gravar (com
     # queda para software quando ela não abrir). Ver ``core/hwaccel.py``.
     hardware: str = hwaccel.SOFTWARE
     # Inventar os quadros que faltam ao subir a taxa, em vez de repetir os que
     # existem. Só na exportação: ver :func:`_rate_chain`.
     interpolate: bool = False
+    audio_only: bool = False
+    audio_codec: str | None = None
 
     @property
     def extension(self) -> str:
@@ -116,9 +119,17 @@ class _Piece:
     seek: float  # onde começar a ler dentro do arquivo
     offset: float  # onde entra na saída, em segundos
     duration: float
+    track_muted: bool = False
 
 
-def _pieces(project: Project, at: float, span: float | None) -> list[_Piece]:
+def _pieces(
+    project: Project,
+    at: float,
+    span: float | None,
+    *,
+    want_video: bool = True,
+    want_audio: bool = True,
+) -> list[_Piece]:
     """Blocos que aparecem na janela pedida, na ordem de composição.
 
     A ordem é a de baixo para cima: a trilha de vídeo mais baixa é o fundo e as
@@ -134,12 +145,20 @@ def _pieces(project: Project, at: float, span: float | None) -> list[_Piece]:
             # Trilha de áudio muda não entra no grafo: é mais barato não
             # decodificar do que decodificar e multiplicar por zero.
             continue
+        if track.muted and not want_video:
+            # Se a trilha está muda e não precisamos de vídeo (ex.: reprodução só
+            # de áudio), os blocos dela não têm o que contribuir para a saída.
+            continue
         for clip in track.sorted_clips():
             if clip.end <= at or (end is not None and clip.start >= end):
                 continue
             begin = max(clip.start, at)
             finish = clip.end if end is None else min(clip.end, end)
             if finish - begin <= 0:
+                continue
+            has_v = want_video and clip.has_image
+            has_a = want_audio and clip.has_sound and not track.muted
+            if not has_v and not has_a:
                 continue
             pieces.append(
                 _Piece(
@@ -148,6 +167,7 @@ def _pieces(project: Project, at: float, span: float | None) -> list[_Piece]:
                     seek=clip.source_time(begin),
                     offset=begin - at,
                     duration=finish - begin,
+                    track_muted=track.muted,
                 )
             )
     return pieces
@@ -327,7 +347,7 @@ def build_graph(
     prévia não mostra do resultado, e a aba diz isso ao lado do controle.
     """
     fps = fps or project.fps
-    pieces = _pieces(project, at, span)
+    pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio)
     duration = span if span is not None else max(_MIN_CANVAS, project.duration - at)
 
     inputs: list[str] = []
@@ -343,7 +363,7 @@ def build_graph(
         # o som estivesse, e ainda pagava a decodificação.
         if want_video and piece.clip.has_image:
             video_parts.append(piece)
-        if want_audio and piece.clip.has_sound:
+        if want_audio and piece.clip.has_sound and not piece.track_muted:
             audio_parts.append(piece)
 
     video_label = None
@@ -398,16 +418,57 @@ def export_args(
     tools: FFmpegTools,
     *,
     container: str = "mp4",
+    family: str | None = None,
     hardware: str = hwaccel.SOFTWARE,
     interpolate: bool = False,
+    audio_only: bool = False,
+    audio_codec: str | None = None,
 ) -> list[str]:
     """Comando que grava o projeto inteiro em um arquivo."""
     if project.is_empty:
         raise ConversionError("Não há nada na linha do tempo para exportar.")
 
+    if audio_only:
+        graph = build_graph(project, want_video=False, want_audio=True)
+        if not graph.audio_label:
+            raise ConversionError(
+                "Não há blocos de áudio audíveis na linha do tempo para exportar."
+            )
+        args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y", *graph.inputs]
+        filters = list(graph.filters)
+        if filters:
+            filter_text = ";".join(filters)
+            if len(filter_text) > 4000:
+                try:
+                    script_path = destination.with_suffix(".filter_script")
+                    script_path.write_text(filter_text, encoding="utf-8")
+                    args += ["-filter_complex_script", str(script_path)]
+                except OSError:
+                    args += ["-filter_complex", filter_text]
+            else:
+                args += ["-filter_complex", filter_text]
+
+        target_codec = (audio_codec or container).lower()
+        args += ["-map", graph.audio_label, "-vn"]
+        if target_codec in ("mp3", "libmp3lame"):
+            args += ["-c:a", "libmp3lame", "-b:a", "192k", "-id3v2_version", "3"]
+        elif target_codec in ("m4a", "aac"):
+            args += ["-c:a", "aac", "-b:a", "192k"]
+        elif target_codec in ("flac",):
+            args += ["-c:a", "flac"]
+        elif target_codec in ("wav", "pcm"):
+            args += ["-c:a", "pcm_s16le"]
+        elif target_codec in ("opus", "libopus"):
+            args += ["-c:a", "libopus", "-b:a", "128k"]
+        elif target_codec in ("ogg", "vorbis", "libvorbis"):
+            args += ["-c:a", "libvorbis", "-q:a", "5"]
+        else:
+            args += encode_audio_args(container)
+        return args + ["-map_metadata", "0", "-progress", "pipe:1", "-nostats", str(destination)]
+
     graph = build_graph(project, interpolate=interpolate)
-    family = hwaccel.family_for(container)
-    encoder = hwaccel.resolve(family, hardware, tools)
+    codec_family = family or hwaccel.family_for(container)
+    encoder = hwaccel.resolve(codec_family, hardware, tools)
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y"]
     # O dispositivo é declarado antes das entradas: o VAAPI precisa dele para
     # abrir o contexto em que os quadros serão enviados à placa.
@@ -419,9 +480,23 @@ def export_args(
         filters.append(f"{video_label}{encoder.filter_suffix}[vhw]")
         video_label = "[vhw]"
     if filters:
-        args += ["-filter_complex", ";".join(filters)]
+        filter_text = ";".join(filters)
+        if len(filter_text) > 4000:
+            try:
+                script_path = destination.with_suffix(".filter_script")
+                script_path.write_text(filter_text, encoding="utf-8")
+                args += ["-filter_complex_script", str(script_path)]
+            except OSError:
+                args += ["-filter_complex", filter_text]
+        else:
+            args += ["-filter_complex", filter_text]
     if video_label:
         args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality]
+        if (
+            encoder.name in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi")
+            and container in ("mp4", "mov")
+        ):
+            args += ["-tag:v", "hvc1"]
     if graph.audio_label:
         args += ["-map", graph.audio_label, *encode_audio_args(container)]
     elif video_label:
@@ -516,7 +591,12 @@ def playback_command(
 
 
 def audio_command(
-    project: Project, at: float, tools: FFmpegTools
+    project: Project,
+    at: float,
+    tools: FFmpegTools,
+    *,
+    sample_rate: int = SAMPLE_RATE,
+    channels: int = CHANNELS,
 ) -> list[str] | None:
     """Comando que produz a mixagem em PCM, a partir de ``at``.
 
@@ -536,8 +616,8 @@ def audio_command(
         "-map", graph.audio_label,
         "-f", "s16le",
         "-acodec", "pcm_s16le",
-        "-ar", str(SAMPLE_RATE),
-        "-ac", str(CHANNELS),
+        "-ar", str(sample_rate),
+        "-ac", str(channels),
         "pipe:1",
     ]
 
@@ -729,6 +809,7 @@ def segment_video_args(
     tools: FFmpegTools,
     *,
     container: str = "mp4",
+    family: str | None = None,
     hardware: str = hwaccel.SOFTWARE,
 ) -> list[str]:
     """Um trecho da composição, **só vídeo**, para ser concatenado depois.
@@ -747,8 +828,8 @@ def segment_video_args(
     )
     if not graph.video_label:
         raise ConversionError("O trecho não tem imagem para exportar.")
-    family = hwaccel.family_for(container)
-    encoder = hwaccel.resolve(family, hardware, tools)
+    codec_family = family or hwaccel.family_for(container)
+    encoder = hwaccel.resolve(codec_family, hardware, tools)
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y", "-progress", "pipe:1"]
     args += [*encoder.device, *graph.inputs]
     filters = list(graph.filters)
@@ -756,8 +837,19 @@ def segment_video_args(
     if encoder.filter_suffix:
         filters.append(f"{video_label}{encoder.filter_suffix}[vhw]")
         video_label = "[vhw]"
-    args += ["-filter_complex", ";".join(filters)]
+    filter_text = ";".join(filters)
+    if len(filter_text) > 4000:
+        try:
+            script_path = destination.with_suffix(f".{destination.stem}_filter.txt")
+            script_path.write_text(filter_text, encoding="utf-8")
+            args += ["-filter_complex_script", str(script_path)]
+        except OSError:
+            args += ["-filter_complex", filter_text]
+    else:
+        args += ["-filter_complex", filter_text]
     args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality]
+    if encoder.name in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi") and container == "mp4":
+        args += ["-tag:v", "hvc1"]
     # ``-t`` na saída, e não ``-frames:v``: a conta que interessa é a do tempo,
     # e é ela que faz a soma dos trechos bater com a duração do projeto.
     return args + ["-an", "-t", f"{span:.6f}", str(destination)]
@@ -813,11 +905,23 @@ def describe_export(
     container: str,
     hardware: str = hwaccel.SOFTWARE,
     interpolate: bool = False,
+    family: str | None = None,
+    audio_only: bool = False,
+    audio_codec: str | None = None,
 ) -> str:
     """Resumo do que a exportação vai produzir."""
-    videos = sum(len(track.clips) for track in project.video_tracks)
     audios = sum(len(track.clips) for track in project.audio_tracks)
-    parts = [f".{container}"]
+    if audio_only:
+        codec_name = (audio_codec or container).upper()
+        parts = [f".{container} (Áudio · {codec_name})"]
+        if audios:
+            parts.append(f"{audios} bloco(s) de áudio")
+        parts.append(f"{format_span(project.duration)} de duração")
+        return " · ".join(parts)
+
+    videos = sum(len(track.clips) for track in project.video_tracks)
+    codec_family = family or hwaccel.family_for(container)
+    parts = [f".{container} ({hwaccel.family_label(codec_family)})"]
     if videos:
         parts.append(f"{videos} bloco(s) de imagem")
     if audios:

@@ -261,6 +261,7 @@ class ParallelExport:
             args = segment_video_args(
                 self._composition.project, at, span, destino, self._tools,
                 container=self._composition.container,
+                family=self._composition.family,
                 hardware=self._composition.hardware,
             )
         except ConversionError as exc:
