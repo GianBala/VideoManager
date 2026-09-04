@@ -11,7 +11,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from videomanager.core.binaries import FFmpegTools
 from videomanager.core.project import (
@@ -22,7 +22,15 @@ from videomanager.core.project import (
     TrackKind,
 )
 from videomanager.core.settings import Settings
+from videomanager.ui import strings
 from videomanager.ui.panels.edit_panel import EditPanel, _Preview, _SpeedPopup, _VolumePopup
+
+
+@pytest.fixture(autouse=True)
+def no_modal_dialogs(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
 
 
 @pytest.fixture
@@ -213,3 +221,188 @@ def test_preview_interactive_transform(qapp: QApplication) -> None:
     )
     preview.mouseReleaseEvent(release_ev)
     assert preview._drag_mode is None
+
+
+def test_font_selector_widget(qapp: QApplication) -> None:
+    from videomanager.ui.panels.edit_panel import _FontSelectorWidget
+
+    selector = _FontSelectorWidget("Sans Serif")
+    assert selector.current_family() == "Sans Serif"
+    assert not selector._expanded
+
+    selector._toggle_list()
+    assert selector._expanded
+    assert not selector._list_container.isHidden()
+
+    changed_fonts: list[str] = []
+    selector.font_changed.connect(changed_fonts.append)
+
+    # Simula escolha de fonte
+    if selector._font_list.count() > 1:
+        target_item = selector._font_list.item(1)
+        target_name = target_item.text()
+        selector._on_item_clicked(target_item)
+        assert selector.current_family() == target_name
+        assert not selector._expanded
+        assert changed_fonts == [target_name]
+
+
+def test_bidirectional_text_and_filter_editing(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        # 1. Inserção de texto inicial
+        panel._text_input.setText("Legenda Original")
+        panel._font_size_spin.setValue(32)
+        panel._bold_btn.setChecked(False)
+        panel._insert_text_clip()
+
+        track = panel._project.additional_tracks[0]
+        text_clip = track.clips[0]
+        assert text_clip.text_content == "Legenda Original"
+
+        # 2. Seleciona o clipe na timeline e verifica se a interface sincroniza
+        panel._timeline.select(text_clip.clip_id)
+        panel._refresh_clip_fields()
+
+        assert panel._text_input.text() == "Legenda Original"
+        assert panel._font_size_spin.value() == 32
+        assert panel._insert_text_btn.text() == strings.EDIT_UPDATE_TEXT
+        assert not panel._insert_new_text_btn.isHidden()
+
+        # 3. Edita o texto selecionado
+        panel._text_input.setText("Legenda Modificada")
+        panel._font_size_spin.setValue(48)
+        panel._bold_btn.setChecked(True)
+        panel._handle_insert_or_update_text()
+
+        updated_clip = panel._project.find(text_clip.clip_id)[1]
+        assert updated_clip.text_content == "Legenda Modificada"
+        assert updated_clip.font_size == 48
+        assert updated_clip.font_bold is True
+
+        # 4. Inserção de Filtro e edição bidirecional
+        panel._select_filter("pb")
+        panel._filter_dur.setValue(4.0)
+        panel._insert_filter_clip("pb")
+
+        filter_clip = [c for t in panel._project.additional_tracks for c in t.clips if c.overlay_type == "filter"][0]
+        assert filter_clip.filter_name == "pb"
+
+        # Seleciona filtro na timeline
+        panel._timeline.select(filter_clip.clip_id)
+        panel._refresh_clip_fields()
+
+        assert panel._selected_filter_name == "pb"
+        assert panel._filter_dur.value() == 4.0
+        assert panel._apply_filter_btn.text() == strings.EDIT_UPDATE_FILTER
+        assert not panel._insert_new_filter_btn.isHidden()
+
+        # Altera para sépia e atualiza
+        panel._select_filter("sepia")
+        panel._filter_dur.setValue(6.0)
+        panel._handle_apply_or_update_filter()
+
+        updated_filter = panel._project.find(filter_clip.clip_id)[1]
+        assert updated_filter.filter_name == "sepia"
+        assert updated_filter.duration == 6.0
+    finally:
+        panel.shutdown()
+
+
+def test_media_cleanup_restriction_and_clear_unused(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        ref_used = MediaRef(path=Path("/tmp/used.mp4"), kind=MediaKind.VIDEO, duration=10.0)
+        ref_unused = MediaRef(path=Path("/tmp/unused.mp4"), kind=MediaKind.VIDEO, duration=5.0)
+
+        panel._pool.append(ref_used)
+        panel._pool.append(ref_unused)
+        panel._refresh_pool()
+        assert len(panel._pool) == 2
+
+        # Insere apenas ref_used na timeline
+        panel._insert_media_ref(ref_used)
+        assert len(panel._project.clips) == 1
+
+        # Tenta remover ref_used: deve ser bloqueado porque está em uso
+        panel._remove_media_ref(ref_used)
+        assert ref_used in panel._pool
+
+        # Limpar mídias não usadas deve remover ref_unused e manter ref_used
+        panel._clear_unused_media()
+        assert len(panel._pool) == 1
+        assert panel._pool[0] == ref_used
+
+        # Ao remover da timeline o clipe, agora pode ser removido da biblioteca
+        panel._project = panel._project.without_clip(panel._project.clips[0].clip_id)
+        panel._remove_media_ref(ref_used)
+        assert len(panel._pool) == 0
+    finally:
+        panel.shutdown()
+
+
+def test_project_lifecycle_media_management(qapp: QApplication, dummy_tools: FFmpegTools, tmp_path: Path) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        sample_file = tmp_path / "sample.mp4"
+        sample_file.write_bytes(b"dummy")
+        ref = MediaRef(path=sample_file, kind=MediaKind.VIDEO, duration=8.0)
+        panel._pool.append(ref)
+        panel._insert_media_ref(ref)
+        assert len(panel._pool) == 1
+
+        # Salva o projeto
+        proj_file = tmp_path / "teste_projeto.vmp"
+        panel._project_path = proj_file
+        panel.save_project()
+
+        # Iniciar novo projeto deve limpar o acervo de mídias
+        panel._is_dirty = False
+        panel.new_project()
+        assert len(panel._pool) == 0
+        assert panel._media_list.count() == 0
+
+        # Abrir projeto existente deve resgatar as mídias para a aba "Mídia do projeto"
+        panel.open_project(proj_file)
+        assert len(panel._pool) == 1
+        assert panel._pool[0].path == sample_file
+        assert panel._media_list.count() == 1
+    finally:
+        panel.shutdown()
+
+
+def test_loop_playback_logic(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        ref = MediaRef(path=Path("/tmp/loop_test.mp4"), kind=MediaKind.VIDEO, duration=4.0)
+        panel._pool.append(ref)
+        panel._insert_media_ref(ref)
+
+        clip = panel._project.clips[0]
+        # Acelera clipe para 2.0x (duração efetiva = 2.0s)
+        panel._timeline.select(clip.clip_id)
+        panel._on_speed(2.0)
+
+        panel._loop.setChecked(True)
+        # Mock de reprodução ativa
+        panel._playing = True
+        panel._play_token = 42
+
+        # Perto do fim da timeline (ex: 1.95s com threshold de fim)
+        panel._timeline.set_position(1.98)
+        looped = False
+
+        def mock_loop():
+            nonlocal looped
+            looped = True
+
+        panel._loop_playback = mock_loop
+        panel._on_tick()
+        assert looped is True
+    finally:
+        panel.shutdown()
+
