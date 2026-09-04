@@ -638,4 +638,41 @@ def test_timeline_track_visibility_toggle_and_menu(qapp: QApplication, dummy_too
         panel.shutdown()
 
 
+def test_video_track_button_positions_and_version(qapp: QApplication) -> None:
+    import videomanager
+    from videomanager.ui.panels.timeline import Timeline
+    from videomanager.ui.theme import DARK
+    from videomanager.core.project import Project, Track, TrackKind
+
+    assert videomanager.__version__ == "1.0"
+
+    tl = Timeline(DARK)
+    proj = Project(
+        tracks=(
+            Track(kind=TrackKind.VIDEO, name="Vídeo"),
+            Track(kind=TrackKind.ADDITIONAL, name="Adicionais"),
+            Track(kind=TrackKind.AUDIO, name="Áudio"),
+        )
+    )
+    tl.set_project(proj)
+
+    # Na trilha de vídeo (índice 0): Mute fica à esquerda do Olho (visibilidade)
+    mute_rect_0 = tl._mute_rect(0)
+    eye_rect_0 = tl._eye_rect(0)
+    assert mute_rect_0.right() < eye_rect_0.left()
+    assert eye_rect_0.right() > mute_rect_0.right()
+
+    # Na trilha de áudio (índice 2): apenas mute na extrema direita
+    mute_rect_2 = tl._mute_rect(2)
+    assert mute_rect_2.right() == eye_rect_0.right()
+
+    # Verifica que os recursos de ícone existem e são válidos
+    res_dir = Path(__file__).resolve().parent.parent / "src" / "videomanager" / "resources"
+    svg_icon = res_dir / "videomanager.svg"
+    png_icon = res_dir / "videomanager.png"
+    assert svg_icon.is_file() and svg_icon.stat().st_size > 0
+    assert png_icon.is_file() and png_icon.stat().st_size > 0
+
+
+
 

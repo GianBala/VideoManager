@@ -96,8 +96,8 @@ abrem o executável gerado para conferir que ele realmente sobe.
 Um arquivo só, sem instalação: baixe, dê permissão de execução, clique.
 
 ```bash
-chmod +x Video_Manager-0.4.0-x86_64.AppImage
-./Video_Manager-0.4.0-x86_64.AppImage
+chmod +x Video_Manager-1.0-x86_64.AppImage
+./Video_Manager-1.0-x86_64.AppImage
 ```
 
 Ele envelopa o mesmo pacote do `build_linux.sh`, então tem tudo dentro: Python,
@@ -117,7 +117,7 @@ O AppImage não se instala no menu do sistema sozinho; para isso existe o
 não montar por falta de FUSE na máquina, roda assim mesmo:
 
 ```bash
-./Video_Manager-0.4.0-x86_64.AppImage --appimage-extract-and-run
+./Video_Manager-1.0-x86_64.AppImage --appimage-extract-and-run
 ```
 
 ## Como o projeto está organizado
