@@ -173,9 +173,11 @@ def _pieces(
     (sobreposições, textos, filtros) no topo visual.
     """
     end = None if span is None else at + span
+    visual_tracks = [
+        t for t in project.tracks if t.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL)
+    ]
     ordered = [
-        *reversed(project.video_tracks),
-        *reversed(project.additional_tracks),
+        *reversed(visual_tracks),
         *project.audio_tracks,
     ]
 
@@ -295,17 +297,34 @@ def _atempo_filters(speed: float) -> list[str]:
     return filters
 
 
+def image_base_size(
+    media_w: int | None, media_h: int | None, canvas_w: int, canvas_h: int
+) -> tuple[int, int]:
+    """Tamanho base de uma imagem ajustada proporcionalmente ao canvas do projeto."""
+    w = media_w or 400
+    h = media_h or 300
+    fit_ratio = min(1.0, canvas_w / max(1, w), canvas_h / max(1, h))
+    base_w = max(2, int(round(w * fit_ratio / 2.0) * 2))
+    base_h = max(2, int(round(h * fit_ratio / 2.0) * 2))
+    return base_w, base_h
+
+
 def _video_chain(
     piece: _Piece, project: Project, fps: float, interpolate: bool = False
 ) -> str:
     """Ajusta um bloco ao formato da tela e o coloca no instante certo."""
     clip = piece.clip
-    is_overlay = clip.overlay_type in ("image", "text") or (
-        clip.is_image and (clip.scale != 1.0 or clip.rotation != 0.0 or clip.x != 0.5 or clip.y != 0.5)
-    )
+    is_overlay = clip.overlay_type in ("image", "text") or clip.is_image
     if is_overlay:
         steps = [f"trim=duration={piece.duration:.6f}", "setpts=PTS-STARTPTS", f"fps={fps:.6f}"]
-        if abs(clip.scale - 1.0) >= 0.01:
+        if clip.overlay_type == "image" or clip.is_image:
+            base_w, base_h = image_base_size(
+                clip.media.width, clip.media.height, project.width, project.height
+            )
+            target_w = max(2, int(round(base_w * clip.scale / 2.0) * 2))
+            target_h = max(2, int(round(base_h * clip.scale / 2.0) * 2))
+            steps.append(f"scale={target_w}:{target_h}")
+        elif abs(clip.scale - 1.0) >= 0.01:
             steps.append(f"scale=w='trunc(iw*{clip.scale:.4f}/2)*2':h='trunc(ih*{clip.scale:.4f}/2)*2'")
         if abs(clip.rotation) >= 0.1:
             rad = math.radians(clip.rotation)
@@ -494,9 +513,7 @@ def build_graph(
             filters.append(_video_chain(piece, project, fps, interpolate))
             start, end = piece.offset, piece.offset + piece.duration
             label = f"[o{order}]"
-            is_overlay_item = piece.clip.overlay_type in ("image", "text") or (
-                piece.clip.is_image and (piece.clip.scale != 1.0 or piece.clip.rotation != 0.0 or piece.clip.x != 0.5 or piece.clip.y != 0.5)
-            )
+            is_overlay_item = piece.clip.overlay_type in ("image", "text") or piece.clip.is_image
             if is_overlay_item:
                 overlay_coords = f"x='({piece.clip.x:.4f}*W-w/2)':y='({piece.clip.y:.4f}*H-h/2)'"
             else:
