@@ -156,7 +156,7 @@ class ExportDialog(QDialog):
         summary_box = QVBoxLayout(summary_group)
         summary_box.setSpacing(4)
         summary_text = (
-            f"Duração total: <b>{format_span(self._project.duration)}</b> · "
+            f"Duração total: <b>{format_span(self._project.export_duration)}</b> · "
             f"{len(self._project.tracks)} trilha(s) · {len(self._project.clips)} bloco(s)"
         )
         summary_label = QLabel(summary_text)
@@ -499,9 +499,9 @@ class ExportDialog(QDialog):
 
     def _main_clip(self, proj: Project) -> Clip | None:
         for track in reversed(proj.video_tracks):
-            if track.clips:
+            if track.visible and track.clips:
                 return track.sorted_clips()[0]
-        clips = proj.clips
+        clips = [c for t in proj.tracks if t.visible for c in t.clips]
         return clips[0] if clips else None
 
     def _container(self, proj: Project) -> str:
@@ -592,7 +592,7 @@ class ExportDialog(QDialog):
         source_size = local.size if local else None
         source_dur = local.duration if local else None
 
-        export_duration = target.output_duration if (is_fast and target) else proj.duration
+        export_duration = target.output_duration if (is_fast and target) else proj.export_duration
         codec_family = self._codec_choice or hwaccel.family_for(self._container_choice or "mp4")
 
         est_bytes = estimate_export_size(
