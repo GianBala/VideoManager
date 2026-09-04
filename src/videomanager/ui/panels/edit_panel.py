@@ -57,6 +57,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QIcon,
     QImage,
+    QKeyEvent,
     QKeySequence,
     QMouseEvent,
     QPaintEvent,
@@ -70,6 +71,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -105,6 +107,7 @@ from ...core.composer import (
     can_interpolate,
     describe_export,
     frame_command,
+    image_base_size,
     interpolation_bytes,
     playback_command,
     simple_trim,
@@ -285,9 +288,12 @@ class _VolumePopup(QDialog):
     def __init__(self, initial_gain: float, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setMinimumWidth(280)
         self.setStyleSheet(
             "QDialog { background: #222228; border: 1px solid #444450; border-radius: 8px; }"
             " QLabel { color: #f0f0f0; }"
+            " QPushButton { background: #32323e; border: 1px solid #444454; border-radius: 4px; color: #fff; padding: 3px 6px; font-size: 11px; }"
+            " QPushButton:hover { background: #424252; border-color: #666678; }"
         )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
@@ -311,10 +317,11 @@ class _VolumePopup(QDialog):
         layout.addLayout(spin_row)
 
         presets = QHBoxLayout()
-        presets.setSpacing(4)
+        presets.setSpacing(6)
         for label, db in (("-6 dB", -6.0), ("0 dB", 0.0), ("+3 dB", 3.0), ("+6 dB", 6.0)):
             btn = QPushButton(label)
-            btn.setFixedHeight(24)
+            btn.setFixedHeight(26)
+            btn.setMinimumWidth(50)
             btn.clicked.connect(lambda _, v=db: self._spin.setValue(v))
             presets.addWidget(btn)
         layout.addLayout(presets)
@@ -335,9 +342,12 @@ class _SpeedPopup(QDialog):
     def __init__(self, initial_speed: float, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setMinimumWidth(320)
         self.setStyleSheet(
             "QDialog { background: #222228; border: 1px solid #444450; border-radius: 8px; }"
             " QLabel { color: #f0f0f0; }"
+            " QPushButton { background: #32323e; border: 1px solid #444454; border-radius: 4px; color: #fff; padding: 3px 6px; font-size: 11px; }"
+            " QPushButton:hover { background: #424252; border-color: #666678; }"
         )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
@@ -361,10 +371,11 @@ class _SpeedPopup(QDialog):
         layout.addLayout(spin_row)
 
         presets = QHBoxLayout()
-        presets.setSpacing(4)
+        presets.setSpacing(6)
         for label, spd in (("0.5x", 0.5), ("1.0x", 1.0), ("1.5x", 1.5), ("2.0x", 2.0), ("4.0x", 4.0)):
             btn = QPushButton(label)
-            btn.setFixedHeight(24)
+            btn.setFixedHeight(26)
+            btn.setMinimumWidth(48)
             btn.clicked.connect(lambda _, v=spd: self._spin.setValue(v))
             presets.addWidget(btn)
         layout.addLayout(presets)
@@ -407,7 +418,19 @@ class _Preview(QLabel):
         self._drag_init_rot: float = 0.0
         self._drag_init_dist: float = 1.0
         self._drag_init_angle: float = 0.0
+        self._clip_pixmaps: dict[Path, QPixmap] = {}
         self.setMouseTracking(True)
+
+    def _get_clip_pixmap(self, clip: Clip) -> QPixmap | None:
+        path = clip.media.path
+        if not path:
+            return None
+        pix = self._clip_pixmaps.get(path)
+        if pix is None and path.exists():
+            pix = QPixmap(str(path))
+            if not pix.isNull():
+                self._clip_pixmaps[path] = pix
+        return pix
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(480, self.minimumHeight())
@@ -474,10 +497,13 @@ class _Preview(QLabel):
             return (cx, cy, w, h)
 
         if clip.media.kind is MediaKind.IMAGE or clip.overlay_type == "image":
-            aspect = (clip.media.width or 400) / max(1, clip.media.height or 300)
-            base_w = vrect.width() * 0.35 * scale
-            base_h = base_w / aspect
-            return (cx, cy, max(40.0, base_w), max(40.0, base_h))
+            base_w, base_h = image_base_size(
+                clip.media.width, clip.media.height, self._proj_w, self._proj_h
+            )
+            preview_scale = vrect.width() / max(1.0, float(self._proj_w))
+            w = max(20.0, base_w * preview_scale * scale)
+            h = max(20.0, base_h * preview_scale * scale)
+            return (cx, cy, w, h)
 
         return None
 
@@ -648,6 +674,12 @@ class _Preview(QLabel):
                         clip.text_content or "Texto",
                     )
                     painter.restore()
+                elif self._drag_mode and (clip.overlay_type == "image" or clip.is_image):
+                    img_pix = self._get_clip_pixmap(clip)
+                    if img_pix and not img_pix.isNull():
+                        painter.save()
+                        painter.drawPixmap(QRectF(-w / 2, -h / 2, w, h).toRect(), img_pix)
+                        painter.restore()
 
                 pen = QPen(QColor("#00e5ff"), 1.5, Qt.PenStyle.DashLine)
                 painter.setPen(pen)
@@ -673,6 +705,7 @@ class _MediaListWidget(QListWidget):
     """Lista de mídias importadas do projeto em grade de cartões com miniaturas."""
 
     files_dropped = Signal(list)  # list[Path]
+    delete_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -684,6 +717,13 @@ class _MediaListWidget(QListWidget):
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setWordWrap(True)
         self.setTextElideMode(Qt.TextElideMode.ElideRight)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self.delete_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         super().paintEvent(event)
@@ -721,6 +761,83 @@ class _MediaListWidget(QListWidget):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+
+
+class _FontSelectorWidget(QWidget):
+    """Seletor de fonte expansível com lista retrátil e prévia tipográfica."""
+
+    font_changed = Signal(str)
+
+    def __init__(self, initial_family: str = "Sans Serif", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._current_family = initial_family
+        self._expanded = False
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        self._toggle_btn = QPushButton(f"🔤 {initial_family}  ▾")
+        self._toggle_btn.setStyleSheet(
+            "QPushButton { text-align: left; padding: 5px 8px; border: 1px solid #444; border-radius: 4px; background: #2a2a32; color: #fff; } "
+            "QPushButton:hover { background: #353540; border-color: #666; }"
+        )
+        self._toggle_btn.clicked.connect(self._toggle_list)
+        layout.addWidget(self._toggle_btn)
+
+        self._list_container = QFrame()
+        self._list_container.setStyleSheet(
+            "QFrame { background: #22222a; border: 1px solid #444450; border-radius: 4px; }"
+        )
+        self._list_container.setVisible(False)
+        c_layout = QVBoxLayout(self._list_container)
+        c_layout.setContentsMargins(2, 2, 2, 2)
+
+        self._font_list = QListWidget()
+        self._font_list.setFixedHeight(140)
+        self._font_list.setStyleSheet(
+            "QListWidget { background: transparent; border: none; color: #eee; } "
+            "QListWidget::item { padding: 4px 6px; border-radius: 3px; } "
+            "QListWidget::item:selected { background: #7b1fa2; color: #fff; }"
+        )
+
+        families = sorted(set(QFontDatabase.families()))
+        for fam in families:
+            item = QListWidgetItem(fam)
+            item.setFont(QFont(fam, 10))
+            self._font_list.addItem(item)
+            if fam == initial_family:
+                item.setSelected(True)
+
+        self._font_list.itemClicked.connect(self._on_item_clicked)
+        c_layout.addWidget(self._font_list)
+        layout.addWidget(self._list_container)
+
+    def _toggle_list(self) -> None:
+        self._expanded = not self._expanded
+        self._list_container.setVisible(self._expanded)
+        arrow = "▴" if self._expanded else "▾"
+        self._toggle_btn.setText(f"🔤 {self._current_family}  {arrow}")
+        if self._expanded:
+            items = self._font_list.findItems(self._current_family, Qt.MatchFlag.MatchExactly)
+            if items:
+                self._font_list.scrollToItem(items[0])
+
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        self.set_family(item.text())
+        self._toggle_list()
+        self.font_changed.emit(self._current_family)
+
+    def current_family(self) -> str:
+        return self._current_family
+
+    def set_family(self, family: str) -> None:
+        self._current_family = family
+        arrow = "▴" if self._expanded else "▾"
+        self._toggle_btn.setText(f"🔤 {family}  {arrow}")
+        items = self._font_list.findItems(family, Qt.MatchFlag.MatchExactly)
+        if items:
+            self._font_list.setCurrentItem(items[0])
 
 
 class EditPanel(QWidget):
@@ -956,6 +1073,7 @@ class EditPanel(QWidget):
         self._media_list.setToolTip(strings.EDIT_POOL_TIP)
         self._media_list.itemDoubleClicked.connect(lambda _: self._insert_selected_media())
         self._media_list.itemSelectionChanged.connect(self._on_media_selection_changed)
+        self._media_list.delete_requested.connect(self._delete_selected_media)
         self._media_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._media_list.customContextMenuRequested.connect(self._show_media_context_menu)
         self._media_list.files_dropped.connect(lambda paths: self.import_files(paths, insert=False))
@@ -964,6 +1082,12 @@ class EditPanel(QWidget):
         bottom_row = QHBoxLayout()
         bottom_row.setContentsMargins(0, 0, 0, 0)
         bottom_row.setSpacing(6)
+
+        self._clear_unused_btn = QPushButton("🧹 Limpar não usados")
+        self._clear_unused_btn.setToolTip(strings.EDIT_CLEAR_UNUSED_TIP)
+        self._clear_unused_btn.clicked.connect(self._clear_unused_media)
+        bottom_row.addWidget(self._clear_unused_btn)
+
         bottom_row.addStretch(1)
 
         self._insert = QPushButton(strings.EDIT_INSERT)
@@ -994,10 +1118,10 @@ class EditPanel(QWidget):
         header.addStretch(1)
         layout.addLayout(header)
 
-        tabs = QTabWidget()
-        tabs.addTab(self._build_text_tab(), strings.EDIT_TAB_TEXT)
-        tabs.addTab(self._build_filters_tab(), strings.EDIT_TAB_FILTERS)
-        layout.addWidget(tabs, 1)
+        self._extras_tabs = QTabWidget()
+        self._extras_tabs.addTab(self._build_text_tab(), strings.EDIT_TAB_TEXT)
+        self._extras_tabs.addTab(self._build_filters_tab(), strings.EDIT_TAB_FILTERS)
+        layout.addWidget(self._extras_tabs, 1)
 
         return box
 
@@ -1010,19 +1134,48 @@ class EditPanel(QWidget):
         self._text_input = QLineEdit()
         self._text_input.setPlaceholderText(strings.EDIT_TEXT_PLACEHOLDER)
         self._text_input.setText("Título")
+        self._text_input.textChanged.connect(lambda _: self._on_text_input_changed())
         layout.addWidget(self._text_input)
 
-        row_font = QHBoxLayout()
-        row_font.setSpacing(4)
-        self._font_combo = QFontComboBox()
-        row_font.addWidget(self._font_combo, 1)
+        self._font_selector = _FontSelectorWidget("Sans Serif")
+        self._font_selector.font_changed.connect(lambda _: self._on_text_style_changed())
+        layout.addWidget(self._font_selector)
+
+        row_size = QHBoxLayout()
+        row_size.setSpacing(4)
+        lbl_size = QLabel("Tamanho:")
+        row_size.addWidget(lbl_size)
+
+        btn_dec = QPushButton("−")
+        btn_dec.setFixedSize(28, 28)
+        btn_dec.setStyleSheet("QPushButton { font-weight: bold; font-size: 14px; }")
+        btn_dec.clicked.connect(lambda: self._font_size_spin.setValue(max(8, self._font_size_spin.value() - 4)))
+        row_size.addWidget(btn_dec)
 
         self._font_size_spin = QSpinBox()
-        self._font_size_spin.setRange(12, 144)
+        self._font_size_spin.setRange(8, 200)
         self._font_size_spin.setValue(48)
         self._font_size_spin.setSuffix(" pt")
-        row_font.addWidget(self._font_size_spin)
-        layout.addLayout(row_font)
+        self._font_size_spin.setFixedHeight(28)
+        self._font_size_spin.valueChanged.connect(lambda _: self._on_text_style_changed())
+        row_size.addWidget(self._font_size_spin, 1)
+
+        btn_inc = QPushButton("+")
+        btn_inc.setFixedSize(28, 28)
+        btn_inc.setStyleSheet("QPushButton { font-weight: bold; font-size: 14px; }")
+        btn_inc.clicked.connect(lambda: self._font_size_spin.setValue(min(200, self._font_size_spin.value() + 4)))
+        row_size.addWidget(btn_inc)
+        layout.addLayout(row_size)
+
+        size_presets = QHBoxLayout()
+        size_presets.setSpacing(4)
+        for sz in (24, 36, 48, 64, 72):
+            btn_sz = QPushButton(f"{sz}")
+            btn_sz.setFixedHeight(22)
+            btn_sz.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 4px; }")
+            btn_sz.clicked.connect(lambda _, s=sz: self._font_size_spin.setValue(s))
+            size_presets.addWidget(btn_sz)
+        layout.addLayout(size_presets)
 
         row_style = QHBoxLayout()
         row_style.setSpacing(4)
@@ -1032,6 +1185,7 @@ class EditPanel(QWidget):
         b_font.setBold(True)
         self._bold_btn.setFont(b_font)
         self._bold_btn.setFixedWidth(36)
+        self._bold_btn.toggled.connect(lambda _: self._on_text_style_changed())
         row_style.addWidget(self._bold_btn)
 
         self._italic_btn = QPushButton("I")
@@ -1040,6 +1194,7 @@ class EditPanel(QWidget):
         i_font.setItalic(True)
         self._italic_btn.setFont(i_font)
         self._italic_btn.setFixedWidth(36)
+        self._italic_btn.toggled.connect(lambda _: self._on_text_style_changed())
         row_style.addWidget(self._italic_btn)
 
         row_style.addStretch(1)
@@ -1070,8 +1225,13 @@ class EditPanel(QWidget):
 
         self._insert_text_btn = QPushButton(strings.EDIT_INSERT_TEXT)
         self._insert_text_btn.setProperty("role", "primary")
-        self._insert_text_btn.clicked.connect(self._insert_text_clip)
+        self._insert_text_btn.clicked.connect(self._handle_insert_or_update_text)
         layout.addWidget(self._insert_text_btn)
+
+        self._insert_new_text_btn = QPushButton(strings.EDIT_INSERT_NEW_TEXT)
+        self._insert_new_text_btn.clicked.connect(self._insert_text_clip)
+        self._insert_new_text_btn.setVisible(False)
+        layout.addWidget(self._insert_new_text_btn)
 
         return tab
 
@@ -1085,6 +1245,7 @@ class EditPanel(QWidget):
         self._color_indicator.setStyleSheet(
             f"background: {color_hex}; border: 1px solid #666; border-radius: 4px;"
         )
+        self._on_text_style_changed()
 
     def _build_filters_tab(self) -> QWidget:
         tab = QWidget()
@@ -1102,11 +1263,19 @@ class EditPanel(QWidget):
             ("inverter", "🔄 " + strings.EDIT_FILTER_INVERT),
         )
 
+        self._filter_group = QButtonGroup(self)
+        self._filter_group.setExclusive(True)
         self._filter_buttons: list[QPushButton] = []
         for fid, flabel in self._filter_specs:
             btn = QPushButton(flabel)
             btn.setCheckable(True)
             btn.setChecked(fid == self._selected_filter_name)
+            btn.setStyleSheet(
+                "QPushButton { text-align: left; padding: 6px 10px; border-radius: 4px; border: 1px solid #444; background: #2a2a32; color: #fff; font-size: 12px; }"
+                "QPushButton:hover { background: #353540; border-color: #666; }"
+                "QPushButton:checked { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7b1fa2, stop:1 #9c27b0); border: 1.5px solid #e1bee7; font-weight: bold; color: #ffffff; }"
+            )
+            self._filter_group.addButton(btn)
             btn.clicked.connect(lambda _, f=fid: self._select_filter(f))
             layout.addWidget(btn)
             self._filter_buttons.append(btn)
@@ -1118,6 +1287,7 @@ class EditPanel(QWidget):
         self._filter_dur.setValue(IMAGE_DURATION)
         self._filter_dur.setSingleStep(0.5)
         self._filter_dur.setSuffix(" s")
+        self._filter_dur.valueChanged.connect(self._on_filter_dur_changed)
         dur_row.addWidget(self._filter_dur)
         layout.addLayout(dur_row)
 
@@ -1125,19 +1295,110 @@ class EditPanel(QWidget):
 
         self._apply_filter_btn = QPushButton(strings.EDIT_APPLY_FILTER)
         self._apply_filter_btn.setProperty("role", "primary")
-        self._apply_filter_btn.clicked.connect(lambda: self._insert_filter_clip(self._selected_filter_name))
+        self._apply_filter_btn.clicked.connect(self._handle_apply_or_update_filter)
         layout.addWidget(self._apply_filter_btn)
+
+        self._insert_new_filter_btn = QPushButton(strings.EDIT_INSERT_NEW_FILTER)
+        self._insert_new_filter_btn.clicked.connect(lambda: self._insert_filter_clip(self._selected_filter_name))
+        self._insert_new_filter_btn.setVisible(False)
+        layout.addWidget(self._insert_new_filter_btn)
 
         return tab
 
     def _select_filter(self, filter_name: str) -> None:
         self._selected_filter_name = filter_name
         for i, (fid, _) in enumerate(self._filter_specs):
-            self._filter_buttons[i].setChecked(fid == filter_name)
+            if i < len(self._filter_buttons):
+                self._filter_buttons[i].setChecked(fid == filter_name)
+        clip = self._timeline.selected_clip
+        if not self._syncing and clip is not None and clip.overlay_type == "filter":
+            self._remember()
+            self._apply(self._project.with_updated_clip(clip.clip_id, filter_name=filter_name))
+
+    def _on_filter_dur_changed(self, dur: float) -> None:
+        clip = self._timeline.selected_clip
+        if not self._syncing and clip is not None and clip.overlay_type == "filter":
+            self._remember()
+            self._apply(self._project.with_updated_clip(clip.clip_id, duration=dur))
+
+    def _handle_apply_or_update_filter(self) -> None:
+        clip = self._timeline.selected_clip
+        if clip is not None and clip.overlay_type == "filter":
+            self._remember()
+            self._apply(
+                self._project.with_updated_clip(
+                    clip.clip_id,
+                    filter_name=self._selected_filter_name,
+                    duration=self._filter_dur.value(),
+                )
+            )
+        else:
+            self._insert_filter_clip(self._selected_filter_name)
+
+    def _on_text_input_changed(self) -> None:
+        clip = self._timeline.selected_clip
+        if self._syncing or clip is None or clip.overlay_type != "text":
+            return
+        new_text = self._text_input.text().strip() or "Texto"
+        if clip.text_content == new_text:
+            return
+        self._remember()
+        self._apply(self._project.with_updated_clip(clip.clip_id, text_content=new_text))
+
+    def _on_text_style_changed(self) -> None:
+        clip = self._timeline.selected_clip
+        if self._syncing or clip is None or clip.overlay_type != "text":
+            return
+        family = self._font_selector.current_family()
+        size = self._font_size_spin.value()
+        bold = self._bold_btn.isChecked()
+        italic = self._italic_btn.isChecked()
+        color = self._text_color
+        self._remember()
+        self._apply(
+            self._project.with_updated_clip(
+                clip.clip_id,
+                font_family=family,
+                font_size=size,
+                font_bold=bold,
+                font_italic=italic,
+                text_color=color,
+            )
+        )
+
+    def _handle_insert_or_update_text(self) -> None:
+        clip = self._timeline.selected_clip
+        if clip is not None and clip.overlay_type == "text":
+            self._update_selected_text_clip()
+        else:
+            self._insert_text_clip()
+
+    def _update_selected_text_clip(self) -> None:
+        clip = self._timeline.selected_clip
+        if clip is None or clip.overlay_type != "text":
+            return
+        text = self._text_input.text().strip() or "Texto"
+        family = self._font_selector.current_family()
+        size = self._font_size_spin.value()
+        bold = self._bold_btn.isChecked()
+        italic = self._italic_btn.isChecked()
+        color = self._text_color
+        self._remember()
+        self._apply(
+            self._project.with_updated_clip(
+                clip.clip_id,
+                text_content=text,
+                font_family=family,
+                font_size=size,
+                font_bold=bold,
+                font_italic=italic,
+                text_color=color,
+            )
+        )
 
     def _insert_text_clip(self) -> None:
         text = self._text_input.text().strip() or "Texto"
-        font_family = self._font_combo.currentFont().family()
+        font_family = self._font_selector.current_family()
         font_size = self._font_size_spin.value()
         bold = self._bold_btn.isChecked()
         italic = self._italic_btn.isChecked()
@@ -1184,6 +1445,37 @@ class EditPanel(QWidget):
             filter_name=fname,
         )
         self._place_clip(clip)
+
+    def _sync_extras_controls(self, clip: Clip | None) -> None:
+        if clip is not None and clip.overlay_type == "text":
+            self._extras_tabs.setCurrentIndex(0)
+            self._text_input.setText(clip.text_content or "")
+            self._font_selector.set_family(clip.font_family or "Sans Serif")
+            self._font_size_spin.setValue(clip.font_size or 48)
+            self._bold_btn.setChecked(bool(clip.font_bold))
+            self._italic_btn.setChecked(bool(clip.font_italic))
+            self._set_text_color(clip.text_color or "#ffffff")
+            self._insert_text_btn.setText(strings.EDIT_UPDATE_TEXT)
+            self._insert_new_text_btn.setVisible(True)
+            self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)
+            self._insert_new_filter_btn.setVisible(False)
+        elif clip is not None and clip.overlay_type == "filter":
+            self._extras_tabs.setCurrentIndex(1)
+            fname = clip.filter_name or "pb"
+            self._selected_filter_name = fname
+            for i, (fid, _) in enumerate(self._filter_specs):
+                if i < len(self._filter_buttons):
+                    self._filter_buttons[i].setChecked(fid == fname)
+            self._filter_dur.setValue(clip.duration)
+            self._apply_filter_btn.setText(strings.EDIT_UPDATE_FILTER)
+            self._insert_new_filter_btn.setVisible(True)
+            self._insert_text_btn.setText(strings.EDIT_INSERT_TEXT)
+            self._insert_new_text_btn.setVisible(False)
+        else:
+            self._insert_text_btn.setText(strings.EDIT_INSERT_TEXT)
+            self._insert_new_text_btn.setVisible(False)
+            self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)
+            self._insert_new_filter_btn.setVisible(False)
 
     def _build_player(self) -> QWidget:
         box = QWidget()
@@ -1823,20 +2115,29 @@ class EditPanel(QWidget):
         has_sel = self._media_list.currentRow() >= 0
         self._insert.setEnabled(has_sel)
 
-    def _show_media_context_menu(self, pos: QPoint) -> None:
-        item = self._media_list.itemAt(pos)
+    def _delete_selected_media(self) -> None:
+        item = self._media_list.currentItem()
         if item is None:
             return
         ref = item.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(ref, MediaRef):
-            return
+        if isinstance(ref, MediaRef):
+            self._remove_media_ref(ref)
 
+    def _show_media_context_menu(self, pos: QPoint) -> None:
+        item = self._media_list.itemAt(pos)
         menu = QMenu(self)
-        insert_action = menu.addAction(strings.EDIT_MEDIA_INSERT)
-        insert_action.triggered.connect(lambda: self._insert_media_ref(ref))
+        if item is not None:
+            ref = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(ref, MediaRef):
+                insert_action = menu.addAction(strings.EDIT_MEDIA_INSERT)
+                insert_action.triggered.connect(lambda: self._insert_media_ref(ref))
 
-        remove_action = menu.addAction(strings.EDIT_MEDIA_REMOVE)
-        remove_action.triggered.connect(lambda: self._remove_media_ref(ref))
+                remove_action = menu.addAction(strings.EDIT_MEDIA_REMOVE)
+                remove_action.triggered.connect(lambda: self._remove_media_ref(ref))
+                menu.addSeparator()
+
+        clear_unused_action = menu.addAction(strings.EDIT_CLEAR_UNUSED)
+        clear_unused_action.triggered.connect(self._clear_unused_media)
 
         menu.exec(self._media_list.mapToGlobal(pos))
 
@@ -1850,28 +2151,31 @@ class EditPanel(QWidget):
             c for c in self._project.clips if c.media.path == reference.path
         ]
         if used_clips:
-            resp = QMessageBox.question(
+            QMessageBox.warning(
                 self,
-                strings.EDIT_MEDIA_REMOVE_TITLE,
-                strings.EDIT_MEDIA_REMOVE_BODY.format(
+                strings.EDIT_MEDIA_IN_USE_TITLE,
+                strings.EDIT_MEDIA_IN_USE_MSG.format(
                     name=reference.name, count=len(used_clips)
                 ),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
             )
-            if resp != QMessageBox.StandardButton.Yes:
-                return
-            self._remember()
-            for clip in used_clips:
-                found = self._project.find(clip.clip_id)
-                if found is not None:
-                    track_idx, _ = found
-                    self._project = self._project.without_clip(track_idx, clip.clip_id)
-            self._after_edit()
+            return
 
         if reference in self._pool:
             self._pool.remove(reference)
+        self._pool_thumbnails.pop(reference.path, None)
         self._probed.pop(reference.path, None)
+        self._refresh_pool()
+        self._refresh_controls()
+
+    def _clear_unused_media(self) -> None:
+        used_paths = {c.media.path for c in self._project.clips if c.media.path}
+        to_remove = [ref for ref in self._pool if ref.path not in used_paths]
+        if not to_remove:
+            return
+        for ref in to_remove:
+            self._pool.remove(ref)
+            self._pool_thumbnails.pop(ref.path, None)
+            self._probed.pop(ref.path, None)
         self._refresh_pool()
         self._refresh_controls()
 
@@ -2011,6 +2315,8 @@ class EditPanel(QWidget):
             )
 
         menu.addSeparator()
+        self._act(menu, strings.EDIT_ADD_ADDITIONAL_TRACK_FULL,
+                  lambda: self._add_track(TrackKind.ADDITIONAL))
         self._act(menu, strings.EDIT_ADD_VIDEO_TRACK_FULL,
                   lambda: self._add_track(TrackKind.VIDEO))
         self._act(menu, strings.EDIT_ADD_AUDIO_TRACK_FULL,
@@ -2333,6 +2639,7 @@ class EditPanel(QWidget):
             else:
                 self._volume_btn.setText("🔊 0,0 dB")
                 self._speed_btn.setText("⚡ 1,0x")
+            self._sync_extras_controls(clip)
         finally:
             self._syncing = False
 
@@ -2617,7 +2924,7 @@ class EditPanel(QWidget):
                     continue
                 if not self._strip_is_stale(clip, track.kind):
                     continue
-                if track.kind is TrackKind.VIDEO:
+                if track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type == "image":
                     self._request_thumbs(clip, tools)
                 elif clip.media.has_audio:
                     self._request_wave(clip, tools)
@@ -2641,7 +2948,7 @@ class EditPanel(QWidget):
         current = self._timeline.strip_range(clip.clip_id)
         if current is None:
             return True
-        if clip.is_image:
+        if clip.is_image or clip.overlay_type == "image":
             return False
 
         begin, finish = self._strip_window(clip)
@@ -2657,7 +2964,7 @@ class EditPanel(QWidget):
         return (finish - begin) * 2 <= coberto
 
     def _thumb_count(self, clip: Clip) -> int:
-        if clip.is_image:
+        if clip.is_image or clip.overlay_type == "image":
             return 1
         return max(1, min(_MAX_THUMBS, round(self._clip_pixels(clip) / FILM_CELL_WIDTH)))
 
@@ -2669,6 +2976,13 @@ class EditPanel(QWidget):
         return max(1.0, visivel / span * max(1, self._timeline.width() - 120))
 
     def _request_thumbs(self, clip: Clip, tools: FFmpegTools) -> None:
+        if (clip.is_image or clip.overlay_type == "image") and clip.media.path and clip.media.path.exists():
+            img = QImage(str(clip.media.path))
+            if not img.isNull():
+                self._timeline.set_strip(clip.clip_id, clip.in_point, clip.out_point, 1)
+                self._timeline.set_thumb(clip.clip_id, clip.in_point, img)
+                return
+
         # Uma imagem não tem trecho de origem para percorrer: uma miniatura só,
         # esticada por todo o bloco. Sem isso a tira cobriria uma fatia mínima
         # dele e o resto ficaria em branco.
@@ -2962,7 +3276,13 @@ class EditPanel(QWidget):
         self._playback = worker
 
     def _loop_playback(self) -> None:
-        self._stop_playback()
+        self._tick.stop()
+        self._live_timer.stop()
+        self._audio.stop()
+        if self._playback is not None:
+            self._playback.cancel()
+            self._playback = None
+        self._play_token = 0
         self._timeline.set_position(0.0)
         self._update_time_labels()
         self._start_playback(0.0)
@@ -2983,14 +3303,19 @@ class EditPanel(QWidget):
             self._timeline.set_position(position)
             self._update_time_labels()
             drift = abs(self._shown_frame - position)
+            max_clip_speed = max((c.speed for c in self._project.clips), default=1.0)
+            allowed_drift = max(_MAX_DRIFT, _MAX_DRIFT * max_clip_speed * 0.75)
             if (
                 self._has_video
-                and drift > _MAX_DRIFT
+                and drift > allowed_drift
                 and position - self._resynced_at > _RESYNC_COOLDOWN
             ):
                 self._resynced_at = position
                 self._start_frames(position)
-        if self._position >= self._duration - 1e-3:
+        frame_time = frame_step(self._fps)
+        max_clip_speed = max((c.speed for c in self._project.clips), default=1.0)
+        end_threshold = max(0.06, frame_time * max_clip_speed * 1.5)
+        if self._duration > 0 and self._position >= self._duration - end_threshold:
             if self._loop.isChecked():
                 self._loop_playback()
             else:
@@ -2998,7 +3323,12 @@ class EditPanel(QWidget):
 
     def _on_playback_done(self, token: int) -> None:
         """O fluxo de quadros acabou: sem som, é ele quem diz que terminou."""
-        if token != self._play_token or not self._playing or self._audio.playing:
+        if token != self._play_token or not self._playing:
+            return
+        frame_time = frame_step(self._fps)
+        max_clip_speed = max((c.speed for c in self._project.clips), default=1.0)
+        end_threshold = max(0.1, frame_time * max_clip_speed * 2.0)
+        if self._has_sound and self._audio.playing and self._position < self._duration - end_threshold:
             return
         if self._loop.isChecked():
             self._loop_playback()
@@ -3312,6 +3642,10 @@ class EditPanel(QWidget):
         self._is_dirty = False
         self._history.clear()
         self._future.clear()
+        self._pool.clear()
+        self._pool_thumbnails.clear()
+        self._probed.clear()
+        self._refresh_pool()
         self._after_edit(refit=True)
         self._timeline.fit()
         self._update_project_label()
@@ -3388,6 +3722,18 @@ class EditPanel(QWidget):
         self._is_dirty = False
         self._history.clear()
         self._future.clear()
+        self._pool.clear()
+        self._pool_thumbnails.clear()
+        self._probed.clear()
+        seen_paths: set[Path] = set()
+        for clip in project.clips:
+            if clip.overlay_type in ("text", "filter"):
+                continue
+            if clip.media.path and clip.media.path not in seen_paths:
+                seen_paths.add(clip.media.path)
+                self._pool.append(clip.media)
+                self._probed[clip.media.path] = clip.media
+        self._refresh_pool()
         self._apply(project, refit=True)
         self._timeline.fit()
         self._update_project_label()
