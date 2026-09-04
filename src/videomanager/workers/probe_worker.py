@@ -22,16 +22,26 @@ class ProbeWorker(QRunnable):
         super().__init__()
         self._url = url
         self._settings = settings
+        self._cancelled = False
         self.signals = ProbeSignals()
+
+    def cancel(self) -> None:
+        self._cancelled = True
 
     @Slot()
     def run(self) -> None:
+        if self._cancelled:
+            return
         try:
             result = probe(self._url, self._settings)
         except VideoManagerError as exc:
+            if self._cancelled:
+                return
             # Erro previsto: a mensagem já está em pt-BR e pronta para exibir.
             emit_safely(self.signals.failed, str(exc))
         except Exception as exc:  # noqa: BLE001
+            if self._cancelled:
+                return
             # Um extrator pode falhar de formas que não mapeamos. Melhor mostrar
             # o tipo do erro que deixar a janela num estado de "analisando" que
             # nunca termina.
@@ -40,4 +50,5 @@ class ProbeWorker(QRunnable):
                 f"Erro inesperado ao analisar a URL ({type(exc).__name__}): {exc}",
             )
         else:
-            emit_safely(self.signals.finished, result)
+            if not self._cancelled:
+                emit_safely(self.signals.finished, result)

@@ -31,7 +31,13 @@ _DEFAULT_LIMIT = 1080
 class PlaylistDialog(QDialog):
     """Lista os itens e devolve os que o usuário marcou."""
 
-    def __init__(self, playlist: PlaylistInfo, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        playlist: PlaylistInfo,
+        *,
+        initial_audio: bool = False,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(strings.PLAYLIST_TITLE)
         self.resize(680, 560)
@@ -65,14 +71,26 @@ class PlaylistDialog(QDialog):
         select_none.clicked.connect(lambda: self._set_all(Qt.CheckState.Unchecked))
         toggles.addWidget(select_none)
         toggles.addStretch(1)
-        toggles.addWidget(QLabel(strings.LABEL_RESOLUTION))
+
+        toggles.addWidget(QLabel(strings.PLAYLIST_MODE_LABEL))
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItem(strings.PLAYLIST_MODE_VIDEO, False)
+        self._mode_combo.addItem(strings.PLAYLIST_MODE_AUDIO, True)
+        toggles.addWidget(self._mode_combo)
+
+        self._limit_label = QLabel(strings.LABEL_RESOLUTION)
+        toggles.addWidget(self._limit_label)
         self._limit = QComboBox()
         for value, label in _HEIGHT_LIMITS:
             self._limit.addItem(label, value)
-        # Por dado, e não por índice: reordenar a tabela acima mudaria o padrão
-        # sem ninguém perceber.
         self._limit.setCurrentIndex(max(0, self._limit.findData(_DEFAULT_LIMIT)))
         toggles.addWidget(self._limit)
+
+        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        if initial_audio:
+            self._mode_combo.setCurrentIndex(1)
+            self._on_mode_changed()
+
         layout.addLayout(toggles)
 
         note = QLabel(strings.PLAYLIST_NOTE)
@@ -124,3 +142,11 @@ class PlaylistDialog(QDialog):
 
     def height_limit(self) -> int | None:
         return self._limit.currentData()
+
+    def _on_mode_changed(self) -> None:
+        is_audio = bool(self._mode_combo.currentData())
+        self._limit_label.setVisible(not is_audio)
+        self._limit.setVisible(not is_audio)
+
+    def is_audio_mode(self) -> bool:
+        return bool(self._mode_combo.currentData())

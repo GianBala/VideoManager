@@ -219,6 +219,17 @@ class SettingsDialog(QDialog):
         self._cookies.setFixedWidth(FIELD_WIDTH)
         self._add_row(form, strings.SETTINGS_COOKIES, self._cookies)
 
+        cookie_file_row = QHBoxLayout()
+        cookie_file_row.setContentsMargins(0, 0, 0, 0)
+        self._cookies_file = QLineEdit(self._settings.cookies_file)
+        self._cookies_file.setPlaceholderText(strings.SETTINGS_COOKIES_FILE_PLACEHOLDER)
+        self._cookies_file.setToolTip(strings.SETTINGS_COOKIES_FILE_TIP)
+        cookie_file_row.addWidget(self._cookies_file, 1)
+        browse_cookies = QPushButton(strings.SETTINGS_COOKIES_FILE_BROWSE)
+        browse_cookies.clicked.connect(self._choose_cookies_file)
+        cookie_file_row.addWidget(browse_cookies)
+        self._add_row(form, strings.SETTINGS_COOKIES_FILE, cookie_file_row)
+
         return page
 
     def _build_subs(self) -> QWidget:
@@ -256,6 +267,16 @@ class SettingsDialog(QDialog):
         if chosen:
             self._dest.setText(chosen)
 
+    def _choose_cookies_file(self) -> None:
+        chosen, _ = QFileDialog.getOpenFileName(
+            self,
+            strings.SETTINGS_COOKIES_FILE,
+            self._cookies_file.text() or str(Path.home()),
+            "Cookies (*.txt);;Todos os arquivos (*)",
+        )
+        if chosen:
+            self._cookies_file.setText(chosen)
+
     # ------------------------------------------------------------------
 
     def result_settings(self) -> Settings:
@@ -276,6 +297,7 @@ class SettingsDialog(QDialog):
         updated.concurrent_fragments = self._fragments.value()
         updated.rate_limit_kbps = self._rate.value()
         updated.cookies_browser = self._cookies.currentData() or ""
+        updated.cookies_file = self._cookies_file.text().strip()
         updated.embed_thumbnail = self._embed_thumb.isChecked()
         updated.embed_metadata = self._embed_meta.isChecked()
         updated.write_subtitles = self._write_subs.isChecked()

@@ -76,6 +76,9 @@ class Settings:
     # Necessário para vídeos com restrição de idade, privados, de membros e para
     # as resoluções altas do BiliBili.
     cookies_browser: str = ""
+    # Caminho para arquivo de cookies (.txt), alternativa mais robusta quando o
+    # navegador está bloqueado ou encriptado pelo sistema.
+    cookies_file: str = ""
 
     # --- rede e desempenho ---
     max_concurrent_jobs: int = 3
