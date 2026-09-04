@@ -57,3 +57,10 @@ class JobCancelled(VideoManagerError):
     Não é uma falha: a UI trata este caso como estado ``cancelado``, sem
     diálogo de erro.
     """
+
+
+# --- edição e projeto --------------------------------------------------------
+
+class ProjectError(VideoManagerError):
+    """Falha ao carregar ou salvar arquivo de projeto de edição."""
+
