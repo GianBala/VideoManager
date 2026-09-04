@@ -243,7 +243,7 @@ class Timeline(QWidget):
 
     @staticmethod
     def _track_height(kind: TrackKind) -> int:
-        return VIDEO_TRACK_HEIGHT if kind is TrackKind.VIDEO else AUDIO_TRACK_HEIGHT
+        return VIDEO_TRACK_HEIGHT if kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL) else AUDIO_TRACK_HEIGHT
 
     @property
     def project(self) -> Project:
@@ -560,10 +560,13 @@ class Timeline(QWidget):
         path.addRoundedRect(rect, 5, 5)
         painter.save()
         painter.setClipPath(path, Qt.ClipOperation.IntersectClip)
-        painter.fillRect(rect, self._color("surface"))
+        if track.kind is TrackKind.ADDITIONAL:
+            painter.fillRect(rect, QColor(106, 27, 154, 180))  # Roxo profundo para adicionais
+        else:
+            painter.fillRect(rect, self._color("surface"))
         if track.kind is TrackKind.VIDEO:
             self._paint_thumbs(painter, clip, rect)
-        else:
+        elif track.kind is TrackKind.AUDIO:
             self._paint_wave(painter, clip, rect)
         self._paint_clip_label(painter, clip, rect, track)
         painter.restore()
@@ -571,7 +574,7 @@ class Timeline(QWidget):
         selected = clip.clip_id == self._selected
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(
-            QPen(self._color("accent") if selected else self._color("border"),
+            QPen(self._color("accent") if selected else (QColor(186, 104, 200) if track.kind is TrackKind.ADDITIONAL else self._color("border")),
                  2 if selected else 1)
         )
         painter.drawPath(path)
@@ -625,10 +628,33 @@ class Timeline(QWidget):
         painter.setPen(
             self._color("warn") if silenced else self._color("text")
         )
-        badge = clip.gain_label
-        text = clip.media.name
-        if badge:
-            text = f"{text}   {badge}"
+
+        badges: list[str] = []
+        if clip.speed_label:
+            badges.append(f"⚡ {clip.speed_label}")
+        if clip.gain_label:
+            badges.append(clip.gain_label)
+
+        if clip.overlay_type == "text":
+            text = f"🔤 {clip.text_content or 'Texto'}"
+        elif clip.overlay_type == "filter":
+            fname = clip.filter_name
+            f_labels = {
+                "pb": "P&B",
+                "sepia": "Sépia",
+                "vinheta": "Vinheta",
+                "inverter": "Inversão",
+                "contraste": "Contraste",
+            }
+            text = f"🎨 {f_labels.get(fname, fname or 'Filtro')}"
+        elif clip.overlay_type == "image" or clip.is_image:
+            text = f"🖼️ {clip.media.name}"
+        else:
+            text = clip.media.name
+
+        if badges:
+            text = f"{text}   {' · '.join(badges)}"
+
         painter.drawText(
             strip.adjusted(6, 0, -4, 0),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
