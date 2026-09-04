@@ -29,6 +29,7 @@ from videomanager.core.composer import (
     frame_command,
     interpolation_bytes,
     playback_command,
+    segment_video_args,
     simple_trim,
 )
 from videomanager.core.errors import ConversionError
@@ -209,6 +210,23 @@ class TestAudio:
         graph = build_graph(projeto(video_track(clip(VIDEO, muted=True))))
         assert graph.audio_label is None
         assert graph.video_label is not None, "a imagem continua"
+
+    def test_trilha_de_video_muda_nao_leva_som(self) -> None:
+        graph = build_graph(projeto(video_track(clip(VIDEO), muted=True)))
+        assert graph.audio_label is None
+        assert graph.video_label is not None, "a imagem continua"
+
+    def test_trilha_de_video_muda_com_trilha_de_audio_mantem_so_audio(self) -> None:
+        graph = build_graph(
+            projeto(
+                video_track(clip(VIDEO), muted=True),
+                audio_track(clip(ESTEREO)),
+            )
+        )
+        assert graph.video_label is not None
+        assert graph.audio_label == "[a1]"
+        assert "[0:a]" not in ";".join(graph.filters)
+        assert "[1:a]" in ";".join(graph.filters)
 
 
 class TestInterpolacao:
@@ -467,6 +485,15 @@ class TestComandos:
         projeto_calado = projeto(video_track(clip(VIDEO, muted=True)))
         assert audio_command(projeto_calado, 0.0, TOOLS) is None
 
+    def test_trilha_de_video_muda_nao_ha_comando_de_audio(self) -> None:
+        projeto_calado = projeto(video_track(clip(VIDEO), muted=True))
+        assert audio_command(projeto_calado, 0.0, TOOLS) is None
+
+    def test_exportacao_com_trilha_de_video_muda_desativa_audio(self) -> None:
+        args = export_args(projeto(video_track(clip(VIDEO), muted=True)), DEST, TOOLS)
+        assert "-an" in args
+        assert "-c:a" not in args
+
     def test_projeto_so_de_audio_nao_grava_video(self) -> None:
         args = export_args(projeto(audio_track(clip(ESTEREO))), DEST, TOOLS)
         assert "-c:v" not in args
@@ -633,3 +660,32 @@ class TestDescricao:
         assert "1 bloco(s) de imagem" in texto
         assert "1 de áudio" in texto
         assert "1920×1080" in texto
+
+
+class TestHevcExport:
+    def test_export_args_hevc(self) -> None:
+        proj = projeto(video_track(clip()))
+        args = export_args(proj, Path("/tmp/out.mp4"), TOOLS, family="hevc")
+        assert "libx265" in args or "hevc_nvenc" in args
+        assert "-tag:v" in args
+        idx = args.index("-tag:v")
+        assert args[idx + 1] == "hvc1"
+
+    def test_segment_video_args_hevc(self) -> None:
+        proj = projeto(video_track(clip()))
+        args = segment_video_args(proj, 0.0, 5.0, Path("/tmp/chunk.mp4"), TOOLS, family="hevc")
+        assert "-tag:v" in args
+        idx = args.index("-tag:v")
+        assert args[idx + 1] == "hvc1"
+
+    def test_audio_command_custom_params(self) -> None:
+        proj = projeto(video_track(clip()), audio_track(clip(ESTEREO)))
+        args = audio_command(proj, 0.0, TOOLS, sample_rate=44100, channels=1)
+        assert args is not None
+        assert "-ar" in args
+        idx_ar = args.index("-ar")
+        assert args[idx_ar + 1] == "44100"
+        assert "-ac" in args
+        idx_ac = args.index("-ac")
+        assert args[idx_ac + 1] == "1"
+

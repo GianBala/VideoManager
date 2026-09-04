@@ -28,6 +28,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import hwaccel
 from .binaries import FFmpegTools, subprocess_kwargs
 from .downloader import Progress
 from .errors import ConversionError, JobCancelled
@@ -187,6 +188,7 @@ class VideoTarget:
     height: int | None = None
     fps: float | None = None
     crf: int = 20
+    hardware: str = hwaccel.SOFTWARE
 
     @property
     def extension(self) -> str:
@@ -502,21 +504,52 @@ def build_video_args(
         args += ["-map", "0:a:0"]
 
     codec = resolved_video_codec(media, target)
+    device_args: list[str] = []
+    video_encoder_args: list[str] = []
+    filters: list[str] = []
+
+    if needs_scaling(media, target):
+        # -2 mantém a largura par: codecs H.264/HEVC exigem dimensões pares.
+        filters.append(f"scale=-2:{target.height}")
+
     if codec == "copy":
-        args += ["-c:v", "copy"]
+        video_encoder_args = ["-c:v", "copy"]
     else:
-        encoder = _VIDEO_ENCODERS.get(codec)
-        if encoder is None:
-            raise ConversionError(f"Codec de vídeo não suportado: {codec}")
-        args += ["-c:v", encoder, "-crf", str(target.crf)]
-        if encoder == "libx264":
-            # yuv420p é o único formato de pixel que reproduz em qualquer lugar.
-            args += ["-pix_fmt", "yuv420p", "-preset", "medium"]
-        if needs_scaling(media, target):
-            # -2 mantém a largura par: codecs H.264/HEVC exigem dimensões pares.
-            args += ["-vf", f"scale=-2:{target.height}"]
-        if target.fps:
-            args += ["-r", str(target.fps)]
+        # Se hardware foi solicitado e a família possui acelerador
+        if target.hardware != hwaccel.SOFTWARE and codec in ("h264", "hevc"):
+            hw_enc = hwaccel.resolve(codec, target.hardware, tools)
+            device_args = list(hw_enc.device)
+            if hw_enc.filter_suffix:
+                filters.append(hw_enc.filter_suffix)
+            video_encoder_args = ["-c:v", hw_enc.name, *hw_enc.quality]
+        else:
+            encoder = _VIDEO_ENCODERS.get(codec)
+            if encoder is None:
+                raise ConversionError(f"Codec de vídeo não suportado: {codec}")
+            video_encoder_args = ["-c:v", encoder, "-crf", str(target.crf)]
+            if encoder in ("libx264", "libx265"):
+                # yuv420p garante reprodução em reprodutores legados e navegadores
+                video_encoder_args += ["-pix_fmt", "yuv420p"]
+            if encoder == "libx264":
+                video_encoder_args += ["-preset", "medium"]
+
+    args = [
+        tools.ffmpeg_str,
+        "-nostdin",
+        "-hide_banner",
+        "-y",
+        *device_args,
+        "-i", str(media.path),
+        "-map", "0:v:0",
+    ]
+    if media.has_audio:
+        args += ["-map", "0:a:0"]
+
+    args += video_encoder_args
+    if filters:
+        args += ["-vf", ",".join(filters)]
+    if codec != "copy" and target.fps:
+        args += ["-r", str(target.fps)]
 
     if media.has_audio:
         audio_codec = resolved_audio_codec(media, target)
@@ -552,8 +585,11 @@ def build_args(
             destination,
             tools,
             container=target.container,
+            family=target.family,
             hardware=target.hardware,
             interpolate=target.interpolate,
+            audio_only=target.audio_only,
+            audio_codec=target.audio_codec,
         )
     return build_video_args(media, target, destination, tools)
 
@@ -573,7 +609,13 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
     """Resumo do que a conversão vai fazer, para exibir antes de começar."""
     if isinstance(target, Composition):
         return describe_export(
-            target.project, target.container, target.hardware, target.interpolate
+            target.project,
+            target.container,
+            target.hardware,
+            target.interpolate,
+            family=target.family,
+            audio_only=target.audio_only,
+            audio_codec=target.audio_codec,
         )
     if isinstance(target, TrimTarget):
         return describe_trim(media, target)
@@ -590,6 +632,8 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
         parts.append("vídeo copiado (sem recodificar)")
     else:
         parts.append(f"recodifica em {codec.upper()}")
+        if target.hardware != hwaccel.SOFTWARE and codec in ("h264", "hevc"):
+            parts.append("placa de vídeo, se disponível")
     audio_codec = resolved_audio_codec(media, target)
     if media.has_audio and audio_codec != "copy":
         # Só se diz quando há custo: "áudio copiado" seria ruído em toda linha.
