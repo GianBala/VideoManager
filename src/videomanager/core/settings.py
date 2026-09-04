@@ -99,6 +99,7 @@ class Settings:
     # reencontrar o volume de ontem a cada abertura seria trabalho repetido.
     preview_volume: int = 70
     preview_muted: bool = False
+    preview_snap: bool = True
 
     # ------------------------------------------------------------------
     # Persistência

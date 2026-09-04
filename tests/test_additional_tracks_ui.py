@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 
@@ -808,6 +809,228 @@ def test_deselection_when_clicking_outside(qapp: QApplication, dummy_tools: FFmp
         assert panel._timeline.selected_clip is None
     finally:
         panel.shutdown()
+
+
+def test_snap_magnetic_border_and_escape(qapp: QApplication) -> None:
+    preview = _Preview()
+    preview.resize(800, 600)
+    clip = Clip(
+        media=None,
+        start=0.0,
+        duration=5.0,
+        overlay_type="text",
+        text_content="Teste Snap",
+        x=0.5,
+        y=0.5,
+        scale=1.0,
+        rotation=0.0,
+    )
+    preview.set_active_clip(clip, 1920, 1080)
+    vrect = preview._video_rect()
+    geom = preview._clip_geometry(clip)
+    assert geom is not None
+    cx, cy, w, h = geom
+
+    # 1. Simula início de arraste a partir do centro
+    preview._drag_mode = "move"
+    preview._drag_clip_id = clip.clip_id
+    preview._drag_start_pos = QPoint(int(cx), int(cy))
+    preview._drag_init_x = clip.x
+    preview._drag_init_y = clip.y
+
+    # Arrasta para perto da borda esquerda interna do vídeo (dentro do limiar de 14px)
+    # Posição onde a borda esquerda do objeto fica a 5px de vrect.left()
+    target_mouse_x = vrect.left() + (w / 2.0) + 5.0
+    move_event = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(target_mouse_x, cy),
+        QPointF(target_mouse_x, cy),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_event)
+
+    # Deve ter ativado o snap na borda esquerda:
+    assert preview._snap_guide_x == float(vrect.left())
+    # O clipe ativo deve estar com a borda esquerda perfeitamente alinhada em vrect.left():
+    active_cx = vrect.left() + preview._active_clip.x * vrect.width()
+    assert abs((active_cx - w / 2.0) - vrect.left()) < 0.001
+
+    # 2. Força o movimento para além do limiar de 14px (ex: 25px para fora)
+    target_forced_x = vrect.left() + (w / 2.0) - 25.0
+    move_forced = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(target_forced_x, cy),
+        QPointF(target_forced_x, cy),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_forced)
+
+    # O snap deve desengatar e seguir livremente a posição do cursor
+    assert preview._snap_guide_x is None
+    forced_cx = vrect.left() + preview._active_clip.x * vrect.width()
+    assert forced_cx < vrect.left() + (w / 2.0)  # Moveu-se para além da borda
+
+    # 3. mouseReleaseEvent limpa as guias
+    release_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonRelease,
+        QPointF(target_forced_x, cy),
+        QPointF(target_forced_x, cy),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseReleaseEvent(release_event)
+    assert preview._snap_guide_x is None
+    assert preview._snap_guide_y is None
+    assert preview._drag_mode is None
+
+
+def test_snap_magnetic_rotation_and_escape(qapp: QApplication) -> None:
+    preview = _Preview()
+    preview.resize(800, 600)
+    clip = Clip(
+        media=None,
+        start=0.0,
+        duration=5.0,
+        overlay_type="text",
+        text_content="Teste Rot",
+        x=0.5,
+        y=0.5,
+        scale=1.0,
+        rotation=0.0,
+    )
+    preview.set_active_clip(clip, 1920, 1080)
+    geom = preview._clip_geometry(clip)
+    assert geom is not None
+    cx, cy, w, h = geom
+
+    preview._drag_mode = "rotate"
+    preview._drag_clip_id = clip.clip_id
+    preview._drag_init_angle = 0.0
+    preview._drag_init_rot = 0.0
+
+    # 1. Ângulo próximo a 90° (ex: 91.5° -> diferença de 1.5° <= 4.0°)
+    rad_near_90 = math.radians(91.5)
+    r = 100.0
+    pos_x = cx + r * math.cos(rad_near_90)
+    pos_y = cy + r * math.sin(rad_near_90)
+
+    move_event = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(pos_x, pos_y),
+        QPointF(pos_x, pos_y),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_event)
+
+    # Deve travar exatamente em 90.0°
+    assert preview._snap_guide_rot == 90.0
+    assert preview._active_clip.rotation == 90.0
+
+    # 2. Ângulo forçado além do limiar (ex: 98.0° -> diferença de 8.0° > 4.0°)
+    rad_forced = math.radians(98.0)
+    pos_fx = cx + r * math.cos(rad_forced)
+    pos_fy = cy + r * math.sin(rad_forced)
+
+    move_forced = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(pos_fx, pos_fy),
+        QPointF(pos_fx, pos_fy),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_forced)
+
+    # Deve soltar o snap e permitir rotação livre
+    assert preview._snap_guide_rot is None
+    assert abs(preview._active_clip.rotation - 98.0) < 0.5
+
+    # 3. Ângulo próximo a 0° / 360° (ex: 358.5° -> trava em 0.0°)
+    rad_near_360 = math.radians(358.5)
+    pos_zx = cx + r * math.cos(rad_near_360)
+    pos_zy = cy + r * math.sin(rad_near_360)
+
+    move_zero = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(pos_zx, pos_zy),
+        QPointF(pos_zx, pos_zy),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_zero)
+    assert preview._snap_guide_rot == 0.0
+    assert preview._active_clip.rotation == 0.0
+
+
+def test_snap_toggle_button_and_persistence(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        assert panel._snap_btn.isChecked() is True
+        assert panel._preview._snap_enabled is True
+
+        # Desativa o botão
+        panel._snap_btn.setChecked(False)
+        assert panel._preview._snap_enabled is False
+        assert panel._settings.preview_snap is False
+
+        # Reativa o botão
+        panel._snap_btn.setChecked(True)
+        assert panel._preview._snap_enabled is True
+        assert panel._settings.preview_snap is True
+    finally:
+        panel.shutdown()
+
+
+def test_properties_tab_opening_editing_and_closing(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    try:
+        panel._text_input.setText("Texto Propriedades")
+        panel._insert_text_clip()
+        clip = panel._project.additional_tracks[0].clips[0]
+
+        # 1. Abre a aba de propriedades pelo método chamado pelo menu
+        panel._open_properties_tab(clip.clip_id)
+
+        # Aba de propriedades deve estar visível e ativa
+        assert panel._extras_tabs.indexOf(panel._properties_widget) >= 0
+        assert panel._extras_tabs.currentWidget() is panel._properties_widget
+
+        # 2. Verifica se valores iniciais estão corretos
+        assert panel._properties_widget._clip_id == clip.clip_id
+        assert panel._properties_widget._spin_scale.value() == clip.scale
+        assert panel._properties_widget._spin_rot.value() == clip.rotation
+
+        # 3. Edita rotação usando preset 90°
+        panel._properties_widget._set_preset_rotation(90.0)
+        updated_clip = panel._project.find(clip.clip_id)[1]
+        assert updated_clip.rotation == 90.0
+
+        # 4. Edita posição X na aba
+        panel._properties_widget._spin_x.setValue(500)
+        updated_clip = panel._project.find(clip.clip_id)[1]
+        expected_x = 500 / panel._project.width
+        assert abs(updated_clip.x - expected_x) < 0.001
+
+        # 5. Edita escala na aba
+        panel._properties_widget._spin_scale.setValue(2.0)
+        updated_clip = panel._project.find(clip.clip_id)[1]
+        assert updated_clip.scale == 2.0
+
+        # 6. Fecha a aba de propriedades
+        panel._close_properties_tab()
+        assert panel._extras_tabs.indexOf(panel._properties_widget) == -1
+    finally:
+        panel.shutdown()
+
 
 
 
