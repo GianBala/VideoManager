@@ -11,15 +11,13 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QMessageBox
 
 from videomanager.core.binaries import FFmpegTools
 from videomanager.core.project import (
-    IMAGE_DURATION,
     Clip,
     MediaKind,
     MediaRef,
-    TrackKind,
 )
 from videomanager.core.settings import Settings
 from videomanager.ui import strings
@@ -467,28 +465,73 @@ def test_font_selector_popular_fonts_and_search(qapp: QApplication) -> None:
     assert len(visible_all) == len(items)
 
 
-def test_font_size_controls_and_no_old_presets(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+def test_font_size_controls_and_presets(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
     try:
-        # Check that old preset buttons (24, 36, 48, 64, 72) are not present
-        old_presets = {"24", "36", "48", "64", "72"}
         text_tab = panel._extras_tabs.widget(0)
-        buttons = text_tab.findChildren(type(panel._font_size_spin))
         button_texts = {b.text() for b in text_tab.findChildren(type(panel._bold_btn))}
-        assert not old_presets.issubset(button_texts)
+
+        # Presets 18, 24, 36, 48, 64, 72 must be present
+        presets = {"18", "24", "36", "48", "64", "72"}
+        assert presets.issubset(button_texts)
+
+        # Spinbox must have no built-in stacked arrows
+        assert panel._font_size_spin.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
 
         # Check increment and decrement buttons
         dec_btns = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.text() == "-"]
         inc_btns = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.text() == "+"]
         assert len(dec_btns) == 1
         assert len(inc_btns) == 1
+        assert "color: #ffffff" in dec_btns[0].styleSheet()
+        assert "color: #ffffff" in inc_btns[0].styleSheet()
 
+        # Step is 1 pt
         initial_val = panel._font_size_spin.value()
         inc_btns[0].click()
-        assert panel._font_size_spin.value() == initial_val + 2
+        assert panel._font_size_spin.value() == initial_val + 1
         dec_btns[0].click()
         assert panel._font_size_spin.value() == initial_val
+
+        # Clicking a preset sets the spinbox value directly
+        btn_36 = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.text() == "36"][0]
+        btn_36.click()
+        assert panel._font_size_spin.value() == 36
+    finally:
+        panel.shutdown()
+
+
+def test_preview_ghost_avoidance_and_playback_state(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        # Insere clipe de texto na trilha de adicionais
+        panel._text_input.setText("Overlay Text")
+        panel._insert_text_clip()
+        track = panel._project.additional_tracks[0]
+        text_clip = track.clips[0]
+
+        # Com o clipe selecionado, o projeto a ser renderizado no fundo exclui o clipe ativo
+        panel._timeline.select(text_clip.clip_id)
+        active = panel._timeline.selected_clip
+        assert active is not None
+        assert active.clip_id == text_clip.clip_id
+
+        # Verifica se without_clip exclui o clipe selecionado
+        proj_without = panel._project.without_clip(active.clip_id)
+        assert proj_without.find(active.clip_id) is None
+
+        # Deseleciona
+        panel._timeline.select(-1)
+        assert panel._timeline.selected_clip is None
+
+        # Testa estado de playback no preview
+        assert not panel._preview._is_playing
+        panel._preview.set_playing(True)
+        assert panel._preview._is_playing
+        panel._preview.set_playing(False)
+        assert not panel._preview._is_playing
     finally:
         panel.shutdown()
 
