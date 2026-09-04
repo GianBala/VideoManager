@@ -1248,10 +1248,11 @@ class EditPanel(QWidget):
         row_size.addWidget(lbl_size)
 
         btn_dec = QPushButton("-")
+        btn_dec.setProperty("role", "spin-tool")
         btn_dec.setFixedSize(30, 28)
         btn_dec.setToolTip("Diminuir tamanho da fonte (1 pt)")
         btn_dec.setStyleSheet(
-            "QPushButton { font-weight: bold; font-size: 16px; color: #ffffff; background: #2a2a32; border: 1px solid #555; border-radius: 4px; } "
+            "QPushButton { font-weight: bold; font-size: 16px; color: #ffffff; background: #2a2a32; border: 1px solid #555; border-radius: 4px; padding: 0px; margin: 0px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; text-align: center; } "
             "QPushButton:hover { background: #383844; border-color: #777; color: #ffffff; } "
             "QPushButton:pressed { background: #0284c7; color: #ffffff; }"
         )
@@ -1274,10 +1275,11 @@ class EditPanel(QWidget):
         row_size.addWidget(self._font_size_spin, 1)
 
         btn_inc = QPushButton("+")
+        btn_inc.setProperty("role", "spin-tool")
         btn_inc.setFixedSize(30, 28)
         btn_inc.setToolTip("Aumentar tamanho da fonte (1 pt)")
         btn_inc.setStyleSheet(
-            "QPushButton { font-weight: bold; font-size: 16px; color: #ffffff; background: #2a2a32; border: 1px solid #555; border-radius: 4px; } "
+            "QPushButton { font-weight: bold; font-size: 16px; color: #ffffff; background: #2a2a32; border: 1px solid #555; border-radius: 4px; padding: 0px; margin: 0px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; text-align: center; } "
             "QPushButton:hover { background: #383844; border-color: #777; color: #ffffff; } "
             "QPushButton:pressed { background: #0284c7; color: #ffffff; }"
         )

@@ -163,6 +163,22 @@ QPushButton[role="transport"]:hover {{ border-color: {accent}; }}
 QPushButton[role="transport"]:checked {{ background: {accent}; color: {accent_text}; border-color: {accent}; }}
 QPushButton[role="transport"]:disabled {{ color: {text_dim}; border-color: {border}; }}
 
+QPushButton[role="spin-tool"] {{
+    background: {surface_alt};
+    border: 1px solid {border};
+    border-radius: 4px;
+    padding: 0px;
+    margin: 0px;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    font-size: 16px;
+    font-weight: bold;
+}}
+QPushButton[role="spin-tool"]:hover {{ border-color: {accent}; }}
+QPushButton[role="spin-tool"]:pressed {{ background: {accent}; color: {accent_text}; }}
+
 /* O indicador precisa ser desenhado aqui: assim que o QSS toca no QRadioButton,
    o estilo deixa de pintar o círculo nativo e sobra um marcador quase invisível
    — não dava para ver qual das duas opções estava escolhida. */
