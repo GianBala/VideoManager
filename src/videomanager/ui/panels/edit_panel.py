@@ -33,14 +33,20 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import (
     QDragEnterEvent,
+    QDragMoveEvent,
     QDropEvent,
     QFontDatabase,
     QFontMetrics,
     QImage,
     QKeySequence,
+    QPaintEvent,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPixmap,
     QShortcut,
 )
 from PySide6.QtWidgets import (
@@ -53,6 +59,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMenu,
     QMessageBox,
     QPushButton,
@@ -82,6 +90,7 @@ from ...core.humanize import format_rate, format_size
 from ...core.job import Job, JobKind
 from ...core.preview import fit_size, preview_fps
 from ...core.project import (
+    IMAGE_DURATION,
     MAX_GAIN_DB,
     MIN_GAIN_DB,
     Clip,
@@ -93,8 +102,8 @@ from ...core.project import (
     auto_canvas,
     media_ref,
     new_project,
-    next_clip_id,
 )
+from ...core.project_io import ProjectError, load_project, save_project
 from ...core.settings import Settings
 from ...core.trimmer import (
     MIN_SEGMENT,
@@ -104,7 +113,6 @@ from ...core.trimmer import (
     format_timecode,
     frame_index,
     frame_step,
-    keyframe_after,
     keyframe_at_or_before,
 )
 from ...workers.preview_worker import (
@@ -117,6 +125,7 @@ from ...workers.preview_worker import (
 from ...workers.runner import WorkerRunner
 from .. import icons, strings
 from ..audio_preview import AudioPreview
+from ..export_dialog import ExportDialog
 from ..fullscreen_preview import FullscreenPreview
 from ..theme import palette
 from .timeline import (
@@ -256,12 +265,109 @@ class _Preview(QLabel):
         self.setStyleSheet("background: #000000; border-radius: 8px;")
         self.setText(strings.EDIT_EMPTY)
         self.setProperty("role", "dim")
+        self._pixmap: QPixmap | None = None
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(480, self.minimumHeight())
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         self.double_clicked.emit()
+
+    @property
+    def has_frame(self) -> bool:
+        return self._pixmap is not None and not self._pixmap.isNull()
+
+    def set_frame_pixmap(self, pixmap: QPixmap) -> None:
+        self._pixmap = pixmap
+        if not pixmap.isNull():
+            self.setText("")
+        self.update()
+
+    def clear_frame(self) -> None:
+        self._pixmap = None
+        self.setText(strings.EDIT_EMPTY)
+        self.update()
+
+    def setPixmap(self, pixmap: QPixmap) -> None:  # noqa: N802
+        self.set_frame_pixmap(pixmap)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        if self._pixmap is None or self._pixmap.isNull():
+            super().paintEvent(event)
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 8, 8)
+        painter.fillPath(path, Qt.GlobalColor.black)
+        painter.setClipPath(path)
+
+        target_w, target_h = fit_size(
+            self._pixmap.width(),
+            self._pixmap.height(),
+            self.width(),
+            self.height(),
+        )
+        x = (self.width() - target_w) // 2
+        y = (self.height() - target_h) // 2
+        target = QRect(x, y, target_w, target_h)
+
+        painter.drawPixmap(target, self._pixmap)
+        painter.end()
+
+
+class _MediaListWidget(QListWidget):
+    """Lista de mídias importadas do projeto, com dica visual quando vazia."""
+
+    files_dropped = Signal(list)  # list[Path]
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
+        super().paintEvent(event)
+        if self.count():
+            return
+        painter = QPainter(self.viewport())
+        painter.setPen(self.palette().color(QPalette.ColorRole.PlaceholderText))
+        painter.drawText(
+            self.viewport().rect(),
+            Qt.AlignmentFlag.AlignCenter,
+            strings.EDIT_MEDIA_EMPTY,
+        )
+        painter.end()
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        paths = [
+            Path(url.toLocalFile())
+            for url in event.mimeData().urls()
+            if url.isLocalFile()
+        ]
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
 
 
 class EditPanel(QWidget):
@@ -329,9 +435,11 @@ class EditPanel(QWidget):
         # Bloco cujo volume está sendo ajustado agora: enquanto for o mesmo, os
         # passos entram num desfazer só (ver :meth:`_on_gain`).
         self._gain_session = -1
+        self._project_path: Path | None = None
+        self._is_dirty = False
 
         self._audio = AudioPreview(self)
-        self._audio.stopped.connect(self._stop_playback)
+        self._audio.stopped.connect(self._on_audio_stopped)
         self._tick = QTimer(self)
         self._tick.setInterval(_TICK_MS)
         self._tick.timeout.connect(self._on_tick)
@@ -367,47 +475,69 @@ class EditPanel(QWidget):
     def _build_ui(self) -> None:
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(8)
-        self._layout.addWidget(self._build_source_row())
+        self._layout.setSpacing(6)
+        self._layout.addWidget(self._build_top_bar())
 
-        # Divisor arrastável entre a imagem e as trilhas, em vez de uma divisão
-        # fixa: quanto de cada uma se quer à vista muda a cada momento da
-        # edição — enquadrando um corte, a imagem; montando a sequência, as
-        # trilhas. O botão de retrair continua existindo como atalho para o
-        # extremo mais pedido.
+        # Divisor vertical principal: metade superior (mídia + monitor) e
+        # metade inferior (linha do tempo).
         self._split_view = QSplitter(Qt.Orientation.Vertical)
         self._split_view.setChildrenCollapsible(False)
+
+        # Divisor horizontal superior (estilo CapCut): biblioteca de mídias à
+        # esquerda e monitor de vídeo com controles de transporte à direita.
+        self._top_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._top_splitter.setChildrenCollapsible(False)
+
+        self._media_box = self._build_media_box()
+        self._top_splitter.addWidget(self._media_box)
+
         self._player_box = self._build_player()
-        self._split_view.addWidget(self._player_box)
+        self._top_splitter.addWidget(self._player_box)
+
+        self._top_splitter.setStretchFactor(0, 0)
+        self._top_splitter.setStretchFactor(1, 1)
+        self._top_splitter.splitterMoved.connect(self._on_splitter_moved)
+
+        self._split_view.addWidget(self._top_splitter)
+
         self._timeline_box = self._build_timeline_area()
         self._split_view.addWidget(self._timeline_box)
+
         self._split_view.setStretchFactor(0, 1)
-        self._split_view.setStretchFactor(1, 0)
+        self._split_view.setStretchFactor(1, 1)
+        self._split_view.splitterMoved.connect(self._on_splitter_moved)
+
         self._layout.addWidget(self._split_view, 1)
 
-        self._layout.addWidget(self._build_export_row())
-
-    def _build_source_row(self) -> QWidget:
+    def _build_top_bar(self) -> QWidget:
         box = QWidget()
         box.setProperty("role", "plain")
         row = QHBoxLayout(box)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
 
-        self._import = QPushButton(strings.EDIT_IMPORT)
-        self._import.setToolTip(strings.EDIT_IMPORT_TIP)
-        self._import.clicked.connect(self._choose_files)
-        row.addWidget(self._import)
+        self._new_btn = QPushButton(strings.EDIT_NEW_BUTTON)
+        self._new_btn.setToolTip(f"{strings.ACTION_NEW_PROJECT} (Ctrl+N)")
+        self._new_btn.clicked.connect(self.new_project)
+        row.addWidget(self._new_btn)
 
-        self._pool_box = QComboBox()
-        self._pool_box.setMinimumWidth(260)
-        self._pool_box.setToolTip(strings.EDIT_POOL_TIP)
-        row.addWidget(self._pool_box, 1)
+        self._open_btn = QPushButton(strings.EDIT_OPEN_BUTTON)
+        self._open_btn.setToolTip(f"{strings.ACTION_OPEN_PROJECT} (Ctrl+O)")
+        self._open_btn.clicked.connect(lambda: self.open_project())
+        row.addWidget(self._open_btn)
 
-        self._insert = QPushButton(strings.EDIT_INSERT)
-        self._insert.setToolTip(strings.EDIT_INSERT_TIP)
-        self._insert.clicked.connect(self._insert_selected_media)
-        row.addWidget(self._insert)
+        self._save_btn = QPushButton(strings.EDIT_SAVE_BUTTON)
+        self._save_btn.setToolTip(f"{strings.ACTION_SAVE_PROJECT} (Ctrl+S)")
+        self._save_btn.clicked.connect(self.save_project)
+        row.addWidget(self._save_btn)
+
+        row.addSpacing(6)
+        self._project_label = QLabel("")
+        self._project_label.setProperty("role", "dim")
+        row.addWidget(self._project_label)
+        self._update_project_label()
+
+        row.addStretch(1)
 
         self._collapse = QPushButton(strings.EDIT_COLLAPSE)
         self._collapse.setToolTip(strings.EDIT_COLLAPSE_TIP)
@@ -418,39 +548,121 @@ class EditPanel(QWidget):
         self._fullscreen_button.setToolTip(strings.EDIT_FULLSCREEN_TIP)
         self._fullscreen_button.clicked.connect(self._toggle_fullscreen)
         row.addWidget(self._fullscreen_button)
+
+        self._export_button = QPushButton(strings.EDIT_EXPORT_BUTTON)
+        self._export_button.setProperty("role", "primary")
+        self._export_button.setToolTip(strings.EDIT_EXPORT_BUTTON_TIP)
+        self._export_button.clicked.connect(self._open_export_dialog)
+        row.addWidget(self._export_button)
+
+        return box
+
+    def _update_project_label(self) -> None:
+        if not hasattr(self, "_project_label"):
+            return
+        name = self._project_path.name if self._project_path else strings.EDIT_UNTITLED
+        dirty = " *" if self.has_unsaved_changes else ""
+        self._project_label.setText(strings.EDIT_PROJECT_STATUS.format(name=name, dirty=dirty))
+
+    def _build_media_box(self) -> QWidget:
+        box = QWidget()
+        box.setProperty("role", "plain")
+        box.setMinimumWidth(200)
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 4, 0)
+        layout.setSpacing(6)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
+
+        title = QLabel(strings.EDIT_MEDIA_POOL_TITLE)
+        title_font = title.font()
+        title_font.setBold(True)
+        title.setFont(title_font)
+        header.addWidget(title)
+
+        self._pool_count_label = QLabel("")
+        self._pool_count_label.setProperty("role", "dim")
+        header.addWidget(self._pool_count_label)
+        header.addStretch(1)
+
+        self._import = QPushButton(strings.EDIT_IMPORT)
+        self._import.setToolTip(strings.EDIT_IMPORT_TIP)
+        self._import.clicked.connect(self._choose_files)
+        header.addWidget(self._import)
+        layout.addLayout(header)
+
+        self._media_list = _MediaListWidget()
+        self._media_list.setToolTip(strings.EDIT_POOL_TIP)
+        self._media_list.itemDoubleClicked.connect(lambda _: self._insert_selected_media())
+        self._media_list.itemSelectionChanged.connect(self._on_media_selection_changed)
+        self._media_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._media_list.customContextMenuRequested.connect(self._show_media_context_menu)
+        self._media_list.files_dropped.connect(lambda paths: self.import_files(paths, insert=False))
+        layout.addWidget(self._media_list, 1)
+
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+        bottom_row.setSpacing(6)
+        bottom_row.addStretch(1)
+
+        self._insert = QPushButton(strings.EDIT_INSERT)
+        self._insert.setToolTip(strings.EDIT_INSERT_TIP)
+        self._insert.clicked.connect(self._insert_selected_media)
+        self._insert.setEnabled(False)
+        bottom_row.addWidget(self._insert)
+        layout.addLayout(bottom_row)
+
         return box
 
     def _build_player(self) -> QWidget:
         box = QWidget()
         box.setProperty("role", "plain")
+        box.setMinimumWidth(920)
         column = QVBoxLayout(box)
-        column.setContentsMargins(0, 0, 0, 0)
+        column.setContentsMargins(4, 0, 0, 0)
         column.setSpacing(6)
+
+        # Moldura com respiro para comportar vídeos com proporções diferentes
+        self._preview_frame = QWidget()
+        self._preview_frame.setProperty("role", "plain")
+        frame_layout = QVBoxLayout(self._preview_frame)
+        frame_layout.setContentsMargins(4, 4, 4, 4)
+
         self._preview = _Preview()
         self._preview.double_clicked.connect(self._toggle_fullscreen)
-        column.addWidget(self._preview, 1)
+        frame_layout.addWidget(self._preview)
+
+        column.addWidget(self._preview_frame, 1)
         column.addWidget(self._build_transport())
         return box
 
     def _build_transport(self) -> QWidget:
         box = QWidget()
         box.setProperty("role", "plain")
+        box.setMinimumWidth(920)
         row = QHBoxLayout(box)
-        row.setContentsMargins(0, 0, 0, 0)
+        row.setContentsMargins(4, 4, 4, 0)
         row.setSpacing(6)
 
         mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self._time_label = QLabel(
             strings.EDIT_POSITION.format(
-                current=format_timecode(0), total=format_timecode(0)
+                current=format_timecode(0, milliseconds=False),
+                total=format_timecode(0, milliseconds=False),
             )
         )
         self._time_label.setFont(mono)
         self._frame_label = QLabel("")
         self._frame_label.setFont(mono)
         self._frame_label.setProperty("role", "dim")
+        self._loading_label = QLabel("")
+        self._loading_label.setProperty("role", "dim")
+
         row.addWidget(self._time_label)
         row.addWidget(self._frame_label)
+
         row.addStretch(1)
 
         self._buttons: list[QPushButton] = []
@@ -466,25 +678,42 @@ class EditPanel(QWidget):
         for text, tip, slot in specs:
             button = QPushButton(text)
             button.setToolTip(tip)
-            button.setFixedWidth(56)
+            button.setProperty("role", "transport")
+            button.setFixedWidth(38)
+            button.setFixedHeight(32)
             button.clicked.connect(slot)
             row.addWidget(button)
             self._buttons.append(button)
         self._play_button = self._buttons[3]
+        self._play_button.setFixedWidth(48)
+        self._play_button.setFixedHeight(32)
         self._play_button.setProperty("role", "primary")
 
         row.addStretch(1)
+
         self._prev_key = QPushButton(strings.EDIT_PREV_KEY_SHORT)
         self._prev_key.setToolTip(strings.EDIT_PREV_KEY)
+        self._prev_key.setProperty("role", "transport")
+        self._prev_key.setFixedHeight(32)
         self._prev_key.clicked.connect(lambda: self._jump_keyframe(-1))
+
         self._next_key = QPushButton(strings.EDIT_NEXT_KEY_SHORT)
         self._next_key.setToolTip(strings.EDIT_NEXT_KEY)
+        self._next_key.setProperty("role", "transport")
+        self._next_key.setFixedHeight(32)
         self._next_key.clicked.connect(lambda: self._jump_keyframe(+1))
+
         row.addWidget(self._prev_key)
         row.addWidget(self._next_key)
         self._buttons += [self._prev_key, self._next_key]
 
-        row.addSpacing(12)
+        row.addSpacing(6)
+        self._loop = QCheckBox(strings.EDIT_LOOP)
+        self._loop.setToolTip(strings.EDIT_LOOP_TIP)
+        self._loop.setChecked(False)
+        row.addWidget(self._loop)
+
+        row.addSpacing(6)
         row.addWidget(self._build_volume())
         return box
 
@@ -498,14 +727,18 @@ class EditPanel(QWidget):
         self._mute = QPushButton()
         self._mute.setCheckable(True)
         self._mute.setChecked(self._settings.preview_muted)
-        self._mute.setFixedWidth(46)
+        self._mute.setProperty("role", "transport")
+        self._mute.setFixedWidth(36)
+        self._mute.setFixedHeight(32)
         self._mute.toggled.connect(self._on_mute)
         row.addWidget(self._mute)
 
         self._volume = QSlider(Qt.Orientation.Horizontal)
         self._volume.setRange(0, 100)
         self._volume.setValue(self._settings.preview_volume)
-        self._volume.setFixedWidth(110)
+        self._volume.setMinimumWidth(60)
+        self._volume.setMaximumWidth(90)
+        self._volume.setFixedHeight(32)
         self._volume.setToolTip(strings.EDIT_VOLUME)
         self._volume.valueChanged.connect(self._on_volume)
         row.addWidget(self._volume)
@@ -544,6 +777,7 @@ class EditPanel(QWidget):
         self._timeline.clip_resized.connect(self._on_clip_resized)
         self._timeline.clip_selected.connect(self._on_clip_selected)
         self._timeline.track_mute_clicked.connect(self._toggle_track_mute)
+        self._timeline.track_reordered.connect(self._on_track_reordered)
         self._timeline.menu_requested.connect(self._show_menu)
         self._timeline.view_changed.connect(self._on_view_changed)
         self._timeline_area.setWidget(self._timeline)
@@ -617,6 +851,17 @@ class EditPanel(QWidget):
         )
         self._delete_button.setIcon(icons.trash(self._colors["text"]))
 
+        row.addSpacing(_TOOL_GROUP_GAP)
+        self._add_video_button = QPushButton(strings.EDIT_ADD_VIDEO_TRACK)
+        self._add_video_button.setToolTip(strings.EDIT_ADD_VIDEO_TRACK_FULL)
+        self._add_video_button.clicked.connect(lambda: self._add_track(TrackKind.VIDEO))
+        row.addWidget(self._add_video_button)
+
+        self._add_audio_button = QPushButton(strings.EDIT_ADD_AUDIO_TRACK)
+        self._add_audio_button.setToolTip(strings.EDIT_ADD_AUDIO_TRACK_FULL)
+        self._add_audio_button.clicked.connect(lambda: self._add_track(TrackKind.AUDIO))
+        row.addWidget(self._add_audio_button)
+
         row.addStretch(1)
         self._count_label = QLabel("")
         self._count_label.setProperty("role", "dim")
@@ -683,82 +928,37 @@ class EditPanel(QWidget):
         row.addWidget(button)
         return button
 
-    def _build_export_row(self) -> QWidget:
-        box = QWidget()
-        box.setProperty("role", "plain")
-        # Altura natural, nunca espremida: sem isto o layout repartia a falta de
-        # espaço entre a prévia e esta caixa, e o aviso da última linha nascia
-        # cortado pela borda da janela. Aqui quem cede pixels é a prévia — ela é
-        # a única coisa da aba que rende com espaço sobrando.
-        box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        column = QVBoxLayout(box)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(6)
+    def _open_export_dialog(self) -> None:
+        if self._project.is_empty:
+            QMessageBox.information(
+                self, strings.DIALOG_WARNING_TITLE, strings.EDIT_NO_CLIPS
+            )
+            return
 
-        # Tudo que decide **como** a exportação sai numa linha só: tela, taxa,
-        # interpolação e corte rápido. Antes o corte rápido tinha uma faixa
-        # inteira para si, e as quatro escolhas se leem juntas de qualquer
-        # forma — o corte rápido só está disponível quando a tela e a taxa são
-        # as do próprio arquivo, então elas se explicam uma à outra.
-        canvas = QHBoxLayout()
-        canvas.setContentsMargins(0, 0, 0, 0)
-        canvas.setSpacing(8)
-        canvas.addWidget(QLabel(strings.EDIT_CANVAS))
-        self._canvas_box = QComboBox()
-        self._canvas_box.setToolTip(strings.EDIT_CANVAS_TIP)
-        self._canvas_box.setMinimumWidth(_CANVAS_BOX_WIDTH)
-        self._canvas_box.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToContents
+        dialog = ExportDialog(
+            project=self._project,
+            settings=self._settings,
+            pool=self._pool,
+            probed=self._probed,
+            keyframes=self._keyframes,
+            ensure_tools=self._ensure_tools,
+            initial_canvas=self._canvas_choice,
+            initial_rate=self._rate_choice,
+            parent=self,
         )
-        self._canvas_box.currentIndexChanged.connect(self._on_canvas_choice)
-        canvas.addWidget(self._canvas_box)
-        canvas.addSpacing(10)
-        canvas.addWidget(QLabel(strings.EDIT_CANVAS_RATE))
-        self._rate_box = QComboBox()
-        self._rate_box.setToolTip(strings.EDIT_CANVAS_RATE_TIP)
-        self._rate_box.setMinimumWidth(_RATE_BOX_WIDTH)
-        self._rate_box.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToContents
-        )
-        self._rate_box.currentIndexChanged.connect(self._on_rate_choice)
-        canvas.addWidget(self._rate_box)
-        canvas.addSpacing(10)
-        self._interpolate = QCheckBox(strings.EDIT_INTERPOLATE)
-        self._interpolate.toggled.connect(self._on_mode_changed)
-        canvas.addWidget(self._interpolate)
-        canvas.addSpacing(10)
-        self._fast = QCheckBox(strings.EDIT_MODE_FAST)
-        self._fast.setToolTip(strings.EDIT_MODE_TIP)
-        self._fast.toggled.connect(self._on_mode_changed)
-        canvas.addWidget(self._fast)
-        canvas.addStretch(1)
-        column.addLayout(canvas)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.created_job:
+            if (
+                dialog.chosen_canvas != self._canvas_choice
+                or dialog.chosen_rate != self._rate_choice
+            ):
+                self._canvas_choice = dialog.chosen_canvas
+                self._rate_choice = dialog.chosen_rate
+                self._sync_canvas()
+                self._after_edit()
+            self.jobs_ready.emit([dialog.created_job])
 
-        # O plano e o aviso ocupam a largura inteira, em linhas próprias. Ao
-        # lado do botão eles ficavam numa coluna de 732 px e quebravam em duas
-        # linhas — e a altura dessa quebra não atravessa uma linha horizontal
-        # (``heightForWidth`` para no ``QHBoxLayout``), então a caixa continuava
-        # dimensionada para uma linha e a última nascia cortada. Com a largura
-        # toda, o texto cabe numa linha e a conta fecha sozinha.
-        self._plan = _wrapping_label("dim")
-        column.addWidget(self._plan)
-        self._warning = _wrapping_label("warn")
-        self._warning.setVisible(False)
-        column.addWidget(self._warning)
-
-        actions = QHBoxLayout()
-        actions.setSpacing(12)
-        actions.addStretch(1)
-
-        self._same_folder = QCheckBox(strings.EDIT_SAME_FOLDER)
-        self._same_folder.setChecked(True)
-        actions.addWidget(self._same_folder)
-        self._export = QPushButton(strings.EDIT_EXPORT)
-        self._export.setProperty("role", "primary")
-        self._export.clicked.connect(self._enqueue)
-        actions.addWidget(self._export)
-        column.addLayout(actions)
-        return box
+    def _enqueue(self) -> None:
+        self._open_export_dialog()
 
     def _install_shortcuts(self) -> None:
         """Atalhos do editor, com o alcance do painel.
@@ -783,6 +983,11 @@ class EditPanel(QWidget):
             ("Ctrl+Z", self._undo_edit),
             ("Ctrl+Shift+Z", self._redo_edit),
             ("Ctrl+Y", self._redo_edit),
+            ("Ctrl+S", lambda: self.save_project()),
+            ("Ctrl+Shift+S", lambda: self.save_project_as()),
+            ("Ctrl+O", lambda: self.open_project()),
+            ("Ctrl+N", lambda: self.new_project()),
+            ("Ctrl+E", self._open_export_dialog),
             ("F", self._toggle_fullscreen),
             ("F11", self._toggle_fullscreen),
         ):
@@ -857,6 +1062,9 @@ class EditPanel(QWidget):
             self.import_files(paths, insert=True)
             event.acceptProposedAction()
 
+    def import_media_dialog(self) -> None:
+        self._choose_files()
+
     def _choose_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
             self, strings.EDIT_IMPORT, str(Path.home()), strings.EDIT_FILE_FILTER
@@ -899,8 +1107,9 @@ class EditPanel(QWidget):
             return
 
         self._refresh_pool()
-        self._refresh_canvas_controls()
-        self._pool_box.setCurrentIndex(self._pool.index(added[-1]))
+        if added:
+            idx = self._pool.index(added[-1])
+            self._media_list.setCurrentRow(idx)
         if insert:
             self._remember()
             for reference in added:
@@ -910,13 +1119,100 @@ class EditPanel(QWidget):
     def _refresh_pool(self) -> None:
         self._syncing = True
         try:
-            current = self._pool_box.currentIndex()
-            self._pool_box.clear()
+            current_row = self._media_list.currentRow()
+            self._media_list.clear()
             for reference in self._pool:
-                self._pool_box.addItem(reference.label)
-            self._pool_box.setCurrentIndex(min(max(0, current), len(self._pool) - 1))
+                kind_symbol = (
+                    "🎬" if reference.kind is MediaKind.VIDEO
+                    else ("🎵" if reference.kind is MediaKind.AUDIO else "🖼️")
+                )
+                duration_str = format_span(reference.natural_duration)
+                if reference.has_video and reference.width and reference.height:
+                    specs = f"{duration_str} · {reference.width}×{reference.height}"
+                    if reference.fps:
+                        specs += f" · {format_rate(reference.fps)} fps"
+                elif reference.kind is MediaKind.AUDIO:
+                    ch = reference.channels or 2
+                    ch_str = "estéreo" if ch == 2 else ("mono" if ch == 1 else f"{ch} canais")
+                    specs = f"{duration_str} · {ch_str}"
+                else:
+                    specs = duration_str
+
+                item = QListWidgetItem(f"{kind_symbol}  {reference.name}\n    {specs}")
+                item.setData(Qt.ItemDataRole.UserRole, reference)
+                item.setToolTip(
+                    f"{reference.name}\n{reference.path}\n"
+                    f"{reference.kind.value.capitalize()} · {specs}"
+                )
+                self._media_list.addItem(item)
+
+            if self._pool:
+                new_row = min(max(0, current_row), len(self._pool) - 1)
+                self._media_list.setCurrentRow(new_row)
+
+            count = len(self._pool)
+            self._pool_count_label.setText(
+                strings.EDIT_MEDIA_COUNT.format(count=count) if count else ""
+            )
+            self._insert.setEnabled(bool(self._pool) and self._media_list.currentRow() >= 0)
         finally:
             self._syncing = False
+
+    def _on_media_selection_changed(self) -> None:
+        has_sel = self._media_list.currentRow() >= 0
+        self._insert.setEnabled(has_sel)
+
+    def _show_media_context_menu(self, pos: QPoint) -> None:
+        item = self._media_list.itemAt(pos)
+        if item is None:
+            return
+        ref = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(ref, MediaRef):
+            return
+
+        menu = QMenu(self)
+        insert_action = menu.addAction(strings.EDIT_MEDIA_INSERT)
+        insert_action.triggered.connect(lambda: self._insert_media_ref(ref))
+
+        remove_action = menu.addAction(strings.EDIT_MEDIA_REMOVE)
+        remove_action.triggered.connect(lambda: self._remove_media_ref(ref))
+
+        menu.exec(self._media_list.mapToGlobal(pos))
+
+    def _insert_media_ref(self, reference: MediaRef) -> None:
+        self._remember()
+        self._place(reference)
+        self._after_edit()
+
+    def _remove_media_ref(self, reference: MediaRef) -> None:
+        used_clips = [
+            c for c in self._project.clips if c.media.path == reference.path
+        ]
+        if used_clips:
+            resp = QMessageBox.question(
+                self,
+                strings.EDIT_MEDIA_REMOVE_TITLE,
+                strings.EDIT_MEDIA_REMOVE_BODY.format(
+                    name=reference.name, count=len(used_clips)
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if resp != QMessageBox.StandardButton.Yes:
+                return
+            self._remember()
+            for clip in used_clips:
+                found = self._project.find(clip.clip_id)
+                if found is not None:
+                    track_idx, _ = found
+                    self._project = self._project.without_clip(track_idx, clip.clip_id)
+            self._after_edit()
+
+        if reference in self._pool:
+            self._pool.remove(reference)
+        self._probed.pop(reference.path, None)
+        self._refresh_pool()
+        self._refresh_controls()
 
     def _place(self, reference: MediaRef, at: float | None = None) -> None:
         """Coloca a mídia numa trilha compatível, a partir do instante dado.
@@ -955,11 +1251,11 @@ class EditPanel(QWidget):
         return None
 
     def _insert_selected_media(self) -> None:
-        index = self._pool_box.currentIndex()
-        if not 0 <= index < len(self._pool):
+        row = self._media_list.currentRow()
+        if not 0 <= row < len(self._pool):
             return
         self._remember()
-        self._place(self._pool[index])
+        self._place(self._pool[row])
         self._after_edit()
 
     # ------------------------------------------------------------------
@@ -1084,6 +1380,7 @@ class EditPanel(QWidget):
 
     def _apply(self, project: Project, *, refit: bool = False) -> None:
         self._project = project
+        self._is_dirty = True
         self._after_edit(refit=refit)
 
     def _after_edit(self, *, refit: bool = False) -> None:
@@ -1092,21 +1389,29 @@ class EditPanel(QWidget):
         self._refresh_clip_fields()
         self._refresh_controls()
         self._view_timer.start()
-        self._request_frame(force=True)
+        if self._project.is_empty:
+            self._preview.clear_frame()
+        else:
+            self._request_frame(force=True)
         if self._playing:
             # A composição mudou com a reprodução em andamento, e o que está
             # saindo é a composição de antes: o grafo do ffmpeg foi montado na
             # hora em que o fluxo abriu (ver :meth:`_restart_stream`).
             self._live_timer.start()
+        self._update_project_label()
         self.changed.emit()
 
     def _on_clip_moved(self, clip_id: int, track_index: int, start: float) -> None:
         self._project = self._project.moved(clip_id, track_index, start)
+        self._is_dirty = True
         self._timeline.set_project(self._project)
+        self._update_project_label()
 
     def _on_clip_resized(self, clip_id: int, edge: str, seconds: float) -> None:
         self._project = self._project.resized(clip_id, edge, seconds)
+        self._is_dirty = True
         self._timeline.set_project(self._project)
+        self._update_project_label()
 
     def _on_edit_finished(self) -> None:
         self._after_edit()
@@ -1115,6 +1420,16 @@ class EditPanel(QWidget):
         self._remember()
         track = self._project.tracks[index]
         self._apply(self._project.with_track_muted(index, not track.muted))
+        if self._playing:
+            self._live_timer.stop()
+            self._restart_stream()
+
+    def _on_track_reordered(self, from_index: int, to_index: int) -> None:
+        self._remember()
+        self._apply(self._project.reordered_track(from_index, to_index))
+        if self._playing:
+            self._live_timer.stop()
+            self._restart_stream()
 
     def _add_track(self, kind: TrackKind) -> None:
         self._remember()
@@ -1427,6 +1742,9 @@ class EditPanel(QWidget):
         if tools is None or self._wanted is None:
             return
         self._frame_busy = True
+        if hasattr(self, "_loading_label") and not self._preview.has_frame:
+            self._loading_label.setText(strings.EDIT_LOADING_FRAME)
+            self._preview.setText(strings.EDIT_LOADING_FRAME)
         self._rendered = self._wanted
         self._frame_token = next(self._tokens)
         size = self._preview_size()
@@ -1442,12 +1760,16 @@ class EditPanel(QWidget):
 
     def _on_frame_done(self) -> None:
         self._frame_busy = False
+        if hasattr(self, "_loading_label") and (self._wanted is None or self._wanted == self._rendered):
+            self._loading_label.setText("")
         if self._wanted is not None and self._wanted != self._rendered:
             self._start_frame()
 
     def _on_frame(self, token: int, frame: object) -> None:
         if token not in (self._frame_token, self._play_token):
             return
+        if hasattr(self, "_loading_label"):
+            self._loading_label.setText("")
         self._show_frame(frame)
         if token != self._play_token or not self._playing:
             return
@@ -1461,17 +1783,17 @@ class EditPanel(QWidget):
         if self._on_fullscreen:
             self._fullscreen.set_frame(pixmap)
             return
-        area = self._preview.size()
-        if pixmap.width() > area.width() or pixmap.height() > area.height():
-            pixmap = pixmap.scaled(
-                area,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        self._preview.setPixmap(pixmap)
+        self._preview.set_frame_pixmap(pixmap)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        self._preview.update()
+        if not self._project.is_empty:
+            self._resize_timer.start()
+            self._view_timer.start()
+
+    def _on_splitter_moved(self, pos: int, index: int) -> None:
+        self._preview.update()
         if not self._project.is_empty:
             self._resize_timer.start()
             self._view_timer.start()
@@ -1497,6 +1819,7 @@ class EditPanel(QWidget):
         self._collapse.setText(
             strings.EDIT_EXPAND if self._collapsed else strings.EDIT_COLLAPSE
         )
+        self._preview.update()
         self._resize_timer.start()
         self.changed.emit()
 
@@ -1723,11 +2046,13 @@ class EditPanel(QWidget):
             self._seek_to(target)
 
     def _update_time_labels(self) -> None:
+        curr = format_timecode(self._position, milliseconds=False)
+        tot = format_timecode(self._duration, milliseconds=False)
         self._time_label.setText(
-            strings.EDIT_POSITION.format(
-                current=format_timecode(self._position),
-                total=format_timecode(self._duration),
-            )
+            strings.EDIT_POSITION.format(current=curr, total=tot)
+        )
+        self._time_label.setToolTip(
+            f"{format_timecode(self._position)}  /  {format_timecode(self._duration)}"
         )
         self._frame_label.setText(
             strings.EDIT_FRAME_NUMBER.format(index=frame_index(self._position, self._fps))
@@ -1740,16 +2065,16 @@ class EditPanel(QWidget):
         Em tipo proporcional o "1" é mais estreito que o "8": sem largura fixa,
         a barra de transporte inteira treme a cada quadro.
         """
-        biggest = format_timecode(self._duration)
+        biggest = format_timecode(self._duration, milliseconds=False)
         text = strings.EDIT_POSITION.format(current=biggest, total=biggest)
         self._time_label.setFixedWidth(
-            QFontMetrics(self._time_label.font()).horizontalAdvance(text) + 6
+            QFontMetrics(self._time_label.font()).horizontalAdvance(text) + 8
         )
         frames = strings.EDIT_FRAME_NUMBER.format(
             index=frame_index(self._duration, self._fps)
         )
         self._frame_label.setFixedWidth(
-            QFontMetrics(self._frame_label.font()).horizontalAdvance(frames) + 6
+            QFontMetrics(self._frame_label.font()).horizontalAdvance(frames) + 8
         )
 
     # ------------------------------------------------------------------
@@ -1871,6 +2196,20 @@ class EditPanel(QWidget):
         self._runner.start(worker, worker.signals.done)
         self._playback = worker
 
+    def _loop_playback(self) -> None:
+        self._stop_playback()
+        self._timeline.set_position(0.0)
+        self._update_time_labels()
+        self._start_playback(0.0)
+
+    def _on_audio_stopped(self) -> None:
+        if not self._playing:
+            return
+        if self._loop.isChecked():
+            self._loop_playback()
+        else:
+            self._stop_playback()
+
     def _on_tick(self) -> None:
         if not self._playing:
             return
@@ -1887,13 +2226,19 @@ class EditPanel(QWidget):
                 self._resynced_at = position
                 self._start_frames(position)
         if self._position >= self._duration - 1e-3:
-            self._stop_playback()
+            if self._loop.isChecked():
+                self._loop_playback()
+            else:
+                self._stop_playback()
 
     def _on_playback_done(self, token: int) -> None:
         """O fluxo de quadros acabou: sem som, é ele quem diz que terminou."""
         if token != self._play_token or not self._playing or self._audio.playing:
             return
-        self._stop_playback()
+        if self._loop.isChecked():
+            self._loop_playback()
+        else:
+            self._stop_playback()
 
     def _stop_playback(self) -> None:
         self._tick.stop()
@@ -2058,132 +2403,10 @@ class EditPanel(QWidget):
         return "mp4" if not suffix or video.media.kind is MediaKind.IMAGE else suffix
 
     def _refresh_plan(self) -> None:
-        fast = self._fast.isChecked() and self._fast_available()
-        if self._project.is_empty:
-            self._plan.setText("")
-            self._warning.setVisible(False)
-            self._export.setEnabled(False)
-            return
+        pass
 
-        if fast:
-            target = self._trim_target()
-            plan = strings.EDIT_PLAN_FAST.format(
-                container=target.container,
-                duration=format_span(target.output_duration),
-            )
-            self._warning.setText(self._drift_text(target))
-        else:
-            plan = describe_export(
-                self._project,
-                self._container(),
-                self._settings.hardware_encoder,
-                self._interpolating,
-            )
-            self._warning.setText(self._compose_warning())
-        self._plan.setText(strings.EDIT_PLAN.format(plan=plan))
-        self._warning.setVisible(bool(self._warning.text()))
-        self._export.setEnabled(True)
-
-    @property
-    def _interpolating(self) -> bool:
-        """Se a exportação vai inventar os quadros que faltam.
-
-        A caixa marcada não basta: ela fica desligada quando não há bloco abaixo
-        da taxa da tela, e uma caixa desligada não manda em nada.
-        """
-        return self._interpolate.isChecked() and can_interpolate(self._project)
-
-    def _compose_warning(self) -> str:
-        """O que precisa ser dito antes de a exportação entrar na fila."""
-        if self._interpolating:
-            # A memória entra no aviso porque é o número que decide se dá para
-            # exportar: ela sai da tela escolhida, que está no controle logo
-            # acima, e uma máquina que não a tem não fica lenta — ela cai.
-            return strings.EDIT_INTERPOLATE_WARN.format(
-                memory=format_size(interpolation_bytes(self._project))
-            )
-        if self._fast.isChecked() and not self._fast_available():
-            return strings.EDIT_FAST_UNAVAILABLE
-        return ""
-
-    def _drift_text(self, target: TrimTarget) -> str:
-        if target.anchor is None:
-            return ""
-        if target.drift < frame_step(self._fps):
-            return strings.EDIT_DRIFT_NONE
-        return strings.EDIT_DRIFT.format(
-            time=format_timecode(target.anchor), delta=format_span(target.drift)
-        )
-
-    def _enqueue(self) -> None:
-        tools = self._ensure_tools()
-        if tools is None:
-            return
-        if self._project.is_empty:
-            QMessageBox.information(
-                self, strings.DIALOG_WARNING_TITLE, strings.EDIT_NO_CLIPS
-            )
-            return
-
-        main = self._main_clip()
-        source = main.media.path if main else self._project.clips[0].media.path
-        local = self._probed.get(source)
-        if local is None:
-            try:
-                local = probe_file(source, tools)
-            except VideoManagerError as exc:
-                QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(exc))
-                return
-
-        fast = self._fast.isChecked() and self._fast_available()
-        target = self._trim_target() if fast else Composition(
-            self._project,
-            self._container(),
-            self._settings.hardware_encoder,
-            self._interpolating,
-        )
-        dest_dir = (
-            None if self._same_folder.isChecked() else self._settings.resolved_download_dir()
-        )
-        try:
-            # Reserva o nome no ato (ver ``converter.output_path``): sem isso,
-            # dois cliques em "Exportar" produziam duas tarefas para o **mesmo**
-            # arquivo, e a segunda apagava o resultado da primeira em silêncio.
-            destination = output_path(
-                source,
-                target,
-                dest_dir,
-                strings.EDIT_SUFFIX_ONE if fast else strings.EDIT_SUFFIX_EDIT,
-            )
-        except VideoManagerError as exc:
-            QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(exc))
-            return
-        job = Job(
-            url=str(source),
-            title=destination.name,
-            description=(
-                strings.EDIT_PLAN_FAST.format(
-                    container=target.container,
-                    duration=format_span(target.output_duration),
-                )
-                if fast
-                else describe_export(
-                    self._project,
-                    self._container(),
-                    self._settings.hardware_encoder,
-                    self._interpolating,
-                )
-            ),
-            kind=JobKind.TRIM,
-            opts={
-                "media": local,
-                "target": target,
-                "destination": destination,
-                "tools": tools,
-            },
-            warnings=(self._warning.text(),) if self._warning.text() else (),
-        )
-        self.jobs_ready.emit([job])
+    def _refresh_canvas_controls(self) -> None:
+        pass
 
     # ------------------------------------------------------------------
     # Sincronização geral
@@ -2229,7 +2452,8 @@ class EditPanel(QWidget):
         clip = self._timeline.selected_clip
         for widget in (*self._buttons, self._scroll):
             widget.setEnabled(loaded)
-        self._insert.setEnabled(bool(self._pool))
+        self._insert.setEnabled(bool(self._pool) and self._media_list.currentRow() >= 0)
+        self._export_button.setEnabled(loaded)
         # Volume só onde há som para ajustar. Num bloco cujo áudio foi
         # separado ele fica desligado de propósito: o som agora é o do outro
         # bloco, e é lá que ele se ajusta — oferecer o controle aqui seria
@@ -2253,21 +2477,6 @@ class EditPanel(QWidget):
         self._fullscreen_button.setEnabled(self._has_video)
         self._collapse.setEnabled(True)
 
-        self._fast.setEnabled(self._fast_available())
-        if not self._fast_available() and self._fast.isChecked():
-            self._fast.setChecked(False)
-
-        # Interpolar só faz sentido com bloco abaixo da taxa da tela. Desmarcar
-        # junto com o desligamento é o que impede uma caixa cinza e marcada
-        # continuar mandando na exportação.
-        interpolavel = can_interpolate(self._project)
-        self._interpolate.setEnabled(interpolavel)
-        self._interpolate.setToolTip(
-            strings.EDIT_INTERPOLATE_TIP if interpolavel else strings.EDIT_INTERPOLATE_OFF
-        )
-        if not interpolavel and self._interpolate.isChecked():
-            self._interpolate.setChecked(False)
-
         self._count_label.setText(
             strings.EDIT_TRACK_COUNT.format(
                 tracks=len(self._project.tracks),
@@ -2277,11 +2486,9 @@ class EditPanel(QWidget):
             if loaded
             else ""
         )
-        self._refresh_canvas_controls()
         self._lock_readouts()
         self._update_time_labels()
         self._sync_scrollbar()
-        self._refresh_plan()
         self._scan_keyframes()
 
     def _scan_keyframes(self) -> None:
@@ -2308,5 +2515,122 @@ class EditPanel(QWidget):
         self._keyframes = tuple(times) if isinstance(times, tuple) else ()
         for button in (self._prev_key, self._next_key):
             button.setEnabled(bool(self._keyframes) and self._fast_available())
-        self._refresh_plan()
+
+    # ------------------------------------------------------------------
+    # Projeto (Salvar e Carregar)
+    # ------------------------------------------------------------------
+
+    @property
+    def has_unsaved_changes(self) -> bool:
+        return self._is_dirty and not self._project.is_empty
+
+    def new_project(self) -> bool:
+        if self.has_unsaved_changes:
+            resp = QMessageBox.question(
+                self,
+                strings.PROJECT_MODIFIED_TITLE,
+                strings.PROJECT_MODIFIED_BODY,
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+            )
+            if resp == QMessageBox.StandardButton.Save:
+                if not self.save_project():
+                    return False
+            elif resp == QMessageBox.StandardButton.Cancel:
+                return False
+
+        self._project = new_project()
+        self._project_path = None
+        self._is_dirty = False
+        self._history.clear()
+        self._future.clear()
+        self._after_edit(refit=True)
+        self._timeline.fit()
+        self._update_project_label()
+        return True
+
+    def save_project(self) -> bool:
+        if self._project_path is None:
+            return self.save_project_as()
+        try:
+            save_project(self._project, self._project_path)
+            self._is_dirty = False
+            self._update_project_label()
+            return True
+        except ProjectError as exc:
+            QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(exc))
+            return False
+
+    def save_project_as(self) -> bool:
+        initial = str(self._project_path or Path.home() / "projeto.vmp")
+        path_str, _ = QFileDialog.getSaveFileName(
+            self,
+            strings.EDIT_SAVE_PROJECT,
+            initial,
+            strings.EDIT_PROJECT_FILTER,
+        )
+        if not path_str:
+            return False
+        path = Path(path_str)
+        try:
+            save_project(self._project, path)
+            self._project_path = path
+            self._is_dirty = False
+            self._update_project_label()
+            return True
+        except ProjectError as exc:
+            QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(exc))
+            return False
+
+    def open_project(self, path: Path | None = None) -> bool:
+        if self.has_unsaved_changes:
+            resp = QMessageBox.question(
+                self,
+                strings.PROJECT_MODIFIED_TITLE,
+                strings.PROJECT_MODIFIED_BODY,
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+            )
+            if resp == QMessageBox.StandardButton.Save:
+                if not self.save_project():
+                    return False
+            elif resp == QMessageBox.StandardButton.Cancel:
+                return False
+
+        if path is None:
+            path_str, _ = QFileDialog.getOpenFileName(
+                self,
+                strings.EDIT_OPEN_PROJECT,
+                str(Path.home()),
+                strings.EDIT_PROJECT_FILTER,
+            )
+            if not path_str:
+                return False
+            path = Path(path_str)
+
+        tools = self._ensure_tools()
+        try:
+            project, missing = load_project(path, tools)
+        except ProjectError as exc:
+            QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(exc))
+            return False
+
+        self._project_path = path
+        self._is_dirty = False
+        self._history.clear()
+        self._future.clear()
+        self._apply(project, refit=True)
+        self._timeline.fit()
+        self._update_project_label()
+
+        if missing:
+            missing_names = "\n".join(f"• {p.name} ({p})" for p in missing)
+            QMessageBox.warning(
+                self,
+                strings.DIALOG_WARNING_TITLE,
+                f"O projeto foi aberto, mas os seguintes arquivos não foram encontrados:\n\n{missing_names}",
+            )
+        return True
 

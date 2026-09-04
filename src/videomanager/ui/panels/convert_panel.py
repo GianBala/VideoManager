@@ -12,6 +12,7 @@ está baixando.
 from __future__ import annotations
 
 from collections.abc import Callable
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
@@ -72,6 +73,8 @@ class _DropList(QListWidget):
     onde os arquivos são soltos.
     """
 
+    delete_requested = Signal()
+
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(super().sizeHint().width(), self.minimumHeight())
 
@@ -87,6 +90,13 @@ class _DropList(QListWidget):
             strings.CONVERT_DROP_HINT,
         )
         painter.end()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self.delete_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class ConvertPanel(QWidget):
@@ -153,16 +163,23 @@ class ConvertPanel(QWidget):
         self._list = _DropList()
         self._list.setMinimumHeight(_LIST_MIN_HEIGHT)
         self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self._list.delete_requested.connect(self._remove_selected)
         box.addWidget(self._list, 1)
 
         row = QHBoxLayout()
         pick = QPushButton(strings.CONVERT_PICK)
+        pick.setToolTip(f"{strings.CONVERT_PICK} (Ctrl+O)")
         pick.clicked.connect(self._choose_files)
         row.addWidget(pick)
         self._remove = QPushButton(strings.CONVERT_REMOVE)
+        self._remove.setToolTip(f"{strings.CONVERT_REMOVE} (Del)")
         self._remove.clicked.connect(self._remove_selected)
         self._remove.setEnabled(False)
         row.addWidget(self._remove)
+        self._clear_btn = QPushButton(strings.CONVERT_CLEAR)
+        self._clear_btn.clicked.connect(self.clear_files)
+        self._clear_btn.setEnabled(False)
+        row.addWidget(self._clear_btn)
         row.addStretch(1)
         box.addLayout(row)
 
@@ -170,8 +187,9 @@ class ConvertPanel(QWidget):
         return group
 
     def _update_remove_button(self) -> None:
-        """"Remover selecionados" sem seleção não faz nada; fica desabilitado."""
         self._remove.setEnabled(bool(self._list.selectedItems()))
+        if hasattr(self, "_clear_btn"):
+            self._clear_btn.setEnabled(bool(self._media))
 
     def _build_target_group(self) -> QGroupBox:
         group = QGroupBox(strings.CONVERT_TARGET_GROUP)
@@ -323,6 +341,7 @@ class ConvertPanel(QWidget):
                 self, strings.DIALOG_WARNING_TITLE,
                 "Estes arquivos foram ignorados:\n\n" + "\n".join(rejected),
             )
+        self._update_remove_button()
         self._update_plan()
 
     @staticmethod
@@ -342,11 +361,16 @@ class ConvertPanel(QWidget):
             self._list.takeItem(row)
             if 0 <= row < len(self._media):
                 self._media.pop(row)
+        self._update_remove_button()
         self._update_plan()
+
+    def clear_files(self) -> None:
+        self._clear()
 
     def _clear(self) -> None:
         self._media.clear()
         self._list.clear()
+        self._update_remove_button()
         self._update_plan()
 
     # ------------------------------------------------------------------
@@ -365,6 +389,7 @@ class ConvertPanel(QWidget):
             video_codec=self._video_codec.currentData() or "copy",
             audio_codec="copy",
             height=self._resize.currentData(),
+            hardware=self._settings.hardware_encoder,
         )
 
     def _update_plan(self) -> None:
@@ -382,11 +407,18 @@ class ConvertPanel(QWidget):
             return
 
         target = self._build_target()
-        # Descreve pelo primeiro arquivo: descrever todos poluiria a tela, e o
-        # que interessa — copiar ou recodificar — é quase sempre igual no lote.
-        self._plan.setText(
-            strings.CONVERT_PLAN.format(plan=describe_target(self._media[0], target))
-        )
+        plans = [describe_target(m, target) for m in self._media]
+        unique_plans = list(dict.fromkeys(plans))
+        if len(unique_plans) == 1:
+            self._plan.setText(
+                strings.CONVERT_PLAN.format(plan=unique_plans[0])
+            )
+        else:
+            self._plan.setText(
+                strings.CONVERT_PLAN.format(
+                    plan=f"{unique_plans[0]} (e outros formatos distintos entre os {len(self._media)} arquivos)"
+                )
+            )
         self._plan.setVisible(True)
         self.changed.emit()
 
@@ -403,10 +435,13 @@ class ConvertPanel(QWidget):
             return
 
         target = self._build_target()
-        dest_dir = None if self._same_folder.isChecked() else self._settings.resolved_download_dir()
+        fallback_dir = self._settings.resolved_download_dir()
+        use_same_folder = self._same_folder.isChecked()
 
         jobs: list[Job] = []
         skipped: list[str] = []
+        fallback_used = False
+
         for media in self._media:
             # Um arquivo só de áudio não pode virar vídeo: avisar aqui é melhor
             # que deixar a tarefa falhar na fila.
@@ -416,6 +451,13 @@ class ConvertPanel(QWidget):
             if isinstance(target, AudioTarget) and not media.has_audio:
                 skipped.append(f"{media.path.name}: não tem trilha de áudio")
                 continue
+
+            dest_dir = None if use_same_folder else fallback_dir
+            target_dir = dest_dir or media.path.parent
+            if not os.access(target_dir, os.W_OK):
+                dest_dir = fallback_dir
+                fallback_used = True
+
             try:
                 # Reserva o nome de saída no ato (ver ``converter.output_path``).
                 # Pasta sem permissão de escrita falha aqui, com o nome do
@@ -439,6 +481,13 @@ class ConvertPanel(QWidget):
                 )
             )
 
+        if fallback_used:
+            QMessageBox.information(
+                self,
+                strings.DIALOG_INFO_TITLE,
+                f"A pasta de origem não permite escrita. "
+                f"Os arquivos serão salvos na pasta de downloads:\n{fallback_dir}",
+            )
         if skipped:
             QMessageBox.warning(
                 self, strings.DIALOG_WARNING_TITLE,
