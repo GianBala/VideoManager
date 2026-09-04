@@ -161,3 +161,51 @@ def test_unsupported_version(tmp_path: Path) -> None:
     bad_version.write_text(json.dumps({"version": 999}), encoding="utf-8")
     with pytest.raises(ProjectError, match="não é suportada"):
         load_project(bad_version)
+
+
+def test_save_load_additional_track_and_speed(tmp_path: Path) -> None:
+    img_file = tmp_path / "foto.png"
+    img_file.write_bytes(b"dummy_img")
+
+    ref = MediaRef(path=img_file, kind=MediaKind.IMAGE, width=800, height=600)
+    clip_add = Clip(
+        media=ref,
+        start=1.0,
+        duration=4.0,
+        speed=1.5,
+        x=0.25,
+        y=0.75,
+        scale=1.2,
+        rotation=45.0,
+        overlay_type="text",
+        text_content="Legenda",
+        font_family="Arial",
+        font_size=42,
+        font_bold=True,
+        font_italic=True,
+        text_color="#ffcc00",
+        filter_name="pb",
+    )
+    track_add = Track(kind=TrackKind.ADDITIONAL, name="Adicionais 1", clips=(clip_add,))
+    proj = Project(tracks=(track_add,), width=1920, height=1080, fps=30.0)
+
+    proj_file = tmp_path / "projeto_adicionais.vmp"
+    save_project(proj, proj_file)
+
+    loaded, missing = load_project(proj_file)
+    assert not missing
+    assert len(loaded.additional_tracks) == 1
+    loaded_clip = loaded.additional_tracks[0].clips[0]
+    assert loaded_clip.speed == 1.5
+    assert loaded_clip.x == 0.25
+    assert loaded_clip.y == 0.75
+    assert loaded_clip.scale == 1.2
+    assert loaded_clip.rotation == 45.0
+    assert loaded_clip.overlay_type == "text"
+    assert loaded_clip.text_content == "Legenda"
+    assert loaded_clip.font_family == "Arial"
+    assert loaded_clip.font_size == 42
+    assert loaded_clip.font_bold is True
+    assert loaded_clip.font_italic is True
+    assert loaded_clip.text_color == "#ffcc00"
+    assert loaded_clip.filter_name == "pb"
