@@ -422,9 +422,16 @@ class _Preview(QLabel):
         self.setMouseTracking(True)
 
     def _get_clip_pixmap(self, clip: Clip) -> QPixmap | None:
-        path = clip.media.path
-        if not path:
+        if clip.overlay_type == "text":
+            try:
+                from videomanager.core.composer import render_text_to_image
+                txt_path = render_text_to_image(clip)
+                return QPixmap(str(txt_path))
+            except Exception:
+                return None
+        if clip.media is None or not clip.media.path:
             return None
+        path = clip.media.path
         pix = self._clip_pixmaps.get(path)
         if pix is None and path.exists():
             pix = QPixmap(str(path))
@@ -485,21 +492,27 @@ class _Preview(QLabel):
         scale = max(0.1, clip.scale)
 
         if clip.overlay_type == "text":
-            scale_factor = vrect.width() / max(1.0, float(self._proj_w))
-            px_size = max(12, int(clip.font_size * scale_factor * scale))
-            font = QFont(clip.font_family, px_size)
+            font = QFont(clip.font_family or "Sans Serif", clip.font_size or 36)
             font.setBold(clip.font_bold)
             font.setItalic(clip.font_italic)
             fm = QFontMetrics(font)
             text = clip.text_content or "Texto"
-            w = max(60.0, float(fm.horizontalAdvance(text) + 24))
-            h = max(30.0, float(fm.height() + 16))
+            rect = fm.boundingRect(QRect(0, 0, self._proj_w, self._proj_h), int(Qt.TextFlag.TextWordWrap), text)
+            pad = 20
+            full_w = max(40, ((rect.width() + pad * 2 + 3) // 4) * 4)
+            full_h = max(40, ((rect.height() + pad * 2 + 3) // 4) * 4)
+            preview_scale = vrect.width() / max(1.0, float(self._proj_w))
+            w = max(20.0, full_w * preview_scale * scale)
+            h = max(20.0, full_h * preview_scale * scale)
             return (cx, cy, w, h)
 
-        if clip.media.kind is MediaKind.IMAGE or clip.overlay_type == "image":
-            base_w, base_h = image_base_size(
-                clip.media.width, clip.media.height, self._proj_w, self._proj_h
-            )
+        if clip.overlay_type == "image" or clip.is_image:
+            if clip.media is not None:
+                base_w, base_h = image_base_size(
+                    clip.media.width, clip.media.height, self._proj_w, self._proj_h
+                )
+            else:
+                base_w, base_h = (400, 300)
             preview_scale = vrect.width() / max(1.0, float(self._proj_w))
             w = max(20.0, base_w * preview_scale * scale)
             h = max(20.0, base_h * preview_scale * scale)
@@ -659,26 +672,27 @@ class _Preview(QLabel):
                 painter.translate(cx, cy)
                 painter.rotate(clip.rotation)
 
-                if self._drag_mode and clip.overlay_type == "text":
-                    painter.save()
-                    scale_factor = target.width() / max(1.0, float(self._proj_w))
-                    px_size = max(12, int(clip.font_size * scale_factor * clip.scale))
-                    f = QFont(clip.font_family, px_size)
-                    f.setBold(clip.font_bold)
-                    f.setItalic(clip.font_italic)
-                    painter.setFont(f)
-                    painter.setPen(QColor(clip.text_color))
-                    painter.drawText(
-                        QRectF(-w / 2, -h / 2, w, h),
-                        Qt.AlignmentFlag.AlignCenter,
-                        clip.text_content or "Texto",
-                    )
-                    painter.restore()
-                elif self._drag_mode and (clip.overlay_type == "image" or clip.is_image):
+                if self._drag_mode and (clip.overlay_type in ("image", "text") or clip.is_image):
                     img_pix = self._get_clip_pixmap(clip)
                     if img_pix and not img_pix.isNull():
                         painter.save()
+                        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
                         painter.drawPixmap(QRectF(-w / 2, -h / 2, w, h).toRect(), img_pix)
+                        painter.restore()
+                    elif clip.overlay_type == "text":
+                        painter.save()
+                        scale_factor = target.width() / max(1.0, float(self._proj_w))
+                        px_size = max(8, int(clip.font_size * scale_factor * clip.scale))
+                        f = QFont(clip.font_family or "Sans Serif", px_size)
+                        f.setBold(clip.font_bold)
+                        f.setItalic(clip.font_italic)
+                        painter.setFont(f)
+                        painter.setPen(QColor(clip.text_color or "#ffffff"))
+                        painter.drawText(
+                            QRectF(-w / 2, -h / 2, w, h),
+                            Qt.AlignmentFlag.AlignCenter,
+                            clip.text_content or "Texto",
+                        )
                         painter.restore()
 
                 pen = QPen(QColor("#00e5ff"), 1.5, Qt.PenStyle.DashLine)
@@ -763,8 +777,31 @@ class _MediaListWidget(QListWidget):
             super().dropEvent(event)
 
 
+_POPULAR_FONTS = [
+    "Arial",
+    "Comic Sans MS",
+    "Helvetica",
+    "Times New Roman",
+    "Courier New",
+    "Verdana",
+    "Georgia",
+    "Impact",
+    "Trebuchet MS",
+    "Ubuntu",
+    "Roboto",
+    "DejaVu Sans",
+    "DejaVu Serif",
+    "DejaVu Sans Mono",
+    "Inter",
+    "Liberation Sans",
+    "Sans Serif",
+    "Serif",
+    "Monospace",
+]
+
+
 class _FontSelectorWidget(QWidget):
-    """Seletor de fonte expansível com lista retrátil e prévia tipográfica."""
+    """Seletor de fonte expansível com lista retrátil, busca e prévia tipográfica."""
 
     font_changed = Signal(str)
 
@@ -791,26 +828,58 @@ class _FontSelectorWidget(QWidget):
         )
         self._list_container.setVisible(False)
         c_layout = QVBoxLayout(self._list_container)
-        c_layout.setContentsMargins(2, 2, 2, 2)
+        c_layout.setContentsMargins(4, 4, 4, 4)
+        c_layout.setSpacing(4)
+
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("🔍 Buscar fonte...")
+        self._search_input.setStyleSheet(
+            "QLineEdit { background: #1a1a22; border: 1px solid #444; border-radius: 3px; padding: 4px 6px; color: #fff; font-size: 11px; }"
+        )
+        self._search_input.textChanged.connect(self._filter_fonts)
+        c_layout.addWidget(self._search_input)
 
         self._font_list = QListWidget()
         self._font_list.setFixedHeight(140)
         self._font_list.setStyleSheet(
             "QListWidget { background: transparent; border: none; color: #eee; } "
             "QListWidget::item { padding: 4px 6px; border-radius: 3px; } "
-            "QListWidget::item:selected { background: #7b1fa2; color: #fff; }"
+            "QListWidget::item:selected { background: #0284c7; color: #fff; } "
+            "QListWidget::item:hover { background: #2f2f3c; }"
         )
 
-        families = sorted(set(QFontDatabase.families()))
-        for fam in families:
+        seen: set[str] = set()
+        all_families: list[str] = []
+        for fam in _POPULAR_FONTS:
+            k = fam.lower()
+            if k not in seen:
+                seen.add(k)
+                all_families.append(fam)
+
+        for fam in QFontDatabase.families():
+            if not fam.startswith("."):
+                k = fam.lower()
+                if k not in seen:
+                    seen.add(k)
+                    all_families.append(fam)
+
+        all_families.sort(key=lambda s: s.lower())
+
+        for fam in all_families:
             item = QListWidgetItem(fam)
             self._font_list.addItem(item)
-            if fam == initial_family:
+            if fam.lower() == initial_family.lower():
                 item.setSelected(True)
 
         self._font_list.itemClicked.connect(self._on_item_clicked)
         c_layout.addWidget(self._font_list)
         layout.addWidget(self._list_container)
+
+    def _filter_fonts(self, query: str) -> None:
+        q = query.strip().lower()
+        for i in range(self._font_list.count()):
+            item = self._font_list.item(i)
+            item.setHidden(bool(q and q not in item.text().lower()))
 
     def _toggle_list(self) -> None:
         self._expanded = not self._expanded
@@ -818,6 +887,8 @@ class _FontSelectorWidget(QWidget):
         arrow = "▴" if self._expanded else "▾"
         self._toggle_btn.setText(f"🔤 {self._current_family}  {arrow}")
         if self._expanded:
+            self._search_input.clear()
+            self._search_input.setFocus()
             items = self._font_list.findItems(self._current_family, Qt.MatchFlag.MatchExactly)
             if items:
                 self._font_list.scrollToItem(items[0])
@@ -837,6 +908,12 @@ class _FontSelectorWidget(QWidget):
         items = self._font_list.findItems(family, Qt.MatchFlag.MatchExactly)
         if items:
             self._font_list.setCurrentItem(items[0])
+        else:
+            for i in range(self._font_list.count()):
+                it = self._font_list.item(i)
+                if it.text().lower() == family.lower():
+                    self._font_list.setCurrentItem(it)
+                    break
 
 
 class EditPanel(QWidget):
@@ -1141,14 +1218,18 @@ class EditPanel(QWidget):
         layout.addWidget(self._font_selector)
 
         row_size = QHBoxLayout()
-        row_size.setSpacing(4)
+        row_size.setSpacing(6)
         lbl_size = QLabel("Tamanho:")
         row_size.addWidget(lbl_size)
 
-        btn_dec = QPushButton("−")
-        btn_dec.setFixedSize(28, 28)
-        btn_dec.setStyleSheet("QPushButton { font-weight: bold; font-size: 14px; }")
-        btn_dec.clicked.connect(lambda: self._font_size_spin.setValue(max(8, self._font_size_spin.value() - 4)))
+        btn_dec = QPushButton("-")
+        btn_dec.setFixedSize(30, 28)
+        btn_dec.setToolTip("Diminuir tamanho da fonte")
+        f_dec = btn_dec.font()
+        f_dec.setBold(True)
+        f_dec.setPointSize(14)
+        btn_dec.setFont(f_dec)
+        btn_dec.clicked.connect(lambda: self._font_size_spin.setValue(max(8, self._font_size_spin.value() - 2)))
         row_size.addWidget(btn_dec)
 
         self._font_size_spin = QSpinBox()
@@ -1160,21 +1241,15 @@ class EditPanel(QWidget):
         row_size.addWidget(self._font_size_spin, 1)
 
         btn_inc = QPushButton("+")
-        btn_inc.setFixedSize(28, 28)
-        btn_inc.setStyleSheet("QPushButton { font-weight: bold; font-size: 14px; }")
-        btn_inc.clicked.connect(lambda: self._font_size_spin.setValue(min(200, self._font_size_spin.value() + 4)))
+        btn_inc.setFixedSize(30, 28)
+        btn_inc.setToolTip("Aumentar tamanho da fonte")
+        f_inc = btn_inc.font()
+        f_inc.setBold(True)
+        f_inc.setPointSize(14)
+        btn_inc.setFont(f_inc)
+        btn_inc.clicked.connect(lambda: self._font_size_spin.setValue(min(200, self._font_size_spin.value() + 2)))
         row_size.addWidget(btn_inc)
         layout.addLayout(row_size)
-
-        size_presets = QHBoxLayout()
-        size_presets.setSpacing(4)
-        for sz in (24, 36, 48, 64, 72):
-            btn_sz = QPushButton(f"{sz}")
-            btn_sz.setFixedHeight(22)
-            btn_sz.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 4px; }")
-            btn_sz.clicked.connect(lambda _, s=sz: self._font_size_spin.setValue(s))
-            size_presets.addWidget(btn_sz)
-        layout.addLayout(size_presets)
 
         row_style = QHBoxLayout()
         row_style.setSpacing(4)
@@ -1272,7 +1347,8 @@ class EditPanel(QWidget):
             btn.setStyleSheet(
                 "QPushButton { text-align: left; padding: 6px 10px; border-radius: 4px; border: 1px solid #444; background: #2a2a32; color: #fff; font-size: 12px; }"
                 "QPushButton:hover { background: #353540; border-color: #666; }"
-                "QPushButton:checked { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7b1fa2, stop:1 #9c27b0); border: 1.5px solid #e1bee7; font-weight: bold; color: #ffffff; }"
+                "QPushButton:checked { background: #2a2a32; border: 2px solid #38bdf8; font-weight: bold; color: #ffffff; }"
+                "QPushButton:checked:hover { background: #32323c; border: 2px solid #38bdf8; }"
             )
             self._filter_group.addButton(btn)
             btn.clicked.connect(lambda _, f=fid: self._select_filter(f))
@@ -2115,15 +2191,22 @@ class EditPanel(QWidget):
         self._insert.setEnabled(has_sel)
 
     def _delete_selected_media(self) -> None:
-        item = self._media_list.currentItem()
-        if item is None:
+        items = self._media_list.selectedItems()
+        if not items:
+            item = self._media_list.currentItem()
+            if item is not None:
+                items = [item]
+        if not items:
             return
-        ref = item.data(Qt.ItemDataRole.UserRole)
-        if isinstance(ref, MediaRef):
-            self._remove_media_ref(ref)
+        for item in items:
+            ref = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(ref, MediaRef):
+                self._remove_media_ref(ref)
 
     def _show_media_context_menu(self, pos: QPoint) -> None:
         item = self._media_list.itemAt(pos)
+        if item is not None and not item.isSelected():
+            self._media_list.setCurrentItem(item)
         menu = QMenu(self)
         if item is not None:
             ref = item.data(Qt.ItemDataRole.UserRole)
@@ -2436,8 +2519,15 @@ class EditPanel(QWidget):
         self._apply(self._project.split(clip.clip_id, position))
 
     def _delete_selected(self) -> None:
+        focused = QApplication.focusWidget()
+        if self._media_list.hasFocus() or (focused is not None and self._media_list.isAncestorOf(focused)):
+            self._delete_selected_media()
+            return
         clip = self._timeline.selected_clip
         if clip is None:
+            if not self._timeline.hasFocus() and (self._media_list.selectedItems() or self._media_list.currentRow() >= 0):
+                self._delete_selected_media()
+                return
             return
         self._remember()
         self._apply(self._project.without_clip(clip.clip_id))

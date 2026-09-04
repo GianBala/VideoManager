@@ -125,9 +125,15 @@ class _Piece:
 
 
 def render_text_to_image(clip: Clip) -> Path:
-    """Renderiza um bloco de texto para um arquivo PNG transparente temporário."""
+    import sys
     from PySide6.QtCore import QRect, Qt
-    from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter
+    from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QImage, QPainter
+
+    if QGuiApplication.instance() is None:
+        try:
+            _ = QGuiApplication(["videomanager", "-platform", "offscreen"])
+        except Exception:
+            _ = QGuiApplication(["videomanager"])
 
     font = QFont(clip.font_family or "Sans Serif", clip.font_size or 36)
     font.setBold(clip.font_bold)
@@ -148,7 +154,7 @@ def render_text_to_image(clip: Clip) -> Path:
     painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
     painter.setFont(font)
     painter.setPen(QColor(clip.text_color or "#ffffff"))
-    painter.drawText(QRect(pad, pad, rect.width(), rect.height()), int(Qt.AlignmentFlag.AlignCenter), text)
+    painter.drawText(QRect(0, 0, w, h), int(Qt.AlignmentFlag.AlignCenter), text)
     painter.end()
 
     cache_dir = Path(tempfile.gettempdir()) / "videomanager_cache"
@@ -317,7 +323,10 @@ def _video_chain(
     is_overlay = clip.overlay_type in ("image", "text") or clip.is_image
     if is_overlay:
         steps = [f"trim=duration={piece.duration:.6f}", "setpts=PTS-STARTPTS", f"fps={fps:.6f}"]
-        if clip.overlay_type == "image" or clip.is_image:
+        if clip.overlay_type == "text":
+            if abs(clip.scale - 1.0) >= 0.01:
+                steps.append(f"scale=w='trunc(iw*{clip.scale:.4f}/2)*2':h='trunc(ih*{clip.scale:.4f}/2)*2'")
+        elif clip.overlay_type == "image" or clip.is_image:
             base_w, base_h = image_base_size(
                 clip.media.width, clip.media.height, project.width, project.height
             )
