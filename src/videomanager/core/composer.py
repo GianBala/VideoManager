@@ -30,6 +30,8 @@ e a soma é responsabilidade dele.
 
 from __future__ import annotations
 
+import math
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -122,6 +124,40 @@ class _Piece:
     track_muted: bool = False
 
 
+def render_text_to_image(clip: Clip) -> Path:
+    """Renderiza um bloco de texto para um arquivo PNG transparente temporário."""
+    from PySide6.QtCore import QRect, Qt
+    from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter
+
+    font = QFont(clip.font_family or "Sans Serif", clip.font_size or 36)
+    font.setBold(clip.font_bold)
+    font.setItalic(clip.font_italic)
+
+    text = clip.text_content or "Texto"
+    metrics = QFontMetrics(font)
+    rect = metrics.boundingRect(QRect(0, 0, 1920, 1080), int(Qt.TextFlag.TextWordWrap), text)
+    pad = 20
+    w = max(40, ((rect.width() + pad * 2 + 3) // 4) * 4)
+    h = max(40, ((rect.height() + pad * 2 + 3) // 4) * 4)
+
+    img = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(img)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    painter.setFont(font)
+    painter.setPen(QColor(clip.text_color or "#ffffff"))
+    painter.drawText(QRect(pad, pad, rect.width(), rect.height()), int(Qt.AlignmentFlag.AlignCenter), text)
+    painter.end()
+
+    cache_dir = Path(tempfile.gettempdir()) / "videomanager_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cache_dir / f"text_{clip.clip_id}.png"
+    img.save(str(out_path), "PNG")
+    return out_path
+
+
 def _pieces(
     project: Project,
     at: float,
@@ -133,21 +169,22 @@ def _pieces(
     """Blocos que aparecem na janela pedida, na ordem de composição.
 
     A ordem é a de baixo para cima: a trilha de vídeo mais baixa é o fundo e as
-    de cima passam por cima dela, como em qualquer editor. As de áudio entram
-    depois, e para elas a ordem não significa nada — som se soma.
+    de cima passam por cima dela. Em seguida vêm as trilhas de adicionais
+    (sobreposições, textos, filtros) no topo visual.
     """
     end = None if span is None else at + span
-    ordered = [*reversed(project.video_tracks), *project.audio_tracks]
+    ordered = [
+        *reversed(project.video_tracks),
+        *reversed(project.additional_tracks),
+        *project.audio_tracks,
+    ]
 
     pieces: list[_Piece] = []
+    input_idx = 0
     for track in ordered:
         if track.muted and track.kind is TrackKind.AUDIO:
-            # Trilha de áudio muda não entra no grafo: é mais barato não
-            # decodificar do que decodificar e multiplicar por zero.
             continue
         if track.muted and not want_video:
-            # Se a trilha está muda e não precisamos de vídeo (ex.: reprodução só
-            # de áudio), os blocos dela não têm o que contribuir para a saída.
             continue
         for clip in track.sorted_clips():
             if clip.end <= at or (end is not None and clip.start >= end):
@@ -160,10 +197,14 @@ def _pieces(
             has_a = want_audio and clip.has_sound and not track.muted
             if not has_v and not has_a:
                 continue
+            is_filter = clip.overlay_type == "filter"
+            idx = -1 if is_filter else input_idx
+            if not is_filter:
+                input_idx += 1
             pieces.append(
                 _Piece(
                     clip=clip,
-                    index=len(pieces),
+                    index=idx,
                     seek=clip.source_time(begin),
                     offset=begin - at,
                     duration=finish - begin,
@@ -175,6 +216,16 @@ def _pieces(
 
 def _input_args(piece: _Piece, fps: float) -> list[str]:
     clip = piece.clip
+    if clip.overlay_type == "filter":
+        return []
+    if clip.overlay_type == "text":
+        path = render_text_to_image(clip)
+        return [
+            "-loop", "1",
+            "-framerate", f"{fps:.6f}",
+            "-t", f"{piece.duration:.6f}",
+            "-i", str(path),
+        ]
     if clip.media.kind is MediaKind.IMAGE:
         # Uma imagem não tem duração: ela é repetida pelo tempo do bloco. O
         # ``-t`` na entrada é o que encerra essa repetição.
@@ -230,15 +281,53 @@ def _rate_chain(piece: _Piece, fps: float, interpolate: bool) -> str:
     return f"fps={fps:.6f}"
 
 
+def _atempo_filters(speed: float) -> list[str]:
+    filters: list[str] = []
+    s = speed
+    while s > 2.0:
+        filters.append("atempo=2.0")
+        s /= 2.0
+    while s < 0.5:
+        filters.append("atempo=0.5")
+        s /= 0.5
+    if abs(s - 1.0) > 0.005:
+        filters.append(f"atempo={s:.4f}")
+    return filters
+
+
 def _video_chain(
     piece: _Piece, project: Project, fps: float, interpolate: bool = False
 ) -> str:
     """Ajusta um bloco ao formato da tela e o coloca no instante certo."""
-    steps = [f"trim=duration={piece.duration:.6f}"]
-    if piece.offset > 0:
-        steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
+    clip = piece.clip
+    is_overlay = clip.overlay_type in ("image", "text") or (
+        clip.is_image and (clip.scale != 1.0 or clip.rotation != 0.0 or clip.x != 0.5 or clip.y != 0.5)
+    )
+    if is_overlay:
+        steps = [f"trim=duration={piece.duration:.6f}", "setpts=PTS-STARTPTS", f"fps={fps:.6f}"]
+        if abs(clip.scale - 1.0) >= 0.01:
+            steps.append(f"scale=w='trunc(iw*{clip.scale:.4f}/2)*2':h='trunc(ih*{clip.scale:.4f}/2)*2'")
+        if abs(clip.rotation) >= 0.1:
+            rad = math.radians(clip.rotation)
+            steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=none")
+        steps.append("format=rgba")
+        return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
+
+    steps = []
+    if abs(clip.speed - 1.0) >= 0.01:
+        steps.append(f"trim=duration={piece.duration * clip.speed:.6f}")
+        inv = 1.0 / clip.speed
+        if piece.offset > 0:
+            steps.append(f"setpts={inv:.6f}*(PTS-STARTPTS)+{piece.offset:.6f}/TB")
+        else:
+            steps.append(f"setpts={inv:.6f}*(PTS-STARTPTS)")
     else:
-        steps.append("setpts=PTS-STARTPTS")
+        steps.append(f"trim=duration={piece.duration:.6f}")
+        if piece.offset > 0:
+            steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
+        else:
+            steps.append("setpts=PTS-STARTPTS")
+
     if _rate_first(piece, project, fps, interpolate):
         steps.append(_rate_chain(piece, fps, interpolate))
         steps.append(_fit_scale(project.width, project.height))
@@ -305,12 +394,17 @@ def _fit_scale(width: int, height: int) -> str:
 
 
 def _audio_chain(piece: _Piece) -> str:
-    steps = [f"atrim=duration={piece.duration:.6f}", "asetpts=PTS-STARTPTS"]
-    if abs(piece.clip.gain_db) >= 0.05:
-        steps.append(f"volume={piece.clip.gain_db:.2f}dB")
+    clip = piece.clip
+    if abs(clip.speed - 1.0) >= 0.01:
+        steps = [f"atrim=duration={piece.duration * clip.speed:.6f}", "asetpts=PTS-STARTPTS"]
+        steps += _atempo_filters(clip.speed)
+    else:
+        steps = [f"atrim=duration={piece.duration:.6f}", "asetpts=PTS-STARTPTS"]
+    if abs(clip.gain_db) >= 0.05:
+        steps.append(f"volume={clip.gain_db:.2f}dB")
     steps.append(_AUDIO_BASE)
     steps.append(
-        _MONO_TO_STEREO if piece.clip.media.channels == 1 else _TO_STEREO
+        _MONO_TO_STEREO if clip.media.channels == 1 else _TO_STEREO
     )
     if piece.offset > 0:
         # ``all=1`` aplica o atraso a todos os canais; sem ele, só o primeiro
@@ -374,15 +468,45 @@ def build_graph(
         )
         current = "[base]"
         for order, piece in enumerate(video_parts):
+            if piece.clip.overlay_type == "filter":
+                fname = piece.clip.filter_name
+                start, end = piece.offset, piece.offset + piece.duration
+                if fname == "pb":
+                    fexpr = f"hue=s=0:enable='between(t,{start:.6f},{end:.6f})'"
+                elif fname == "sepia":
+                    fexpr = (
+                        f"colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"
+                        f":enable='between(t,{start:.6f},{end:.6f})'"
+                    )
+                elif fname == "vinheta":
+                    fexpr = f"vignette=PI/4:enable='between(t,{start:.6f},{end:.6f})'"
+                elif fname == "inverter":
+                    fexpr = f"negate=enable='between(t,{start:.6f},{end:.6f})'"
+                elif fname == "contraste":
+                    fexpr = f"eq=contrast=1.5:enable='between(t,{start:.6f},{end:.6f})'"
+                else:
+                    fexpr = f"hue=s=0:enable='between(t,{start:.6f},{end:.6f})'"
+                label = f"[f{order}]"
+                filters.append(f"{current}{fexpr}{label}")
+                current = label
+                continue
+
             filters.append(_video_chain(piece, project, fps, interpolate))
             start, end = piece.offset, piece.offset + piece.duration
             label = f"[o{order}]"
+            is_overlay_item = piece.clip.overlay_type in ("image", "text") or (
+                piece.clip.is_image and (piece.clip.scale != 1.0 or piece.clip.rotation != 0.0 or piece.clip.x != 0.5 or piece.clip.y != 0.5)
+            )
+            if is_overlay_item:
+                overlay_coords = f"x='({piece.clip.x:.4f}*W-w/2)':y='({piece.clip.y:.4f}*H-h/2)'"
+            else:
+                overlay_coords = "x=0:y=0"
             filters.append(
                 f"{current}[v{piece.index}]"
                 # ``repeatlast=0`` impede o último quadro do bloco de ficar
                 # congelado na tela depois que ele acaba; ``eof_action=pass``
                 # deixa o fundo seguir sozinho a partir daí.
-                f"overlay=eof_action=pass:repeatlast=0"
+                f"overlay={overlay_coords}:eof_action=pass:repeatlast=0"
                 f":enable='between(t,{start:.6f},{end:.6f})'{label}"
             )
             current = label

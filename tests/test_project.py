@@ -76,7 +76,8 @@ class TestMidia:
 
     def test_trilha_so_aceita_o_que_ela_mostra(self) -> None:
         assert accepts(TrackKind.VIDEO, clip(VIDEO))
-        assert accepts(TrackKind.VIDEO, clip(FOTO))
+        assert not accepts(TrackKind.VIDEO, clip(FOTO))
+        assert accepts(TrackKind.ADDITIONAL, clip(FOTO))
         assert not accepts(TrackKind.VIDEO, clip(SOM))
         assert accepts(TrackKind.AUDIO, clip(SOM))
         # O som de um vídeo só desce para a trilha de áudio por "separar áudio".
@@ -580,3 +581,25 @@ class TestOrdemDasTrilhas:
         assert reordenado.tracks[0].name == "Vídeo 1"
         assert reordenado.tracks[1].name == "Camada Superior"
         assert reordenado.topmost_video_at(2.0).media.kind is MediaKind.VIDEO
+
+    def test_trilha_adicionais_e_velocidade(self) -> None:
+        proj = new_project().with_track(TrackKind.ADDITIONAL, name="Adicionais 1")
+        assert len(proj.additional_tracks) == 1
+        assert proj.additional_tracks[0].name == "Adicionais 1"
+
+        c_foto = clip(FOTO, start=0.0, duration=5.0)
+        c_text = clip(FOTO, start=2.0, duration=3.0, overlay_type="text", text_content="Olá")
+        assert accepts(TrackKind.ADDITIONAL, c_foto)
+        assert accepts(TrackKind.ADDITIONAL, c_text)
+
+        # Teste de velocidade
+        c_fast = clip(VIDEO, start=0.0, duration=5.0, speed=2.0)
+        assert c_fast.speed == 2.0
+        assert c_fast.speed_label == "2,0x"
+        assert c_fast.out_point == 10.0  # 0 + 5.0 * 2.0
+        assert c_fast.source_time(2.0) == 4.0  # 0 + 2.0 * 2.0
+
+        c_slow = clip(VIDEO, start=0.0, duration=5.0, speed=0.5)
+        assert c_slow.speed_label == "0,5x"
+        assert c_slow.out_point == 2.5
+        assert c_slow.source_time(2.0) == 1.0

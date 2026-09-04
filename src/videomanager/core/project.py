@@ -79,6 +79,7 @@ class MediaKind(Enum):
 class TrackKind(Enum):
     VIDEO = "vídeo"
     AUDIO = "áudio"
+    ADDITIONAL = "adicionais"
 
 
 @dataclass(frozen=True)
@@ -190,6 +191,22 @@ class Clip:
     # imagem dele por cima da montagem, a trilha de áudio recusava recebê-lo de
     # volta num arrasto e colar mandava o som para a trilha de vídeo.
     audio_only: bool = False
+    # Velocidade de reprodução do bloco (1.0 = normal, 2.0 = dobro, 0.5 = metade).
+    speed: float = 1.0
+    # Posição e transformação para trilhas de adicionais
+    x: float = 0.5  # Centro X normalizado (0.0 a 1.0)
+    y: float = 0.5  # Centro Y normalizado (0.0 a 1.0)
+    scale: float = 1.0  # Fator de escala (1.0 = padrão)
+    rotation: float = 0.0  # Rotação em graus (0.0 a 360.0)
+    # Metadados de sobreposições de adicionais
+    overlay_type: str = "none"  # "none", "image", "text", "filter"
+    text_content: str = ""
+    font_family: str = "Sans Serif"
+    font_size: int = 36
+    font_bold: bool = False
+    font_italic: bool = False
+    text_color: str = "#ffffff"
+    filter_name: str = ""  # "pb", "sepia", "contraste", "vinheta", "inverter"
     # Identidade estável, preservada por ``dataclasses.replace``: é por ela que
     # a seleção, o cache de miniaturas e o desfazer reconhecem o mesmo bloco
     # depois de qualquer alteração.
@@ -201,11 +218,11 @@ class Clip:
 
     @property
     def out_point(self) -> float:
-        return self.in_point + self.duration
+        return self.in_point + self.duration * self.speed
 
     @property
     def has_sound(self) -> bool:
-        return self.media.has_audio and not self.muted and not self.detached
+        return self.media.has_audio and not self.muted and not self.detached and not self.is_additional
 
     @property
     def has_image(self) -> bool:
@@ -214,12 +231,18 @@ class Clip:
         Não basta a mídia ter vídeo: o bloco de "separar áudio" nasce do mesmo
         arquivo e não mostra nada.
         """
+        if self.overlay_type in ("image", "text", "filter"):
+            return True
         return self.media.has_video and not self.audio_only
+
+    @property
+    def is_additional(self) -> bool:
+        return self.overlay_type in ("image", "text", "filter") or self.is_image
 
     @property
     def can_adjust_sound(self) -> bool:
         """Se faz sentido oferecer volume e mudo para este bloco."""
-        return self.media.has_audio and not self.detached
+        return self.media.has_audio and not self.detached and not self.is_additional
 
     @property
     def is_image(self) -> bool:
@@ -230,7 +253,7 @@ class Clip:
 
     def source_time(self, seconds: float) -> float:
         """Instante dentro do arquivo que corresponde a um instante da edição."""
-        return self.in_point + max(0.0, seconds - self.start)
+        return self.in_point + max(0.0, (seconds - self.start) * self.speed)
 
     @property
     def gain_label(self) -> str:
@@ -241,6 +264,12 @@ class Clip:
         if abs(self.gain_db) < 0.05:
             return ""
         return f"{self.gain_db:+.1f} dB".replace(".", ",")
+
+    @property
+    def speed_label(self) -> str:
+        if abs(self.speed - 1.0) < 0.05:
+            return ""
+        return f"{self.speed:.1f}x".replace(".", ",")
 
 
 @dataclass(frozen=True)
@@ -333,12 +362,16 @@ class Project:
         return tuple(t for t in self.tracks if t.kind is TrackKind.VIDEO)
 
     @property
+    def additional_tracks(self) -> tuple[Track, ...]:
+        return tuple(t for t in self.tracks if t.kind is TrackKind.ADDITIONAL)
+
+    @property
     def audio_tracks(self) -> tuple[Track, ...]:
         return tuple(t for t in self.tracks if t.kind is TrackKind.AUDIO)
 
     @property
     def has_video(self) -> bool:
-        return any(track.clips for track in self.video_tracks)
+        return any(track.clips for track in (*self.video_tracks, *self.additional_tracks))
 
     @property
     def has_sound(self) -> bool:
@@ -369,8 +402,8 @@ class Project:
         return self.tracks[track_index].clip_at(seconds)
 
     def topmost_video_at(self, seconds: float) -> Clip | None:
-        """O bloco de vídeo que aparece por cima no instante dado."""
-        for track in self.video_tracks:
+        """O bloco visual que aparece por cima no instante dado."""
+        for track in (*self.additional_tracks, *self.video_tracks):
             clip = track.clip_at(seconds)
             if clip is not None:
                 return clip
@@ -386,12 +419,11 @@ class Project:
     def with_track(self, kind: TrackKind, name: str = "") -> Project:
         """Acrescenta uma trilha vazia, no lugar certo da pilha.
 
-        Vídeo entra por cima das de vídeo, áudio entra no fim: é a ordem que a
-        composição espera, e a que o usuário vê na tela.
+        Adicionais e vídeo entram por cima, áudio entra no fim.
         """
         track = Track(kind=kind, name=name or _default_name(self, kind))
         tracks = list(self.tracks)
-        if kind is TrackKind.VIDEO:
+        if kind in (TrackKind.ADDITIONAL, TrackKind.VIDEO):
             tracks.insert(0, track)
         else:
             tracks.append(track)
@@ -680,15 +712,20 @@ class Project:
 def accepts(kind: TrackKind, clip: Clip) -> bool:
     """Se um bloco pode viver numa trilha desta espécie.
 
-    Áudio não sobe para trilha de vídeo (não há o que mostrar) e imagem ou vídeo
-    não descem para trilha de áudio (o som deles, quando existe, é separado por
-    "separar áudio").
+    Adicionais (textos, filtros e imagens) vivem exclusivamente em trilhas
+    de adicionais. Áudio não sobe para trilha de vídeo (não há o que mostrar)
+    e imagem ou vídeo não descem para trilha de áudio (o som deles, quando
+    existe, é separado por "separar áudio").
 
     Quem decide é o **bloco**, não a mídia dele: o bloco criado por "separar
     áudio" vem de um arquivo com imagem e mesmo assim é áudio. Enquanto isso
     saía da mídia, esse bloco não podia ser arrastado nem dentro da própria
     trilha, e colar mandava o som para a trilha de vídeo.
     """
+    if kind is TrackKind.ADDITIONAL:
+        return clip.is_additional
+    if clip.is_additional:
+        return False
     if kind is TrackKind.VIDEO:
         return clip.has_image
     return clip.media.kind is MediaKind.AUDIO or clip.audio_only
