@@ -43,7 +43,7 @@ from .. import APP_DISPLAY_NAME, APP_NAME, __version__
 from ..core import hwaccel
 from ..core.binaries import FFmpegTools, find_tools
 from ..core.job import Job, JobStatus
-from ..core.models import FormatMatrix, MediaInfo, PlaylistInfo
+from ..core.models import FormatMatrix, MediaInfo, Mode, PlaylistInfo
 from ..core.selector import (
     AudioRequest,
     VideoRequest,
@@ -70,6 +70,7 @@ from .theme import qpalette, stylesheet
 
 # Índices das abas, na ordem em que são criadas.
 _TAB_DOWNLOAD = 0
+_TAB_CONVERT = 1
 _TAB_EDIT = 2
 # Sem margem lateral: o conteúdo da aba fica na mesma coluna da fila, que está
 # fora das abas. Em cima, só o respiro que separa da barra de abas.
@@ -90,6 +91,7 @@ class MainWindow(QMainWindow):
         self._settings = settings
         self._tools: FFmpegTools | None = None
         self._media: MediaInfo | None = None
+        self._probe_worker: ProbeWorker | None = None
         self._runner = WorkerRunner()
         # A sondagem da placa é uma vez por execução (ver
         # :meth:`_warm_hardware_probe`).
@@ -123,6 +125,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_menu()
+        self._update_menu_scope(_TAB_DOWNLOAD)
         self._update_status()
         # Depois de a janela aparecer, e não durante a montagem: o que se ganha
         # é tempo na primeira exportação, e não vale pagá-lo na abertura.
@@ -221,6 +224,7 @@ class MainWindow(QMainWindow):
         """
         self._queue_panel.setVisible(index != _TAB_EDIT)
         self._balance_panes()
+        self._update_menu_scope(index)
 
     def _tabs_height(self) -> int:
         """Altura pedida pelas abas: a maior de todas, para todas caberem.
@@ -415,44 +419,142 @@ class MainWindow(QMainWindow):
         return pane
 
     def _build_menu(self) -> None:
-        # Sem entrada para a conversão: ela é uma aba, sempre à vista. Um item
-        # de menu que só troca de aba é caminho duplicado para a mesma coisa.
-        file_menu = self.menuBar().addMenu(strings.MENU_FILE)
+        self._file_menu = self.menuBar().addMenu(strings.MENU_FILE)
+        self._file_menu.aboutToShow.connect(self._on_file_menu_about_to_show)
+        self._tools_menu = self.menuBar().addMenu(strings.MENU_TOOLS)
+        self._help_menu = self.menuBar().addMenu(strings.MENU_HELP)
 
-        open_dest = QAction(strings.ACTION_OPEN_DEST, self)
-        open_dest.triggered.connect(
+        # Ações universais
+        self._quit_action = QAction(strings.ACTION_QUIT, self)
+        self._quit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        self._quit_action.triggered.connect(self.close)
+
+        self._settings_action = QAction(strings.ACTION_SETTINGS, self)
+        self._settings_action.triggered.connect(self._open_settings)
+
+        self._about_action = QAction(strings.ACTION_ABOUT, self)
+        self._about_action.triggered.connect(self._show_about)
+        self._help_menu.addAction(self._about_action)
+
+        # Ações da aba Download
+        self._open_download_dest = QAction(strings.ACTION_OPEN_DOWNLOAD_DEST, self)
+        self._open_download_dest.triggered.connect(
             lambda: QDesktopServices.openUrl(
                 QUrl.fromLocalFile(str(self._settings.resolved_download_dir()))
             )
         )
-        file_menu.addAction(open_dest)
-
-        file_menu.addSeparator()
-        quit_action = QAction(strings.ACTION_QUIT, self)
-        quit_action.setShortcut(QKeySequence.StandardKey.Quit)
-        quit_action.triggered.connect(self.close)
-        file_menu.addAction(quit_action)
-
-        tools_menu = self.menuBar().addMenu(strings.MENU_TOOLS)
-        settings_action = QAction(strings.ACTION_SETTINGS, self)
-        settings_action.triggered.connect(self._open_settings)
-        tools_menu.addAction(settings_action)
-        update_action = QAction(strings.ACTION_UPDATE_ENGINE, self)
-        update_action.triggered.connect(self._update_engine)
-        # Num pacote não há pip, e o yt-dlp vem embutido: o item fica à vista
-        # com a explicação na dica, em vez de sumir sem dizer por quê — a
-        # atualização da engine é o remédio que as próprias mensagens de erro
-        # recomendam, e some-lo deixaria essa recomendação sem destino.
+        self._update_engine_action = QAction(strings.ACTION_UPDATE_ENGINE, self)
+        self._update_engine_action.triggered.connect(self._update_engine)
         if is_packaged():
-            update_action.setEnabled(False)
-            update_action.setToolTip(strings.DIALOG_ENGINE_PACKAGED)
-        tools_menu.addAction(update_action)
-        tools_menu.setToolTipsVisible(True)
+            self._update_engine_action.setEnabled(False)
+            self._update_engine_action.setToolTip(strings.DIALOG_ENGINE_PACKAGED)
 
-        help_menu = self.menuBar().addMenu(strings.MENU_HELP)
-        about = QAction(strings.ACTION_ABOUT, self)
-        about.triggered.connect(self._show_about)
-        help_menu.addAction(about)
+        # Ações da aba Converter
+        self._convert_add_action = QAction(strings.ACTION_CONVERT_ADD, self)
+        self._convert_add_action.triggered.connect(self._convert._choose_files)
+
+        self._convert_remove_action = QAction(strings.ACTION_CONVERT_REMOVE, self)
+        self._convert_remove_action.triggered.connect(self._convert._remove_selected)
+
+        self._convert_clear_action = QAction(strings.ACTION_CONVERT_CLEAR, self)
+        self._convert_clear_action.triggered.connect(self._convert.clear_files)
+
+        self._convert_open_dest = QAction(strings.ACTION_OPEN_CONVERT_DEST, self)
+        self._convert_open_dest.triggered.connect(self._open_convert_dest)
+
+        # Ações da aba Editar
+        self._new_proj_action = QAction(strings.ACTION_NEW_PROJECT, self)
+        self._new_proj_action.triggered.connect(self._new_project)
+
+        self._open_proj_action = QAction(strings.ACTION_OPEN_PROJECT, self)
+        self._open_proj_action.triggered.connect(self._open_project)
+
+        self._save_proj_action = QAction(strings.ACTION_SAVE_PROJECT, self)
+        self._save_proj_action.triggered.connect(self._save_project)
+
+        self._save_as_proj_action = QAction(strings.ACTION_SAVE_PROJECT_AS, self)
+        self._save_as_proj_action.triggered.connect(self._save_project_as)
+
+        self._import_media_action = QAction(strings.ACTION_IMPORT_MEDIA, self)
+        self._import_media_action.triggered.connect(self._edit.import_media_dialog)
+
+        self._export_action = QAction(strings.ACTION_EXPORT_VIDEO, self)
+        self._export_action.triggered.connect(self._edit._open_export_dialog)
+
+    def _on_file_menu_about_to_show(self) -> None:
+        if self._tabs.currentIndex() == _TAB_CONVERT:
+            self._convert_remove_action.setEnabled(bool(self._convert._list.selectedItems()))
+            self._convert_clear_action.setEnabled(bool(self._convert._media))
+
+    def _update_menu_scope(self, index: int) -> None:
+        if not hasattr(self, "_file_menu"):
+            return
+
+        self._file_menu.clear()
+        self._tools_menu.clear()
+
+        # Configurações gerais sempre presentes em Ferramentas
+        self._tools_menu.addAction(self._settings_action)
+
+        if index == _TAB_DOWNLOAD:
+            # Desativa atalhos de outras abas
+            self._convert_add_action.setShortcut(QKeySequence())
+            self._new_proj_action.setShortcut(QKeySequence())
+            self._open_proj_action.setShortcut(QKeySequence())
+            self._save_proj_action.setShortcut(QKeySequence())
+            self._save_as_proj_action.setShortcut(QKeySequence())
+            self._import_media_action.setShortcut(QKeySequence())
+            self._export_action.setShortcut(QKeySequence())
+
+            # Arquivo na aba Download
+            self._file_menu.addAction(self._open_download_dest)
+            self._file_menu.addSeparator()
+            self._file_menu.addAction(self._quit_action)
+
+            # Ferramentas na aba Download (motor de download yt-dlp)
+            self._tools_menu.addAction(self._update_engine_action)
+
+        elif index == _TAB_CONVERT:
+            # Ativa atalhos de conversão e limpa os de edição
+            self._convert_add_action.setShortcut(QKeySequence("Ctrl+O"))
+            self._new_proj_action.setShortcut(QKeySequence())
+            self._open_proj_action.setShortcut(QKeySequence())
+            self._save_proj_action.setShortcut(QKeySequence())
+            self._save_as_proj_action.setShortcut(QKeySequence())
+            self._import_media_action.setShortcut(QKeySequence())
+            self._export_action.setShortcut(QKeySequence())
+
+            # Arquivo na aba Conversão
+            self._file_menu.addAction(self._convert_add_action)
+            self._file_menu.addAction(self._convert_remove_action)
+            self._file_menu.addAction(self._convert_clear_action)
+            self._file_menu.addSeparator()
+            self._file_menu.addAction(self._convert_open_dest)
+            self._file_menu.addSeparator()
+            self._file_menu.addAction(self._quit_action)
+
+        elif index == _TAB_EDIT:
+            # Limpa atalho de conversão e ativa atalhos de edição
+            self._convert_add_action.setShortcut(QKeySequence())
+            self._new_proj_action.setShortcut(QKeySequence("Ctrl+N"))
+            self._open_proj_action.setShortcut(QKeySequence("Ctrl+O"))
+            self._save_proj_action.setShortcut(QKeySequence("Ctrl+S"))
+            self._save_as_proj_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+            self._import_media_action.setShortcut(QKeySequence("Ctrl+I"))
+            self._export_action.setShortcut(QKeySequence("Ctrl+E"))
+
+            # Arquivo na aba Edição
+            self._file_menu.addAction(self._new_proj_action)
+            self._file_menu.addAction(self._open_proj_action)
+            self._file_menu.addAction(self._save_proj_action)
+            self._file_menu.addAction(self._save_as_proj_action)
+            self._file_menu.addSeparator()
+            self._file_menu.addAction(self._import_media_action)
+            self._file_menu.addAction(self._export_action)
+            self._file_menu.addSeparator()
+            self._file_menu.addAction(self._quit_action)
+
+        self._tools_menu.setToolTipsVisible(True)
 
     # ------------------------------------------------------------------
     # Primeira execução
@@ -475,24 +577,37 @@ class MainWindow(QMainWindow):
             self._analyze()
 
     def _analyze(self) -> None:
+        if self._probe_worker is not None:
+            self._cancel_analyze()
+            return
         url = self._url.text().strip()
         if not url:
             return
         self._set_analyzing(True)
         worker = ProbeWorker(url, self._settings)
+        self._probe_worker = worker
         worker.signals.finished.connect(self._on_probed)
         worker.signals.failed.connect(self._on_probe_failed)
         self._runner.start(worker, worker.signals.finished, worker.signals.failed)
 
+    def _cancel_analyze(self) -> None:
+        if self._probe_worker is not None:
+            self._probe_worker.cancel()
+            self._probe_worker = None
+        self._set_analyzing(False)
+
     def _set_analyzing(self, busy: bool) -> None:
-        self._analyze_button.setEnabled(not busy)
         self._analyze_button.setText(
-            strings.URL_ANALYZING if busy else strings.URL_ANALYZE
+            strings.URL_CANCEL if busy else strings.URL_ANALYZE
+        )
+        self._analyze_button.setToolTip(
+            strings.URL_CANCEL_TIP if busy else ""
         )
         self._url.setEnabled(not busy)
         self._paste.setEnabled(not busy)
 
     def _on_probed(self, result: object) -> None:
+        self._probe_worker = None
         self._set_analyzing(False)
         if isinstance(result, PlaylistInfo):
             self._handle_playlist(result)
@@ -509,6 +624,7 @@ class MainWindow(QMainWindow):
         self._balance_panes()
 
     def _on_probe_failed(self, message: str) -> None:
+        self._probe_worker = None
         self._set_analyzing(False)
         QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, message)
 
@@ -603,17 +719,24 @@ class MainWindow(QMainWindow):
     def _handle_playlist(self, playlist: PlaylistInfo) -> None:
         if not self._require_tools():
             return
-        dialog = PlaylistDialog(playlist, self)
+        initial_audio = self._quality.mode is Mode.AUDIO_ONLY
+        dialog = PlaylistDialog(playlist, initial_audio=initial_audio, parent=self)
         if dialog.exec() != PlaylistDialog.DialogCode.Accepted:
             return
         entries = dialog.selected_entries()
         if not entries:
             return
 
+        if dialog.is_audio_mode():
+            self._quality.set_mode(Mode.AUDIO_ONLY)
+        else:
+            self._quality.set_mode(Mode.VIDEO)
+
         # Cada item da playlist tem formatos próprios, então uma escolha por id
         # concreto não valeria para todos. O pedido vai por limite de resolução,
         # que o seletor resolve item a item na hora do download.
-        request = self._quality.build_batch_request(dialog.height_limit())
+        height_limit = None if dialog.is_audio_mode() else dialog.height_limit()
+        request = self._quality.build_batch_request(height_limit)
         for entry in entries:
             placeholder = MediaInfo(
                 url=entry.url, title=entry.title, matrix=FormatMatrix()
@@ -754,8 +877,39 @@ class MainWindow(QMainWindow):
             parts.append(strings.STATUS_FFMPEG.format(source=self._tools.source))
         self.statusBar().showMessage("  |  ".join(parts))
 
+    def _new_project(self) -> None:
+        self._tabs.setCurrentIndex(_TAB_EDIT)
+        self._edit.new_project()
+
+    def _open_project(self) -> None:
+        self._tabs.setCurrentIndex(_TAB_EDIT)
+        self._edit.open_project()
+
+    def _save_project(self) -> None:
+        self._edit.save_project()
+
+    def _save_project_as(self) -> None:
+        self._edit.save_project_as()
+
+    def _open_convert_dest(self) -> None:
+        target_dir = self._settings.resolved_download_dir()
+        if self._convert._same_folder.isChecked() and self._convert._media:
+            target_dir = self._convert._media[0].path.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target_dir)))
+
     def closeEvent(self, event) -> None:  # noqa: N802
-        """Confirma a saída quando há tarefas em andamento."""
+        """Confirma a saída quando há alterações não salvas ou tarefas em andamento."""
+        if hasattr(self, "_edit") and self._edit.has_unsaved_changes:
+            answer = QMessageBox.question(
+                self,
+                strings.PROJECT_MODIFIED_TITLE,
+                strings.PROJECT_MODIFIED_BODY,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+
         unfinished = sum(1 for job in self._queue.jobs if not job.status.is_final)
         if unfinished:
             answer = QMessageBox.question(
