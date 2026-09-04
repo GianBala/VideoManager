@@ -411,6 +411,22 @@ class Project:
         del tracks[track_index]
         return replace(self, tracks=tuple(tracks))
 
+    def reordered_track(self, from_index: int, to_index: int) -> Project:
+        """Reordena uma trilha na pilha, movendo de ``from_index`` para ``to_index``.
+
+        Mover uma trilha de vídeo para cima ou para baixo altera a ordem das
+        camadas visuais da composição: a trilha no topo da lista sobrepõe as de
+        baixo. Para trilhas de áudio, organiza a ordem visual na linha do tempo.
+        """
+        if from_index == to_index or not (
+            0 <= from_index < len(self.tracks) and 0 <= to_index < len(self.tracks)
+        ):
+            return self
+        tracks = list(self.tracks)
+        track = tracks.pop(from_index)
+        tracks.insert(to_index, track)
+        return replace(self, tracks=tuple(tracks))
+
     def with_clip(self, track_index: int, clip: Clip) -> Project:
         track = self.tracks[track_index]
         clips = tuple(sorted((*track.clips, clip), key=lambda c: c.start))

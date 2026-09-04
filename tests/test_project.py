@@ -542,3 +542,41 @@ class TestOrdemDasTrilhas:
         projeto = projeto.with_clip(0, foto)
         visivel = projeto.topmost_video_at(2.0)
         assert visivel is not None and visivel.media.kind is MediaKind.IMAGE
+
+    def test_reordenar_trilhas_altera_posicao_e_mantem_integridade(self) -> None:
+        projeto = new_project().with_track(TrackKind.VIDEO, name="Trilha 2").with_track(TrackKind.VIDEO, name="Trilha 1")
+        # tracks: Trilha 1 (index 0), Trilha 2 (index 1), Video 1 (index 2), Audio 1 (index 3)
+        assert projeto.tracks[0].name == "Trilha 1"
+        assert projeto.tracks[1].name == "Trilha 2"
+
+        # Move index 0 para index 1
+        movido = projeto.reordered_track(0, 1)
+        assert movido.tracks[0].name == "Trilha 2"
+        assert movido.tracks[1].name == "Trilha 1"
+        assert len(movido.tracks) == len(projeto.tracks)
+
+        # Mesmos índices ou fora dos limites não alteram o projeto
+        assert projeto.reordered_track(0, 0) is projeto
+        assert projeto.reordered_track(-1, 2) is projeto
+        assert projeto.reordered_track(0, 99) is projeto
+
+    def test_reordenar_trilha_de_video_altera_prioridade_de_exibicao(self) -> None:
+        # Projeto com duas trilhas de vídeo com blocos no mesmo instante
+        proj = new_project()
+        clip_v1 = clip(VIDEO, start=0.0, duration=5.0)
+        clip_foto = clip(FOTO, start=0.0, duration=5.0)
+
+        # Trilha 0 terá FOTO, Trilha 1 terá VIDEO
+        proj = proj.with_track(TrackKind.VIDEO, name="Camada Superior")
+        # proj.tracks: Camada Superior (0), Video 1 (1), Audio 1 (2)
+        proj = proj.with_clip(0, clip_foto)
+        proj = proj.with_clip(1, clip_v1)
+
+        # No início, Camada Superior (0) é quem aparece por cima
+        assert proj.topmost_video_at(2.0).media.kind is MediaKind.IMAGE
+
+        # Ao mover a Trilha 1 (Vídeo) para o índice 0, ela passa a ter prioridade visual máxima
+        reordenado = proj.reordered_track(1, 0)
+        assert reordenado.tracks[0].name == "Vídeo 1"
+        assert reordenado.tracks[1].name == "Camada Superior"
+        assert reordenado.topmost_video_at(2.0).media.kind is MediaKind.VIDEO
