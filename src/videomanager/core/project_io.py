@@ -135,6 +135,7 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                 "name": track.name,
                 "kind": track.kind.name,
                 "muted": track.muted,
+                "visible": track.visible,
                 "clips": clips_data,
             }
         )
@@ -181,6 +182,7 @@ def project_from_dict(
 
         name = str(t_data.get("name", ""))
         muted = bool(t_data.get("muted", False))
+        visible = bool(t_data.get("visible", True))
         track_id = int(t_data.get("track_id", 0))
 
         clips: list[Clip] = []
@@ -227,6 +229,7 @@ def project_from_dict(
                 kind=kind,
                 name=name,
                 muted=muted,
+                visible=visible,
                 clips=tuple(sorted(clips, key=lambda c: c.start)),
                 track_id=track_id,
             )

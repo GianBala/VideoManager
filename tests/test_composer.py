@@ -774,4 +774,56 @@ class TestVelocidadeEFiltros:
         assert img2.width() > 0
         assert img2.height() > 0
 
+    def test_trilha_invisivel_e_audio_mudo_nao_processados(self) -> None:
+        c_vid1 = clip(VIDEO, start=0.0, duration=10.0)
+        c_vid2 = clip(OUTRO, start=0.0, duration=10.0)
+        c_add = clip(FOTO, start=2.0, duration=5.0, overlay_type="image")
+        c_aud = clip(MONO, start=0.0, duration=10.0)
+
+        # Projeto com Vídeo 1 (visível), Vídeo 2 (invisível), Adicionais (invisível), Áudio (mudo)
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(c_vid1,), visible=True, name="V1"),
+                Track(kind=TrackKind.VIDEO, clips=(c_vid2,), visible=False, name="V2"),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_add,), visible=False, name="A1"),
+                Track(kind=TrackKind.AUDIO, clips=(c_aud,), muted=True, name="Aud1"),
+            )
+        )
+
+        graph = build_graph(p)
+        # Somente Vídeo 1 deve estar nas entradas
+        inputs_str = " ".join(graph.inputs)
+        assert str(VIDEO.path) in inputs_str
+        assert str(OUTRO.path) not in inputs_str
+        assert str(FOTO.path) not in inputs_str
+        assert str(MONO.path) not in inputs_str
+
+        # Como Aud1 está mudo e V2 está invisível, o áudio deve ser apenas do V1
+        assert graph.audio_label == "[a0]"
+        # V2 e A1 não devem ter filtros de overlay
+        filters_str = ";".join(graph.filters)
+        assert "[v0]" in filters_str
+        assert "[v1]" not in filters_str
+
+    def test_overlay_com_offset_tem_setpts_correto(self) -> None:
+        c_vid = clip(VIDEO, start=0.0, duration=10.0)
+        c_add = clip(FOTO, start=3.5, duration=4.0, overlay_type="image")
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(c_vid,), visible=True),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_add,), visible=True),
+            )
+        )
+        graph = build_graph(p)
+        filters_str = ";".join(graph.filters)
+        assert "setpts=PTS-STARTPTS+3.500000/TB" in filters_str
+
+    def test_simple_trim_ignora_trilha_invisivel(self) -> None:
+        c1 = clip(VIDEO, start=0.0, duration=5.0)
+        p_vis = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(c1,), visible=True),))
+        assert simple_trim(p_vis) is not None
+
+        p_invis = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(c1,), visible=False),))
+        assert simple_trim(p_invis) is None
+
 

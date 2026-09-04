@@ -50,7 +50,7 @@ from .. import strings
 
 # Faixas do widget.
 RULER_HEIGHT = 20
-HEADER_WIDTH = 104
+HEADER_WIDTH = 148
 VIDEO_TRACK_HEIGHT = 58
 AUDIO_TRACK_HEIGHT = 42
 TRACK_GAP = 4
@@ -171,6 +171,7 @@ class Timeline(QWidget):
     edit_finished = Signal()
     clip_selected = Signal(int)
     track_mute_clicked = Signal(int)
+    track_visibility_clicked = Signal(int)
     track_reordered = Signal(int, int)  # índice de origem, índice de destino
     view_changed = Signal()
     # Botão direito: o widget diz **onde** foi clicado e o painel monta o menu.
@@ -504,15 +505,25 @@ class Timeline(QWidget):
         painter.setPen(
             self._color("accent_text") if is_dragged else self._color("text_dim")
         )
-        right_margin = -8 if track.kind is TrackKind.ADDITIONAL else -34
+        right_margin = -28
+        if track.kind is TrackKind.VIDEO:
+            right_margin = -54
         painter.drawText(
-            rect.adjusted(8, 0, right_margin, 0),
+            rect.adjusted(10, 0, right_margin, 0),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             track.name,
         )
 
-        # Botão de mudo: apenas para trilhas de vídeo e áudio
-        if track.kind is not TrackKind.ADDITIONAL:
+        # Botão de visibilidade (olho): para vídeo e adicionais
+        if track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL):
+            box = self._eye_rect(index)
+            painter.setBrush(self._color("surface_alt") if track.visible else QColor("#1a1b24"))
+            painter.setPen(QPen(self._color("border"), 1))
+            painter.drawRoundedRect(box, 4, 4)
+            self._paint_eye_icon(painter, box, track.visible)
+
+        # Botão de mudo: para vídeo e áudio
+        if track.kind in (TrackKind.VIDEO, TrackKind.AUDIO):
             box = self._mute_rect(index)
             painter.setBrush(self._color("error") if track.muted else self._color("surface_alt"))
             painter.setPen(QPen(self._color("border"), 1))
@@ -520,9 +531,33 @@ class Timeline(QWidget):
             painter.setPen(
                 self._color("accent_text") if track.muted else self._color("text_dim")
             )
+            font_m = QFont(self.font())
+            font_m.setBold(True)
+            painter.setFont(font_m)
             painter.drawText(
                 box, int(Qt.AlignmentFlag.AlignCenter), "M"
             )
+
+    def _paint_eye_icon(self, painter: QPainter, box: QRectF, visible: bool) -> None:
+        cx = box.center().x()
+        cy = box.center().y()
+        path = QPainterPath()
+        path.moveTo(cx - 7, cy)
+        path.cubicTo(cx - 3.5, cy - 4.5, cx + 3.5, cy - 4.5, cx + 7, cy)
+        path.cubicTo(cx + 3.5, cy + 4.5, cx - 3.5, cy + 4.5, cx - 7, cy)
+
+        if visible:
+            painter.setPen(QPen(self._color("text_dim"), 1.3))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(path)
+            painter.setBrush(self._color("text_dim"))
+            painter.drawEllipse(QPointF(cx, cy), 2.2, 2.2)
+        else:
+            painter.setPen(QPen(QColor("#64748b"), 1.2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(path)
+            painter.setPen(QPen(self._color("error"), 1.6))
+            painter.drawLine(QPointF(cx - 6, cy + 5), QPointF(cx + 6, cy - 5))
 
     def _paint_track_drop_indicator(self, painter: QPainter) -> None:
         lane = self._lane_rect(self._drop_track_target)
@@ -537,9 +572,16 @@ class Timeline(QWidget):
             int(header.left()), int(y), int(lane.right()), int(y)
         )
 
+    def _eye_rect(self, index: int) -> QRectF:
+        rect = self._header_rect(index)
+        track = self._project.tracks[index]
+        if track.kind is TrackKind.VIDEO:
+            return QRectF(rect.right() - 50, rect.center().y() - 10, 22, 20)
+        return QRectF(rect.right() - 25, rect.center().y() - 10, 22, 20)
+
     def _mute_rect(self, index: int) -> QRectF:
         rect = self._header_rect(index)
-        return QRectF(rect.right() - 26, rect.center().y() - 9, 20, 18)
+        return QRectF(rect.right() - 25, rect.center().y() - 10, 22, 20)
 
     def _paint_lane(self, painter: QPainter, index: int, track) -> None:
         lane = self._lane_rect(index)
@@ -549,6 +591,8 @@ class Timeline(QWidget):
 
         painter.save()
         painter.setClipRect(lane)
+        if not track.visible:
+            painter.setOpacity(0.35)
         for clip in track.clips:
             self._paint_clip(painter, index, clip, track)
         painter.restore()
@@ -740,6 +784,15 @@ class Timeline(QWidget):
             help_event = cast(QHelpEvent, event)
             pos = help_event.position()
             kind, index, _ = self._hit(pos.x(), pos.y())
+            if kind == "olho" and 0 <= index < len(self._project.tracks):
+                track = self._project.tracks[index]
+                text = (
+                    strings.EDIT_TRACK_HIDE
+                    if track.visible
+                    else strings.EDIT_TRACK_SHOW
+                )
+                QToolTip.showText(help_event.globalPosition().toPoint(), text, self)
+                return True
             if kind == "mudo" and 0 <= index < len(self._project.tracks):
                 track = self._project.tracks[index]
                 text = (
@@ -768,7 +821,9 @@ class Timeline(QWidget):
             return "cursor", -1, -1
         if x < HEADER_WIDTH:
             track = self._project.tracks[index]
-            if track.kind is not TrackKind.ADDITIONAL and self._mute_rect(index).adjusted(-3, -3, 3, 3).contains(x, y):
+            if track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL) and self._eye_rect(index).adjusted(-3, -3, 3, 3).contains(x, y):
+                return "olho", index, -1
+            if track.kind in (TrackKind.VIDEO, TrackKind.AUDIO) and self._mute_rect(index).adjusted(-3, -3, 3, 3).contains(x, y):
                 return "mudo", index, -1
             return "cabecalho", index, -1
 
@@ -801,6 +856,9 @@ class Timeline(QWidget):
             return
 
         kind, index, clip_id = self._hit(x, y)
+        if kind == "olho":
+            self.track_visibility_clicked.emit(index)
+            return
         if kind == "mudo":
             self.track_mute_clicked.emit(index)
             return

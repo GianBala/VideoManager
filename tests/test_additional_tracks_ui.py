@@ -597,3 +597,45 @@ def test_text_stroke_controls_and_bidirectional_sync(qapp: QApplication, dummy_t
         panel.shutdown()
 
 
+def test_timeline_track_visibility_toggle_and_menu(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        # Insere um vídeo fictício na timeline
+        from videomanager.core.project import new_project, TrackKind, MediaRef, Clip, MediaKind
+        ref = MediaRef(Path("/m/teste.mp4"), MediaKind.VIDEO, duration=10.0, width=1280, height=720, has_audio=True)
+        clip_v = Clip(media=ref, start=0.0, duration=10.0)
+        proj = new_project().with_clip(0, clip_v)
+        panel._apply(proj)
+
+        # Trilha 0 (Vídeo) visível inicialmente
+        assert panel._project.tracks[0].visible is True
+
+        # Menu no cabeçalho deve oferecer "Ocultar a trilha"
+        menu = panel.build_menu("cabecalho", 0, -1)
+        action_texts = [a.text() for a in menu.actions()]
+        assert strings.EDIT_TRACK_HIDE in action_texts
+
+        # Oculta a trilha
+        panel._toggle_track_visibility(0)
+        assert panel._project.tracks[0].visible is False
+
+        # Menu no cabeçalho agora deve oferecer "Mostrar a trilha"
+        menu2 = panel.build_menu("cabecalho", 0, -1)
+        action_texts2 = [a.text() for a in menu2.actions()]
+        assert strings.EDIT_TRACK_SHOW in action_texts2
+
+        # Clica no botão de olho da timeline via simulação de mouse
+        eye_rect = panel._timeline._eye_rect(0)
+        hit_kind, hit_idx, _ = panel._timeline._hit(eye_rect.center().x(), eye_rect.center().y())
+        assert hit_kind == "olho"
+        assert hit_idx == 0
+
+        # Mostra a trilha novamente
+        panel._toggle_track_visibility(0)
+        assert panel._project.tracks[0].visible is True
+    finally:
+        panel.shutdown()
+
+
+
