@@ -84,6 +84,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFontComboBox,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -547,7 +548,8 @@ class _Preview(QLabel):
             return None
         cx = vrect.x() + clip.x * vrect.width()
         cy = vrect.y() + clip.y * vrect.height()
-        scale = max(0.1, clip.scale)
+        sx = max(0.05, getattr(clip, "scale_x", clip.scale))
+        sy = max(0.05, getattr(clip, "scale_y", clip.scale))
 
         if clip.overlay_type == "text":
             font = QFont(clip.font_family or "Sans Serif", clip.font_size or 36)
@@ -564,8 +566,8 @@ class _Preview(QLabel):
             full_w = max(40, ((max_tw + pad * 2 + 3) // 4) * 4)
             full_h = max(40, ((total_text_h + pad * 2 + 3) // 4) * 4)
             preview_scale = vrect.width() / max(1.0, float(self._proj_w))
-            w = max(20.0, full_w * preview_scale * scale)
-            h = max(20.0, full_h * preview_scale * scale)
+            w = max(20.0, full_w * preview_scale * sx)
+            h = max(20.0, full_h * preview_scale * sy)
             return (cx, cy, w, h)
 
         if clip.overlay_type == "image" or clip.is_image:
@@ -576,8 +578,8 @@ class _Preview(QLabel):
             else:
                 base_w, base_h = (400, 300)
             preview_scale = vrect.width() / max(1.0, float(self._proj_w))
-            w = max(20.0, base_w * preview_scale * scale)
-            h = max(20.0, base_h * preview_scale * scale)
+            w = max(20.0, base_w * preview_scale * sx)
+            h = max(20.0, base_h * preview_scale * sy)
             return (cx, cy, w, h)
 
         if clip.media is not None and clip.media.has_video:
@@ -585,8 +587,8 @@ class _Preview(QLabel):
             mh = clip.media.height or self._proj_h
             base_w, base_h = fit_size(mw, mh, self._proj_w, self._proj_h)
             preview_scale = vrect.width() / max(1.0, float(self._proj_w))
-            w = max(20.0, base_w * preview_scale * scale)
-            h = max(20.0, base_h * preview_scale * scale)
+            w = max(20.0, base_w * preview_scale * sx)
+            h = max(20.0, base_h * preview_scale * sy)
             return (cx, cy, w, h)
 
         return None
@@ -646,6 +648,8 @@ class _Preview(QLabel):
                     self._drag_init_x = self._active_clip.x
                     self._drag_init_y = self._active_clip.y
                     self._drag_init_scale = self._active_clip.scale
+                    self._drag_init_scale_x = getattr(self._active_clip, "scale_x", self._active_clip.scale)
+                    self._drag_init_scale_y = getattr(self._active_clip, "scale_y", self._active_clip.scale)
                     self._drag_init_rot = self._active_clip.rotation
                     self._drag_init_dist = max(10.0, math.hypot(pos.x() - cx, pos.y() - cy))
                     self._drag_init_angle = math.degrees(math.atan2(pos.y() - cy, pos.x() - cx))
@@ -692,6 +696,8 @@ class _Preview(QLabel):
             new_x = self._drag_init_x
             new_y = self._drag_init_y
             new_scale = self._drag_init_scale
+            new_scale_x = getattr(self, "_drag_init_scale_x", self._drag_init_scale)
+            new_scale_y = getattr(self, "_drag_init_scale_y", self._drag_init_scale)
             new_rot = self._drag_init_rot
 
             if self._drag_mode == "move":
@@ -762,6 +768,8 @@ class _Preview(QLabel):
                 min_scale = 0.05
                 max_scale = 10.0
                 new_scale = max(min_scale, min(max_scale, self._drag_init_scale * factor))
+                new_scale_x = max(min_scale, min(max_scale, getattr(self, "_drag_init_scale_x", self._drag_init_scale) * factor))
+                new_scale_y = max(min_scale, min(max_scale, getattr(self, "_drag_init_scale_y", self._drag_init_scale) * factor))
                 actual_ratio = new_scale / max(0.001, self._drag_init_scale)
 
                 new_w = w0 * actual_ratio
@@ -800,6 +808,8 @@ class _Preview(QLabel):
                 x=new_x,
                 y=new_y,
                 scale=new_scale,
+                scale_x=new_scale_x,
+                scale_y=new_scale_y,
                 rotation=new_rot,
             )
             self.overlay_transformed.emit(self._drag_clip_id, new_x, new_y, new_scale, new_rot)
@@ -997,8 +1007,6 @@ class _ClipPropertiesWidget(QWidget):
         self._base_h: float = 1080.0
         self._aspect_ratio: float = 16.0 / 9.0
         self._updating: bool = False
-        self._current_text_color: str = "#ffffff"
-        self._current_stroke_color: str = "#000000"
 
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1046,86 +1054,83 @@ class _ClipPropertiesWidget(QWidget):
         self._lbl_clip_type.setProperty("role", "dim")
         self._layout.addWidget(self._lbl_clip_type)
 
-        # 1. Grupo Transformação (Posição, Tamanho, Rotação, Escala)
+        # Grupo Transformação (Posição, Tamanho, Travar proporção, Escala, Rotação)
         self._transform_group = QGroupBox("Transformação")
-        t_layout = QVBoxLayout(self._transform_group)
-        t_layout.setContentsMargins(6, 8, 6, 6)
-        t_layout.setSpacing(6)
+        grid = QGridLayout(self._transform_group)
+        grid.setContentsMargins(6, 8, 6, 6)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
 
-        # Posição X
-        row_x = QHBoxLayout()
-        row_x.addWidget(QLabel("Posição X:"))
+        lbl_x = QLabel("Posição X:")
         self._spin_x = QSpinBox()
         self._spin_x.setRange(-10000, 10000)
         self._spin_x.setSuffix(" px")
+        self._spin_x.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._spin_x.valueChanged.connect(self._on_x_changed)
-        row_x.addWidget(self._spin_x, 1)
-        self._lbl_x_pct = QLabel("(50.0%)")
-        self._lbl_x_pct.setProperty("role", "dim")
-        row_x.addWidget(self._lbl_x_pct)
-        t_layout.addLayout(row_x)
 
-        # Posição Y
-        row_y = QHBoxLayout()
-        row_y.addWidget(QLabel("Posição Y:"))
+        lbl_y = QLabel("Posição Y:")
         self._spin_y = QSpinBox()
         self._spin_y.setRange(-10000, 10000)
         self._spin_y.setSuffix(" px")
+        self._spin_y.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._spin_y.valueChanged.connect(self._on_y_changed)
-        row_y.addWidget(self._spin_y, 1)
-        self._lbl_y_pct = QLabel("(50.0%)")
-        self._lbl_y_pct.setProperty("role", "dim")
-        row_y.addWidget(self._lbl_y_pct)
-        t_layout.addLayout(row_y)
 
-        # Largura
-        row_w = QHBoxLayout()
-        row_w.addWidget(QLabel("Largura:"))
+        lbl_w = QLabel("Largura:")
         self._spin_w = QSpinBox()
         self._spin_w.setRange(1, 20000)
         self._spin_w.setSuffix(" px")
+        self._spin_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._spin_w.valueChanged.connect(self._on_w_changed)
-        row_w.addWidget(self._spin_w, 1)
-        t_layout.addLayout(row_w)
 
-        # Altura
-        row_h = QHBoxLayout()
-        row_h.addWidget(QLabel("Altura:"))
+        lbl_h = QLabel("Altura:")
         self._spin_h = QSpinBox()
         self._spin_h.setRange(1, 20000)
         self._spin_h.setSuffix(" px")
+        self._spin_h.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._spin_h.valueChanged.connect(self._on_h_changed)
-        row_h.addWidget(self._spin_h, 1)
-        t_layout.addLayout(row_h)
 
-        # Trava de proporção e Escala
-        row_scale = QHBoxLayout()
+        # Alinhamento no eixo X das 4 coordenadas
+        grid.addWidget(lbl_x, 0, 0)
+        grid.addWidget(self._spin_x, 0, 1)
+
+        grid.addWidget(lbl_y, 1, 0)
+        grid.addWidget(self._spin_y, 1, 1)
+
+        grid.addWidget(lbl_w, 2, 0)
+        grid.addWidget(self._spin_w, 2, 1)
+
+        grid.addWidget(lbl_h, 3, 0)
+        grid.addWidget(self._spin_h, 3, 1)
+
+        # Trava de proporção
         self._chk_lock_ratio = QCheckBox("Travar proporção")
         self._chk_lock_ratio.setChecked(True)
-        row_scale.addWidget(self._chk_lock_ratio)
-        row_scale.addStretch(1)
+        self._chk_lock_ratio.toggled.connect(self._on_lock_ratio_toggled)
+        grid.addWidget(self._chk_lock_ratio, 4, 0, 1, 2)
 
-        row_scale.addWidget(QLabel("Escala:"))
+        # Escala
+        lbl_scale = QLabel("Escala:")
         self._spin_scale = QDoubleSpinBox()
         self._spin_scale.setRange(0.05, 10.00)
         self._spin_scale.setSingleStep(0.05)
         self._spin_scale.setDecimals(2)
         self._spin_scale.setSuffix("x")
+        self._spin_scale.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._spin_scale.valueChanged.connect(self._on_scale_changed)
-        row_scale.addWidget(self._spin_scale)
-        t_layout.addLayout(row_scale)
+        grid.addWidget(lbl_scale, 5, 0)
+        grid.addWidget(self._spin_scale, 5, 1)
 
         # Rotação
-        row_rot = QHBoxLayout()
-        row_rot.addWidget(QLabel("Rotação:"))
+        lbl_rot = QLabel("Rotação:")
         self._spin_rot = QDoubleSpinBox()
         self._spin_rot.setRange(0.0, 360.0)
         self._spin_rot.setSingleStep(1.0)
         self._spin_rot.setDecimals(1)
         self._spin_rot.setSuffix("°")
+        self._spin_rot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._spin_rot.valueChanged.connect(self._on_rot_changed)
-        row_rot.addWidget(self._spin_rot, 1)
-        t_layout.addLayout(row_rot)
+        grid.addWidget(lbl_rot, 6, 0)
+        grid.addWidget(self._spin_rot, 6, 1)
 
         # Presets de Rotação
         row_presets = QHBoxLayout()
@@ -1137,169 +1142,9 @@ class _ClipPropertiesWidget(QWidget):
             btn_ang.setFixedHeight(24)
             btn_ang.clicked.connect(lambda _, a=ang: self._set_preset_rotation(a))
             row_presets.addWidget(btn_ang)
-        t_layout.addLayout(row_presets)
+        grid.addLayout(row_presets, 7, 0, 1, 2)
 
         self._layout.addWidget(self._transform_group)
-
-        # 2. Grupo Linha do Tempo (Tempo)
-        self._timeline_group = QGroupBox("Linha do Tempo")
-        time_layout = QVBoxLayout(self._timeline_group)
-        time_layout.setContentsMargins(6, 8, 6, 6)
-        time_layout.setSpacing(6)
-
-        row_start = QHBoxLayout()
-        row_start.addWidget(QLabel("Início:"))
-        self._spin_start = QDoubleSpinBox()
-        self._spin_start.setRange(0.0, 99999.0)
-        self._spin_start.setSingleStep(0.1)
-        self._spin_start.setDecimals(3)
-        self._spin_start.setSuffix(" s")
-        self._spin_start.valueChanged.connect(self._on_start_changed)
-        row_start.addWidget(self._spin_start, 1)
-        time_layout.addLayout(row_start)
-
-        row_dur = QHBoxLayout()
-        row_dur.addWidget(QLabel("Duração:"))
-        self._spin_dur = QDoubleSpinBox()
-        self._spin_dur.setRange(0.05, 99999.0)
-        self._spin_dur.setSingleStep(0.1)
-        self._spin_dur.setDecimals(3)
-        self._spin_dur.setSuffix(" s")
-        self._spin_dur.valueChanged.connect(self._on_dur_changed)
-        row_dur.addWidget(self._spin_dur, 1)
-        time_layout.addLayout(row_dur)
-
-        # Ponto de entrada e Velocidade (para mídia)
-        self._row_media_time = QHBoxLayout()
-        self._lbl_in = QLabel("Entrada:")
-        self._row_media_time.addWidget(self._lbl_in)
-        self._spin_in = QDoubleSpinBox()
-        self._spin_in.setRange(0.0, 99999.0)
-        self._spin_in.setSingleStep(0.1)
-        self._spin_in.setDecimals(3)
-        self._spin_in.setSuffix(" s")
-        self._spin_in.valueChanged.connect(self._on_in_changed)
-        self._row_media_time.addWidget(self._spin_in, 1)
-
-        self._lbl_speed = QLabel("Velocidade:")
-        self._row_media_time.addWidget(self._lbl_speed)
-        self._spin_speed = QDoubleSpinBox()
-        self._spin_speed.setRange(0.10, 10.00)
-        self._spin_speed.setSingleStep(0.05)
-        self._spin_speed.setDecimals(2)
-        self._spin_speed.setSuffix("x")
-        self._spin_speed.valueChanged.connect(self._on_speed_changed)
-        self._row_media_time.addWidget(self._spin_speed, 1)
-        time_layout.addLayout(self._row_media_time)
-
-        self._layout.addWidget(self._timeline_group)
-
-        # 3. Grupo Específico (Texto, Áudio, Filtro)
-        self._specific_group = QGroupBox("Propriedades Específicas")
-        self._spec_layout = QVBoxLayout(self._specific_group)
-        self._spec_layout.setContentsMargins(6, 8, 6, 6)
-        self._spec_layout.setSpacing(6)
-
-        # Seção de Texto
-        self._text_container = QWidget()
-        tc_layout = QVBoxLayout(self._text_container)
-        tc_layout.setContentsMargins(0, 0, 0, 0)
-        tc_layout.setSpacing(6)
-
-        tc_layout.addWidget(QLabel("Texto:"))
-        self._text_edit = QPlainTextEdit()
-        self._text_edit.setFixedHeight(50)
-        self._text_edit.textChanged.connect(self._on_text_changed)
-        tc_layout.addWidget(self._text_edit)
-
-        row_f = QHBoxLayout()
-        self._font_combo = QFontComboBox()
-        self._font_combo.currentFontChanged.connect(self._on_font_changed)
-        row_f.addWidget(self._font_combo, 1)
-
-        self._spin_font_size = QSpinBox()
-        self._spin_font_size.setRange(8, 250)
-        self._spin_font_size.setSuffix(" pt")
-        self._spin_font_size.valueChanged.connect(self._on_font_size_changed)
-        row_f.addWidget(self._spin_font_size)
-        tc_layout.addLayout(row_f)
-
-        row_style = QHBoxLayout()
-        self._chk_bold = QCheckBox("Negrito")
-        self._chk_bold.toggled.connect(self._on_style_changed)
-        row_style.addWidget(self._chk_bold)
-
-        self._chk_italic = QCheckBox("Itálico")
-        self._chk_italic.toggled.connect(self._on_style_changed)
-        row_style.addWidget(self._chk_italic)
-
-        self._btn_text_color = QPushButton("Cor")
-        self._btn_text_color.clicked.connect(self._choose_text_color)
-        row_style.addWidget(self._btn_text_color)
-        tc_layout.addLayout(row_style)
-
-        row_str = QHBoxLayout()
-        self._chk_stroke = QCheckBox("Contorno:")
-        self._chk_stroke.toggled.connect(self._on_stroke_toggled)
-        row_str.addWidget(self._chk_stroke)
-
-        self._spin_stroke_width = QSpinBox()
-        self._spin_stroke_width.setRange(1, 50)
-        self._spin_stroke_width.setSuffix(" px")
-        self._spin_stroke_width.valueChanged.connect(self._on_stroke_changed)
-        row_str.addWidget(self._spin_stroke_width)
-
-        self._btn_stroke_color = QPushButton("Cor")
-        self._btn_stroke_color.clicked.connect(self._choose_stroke_color)
-        row_str.addWidget(self._btn_stroke_color)
-        tc_layout.addLayout(row_str)
-
-        self._spec_layout.addWidget(self._text_container)
-
-        # Seção de Áudio
-        self._audio_container = QWidget()
-        ac_layout = QVBoxLayout(self._audio_container)
-        ac_layout.setContentsMargins(0, 0, 0, 0)
-        ac_layout.setSpacing(6)
-
-        row_gain = QHBoxLayout()
-        row_gain.addWidget(QLabel("Ganho:"))
-        self._spin_gain = QDoubleSpinBox()
-        self._spin_gain.setRange(-60.0, 12.0)
-        self._spin_gain.setSingleStep(0.5)
-        self._spin_gain.setDecimals(1)
-        self._spin_gain.setSuffix(" dB")
-        self._spin_gain.valueChanged.connect(self._on_gain_changed)
-        row_gain.addWidget(self._spin_gain, 1)
-        self._chk_muted = QCheckBox("Silenciado")
-        self._chk_muted.toggled.connect(self._on_mute_changed)
-        row_gain.addWidget(self._chk_muted)
-        ac_layout.addLayout(row_gain)
-
-        self._spec_layout.addWidget(self._audio_container)
-
-        # Seção de Filtro
-        self._filter_container = QWidget()
-        fc_layout = QHBoxLayout(self._filter_container)
-        fc_layout.setContentsMargins(0, 0, 0, 0)
-        fc_layout.addWidget(QLabel("Filtro:"))
-        self._filter_combo = QComboBox()
-        self._filter_combo.addItem("Preto e Branco", "pb")
-        self._filter_combo.addItem("Sépia", "sepia")
-        self._filter_combo.addItem("Contraste", "contraste")
-        self._filter_combo.addItem("Vinheta", "vinheta")
-        self._filter_combo.addItem("Inverter", "inverter")
-        self._filter_combo.currentIndexChanged.connect(self._on_filter_changed)
-        fc_layout.addWidget(self._filter_combo, 1)
-        self._spec_layout.addWidget(self._filter_container)
-
-        # Informações da Mídia
-        self._lbl_media_info = QLabel("")
-        self._lbl_media_info.setWordWrap(True)
-        self._lbl_media_info.setProperty("role", "dim")
-        self._spec_layout.addWidget(self._lbl_media_info)
-
-        self._layout.addWidget(self._specific_group)
         self._layout.addStretch(1)
 
     def load_clip(self, clip: Clip, proj_w: int, proj_h: int) -> None:
@@ -1344,9 +1189,12 @@ class _ClipPropertiesWidget(QWidget):
                 self._base_w = float(self._proj_w)
                 self._base_h = float(self._proj_h)
 
-            self._aspect_ratio = max(0.001, self._base_w / max(1.0, self._base_h))
+            sx = getattr(clip, "scale_x", clip.scale)
+            sy = getattr(clip, "scale_y", clip.scale)
+            cur_w = max(1, round(self._base_w * sx))
+            cur_h = max(1, round(self._base_h * sy))
+            self._aspect_ratio = max(0.001, cur_w / max(1.0, float(cur_h)))
 
-            # Visibilidade do grupo de transformação
             has_transform = clip.has_image or clip.is_additional
             self._transform_group.setVisible(has_transform)
             if has_transform:
@@ -1354,89 +1202,30 @@ class _ClipPropertiesWidget(QWidget):
                 py = round(clip.y * self._proj_h)
                 self._spin_x.setValue(px)
                 self._spin_y.setValue(py)
-                self._lbl_x_pct.setText(f"({clip.x * 100:.1f}%)")
-                self._lbl_y_pct.setText(f"({clip.y * 100:.1f}%)")
-                self._spin_scale.setValue(clip.scale)
-                self._spin_w.setValue(max(1, round(self._base_w * clip.scale)))
-                self._spin_h.setValue(max(1, round(self._base_h * clip.scale)))
+                self._spin_w.setValue(cur_w)
+                self._spin_h.setValue(cur_h)
+                self._spin_scale.setValue((sx + sy) / 2.0)
                 self._spin_rot.setValue(clip.rotation % 360.0)
-
-            # Linha do tempo
-            self._spin_start.setValue(clip.start)
-            self._spin_dur.setValue(clip.duration)
-            has_media = clip.media is not None
-            self._lbl_in.setVisible(has_media)
-            self._spin_in.setVisible(has_media)
-            self._lbl_speed.setVisible(has_media)
-            self._spin_speed.setVisible(has_media)
-            if has_media:
-                self._spin_in.setValue(clip.in_point)
-                self._spin_speed.setValue(clip.speed)
-
-            # Específicas
-            is_text = clip.overlay_type == "text"
-            self._text_container.setVisible(is_text)
-            if is_text:
-                self._text_edit.setPlainText(clip.text_content or "")
-                self._font_combo.setCurrentFont(QFont(clip.font_family or "Sans Serif"))
-                self._spin_font_size.setValue(clip.font_size or 36)
-                self._chk_bold.setChecked(bool(clip.font_bold))
-                self._chk_italic.setChecked(bool(clip.font_italic))
-                self._current_text_color = clip.text_color or "#ffffff"
-                self._btn_text_color.setStyleSheet(
-                    f"background: {self._current_text_color}; color: {'#000' if self._current_text_color.lower() in ('#ffffff', '#fff') else '#fff'};"
-                )
-                has_stroke = (clip.stroke_width or 0) > 0
-                self._chk_stroke.setChecked(has_stroke)
-                self._spin_stroke_width.setValue(clip.stroke_width if has_stroke else 3)
-                self._spin_stroke_width.setEnabled(has_stroke)
-                self._current_stroke_color = clip.stroke_color or "#000000"
-                self._btn_stroke_color.setStyleSheet(f"background: {self._current_stroke_color}; color: #fff;")
-                self._btn_stroke_color.setEnabled(has_stroke)
-
-            has_audio = clip.can_adjust_sound or (clip.media and clip.media.has_audio)
-            self._audio_container.setVisible(has_audio)
-            if has_audio:
-                self._spin_gain.setValue(clip.gain_db)
-                self._chk_muted.setChecked(bool(clip.muted))
-
-            is_filter = clip.overlay_type == "filter"
-            self._filter_container.setVisible(is_filter)
-            if is_filter:
-                idx = self._filter_combo.findData(clip.filter_name or "pb")
-                if idx >= 0:
-                    self._filter_combo.setCurrentIndex(idx)
-
-            if clip.media is not None:
-                info_parts = [f"Arquivo: {clip.media.path.name}"]
-                if clip.media.width and clip.media.height:
-                    info_parts.append(f"Resolução: {clip.media.width}×{clip.media.height}")
-                if clip.media.fps:
-                    info_parts.append(f"Taxa: {clip.media.fps:.1f} fps")
-                if clip.media.duration:
-                    info_parts.append(f"Duração original: {format_span(clip.media.duration)}")
-                self._lbl_media_info.setText("\n".join(info_parts))
-                self._lbl_media_info.setVisible(True)
-            else:
-                self._lbl_media_info.setVisible(False)
         finally:
             self._updating = False
 
-    def update_transform_fields(self, x: float, y: float, scale: float, rotation: float) -> None:
+    def update_transform_fields(
+        self, x: float, y: float, scale_x: float, scale_y: float | None = None, rotation: float = 0.0
+    ) -> None:
         """Atualiza campos de transformação durante manipulação interativa no canvas."""
         if self._updating:
             return
+        if scale_y is None:
+            scale_y = scale_x
         self._updating = True
         try:
             px = round(x * self._proj_w)
             py = round(y * self._proj_h)
             self._spin_x.setValue(px)
             self._spin_y.setValue(py)
-            self._lbl_x_pct.setText(f"({x * 100:.1f}%)")
-            self._lbl_y_pct.setText(f"({y * 100:.1f}%)")
-            self._spin_scale.setValue(scale)
-            self._spin_w.setValue(max(1, round(self._base_w * scale)))
-            self._spin_h.setValue(max(1, round(self._base_h * scale)))
+            self._spin_w.setValue(max(1, round(self._base_w * scale_x)))
+            self._spin_h.setValue(max(1, round(self._base_h * scale_y)))
+            self._spin_scale.setValue((scale_x + scale_y) / 2.0)
             self._spin_rot.setValue(rotation % 360.0)
         finally:
             self._updating = False
@@ -1445,52 +1234,88 @@ class _ClipPropertiesWidget(QWidget):
         if self._updating or self._clip_id < 0:
             return
         new_x = val / max(1.0, float(self._proj_w))
-        self._lbl_x_pct.setText(f"({new_x * 100:.1f}%)")
         self.property_changed.emit(self._clip_id, {"x": new_x})
 
     def _on_y_changed(self, val: int) -> None:
         if self._updating or self._clip_id < 0:
             return
         new_y = val / max(1.0, float(self._proj_h))
-        self._lbl_y_pct.setText(f"({new_y * 100:.1f}%)")
         self.property_changed.emit(self._clip_id, {"y": new_y})
+
+    def _on_lock_ratio_toggled(self, checked: bool) -> None:
+        if checked:
+            cur_w = self._spin_w.value()
+            cur_h = self._spin_h.value()
+            self._aspect_ratio = max(0.001, cur_w / max(1.0, float(cur_h)))
 
     def _on_scale_changed(self, val: float) -> None:
         if self._updating or self._clip_id < 0:
             return
         self._updating = True
         try:
-            self._spin_w.setValue(max(1, round(self._base_w * val)))
-            self._spin_h.setValue(max(1, round(self._base_h * val)))
+            if self._chk_lock_ratio.isChecked():
+                new_w = max(1, round(self._base_w * val))
+                new_h = max(1, round(self._base_h * val))
+                self._spin_w.setValue(new_w)
+                self._spin_h.setValue(new_h)
+                changes = {"scale": val, "scale_x": val, "scale_y": val}
+            else:
+                cur_sx = self._spin_w.value() / max(1.0, self._base_w)
+                cur_sy = self._spin_h.value() / max(1.0, self._base_h)
+                avg = max(0.001, (cur_sx + cur_sy) / 2.0)
+                factor = val / avg
+                new_sx = max(0.05, min(10.0, cur_sx * factor))
+                new_sy = max(0.05, min(10.0, cur_sy * factor))
+                self._spin_w.setValue(max(1, round(self._base_w * new_sx)))
+                self._spin_h.setValue(max(1, round(self._base_h * new_sy)))
+                changes = {"scale": val, "scale_x": new_sx, "scale_y": new_sy}
         finally:
             self._updating = False
-        self.property_changed.emit(self._clip_id, {"scale": val})
+        self.property_changed.emit(self._clip_id, changes)
 
     def _on_w_changed(self, val: int) -> None:
         if self._updating or self._clip_id < 0:
             return
-        new_scale = max(0.05, min(10.0, val / max(1.0, self._base_w)))
+        new_scale_x = max(0.05, min(10.0, val / max(1.0, self._base_w)))
         self._updating = True
         try:
-            self._spin_scale.setValue(new_scale)
             if self._chk_lock_ratio.isChecked():
-                self._spin_h.setValue(max(1, round(val / max(0.001, self._aspect_ratio))))
+                new_h = max(1, round(val / max(0.001, self._aspect_ratio)))
+                new_scale_y = max(0.05, min(10.0, new_h / max(1.0, self._base_h)))
+                self._spin_h.setValue(new_h)
+                avg_scale = (new_scale_x + new_scale_y) / 2.0
+                self._spin_scale.setValue(avg_scale)
+                changes = {"scale": avg_scale, "scale_x": new_scale_x, "scale_y": new_scale_y}
+            else:
+                cur_sy = self._spin_h.value() / max(1.0, self._base_h)
+                avg_scale = (new_scale_x + cur_sy) / 2.0
+                self._spin_scale.setValue(avg_scale)
+                changes = {"scale": avg_scale, "scale_x": new_scale_x}
         finally:
             self._updating = False
-        self.property_changed.emit(self._clip_id, {"scale": new_scale})
+        self.property_changed.emit(self._clip_id, changes)
 
     def _on_h_changed(self, val: int) -> None:
         if self._updating or self._clip_id < 0:
             return
-        new_scale = max(0.05, min(10.0, val / max(1.0, self._base_h)))
+        new_scale_y = max(0.05, min(10.0, val / max(1.0, self._base_h)))
         self._updating = True
         try:
-            self._spin_scale.setValue(new_scale)
             if self._chk_lock_ratio.isChecked():
-                self._spin_w.setValue(max(1, round(val * self._aspect_ratio)))
+                new_w = max(1, round(val * self._aspect_ratio))
+                new_scale_x = max(0.05, min(10.0, new_w / max(1.0, self._base_w)))
+                self._spin_w.setValue(new_w)
+                avg_scale = (new_scale_x + new_scale_y) / 2.0
+                self._spin_scale.setValue(avg_scale)
+                changes = {"scale": avg_scale, "scale_x": new_scale_x, "scale_y": new_scale_y}
+            else:
+                cur_sx = self._spin_w.value() / max(1.0, self._base_w)
+                avg_scale = (cur_sx + new_scale_y) / 2.0
+                self._spin_scale.setValue(avg_scale)
+                changes = {"scale": avg_scale, "scale_y": new_scale_y}
         finally:
             self._updating = False
-        self.property_changed.emit(self._clip_id, {"scale": new_scale})
+        self.property_changed.emit(self._clip_id, changes)
 
     def _on_rot_changed(self, val: float) -> None:
         if self._updating or self._clip_id < 0:
@@ -1499,97 +1324,6 @@ class _ClipPropertiesWidget(QWidget):
 
     def _set_preset_rotation(self, angle: float) -> None:
         self._spin_rot.setValue(angle)
-
-    def _on_start_changed(self, val: float) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        self.property_changed.emit(self._clip_id, {"start": val})
-
-    def _on_dur_changed(self, val: float) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        self.property_changed.emit(self._clip_id, {"duration": val})
-
-    def _on_in_changed(self, val: float) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        self.property_changed.emit(self._clip_id, {"in_point": val})
-
-    def _on_speed_changed(self, val: float) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        self.property_changed.emit(self._clip_id, {"speed": val})
-
-    def _on_text_changed(self) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        self.property_changed.emit(self._clip_id, {"text_content": self._text_edit.toPlainText()})
-
-    def _on_font_changed(self, font: QFont) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        self.property_changed.emit(self._clip_id, {"font_family": font.family()})
-
-    def _on_font_size_changed(self, val: int) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        self.property_changed.emit(self._clip_id, {"font_size": val})
-
-    def _on_style_changed(self) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        self.property_changed.emit(
-            self._clip_id,
-            {"font_bold": self._chk_bold.isChecked(), "font_italic": self._chk_italic.isChecked()},
-        )
-
-    def _choose_text_color(self) -> None:
-        col = QColorDialog.getColor(QColor(self._current_text_color), self, "Cor do Texto")
-        if col.isValid():
-            self._current_text_color = col.name()
-            self._btn_text_color.setStyleSheet(
-                f"background: {self._current_text_color}; color: {'#000' if self._current_text_color.lower() in ('#ffffff', '#fff') else '#fff'};"
-            )
-            self.property_changed.emit(self._clip_id, {"text_color": self._current_text_color})
-
-    def _on_stroke_toggled(self, checked: bool) -> None:
-        self._spin_stroke_width.setEnabled(checked)
-        self._btn_stroke_color.setEnabled(checked)
-        if self._updating or self._clip_id < 0:
-            return
-        w = self._spin_stroke_width.value() if checked else 0
-        self.property_changed.emit(
-            self._clip_id, {"stroke_width": w, "stroke_color": self._current_stroke_color}
-        )
-
-    def _on_stroke_changed(self, val: int) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        w = val if self._chk_stroke.isChecked() else 0
-        self.property_changed.emit(self._clip_id, {"stroke_width": w})
-
-    def _choose_stroke_color(self) -> None:
-        col = QColorDialog.getColor(QColor(self._current_stroke_color), self, "Cor do Contorno")
-        if col.isValid():
-            self._current_stroke_color = col.name()
-            self._btn_stroke_color.setStyleSheet(f"background: {self._current_stroke_color}; color: #fff;")
-            self.property_changed.emit(self._clip_id, {"stroke_color": self._current_stroke_color})
-
-    def _on_gain_changed(self, val: float) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        self.property_changed.emit(self._clip_id, {"gain_db": val})
-
-    def _on_mute_changed(self, checked: bool) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        self.property_changed.emit(self._clip_id, {"muted": checked})
-
-    def _on_filter_changed(self, _index: int) -> None:
-        if self._updating or self._clip_id < 0:
-            return
-        fname = self._filter_combo.currentData()
-        self.property_changed.emit(self._clip_id, {"filter_name": fname})
 
 
 class _MediaListWidget(QListWidget):
@@ -3475,6 +3209,8 @@ class EditPanel(QWidget):
             return
         _, clip = found
         self._timeline.select(clip_id)
+        if not clip.contains(self._position):
+            self._seek(clip.start)
         if self._extras_tabs.indexOf(self._properties_widget) < 0:
             self._extras_tabs.addTab(self._properties_widget, strings.EDIT_TAB_PROPERTIES)
             self._update_extras_tab_close_buttons()
@@ -3496,11 +3232,28 @@ class EditPanel(QWidget):
         self._remember()
         self._project = self._project.with_updated_clip(clip_id, **changes)
         found_after = self._project.find(clip_id)
-        updated_clip = found_after[1] if found_after else None
+        if not found_after:
+            return
+        track_idx, updated_clip = found_after
+
         self._sync_canvas()
-        self._timeline.set_project(self._project, refit=False)
-        self._preview.set_active_clip(updated_clip, self._project.width, self._project.height)
-        self._refresh_clip_fields()
+
+        # Garante que o clipe permaneça ou torne a ser selecionado na timeline
+        if self._timeline.selected != clip_id:
+            self._timeline.select(clip_id)
+        else:
+            self._timeline.set_project(self._project, refit=False)
+
+        track_visible = self._project.tracks[track_idx].visible
+        self._preview.set_active_clip(
+            updated_clip, self._project.width, self._project.height, visible=track_visible
+        )
+        self._preview.update()
+
+        # Atualiza a renderização de vídeo no preview em tempo real
+        self._is_dirty = True
+        self._request_frame(force=True)
+        self.changed.emit()
 
     @staticmethod
     def _act(
@@ -3825,15 +3578,18 @@ class EditPanel(QWidget):
         if self._overlay_drag_session != clip_id:
             self._remember()
             self._overlay_drag_session = clip_id
+        active = self._preview._active_clip
+        sx = getattr(active, "scale_x", scale) if active else scale
+        sy = getattr(active, "scale_y", scale) if active else scale
         self._project = self._project.with_updated_clip(
-            clip_id, x=x, y=y, scale=scale, rotation=rotation
+            clip_id, x=x, y=y, scale=scale, scale_x=sx, scale_y=sy, rotation=rotation
         )
         if (
             hasattr(self, "_properties_widget")
             and self._extras_tabs.indexOf(self._properties_widget) >= 0
             and self._properties_widget._clip_id == clip_id
         ):
-            self._properties_widget.update_transform_fields(x, y, scale, rotation)
+            self._properties_widget.update_transform_fields(x, y, sx, sy, rotation)
 
     def _on_overlay_transform_finished(self, clip_id: int) -> None:
         self._overlay_drag_session = -1
@@ -4794,6 +4550,13 @@ class EditPanel(QWidget):
 
                         # Se for no monitor de prévia, a própria _Preview gerencia
                         if hasattr(self, "_preview") and obj == self._preview:
+                            return super().eventFilter(obj, event)
+
+                        # Se o clique for no painel lateral de ferramentas / propriedades, não desseleciona
+                        if (
+                            (hasattr(self, "_extras_tabs") and (obj == self._extras_tabs or self._extras_tabs.isAncestorOf(obj)))
+                            or (hasattr(self, "_extras_box") and (obj == self._extras_box or self._extras_box.isAncestorOf(obj)))
+                        ):
                             return super().eventFilter(obj, event)
 
                         # Se for um controle interativo de propriedades (botão, spinbox, tab, input, slider, etc.)

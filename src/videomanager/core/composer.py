@@ -363,18 +363,20 @@ def _video_chain(
         else:
             steps.append("setpts=PTS-STARTPTS")
         steps.append(f"fps={fps:.6f}")
+        sx = getattr(clip, "scale_x", clip.scale)
+        sy = getattr(clip, "scale_y", clip.scale)
         if clip.overlay_type == "text":
-            if abs(clip.scale - 1.0) >= 0.01:
-                steps.append(f"scale=w='trunc(iw*{clip.scale:.4f}/2)*2':h='trunc(ih*{clip.scale:.4f}/2)*2'")
+            if abs(sx - 1.0) >= 0.01 or abs(sy - 1.0) >= 0.01:
+                steps.append(f"scale=w='trunc(iw*{sx:.4f}/2)*2':h='trunc(ih*{sy:.4f}/2)*2'")
         elif clip.overlay_type == "image" or clip.is_image:
             base_w, base_h = image_base_size(
                 clip.media.width, clip.media.height, project.width, project.height
             )
-            target_w = max(2, int(round(base_w * clip.scale / 2.0) * 2))
-            target_h = max(2, int(round(base_h * clip.scale / 2.0) * 2))
+            target_w = max(2, int(round(base_w * sx / 2.0) * 2))
+            target_h = max(2, int(round(base_h * sy / 2.0) * 2))
             steps.append(f"scale={target_w}:{target_h}")
-        elif abs(clip.scale - 1.0) >= 0.01:
-            steps.append(f"scale=w='trunc(iw*{clip.scale:.4f}/2)*2':h='trunc(ih*{clip.scale:.4f}/2)*2'")
+        elif abs(sx - 1.0) >= 0.01 or abs(sy - 1.0) >= 0.01:
+            steps.append(f"scale=w='trunc(iw*{sx:.4f}/2)*2':h='trunc(ih*{sy:.4f}/2)*2'")
         if abs(clip.rotation) >= 0.1:
             rad = math.radians(clip.rotation)
             steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=none")
@@ -396,10 +398,13 @@ def _video_chain(
         else:
             steps.append("setpts=PTS-STARTPTS")
 
+    sx = getattr(clip, "scale_x", clip.scale)
+    sy = getattr(clip, "scale_y", clip.scale)
     has_transform = (
         abs(clip.x - 0.5) >= 0.0001
         or abs(clip.y - 0.5) >= 0.0001
-        or abs(clip.scale - 1.0) >= 0.001
+        or abs(sx - 1.0) >= 0.001
+        or abs(sy - 1.0) >= 0.001
         or abs(clip.rotation) >= 0.1
     )
     if has_transform:
@@ -407,8 +412,8 @@ def _video_chain(
         mw = clip.media.width if clip.media else None
         mh = clip.media.height if clip.media else None
         base_w, base_h = fit_size(mw, mh, project.width, project.height)
-        target_w = max(2, int(round(base_w * clip.scale / 2.0) * 2))
-        target_h = max(2, int(round(base_h * clip.scale / 2.0) * 2))
+        target_w = max(2, int(round(base_w * sx / 2.0) * 2))
+        target_h = max(2, int(round(base_h * sy / 2.0) * 2))
         steps.append(f"scale={target_w}:{target_h}")
         if abs(clip.rotation) >= 0.1:
             rad = math.radians(clip.rotation)
@@ -587,7 +592,8 @@ def build_graph(
             has_transform = (
                 abs(piece.clip.x - 0.5) >= 0.0001
                 or abs(piece.clip.y - 0.5) >= 0.0001
-                or abs(piece.clip.scale - 1.0) >= 0.001
+                or abs(getattr(piece.clip, "scale_x", piece.clip.scale) - 1.0) >= 0.001
+                or abs(getattr(piece.clip, "scale_y", piece.clip.scale) - 1.0) >= 0.001
                 or abs(piece.clip.rotation) >= 0.1
             )
             if is_overlay_item or has_transform:
@@ -885,7 +891,8 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     if any(
         abs(clip.x - 0.5) >= 0.001
         or abs(clip.y - 0.5) >= 0.001
-        or abs(clip.scale - 1.0) >= 0.001
+        or abs(getattr(clip, "scale_x", clip.scale) - 1.0) >= 0.001
+        or abs(getattr(clip, "scale_y", clip.scale) - 1.0) >= 0.001
         or abs(clip.rotation) >= 0.1
         for clip in clips
     ):
