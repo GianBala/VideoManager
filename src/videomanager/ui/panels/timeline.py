@@ -33,11 +33,13 @@ from PySide6.QtGui import (
     QFontMetrics,
     QHelpEvent,
     QImage,
+    QLinearGradient,
     QMouseEvent,
     QPainter,
     QPainterPath,
     QPen,
     QPixmap,
+    QRadialGradient,
     QWheelEvent,
 )
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
@@ -502,25 +504,25 @@ class Timeline(QWidget):
         painter.setPen(
             self._color("accent_text") if is_dragged else self._color("text_dim")
         )
+        right_margin = -8 if track.kind is TrackKind.ADDITIONAL else -34
         painter.drawText(
-            rect.adjusted(8, 0, -34, 0),
+            rect.adjusted(8, 0, right_margin, 0),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             track.name,
         )
 
-        # Botão de mudo: o único controle desenhado do cabeçalho, e por isso
-        # marcado em cor forte quando ativo — é a diferença entre uma trilha
-        # calada de propósito e uma que parece calada por defeito.
-        box = self._mute_rect(index)
-        painter.setBrush(self._color("error") if track.muted else self._color("surface_alt"))
-        painter.setPen(QPen(self._color("border"), 1))
-        painter.drawRoundedRect(box, 4, 4)
-        painter.setPen(
-            self._color("accent_text") if track.muted else self._color("text_dim")
-        )
-        painter.drawText(
-            box, int(Qt.AlignmentFlag.AlignCenter), "M"
-        )
+        # Botão de mudo: apenas para trilhas de vídeo e áudio
+        if track.kind is not TrackKind.ADDITIONAL:
+            box = self._mute_rect(index)
+            painter.setBrush(self._color("error") if track.muted else self._color("surface_alt"))
+            painter.setPen(QPen(self._color("border"), 1))
+            painter.drawRoundedRect(box, 4, 4)
+            painter.setPen(
+                self._color("accent_text") if track.muted else self._color("text_dim")
+            )
+            painter.drawText(
+                box, int(Qt.AlignmentFlag.AlignCenter), "M"
+            )
 
     def _paint_track_drop_indicator(self, painter: QPainter) -> None:
         lane = self._lane_rect(self._drop_track_target)
@@ -561,10 +563,43 @@ class Timeline(QWidget):
         painter.save()
         painter.setClipPath(path, Qt.ClipOperation.IntersectClip)
         if track.kind is TrackKind.ADDITIONAL:
-            painter.fillRect(rect, QColor(106, 27, 154, 180))  # Roxo profundo para adicionais
+            if clip.overlay_type == "filter":
+                fname = clip.filter_name
+                if fname == "pb":
+                    grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+                    grad.setColorAt(0.0, QColor("#455a64"))
+                    grad.setColorAt(1.0, QColor("#263238"))
+                    painter.fillRect(rect, grad)
+                elif fname == "sepia":
+                    grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+                    grad.setColorAt(0.0, QColor("#5d4037"))
+                    grad.setColorAt(1.0, QColor("#3e2723"))
+                    painter.fillRect(rect, grad)
+                elif fname == "vinheta":
+                    grad = QRadialGradient(rect.center(), max(rect.width(), rect.height()) / 1.5)
+                    grad.setColorAt(0.0, QColor("#283593"))
+                    grad.setColorAt(1.0, QColor("#0d1224"))
+                    painter.fillRect(rect, grad)
+                elif fname == "inverter":
+                    grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+                    grad.setColorAt(0.0, QColor("#00695c"))
+                    grad.setColorAt(1.0, QColor("#004d40"))
+                    painter.fillRect(rect, grad)
+                elif fname == "contraste":
+                    grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+                    grad.setColorAt(0.0, QColor("#e65100"))
+                    grad.setColorAt(1.0, QColor("#bf360c"))
+                    painter.fillRect(rect, grad)
+                else:
+                    painter.fillRect(rect, QColor(94, 53, 177, 200))
+            elif clip.is_image or clip.overlay_type == "image":
+                painter.fillRect(rect, QColor("#1e1e24"))
+            else:
+                painter.fillRect(rect, QColor(106, 27, 154, 190))
         else:
             painter.fillRect(rect, self._color("surface"))
-        if track.kind is TrackKind.VIDEO:
+
+        if track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type == "image":
             self._paint_thumbs(painter, clip, rect)
         elif track.kind is TrackKind.AUDIO:
             self._paint_wave(painter, clip, rect)
@@ -573,10 +608,25 @@ class Timeline(QWidget):
 
         selected = clip.clip_id == self._selected
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(
-            QPen(self._color("accent") if selected else (QColor(186, 104, 200) if track.kind is TrackKind.ADDITIONAL else self._color("border")),
-                 2 if selected else 1)
-        )
+        if selected:
+            border_pen = QPen(self._color("accent"), 2)
+        elif track.kind is TrackKind.ADDITIONAL:
+            if clip.overlay_type == "filter":
+                f_borders = {
+                    "pb": QColor("#90a4ae"),
+                    "sepia": QColor("#bcaaa4"),
+                    "vinheta": QColor("#7986cb"),
+                    "inverter": QColor("#80cbc4"),
+                    "contraste": QColor("#ffb74d"),
+                }
+                border_pen = QPen(f_borders.get(clip.filter_name, QColor(186, 104, 200)), 1)
+            elif clip.is_image or clip.overlay_type == "image":
+                border_pen = QPen(QColor("#00bcd4"), 1)
+            else:
+                border_pen = QPen(QColor(186, 104, 200), 1)
+        else:
+            border_pen = QPen(self._color("border"), 1)
+        painter.setPen(border_pen)
         painter.drawPath(path)
         if selected:
             painter.setPen(Qt.PenStyle.NoPen)
@@ -595,6 +645,14 @@ class Timeline(QWidget):
     def _paint_thumbs(self, painter: QPainter, clip: Clip, rect: QRectF) -> None:
         strip = self._strips.get(clip.clip_id)
         if strip is None or not strip.thumbs:
+            return
+        if clip.is_image or clip.overlay_type == "image":
+            first_thumb = next(iter(strip.thumbs.values()), None)
+            if first_thumb is not None:
+                painter.drawImage(
+                    QRectF(rect.left(), rect.top() + 13, rect.width(), max(1.0, rect.height() - 13)),
+                    first_thumb,
+                )
             return
         for moment, image in sorted(strip.thumbs.items()):
             begin, end = strip.cell_of(moment)
@@ -709,7 +767,8 @@ class Timeline(QWidget):
         if index < 0:
             return "cursor", -1, -1
         if x < HEADER_WIDTH:
-            if self._mute_rect(index).adjusted(-3, -3, 3, 3).contains(x, y):
+            track = self._project.tracks[index]
+            if track.kind is not TrackKind.ADDITIONAL and self._mute_rect(index).adjusted(-3, -3, 3, 3).contains(x, y):
                 return "mudo", index, -1
             return "cabecalho", index, -1
 

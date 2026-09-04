@@ -403,10 +403,11 @@ class Project:
 
     def topmost_video_at(self, seconds: float) -> Clip | None:
         """O bloco visual que aparece por cima no instante dado."""
-        for track in (*self.additional_tracks, *self.video_tracks):
-            clip = track.clip_at(seconds)
-            if clip is not None:
-                return clip
+        for track in self.tracks:
+            if track.kind in (TrackKind.ADDITIONAL, TrackKind.VIDEO):
+                clip = track.clip_at(seconds)
+                if clip is not None:
+                    return clip
         return None
 
     # -- escrita (sempre devolvendo um projeto novo) ----------------------
@@ -419,12 +420,16 @@ class Project:
     def with_track(self, kind: TrackKind, name: str = "") -> Project:
         """Acrescenta uma trilha vazia, no lugar certo da pilha.
 
-        Adicionais e vídeo entram por cima, áudio entra no fim.
+        Adicionais entram no topo absoluto (camadas superiores).
+        Vídeo entra abaixo dos adicionais e no topo dos vídeos existentes.
+        Áudio entra no fim da lista.
         """
         track = Track(kind=kind, name=name or _default_name(self, kind))
         tracks = list(self.tracks)
-        if kind in (TrackKind.ADDITIONAL, TrackKind.VIDEO):
+        if kind is TrackKind.ADDITIONAL:
             tracks.insert(0, track)
+        elif kind is TrackKind.VIDEO:
+            tracks.insert(len(self.additional_tracks), track)
         else:
             tracks.append(track)
         return replace(self, tracks=tuple(tracks))
