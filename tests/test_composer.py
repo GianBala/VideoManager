@@ -826,4 +826,23 @@ class TestVelocidadeEFiltros:
         p_invis = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(c1,), visible=False),))
         assert simple_trim(p_invis) is None
 
+    def test_video_com_transformacao_gera_filtros_de_escala_rotacao_e_overlay(self) -> None:
+        c_trans = clip(VIDEO, start=0.0, duration=5.0, x=0.25, y=0.30, scale=0.5, rotation=30.0)
+        p = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(c_trans,), visible=True),), width=1920, height=1080)
+        graph = build_graph(p)
+        filters_str = ";".join(graph.filters)
+        # Deve ter scale para 960x540 (1920*0.5 x 1080*0.5)
+        assert "scale=960:540" in filters_str
+        # Deve ter rotate com c=none e format=rgba
+        assert "rotate=0.5236" in filters_str
+        assert "c=none" in filters_str
+        assert "format=rgba" in filters_str
+        # Deve ter coordenadas de overlay calculadas
+        assert "overlay=x='(0.2500*W-w/2)':y='(0.3000*H-h/2)'" in filters_str
+
+    def test_simple_trim_recusa_video_com_transformacao(self) -> None:
+        c1 = clip(VIDEO, start=0.0, duration=5.0, scale=0.8)
+        p = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(c1,), visible=True),))
+        assert simple_trim(p) is None
+
 

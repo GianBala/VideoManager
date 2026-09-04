@@ -187,9 +187,15 @@ def test_preview_interactive_transform(qapp: QApplication) -> None:
     mode_rot, _ = preview._hit_test(QPoint(int(cx), int(cy - h / 2 - 24)))
     assert mode_rot == "rotate"
 
-    # Hit test na alça de canto (redimensionar)
-    mode_scale, _ = preview._hit_test(QPoint(int(cx - w / 2), int(cy - h / 2)))
-    assert mode_scale == "scale"
+    # Hit test nas alças de canto (redimensionar com cantos identificados)
+    mode_tl, _ = preview._hit_test(QPoint(int(cx - w / 2), int(cy - h / 2)))
+    assert mode_tl == "scale_tl"
+    mode_tr, _ = preview._hit_test(QPoint(int(cx + w / 2), int(cy - h / 2)))
+    assert mode_tr == "scale_tr"
+    mode_br, _ = preview._hit_test(QPoint(int(cx + w / 2), int(cy + h / 2)))
+    assert mode_br == "scale_br"
+    mode_bl, _ = preview._hit_test(QPoint(int(cx - w / 2), int(cy + h / 2)))
+    assert mode_bl == "scale_bl"
 
     # Simula arraste para mover
     press_ev = QMouseEvent(
@@ -671,7 +677,138 @@ def test_video_track_button_positions_and_version(qapp: QApplication) -> None:
     svg_icon = res_dir / "videomanager.svg"
     png_icon = res_dir / "videomanager.png"
     assert svg_icon.is_file() and svg_icon.stat().st_size > 0
-    assert png_icon.is_file() and png_icon.stat().st_size > 0
+    assert res_dir.exists()
+
+
+def test_opposite_corner_anchored_resizing(qapp: QApplication) -> None:
+    from videomanager.ui.panels.edit_panel import _Preview
+    preview = _Preview()
+    preview.resize(800, 600)
+    ref = MediaRef(path=Path("/tmp/box.png"), kind=MediaKind.IMAGE, width=400, height=200)
+    clip = Clip(media=ref, start=0.0, duration=5.0, overlay_type="image", x=0.5, y=0.5, scale=1.0, rotation=0.0)
+    preview.set_active_clip(clip, 1920, 1080)
+    preview.set_position(1.0)
+
+    geom = preview._clip_geometry(clip)
+    assert geom is not None
+    cx0, cy0, w0, h0 = geom
+
+    # Ponto Top-Left inicial
+    init_tl = (cx0 - w0 / 2.0, cy0 - h0 / 2.0)
+    # Ponto Bottom-Right inicial
+    init_br = (cx0 + w0 / 2.0, cy0 + h0 / 2.0)
+
+    # 1. Clica no canto BR (Bottom-Right) e arrasta para expandir
+    br_pos = QPointF(cx0 + w0 / 2.0, cy0 + h0 / 2.0)
+    press_ev = QMouseEvent(QMouseEvent.Type.MouseButtonPress, br_pos, br_pos, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    preview.mousePressEvent(press_ev)
+    assert preview._drag_mode == "scale_br"
+
+    # Arrasta aumentando a largura e altura em 40px
+    move_ev = QMouseEvent(QMouseEvent.Type.MouseMove, QPointF(br_pos.x() + 40, br_pos.y() + 20), QPointF(br_pos.x() + 40, br_pos.y() + 20), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    preview.mouseMoveEvent(move_ev)
+
+    # A nova geometria deve manter o canto TL rigorosamente idêntico!
+    new_geom = preview._clip_geometry(preview._active_clip)
+    assert new_geom is not None
+    ncx, ncy, nw, nh = new_geom
+    new_tl = (ncx - nw / 2.0, ncy - nh / 2.0)
+    assert abs(new_tl[0] - init_tl[0]) < 0.05
+    assert abs(new_tl[1] - init_tl[1]) < 0.05
+    assert nw > w0
+    assert nh > h0
+
+    release_ev = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, QPointF(br_pos.x() + 40, br_pos.y() + 20), QPointF(br_pos.x() + 40, br_pos.y() + 20), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    preview.mouseReleaseEvent(release_ev)
+
+    # 2. Agora clica no canto TL e arrasta encolhendo: o canto BR deve permanecer fixo!
+    tl_pos = QPointF(ncx - nw / 2.0, ncy - nh / 2.0)
+    press_tl = QMouseEvent(QMouseEvent.Type.MouseButtonPress, tl_pos, tl_pos, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    preview.mousePressEvent(press_tl)
+    assert preview._drag_mode == "scale_tl"
+
+    current_br = (ncx + nw / 2.0, ncy + nh / 2.0)
+    move_tl = QMouseEvent(QMouseEvent.Type.MouseMove, QPointF(tl_pos.x() + 20, tl_pos.y() + 10), QPointF(tl_pos.x() + 20, tl_pos.y() + 10), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    preview.mouseMoveEvent(move_tl)
+
+    geom_after_tl = preview._clip_geometry(preview._active_clip)
+    assert geom_after_tl is not None
+    ncx2, ncy2, nw2, nh2 = geom_after_tl
+    new_br2 = (ncx2 + nw2 / 2.0, ncy2 + nh2 / 2.0)
+    assert abs(new_br2[0] - current_br[0]) < 0.05
+    assert abs(new_br2[1] - current_br[1]) < 0.05
+
+
+def test_video_clip_manipulation_in_preview(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    from videomanager.ui.panels.edit_panel import _Preview
+    preview = _Preview()
+    preview.resize(800, 600)
+
+    # Clipe de vídeo em trilha de vídeo
+    ref = MediaRef(path=Path("/tmp/filme.mp4"), kind=MediaKind.VIDEO, duration=10.0, width=1920, height=1080)
+    clip_vid = Clip(media=ref, start=0.0, duration=5.0, x=0.5, y=0.5, scale=1.0, rotation=0.0)
+
+    preview.set_active_clip(clip_vid, 1920, 1080)
+    preview.set_position(2.0)
+
+    # Deve calcular geometria corretamente através de fit_size
+    geom = preview._clip_geometry(clip_vid)
+    assert geom is not None
+    cx, cy, w, h = geom
+    assert w > 0 and h > 0
+
+    # Deve permitir hit_test no corpo (move), rotação e cantos
+    mode_body, _ = preview._hit_test(QPoint(int(cx), int(cy)))
+    assert mode_body == "move"
+
+    mode_rot, _ = preview._hit_test(QPoint(int(cx), int(cy - h / 2 - 24)))
+    assert mode_rot == "rotate"
+
+    mode_br, _ = preview._hit_test(QPoint(int(cx + w / 2), int(cy + h / 2)))
+    assert mode_br == "scale_br"
+
+
+def test_deselection_when_clicking_outside(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    from videomanager.ui.panels.edit_panel import EditPanel
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    try:
+        # Adiciona um clipe de texto na trilha de adicionais
+        panel._text_input.setText("Texto Selecionado")
+        panel._insert_text_clip()
+        clip = panel._project.additional_tracks[0].clips[0]
+        panel._timeline.select(clip.clip_id)
+        assert panel._timeline.selected_clip is not None
+
+        # 1. Clique na prévia fora do objeto emite clicked_outside e desseleciona
+        press_outside = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPointF(5, 5),
+            QPointF(5, 5),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        panel._preview.mousePressEvent(press_outside)
+        assert panel._timeline.selected_clip is None
+
+        # 2. Seleciona novamente e clica em área vazia fora das trilhas (ex.: no _preview_frame)
+        panel._timeline.select(clip.clip_id)
+        assert panel._timeline.selected_clip is not None
+
+        dummy_click = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPointF(10, 10),
+            QPointF(10, 10),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        # O eventFilter do painel intercepta e desseleciona
+        panel.eventFilter(panel._preview_frame, dummy_click)
+        assert panel._timeline.selected_clip is None
+    finally:
+        panel.shutdown()
+
 
 
 

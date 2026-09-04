@@ -35,6 +35,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import (
+    QEvent,
     QObject,
     QPoint,
     QPointF,
@@ -70,9 +71,11 @@ from PySide6.QtGui import (
     QTransform,
 )
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QAbstractSpinBox,
     QApplication,
     QButtonGroup,
+    QTabBar,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -396,6 +399,7 @@ class _Preview(QLabel):
     double_clicked = Signal()
     overlay_transformed = Signal(int, float, float, float, float)
     overlay_transform_finished = Signal(int)
+    clicked_outside = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -403,7 +407,7 @@ class _Preview(QLabel):
         self.setMinimumHeight(_PREVIEW_MIN_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setStyleSheet("background: #000000; border-radius: 8px;")
+        self.setStyleSheet("background: #141418; border-radius: 8px;")
         self.setText(strings.EDIT_EMPTY)
         self.setProperty("role", "dim")
         self._pixmap: QPixmap | None = None
@@ -421,6 +425,12 @@ class _Preview(QLabel):
         self._drag_init_rot: float = 0.0
         self._drag_init_dist: float = 1.0
         self._drag_init_angle: float = 0.0
+        self._drag_opp_x: float = 0.0
+        self._drag_opp_y: float = 0.0
+        self._drag_sx: float = 1.0
+        self._drag_sy: float = 1.0
+        self._drag_w0: float = 1.0
+        self._drag_h0: float = 1.0
         self._clip_pixmaps: dict[Path, QPixmap] = {}
         self._text_pixmaps: dict[tuple, QPixmap] = {}
         self._is_playing: bool = False
@@ -550,13 +560,21 @@ class _Preview(QLabel):
             h = max(20.0, base_h * preview_scale * scale)
             return (cx, cy, w, h)
 
+        if clip.media is not None and clip.media.has_video:
+            mw = clip.media.width or self._proj_w
+            mh = clip.media.height or self._proj_h
+            base_w, base_h = fit_size(mw, mh, self._proj_w, self._proj_h)
+            preview_scale = vrect.width() / max(1.0, float(self._proj_w))
+            w = max(20.0, base_w * preview_scale * scale)
+            h = max(20.0, base_h * preview_scale * scale)
+            return (cx, cy, w, h)
+
         return None
 
     def _hit_test(self, pos: QPoint) -> tuple[str | None, tuple[float, float, float, float] | None]:
         if (
             not self._clip_visible
             or self._active_clip is None
-            or not self._active_clip.is_additional
             or self._active_clip.overlay_type == "filter"
             or not self._active_clip.contains(self._position)
         ):
@@ -575,13 +593,19 @@ class _Preview(QLabel):
 
         # 1. Alça de rotação (topo em y = -h/2 - 24)
         rot_handle_y = -h / 2.0 - 24.0
-        if math.hypot(lx, ly - rot_handle_y) <= 12.0:
+        if math.hypot(lx, ly - rot_handle_y) <= 14.0:
             return "rotate", geom
 
         # 2. Alças de escala nos 4 cantos
-        for hx, hy in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)):
-            if math.hypot(lx - hx, ly - hy) <= 10.0:
-                return "scale", geom
+        corners = (
+            ("scale_tl", -w / 2, -h / 2),
+            ("scale_tr", w / 2, -h / 2),
+            ("scale_br", w / 2, h / 2),
+            ("scale_bl", -w / 2, h / 2),
+        )
+        for mode_name, hx, hy in corners:
+            if math.hypot(lx - hx, ly - hy) <= 12.0:
+                return mode_name, geom
 
         # 3. Corpo (mover)
         if abs(lx) <= w / 2.0 and abs(ly) <= h / 2.0:
@@ -591,21 +615,49 @@ class _Preview(QLabel):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         pos = event.position().toPoint()
-        if event.button() == Qt.MouseButton.LeftButton and self._active_clip is not None:
-            mode, geom = self._hit_test(pos)
-            if mode and geom:
-                cx, cy, w, h = geom
-                self._drag_mode = mode
-                self._drag_clip_id = self._active_clip.clip_id
-                self._drag_start_pos = pos
-                self._drag_init_x = self._active_clip.x
-                self._drag_init_y = self._active_clip.y
-                self._drag_init_scale = self._active_clip.scale
-                self._drag_init_rot = self._active_clip.rotation
-                self._drag_init_dist = max(10.0, math.hypot(pos.x() - cx, pos.y() - cy))
-                self._drag_init_angle = math.degrees(math.atan2(pos.y() - cy, pos.x() - cx))
-                event.accept()
-                return
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._active_clip is not None:
+                mode, geom = self._hit_test(pos)
+                if mode and geom:
+                    cx, cy, w, h = geom
+                    self._drag_mode = mode
+                    self._drag_clip_id = self._active_clip.clip_id
+                    self._drag_start_pos = pos
+                    self._drag_init_x = self._active_clip.x
+                    self._drag_init_y = self._active_clip.y
+                    self._drag_init_scale = self._active_clip.scale
+                    self._drag_init_rot = self._active_clip.rotation
+                    self._drag_init_dist = max(10.0, math.hypot(pos.x() - cx, pos.y() - cy))
+                    self._drag_init_angle = math.degrees(math.atan2(pos.y() - cy, pos.x() - cx))
+
+                    if mode.startswith("scale_"):
+                        if mode == "scale_tl":
+                            sx, sy = -1.0, -1.0
+                        elif mode == "scale_tr":
+                            sx, sy = 1.0, -1.0
+                        elif mode == "scale_br":
+                            sx, sy = 1.0, 1.0
+                        else:  # scale_bl
+                            sx, sy = -1.0, 1.0
+
+                        self._drag_sx = sx
+                        self._drag_sy = sy
+                        self._drag_w0 = max(1.0, w)
+                        self._drag_h0 = max(1.0, h)
+
+                        ox_local = -sx * (w / 2.0)
+                        oy_local = -sy * (h / 2.0)
+                        theta_rad = math.radians(self._active_clip.rotation)
+                        cos_t = math.cos(theta_rad)
+                        sin_t = math.sin(theta_rad)
+
+                        self._drag_opp_x = cx + ox_local * cos_t - oy_local * sin_t
+                        self._drag_opp_y = cy + ox_local * sin_t + oy_local * cos_t
+
+                    event.accept()
+                    return
+
+            self.clicked_outside.emit()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
@@ -625,12 +677,40 @@ class _Preview(QLabel):
             if self._drag_mode == "move":
                 dx = pos.x() - self._drag_start_pos.x()
                 dy = pos.y() - self._drag_start_pos.y()
-                new_x = max(0.0, min(1.0, self._drag_init_x + dx / vrect.width()))
-                new_y = max(0.0, min(1.0, self._drag_init_y + dy / vrect.height()))
-            elif self._drag_mode == "scale":
-                cur_dist = math.hypot(pos.x() - cx, pos.y() - cy)
-                ratio = cur_dist / max(1.0, self._drag_init_dist)
-                new_scale = max(0.1, min(10.0, self._drag_init_scale * ratio))
+                new_x = self._drag_init_x + dx / vrect.width()
+                new_y = self._drag_init_y + dy / vrect.height()
+            elif self._drag_mode.startswith("scale_"):
+                vx = pos.x() - self._drag_opp_x
+                vy = pos.y() - self._drag_opp_y
+
+                theta_rad = math.radians(self._drag_init_rot)
+                cos_t = math.cos(theta_rad)
+                sin_t = math.sin(theta_rad)
+                vlx = vx * cos_t + vy * sin_t
+                vly = -vx * sin_t + vy * cos_t
+
+                w_proj = self._drag_sx * vlx
+                h_proj = self._drag_sy * vly
+                w0 = self._drag_w0
+                h0 = self._drag_h0
+                diag_sq = w0 * w0 + h0 * h0
+                factor = (w_proj * w0 + h_proj * h0) / max(1.0, diag_sq)
+
+                min_scale = 0.05
+                max_scale = 10.0
+                new_scale = max(min_scale, min(max_scale, self._drag_init_scale * factor))
+                actual_ratio = new_scale / max(0.001, self._drag_init_scale)
+
+                new_w = w0 * actual_ratio
+                new_h = h0 * actual_ratio
+
+                cnx_local = self._drag_sx * (new_w / 2.0)
+                cny_local = self._drag_sy * (new_h / 2.0)
+                new_cx = self._drag_opp_x + cnx_local * cos_t - cny_local * sin_t
+                new_cy = self._drag_opp_y + cnx_local * sin_t + cny_local * cos_t
+
+                new_x = (new_cx - vrect.x()) / max(1.0, vrect.width())
+                new_y = (new_cy - vrect.y()) / max(1.0, vrect.height())
             elif self._drag_mode == "rotate":
                 cur_angle = math.degrees(math.atan2(pos.y() - cy, pos.x() - cx))
                 delta_angle = cur_angle - self._drag_init_angle
@@ -651,8 +731,10 @@ class _Preview(QLabel):
         mode, _ = self._hit_test(pos)
         if mode == "rotate":
             self.setCursor(Qt.CursorShape.PointingHandCursor)
-        elif mode == "scale":
+        elif mode in ("scale_tl", "scale_br"):
             self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        elif mode in ("scale_tr", "scale_bl"):
+            self.setCursor(Qt.CursorShape.SizeBDiagCursor)
         elif mode == "move":
             self.setCursor(Qt.CursorShape.SizeAllCursor)
         else:
@@ -682,24 +764,30 @@ class _Preview(QLabel):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
+        # 1. Área total do monitor (pasteboard/área de trabalho cinza-escura suave)
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()), 8, 8)
-        painter.fillPath(path, Qt.GlobalColor.black)
+        painter.fillPath(path, QColor("#141418"))
         painter.setClipPath(path)
 
         target = self._video_rect()
+
+        # 2. Canvas efetivo do vídeo (preto absoluto onde o vídeo é exibido)
+        painter.fillRect(target, Qt.GlobalColor.black)
         if self._pixmap is not None and not self._pixmap.isNull():
             painter.drawPixmap(target, self._pixmap)
 
         clip = self._active_clip
-        if (
+        has_active = (
             self._clip_visible
             and not self._is_playing
             and clip is not None
-            and clip.is_additional
             and clip.overlay_type != "filter"
             and clip.contains(self._position)
-        ):
+        )
+
+        # 3. Conteúdo do item ativo durante edição
+        if has_active:
             geom = self._clip_geometry(clip)
             if geom:
                 cx, cy, w, h = geom
@@ -729,6 +817,38 @@ class _Preview(QLabel):
                             clip.text_content or "Texto",
                         )
                         painter.restore()
+                elif clip.media is not None and clip.media.has_video and self._drag_mode is not None:
+                    # Durante o arraste de clipe de vídeo: preenchimento semitransparente cyan para feedback 60fps
+                    painter.fillRect(QRectF(-w / 2, -h / 2, w, h), QColor(0, 229, 255, 35))
+
+                painter.restore()
+
+        # 4. Máscara de delimitação e atenuação (dimming) fora da região efetiva do vídeo
+        outside_path = QPainterPath()
+        outside_path.addRect(QRectF(self.rect()))
+        target_path = QPainterPath()
+        target_path.addRect(QRectF(target))
+        dim_path = outside_path.subtracted(target_path)
+        painter.fillPath(dim_path, QColor(10, 10, 14, 175))
+
+        # 5. Moldura de destaque da região efetiva do vídeo
+        border_pen = QPen(
+            QColor("#00e5ff") if has_active else QColor("#444452"),
+            1.5 if has_active else 1.0,
+            Qt.PenStyle.SolidLine,
+        )
+        painter.setPen(border_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(QRectF(target))
+
+        # 6. Alças de controle e Bounding Box no topo de tudo
+        if has_active:
+            geom = self._clip_geometry(clip)
+            if geom:
+                cx, cy, w, h = geom
+                painter.save()
+                painter.translate(cx, cy)
+                painter.rotate(clip.rotation)
 
                 pen = QPen(QColor("#00e5ff"), 1.5, Qt.PenStyle.DashLine)
                 painter.setPen(pen)
@@ -1050,6 +1170,10 @@ class EditPanel(QWidget):
         self._build_ui()
         self._install_shortcuts()
         self._refresh_all()
+
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
     # ------------------------------------------------------------------
     # Montagem
@@ -1725,6 +1849,7 @@ class EditPanel(QWidget):
         self._preview.double_clicked.connect(self._toggle_fullscreen)
         self._preview.overlay_transformed.connect(self._on_overlay_transformed)
         self._preview.overlay_transform_finished.connect(self._on_overlay_transform_finished)
+        self._preview.clicked_outside.connect(lambda: self._timeline.select(-1))
         frame_layout.addWidget(self._preview)
 
         column.addWidget(self._preview_frame, 1)
@@ -3824,6 +3949,37 @@ class EditPanel(QWidget):
         self._runner.cancel_all()
         if self._fullscreen is not None:
             self._fullscreen.close()
+        app = QApplication.instance()
+        if app is not None:
+            try:
+                app.removeEventFilter(self)
+            except Exception:
+                pass
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.MouseButtonPress:
+            if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.LeftButton:
+                if hasattr(self, "_timeline") and self._timeline.selected_clip is not None:
+                    if isinstance(obj, QWidget) and (obj == self or self.isAncestorOf(obj)):
+                        # Se o clique for na área das trilhas, não desseleciona
+                        if (
+                            obj == self._timeline
+                            or self._timeline.isAncestorOf(obj)
+                            or (hasattr(self, "_timeline_area") and (obj == self._timeline_area or self._timeline_area.isAncestorOf(obj)))
+                        ):
+                            return super().eventFilter(obj, event)
+
+                        # Se for no monitor de prévia, a própria _Preview gerencia
+                        if hasattr(self, "_preview") and obj == self._preview:
+                            return super().eventFilter(obj, event)
+
+                        # Se for um controle interativo de propriedades (botão, spinbox, tab, input, slider, etc.)
+                        if isinstance(obj, (QAbstractButton, QAbstractSpinBox, QLineEdit, QComboBox, QSlider, QTabBar)):
+                            return super().eventFilter(obj, event)
+
+                        # Clique fora das trilhas e de controles interativos: desseleciona
+                        self._timeline.select(-1)
+        return super().eventFilter(obj, event)
 
     def apply_settings(self, settings: Settings) -> None:
         """Adota as preferências recém-salvas pelo diálogo de configurações."""

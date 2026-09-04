@@ -38,6 +38,7 @@ from pathlib import Path
 from . import hwaccel
 from .binaries import FFmpegTools, decode_thread_args
 from .errors import ConversionError
+from .preview import fit_size
 from .project import Clip, MediaKind, Project, TrackKind
 from .trimmer import (
     CutMode,
@@ -395,6 +396,27 @@ def _video_chain(
         else:
             steps.append("setpts=PTS-STARTPTS")
 
+    has_transform = (
+        abs(clip.x - 0.5) >= 0.0001
+        or abs(clip.y - 0.5) >= 0.0001
+        or abs(clip.scale - 1.0) >= 0.001
+        or abs(clip.rotation) >= 0.1
+    )
+    if has_transform:
+        steps.append(_rate_chain(piece, fps, interpolate))
+        mw = clip.media.width if clip.media else None
+        mh = clip.media.height if clip.media else None
+        base_w, base_h = fit_size(mw, mh, project.width, project.height)
+        target_w = max(2, int(round(base_w * clip.scale / 2.0) * 2))
+        target_h = max(2, int(round(base_h * clip.scale / 2.0) * 2))
+        steps.append(f"scale={target_w}:{target_h}")
+        if abs(clip.rotation) >= 0.1:
+            rad = math.radians(clip.rotation)
+            steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=none")
+        steps.append("format=rgba")
+        steps.append("setsar=1")
+        return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
+
     if _rate_first(piece, project, fps, interpolate):
         steps.append(_rate_chain(piece, fps, interpolate))
         steps.append(_fit_scale(project.width, project.height))
@@ -562,7 +584,13 @@ def build_graph(
             start, end = piece.offset, piece.offset + piece.duration
             label = f"[o{order}]"
             is_overlay_item = piece.clip.overlay_type in ("image", "text") or piece.clip.is_image
-            if is_overlay_item:
+            has_transform = (
+                abs(piece.clip.x - 0.5) >= 0.0001
+                or abs(piece.clip.y - 0.5) >= 0.0001
+                or abs(piece.clip.scale - 1.0) >= 0.001
+                or abs(piece.clip.rotation) >= 0.1
+            )
+            if is_overlay_item or has_transform:
                 overlay_coords = f"x='({piece.clip.x:.4f}*W-w/2)':y='({piece.clip.y:.4f}*H-h/2)'"
             else:
                 overlay_coords = "x=0:y=0"
@@ -853,6 +881,14 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     ) > 1:
         return None
     if any(clip.is_additional for clip in clips) or any(track.clips for track in project.additional_tracks):
+        return None
+    if any(
+        abs(clip.x - 0.5) >= 0.001
+        or abs(clip.y - 0.5) >= 0.001
+        or abs(clip.scale - 1.0) >= 0.001
+        or abs(clip.rotation) >= 0.1
+        for clip in clips
+    ):
         return None
     if any(not track.visible for track in project.tracks if track.clips):
         return None
