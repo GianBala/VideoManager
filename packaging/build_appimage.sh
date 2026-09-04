@@ -92,7 +92,12 @@ fi
 echo "==> gerando o AppImage"
 mkdir -p dist
 rm -f "$OUTPUT"
-ARCH="$ARCH" "$TOOL" "$APPDIR" "$OUTPUT"
+RUNTIME="$CACHE/runtime-${ARCH}"
+RUNTIME_ARG=()
+if [ -f "$RUNTIME" ]; then
+    RUNTIME_ARG=("--runtime-file" "$RUNTIME")
+fi
+ARCH="$ARCH" "$TOOL" "${RUNTIME_ARG[@]}" "$APPDIR" "$OUTPUT"
 
 echo "==> conferindo que o AppImage abre"
 ./packaging/smoke_run.sh "$OUTPUT"
