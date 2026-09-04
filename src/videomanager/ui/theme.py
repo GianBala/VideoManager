@@ -152,6 +152,17 @@ QPushButton[role="profile"] {{
 }}
 QPushButton[role="profile"]:hover {{ border-color: {accent}; background: {surface}; }}
 
+QPushButton[role="transport"] {{
+    background: {surface_alt};
+    border: 1px solid {border};
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-size: 13px;
+}}
+QPushButton[role="transport"]:hover {{ border-color: {accent}; }}
+QPushButton[role="transport"]:checked {{ background: {accent}; color: {accent_text}; border-color: {accent}; }}
+QPushButton[role="transport"]:disabled {{ color: {text_dim}; border-color: {border}; }}
+
 /* O indicador precisa ser desenhado aqui: assim que o QSS toca no QRadioButton,
    o estilo deixa de pintar o círculo nativo e sobra um marcador quase invisível
    — não dava para ver qual das duas opções estava escolhida. */
@@ -210,6 +221,35 @@ QProgressBar {{
     height: 16px;
 }}
 QProgressBar::chunk {{ background: {accent}; border-radius: 5px; }}
+
+QSlider {{
+    background: transparent;
+    height: 22px;
+}}
+QSlider::groove:horizontal {{
+    background: {track};
+    height: 4px;
+    border-radius: 2px;
+}}
+QSlider::sub-page:horizontal {{
+    background: {accent};
+    border-radius: 2px;
+}}
+QSlider::handle:horizontal {{
+    background: {text};
+    border: 1px solid {border};
+    width: 12px;
+    height: 12px;
+    margin: -4px 0;
+    border-radius: 6px;
+}}
+QSlider::handle:horizontal:hover {{
+    background: {accent_hover};
+    border-color: {accent_hover};
+}}
+QSlider::handle:horizontal:disabled {{
+    background: {text_dim};
+}}
 
 /* Alça larga e transparente: quem separa os painéis são as bordas dos grupos, e
    uma alça de 1 px colava o título do grupo de baixo no conteúdo do de cima. */
