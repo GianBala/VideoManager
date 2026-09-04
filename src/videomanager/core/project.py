@@ -222,7 +222,7 @@ class Clip:
 
     @property
     def has_sound(self) -> bool:
-        return self.media.has_audio and not self.muted and not self.detached and not self.is_additional
+        return bool(self.media and self.media.has_audio and not self.muted and not self.detached and not self.is_additional)
 
     @property
     def has_image(self) -> bool:
@@ -233,7 +233,7 @@ class Clip:
         """
         if self.overlay_type in ("image", "text", "filter"):
             return True
-        return self.media.has_video and not self.audio_only
+        return bool(self.media and self.media.has_video and not self.audio_only)
 
     @property
     def is_additional(self) -> bool:
@@ -242,11 +242,11 @@ class Clip:
     @property
     def can_adjust_sound(self) -> bool:
         """Se faz sentido oferecer volume e mudo para este bloco."""
-        return self.media.has_audio and not self.detached and not self.is_additional
+        return bool(self.media and self.media.has_audio and not self.detached and not self.is_additional)
 
     @property
     def is_image(self) -> bool:
-        return self.media.kind is MediaKind.IMAGE
+        return self.media is not None and self.media.kind is MediaKind.IMAGE
 
     def contains(self, seconds: float) -> bool:
         return self.start <= seconds < self.end

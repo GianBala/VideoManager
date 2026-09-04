@@ -721,3 +721,24 @@ class TestVelocidadeEFiltros:
         assert "rotate=" in filter_str
         assert "overlay=x='(0.3000*W-w/2)':y='(0.4000*H-h/2)'" in filter_str
 
+    def test_texto_sobreposicao_escala_proporcional(self) -> None:
+        c_txt = clip(
+            FOTO,
+            overlay_type="text",
+            text_content="Legenda Teste",
+            font_size=36,
+            scale=1.2,
+            x=0.5,
+            y=0.8,
+        )
+        t_add = Track(kind=TrackKind.ADDITIONAL, name="Adicionais 1", clips=(c_txt,))
+        proj = Project(tracks=(t_add, video_track(clip(VIDEO))))
+        graph = build_graph(proj)
+        filter_str = ";".join(graph.filters)
+        # Deve usar escalonamento proporcional ao iw/ih e NÃO escala de imagem base fixa (400:300)
+        assert "scale=w='trunc(iw*1.2000/2)*2':h='trunc(ih*1.2000/2)*2'" in filter_str
+        assert "scale=400:300" not in filter_str
+        assert "scale=480:360" not in filter_str
+        assert "overlay=x='(0.5000*W-w/2)':y='(0.8000*H-h/2)'" in filter_str
+
+

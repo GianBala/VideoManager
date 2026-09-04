@@ -192,7 +192,7 @@ EDIT_IMPORT_REJECTED = "Estes arquivos foram ignorados:"
 EDIT_POOL_TIP = "Mídias já importadas nesta edição"
 EDIT_MEDIA_POOL_TITLE = "Mídia do projeto"
 EDIT_MEDIA_EMPTY = "Arraste mídias para cá\nou clique em “+ Importar”"
-EDIT_MEDIA_REMOVE = "Remover do projeto"
+EDIT_MEDIA_REMOVE = "Deletar  (Del)"
 EDIT_MEDIA_REMOVE_TITLE = "Remover mídia?"
 EDIT_MEDIA_REMOVE_BODY = (
     "A mídia “{name}” está sendo usada em {count} bloco(s) da linha do tempo. "

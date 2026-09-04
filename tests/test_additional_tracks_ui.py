@@ -23,7 +23,13 @@ from videomanager.core.project import (
 )
 from videomanager.core.settings import Settings
 from videomanager.ui import strings
-from videomanager.ui.panels.edit_panel import EditPanel, _Preview, _SpeedPopup, _VolumePopup
+from videomanager.ui.panels.edit_panel import (
+    EditPanel,
+    _FontSelectorWidget,
+    _Preview,
+    _SpeedPopup,
+    _VolumePopup,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -405,4 +411,101 @@ def test_loop_playback_logic(qapp: QApplication, dummy_tools: FFmpegTools) -> No
         assert looped is True
     finally:
         panel.shutdown()
+
+
+def test_media_list_delete_shortcut_and_context_menu(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        ref1 = MediaRef(path=Path("/tmp/media1.mp4"), kind=MediaKind.VIDEO, duration=5.0)
+        ref2 = MediaRef(path=Path("/tmp/media2.mp4"), kind=MediaKind.VIDEO, duration=5.0)
+        panel._pool.extend([ref1, ref2])
+        panel._refresh_pool()
+        assert len(panel._pool) == 2
+        assert panel._media_list.count() == 2
+
+        # 1. Test context menu text is "Deletar  (Del)"
+        assert strings.EDIT_MEDIA_REMOVE == "Deletar  (Del)"
+
+        # 2. Test deleting selected item with focus on _media_list
+        panel._media_list.setCurrentRow(0)
+        panel._media_list.setFocus()
+        panel._delete_selected()
+
+        assert len(panel._pool) == 1
+        assert panel._pool[0].path == Path("/tmp/media2.mp4")
+        assert panel._media_list.count() == 1
+    finally:
+        panel.shutdown()
+
+
+def test_font_selector_popular_fonts_and_search(qapp: QApplication) -> None:
+    selector = _FontSelectorWidget("Sans Serif")
+    # Verify popular fonts exist
+    items = [selector._font_list.item(i).text() for i in range(selector._font_list.count())]
+    assert "Arial" in items
+    assert "Comic Sans MS" in items
+    assert "Times New Roman" in items
+
+    # Test filtering
+    selector._filter_fonts("Comic")
+    visible = [
+        selector._font_list.item(i).text()
+        for i in range(selector._font_list.count())
+        if not selector._font_list.item(i).isHidden()
+    ]
+    assert "Comic Sans MS" in visible
+    assert "Arial" not in visible
+
+    # Test clear filter
+    selector._filter_fonts("")
+    visible_all = [
+        selector._font_list.item(i).text()
+        for i in range(selector._font_list.count())
+        if not selector._font_list.item(i).isHidden()
+    ]
+    assert len(visible_all) == len(items)
+
+
+def test_font_size_controls_and_no_old_presets(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        # Check that old preset buttons (24, 36, 48, 64, 72) are not present
+        old_presets = {"24", "36", "48", "64", "72"}
+        text_tab = panel._extras_tabs.widget(0)
+        buttons = text_tab.findChildren(type(panel._font_size_spin))
+        button_texts = {b.text() for b in text_tab.findChildren(type(panel._bold_btn))}
+        assert not old_presets.issubset(button_texts)
+
+        # Check increment and decrement buttons
+        dec_btns = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.text() == "-"]
+        inc_btns = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.text() == "+"]
+        assert len(dec_btns) == 1
+        assert len(inc_btns) == 1
+
+        initial_val = panel._font_size_spin.value()
+        inc_btns[0].click()
+        assert panel._font_size_spin.value() == initial_val + 2
+        dec_btns[0].click()
+        assert panel._font_size_spin.value() == initial_val
+    finally:
+        panel.shutdown()
+
+
+def test_filter_selection_highlight_style(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    settings = Settings()
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        # Check stylesheet of filter buttons
+        for btn in panel._filter_buttons:
+            style = btn.styleSheet()
+            # Must have light blue border on checked
+            assert "border: 2px solid #38bdf8" in style
+            # Must NOT paint entire background purple
+            assert "#7b1fa2" not in style
+            assert "#9c27b0" not in style
+    finally:
+        panel.shutdown()
+
 
