@@ -26,13 +26,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...core.estimator import estimate_download_size
 from ...core.format_matrix import (
     available_families,
     available_fps,
     available_heights,
     find_video,
 )
-from ...core.humanize import format_bitrate
+from ...core.humanize import format_bitrate, format_size
 from ...core.models import AudioChoice, FormatMatrix, Mode, VideoChoice
 from ...core.selector import (
     AUDIO_BITRATES,
@@ -84,6 +85,7 @@ class QualityPanel(QWidget):
         # depois e avisar quando esta mídia não puder atendê-lo.
         self._wanted_family: str | None = None
         self._wanted_fps: int | None = None
+        self._duration: float | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -193,6 +195,10 @@ class QualityPanel(QWidget):
             form, strings.LABEL_AUDIO_TRACK, self._audio_track
         )
 
+        self._video_size_label = QLabel("—")
+        self._video_size_label.setProperty("role", "dim")
+        self._add_row(form, strings.LABEL_ESTIMATED_SIZE, self._video_size_label)
+
         for combo in (self._resolution, self._fps, self._codec, self._container, self._audio_track):
             combo.setFixedWidth(FIELD_WIDTH)
         return page
@@ -219,6 +225,10 @@ class QualityPanel(QWidget):
         self._audio_quality.setCurrentIndex(max(0, index))
         self._audio_quality.currentIndexChanged.connect(self._emit_changed)
         self._add_row(form, strings.LABEL_AUDIO_QUALITY, self._audio_quality)
+
+        self._audio_size_label = QLabel("—")
+        self._audio_size_label.setProperty("role", "dim")
+        self._add_row(form, strings.LABEL_ESTIMATED_SIZE, self._audio_size_label)
 
         # Sem rótulo, mas na coluna dos campos: é uma nota sobre o campo de cima.
         self._audio_source = QLabel("")
@@ -249,9 +259,12 @@ class QualityPanel(QWidget):
         if target.isEnabled():
             target.setChecked(True)
 
-    def set_matrix(self, matrix: FormatMatrix) -> None:
+    def set_matrix(
+        self, matrix: FormatMatrix, duration: float | None = None
+    ) -> None:
         """Repopula todos os combos a partir de uma mídia recém-analisada."""
         self._matrix = matrix
+        self._duration = duration
         self._loading = True
         try:
             self._populate_resolutions()
@@ -269,6 +282,7 @@ class QualityPanel(QWidget):
 
         self._update_audio_source_hint()
         self._refresh_warnings()
+        self._update_estimated_size()
 
     def _update_mode_availability(self, matrix: FormatMatrix) -> None:
         """Desabilita o modo que esta mídia não oferece.
@@ -383,7 +397,38 @@ class QualityPanel(QWidget):
             return
         self._update_audio_source_hint()
         self._refresh_warnings()
+        self._update_estimated_size()
         self.changed.emit()
+
+    def _update_estimated_size(self) -> None:
+        if self._matrix.is_empty:
+            self._video_size_label.setText("—")
+            self._audio_size_label.setText("—")
+            return
+
+        v_choice = self.current_video_choice()
+        a_choice = self.current_audio_choice()
+        v_bytes = estimate_download_size(
+            self._matrix,
+            Mode.VIDEO,
+            v_choice,
+            a_choice,
+            duration=self._duration,
+        )
+        self._video_size_label.setText(format_size(v_bytes, estimated=True))
+
+        codec = self._audio_codec.currentData() or "mp3"
+        quality = self._audio_quality.currentData() or "192"
+        a_bytes = estimate_download_size(
+            self._matrix,
+            Mode.AUDIO_ONLY,
+            None,
+            a_choice,
+            audio_codec=codec,
+            audio_quality=quality,
+            duration=self._duration,
+        )
+        self._audio_size_label.setText(format_size(a_bytes, estimated=True))
 
     def _update_audio_source_hint(self) -> None:
         best = self._matrix.best_audio_bitrate

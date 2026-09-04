@@ -38,6 +38,7 @@ from ..core.composer import (
 )
 from ..core.converter import LocalMedia, output_path, probe_file
 from ..core import hwaccel
+from ..core.estimator import estimate_export_size
 from ..core.errors import VideoManagerError
 from ..core.humanize import format_rate, format_size
 from ..core.job import Job, JobKind
@@ -226,6 +227,11 @@ class ExportDialog(QDialog):
         advanced_box.addWidget(self._interpolate)
 
         self._form.addRow("", self._advanced_widget)
+
+        self._size_label = QLabel("—")
+        self._size_label.setProperty("role", "dim")
+        self._form.addRow(strings.EXPORT_ESTIMATED_SIZE, self._size_label)
+
         layout.addWidget(settings_group)
 
         # 3. Destino do arquivo
@@ -535,6 +541,7 @@ class ExportDialog(QDialog):
 
         is_fast = self._fast.isChecked() and can_fast
         interpolating = self._interpolate.isChecked() and can_interp
+        target: TrimTarget | None = None
 
         if audio_only:
             container = self._audio_format_choice or "mp3"
@@ -577,6 +584,30 @@ class ExportDialog(QDialog):
         self._plan.setText(strings.EDIT_PLAN.format(plan=plan))
         self._warning.setText(warning)
         self._warning.setVisible(bool(warning))
+
+        # Calcula estimativa de tamanho do arquivo exportado
+        main = self._main_clip(proj)
+        source = main.media.path if main else (proj.clips[0].media.path if proj.clips else None)
+        local = self._probed.get(source) if source else None
+        source_size = local.size if local else None
+        source_dur = local.duration if local else None
+
+        export_duration = target.output_duration if (is_fast and target) else proj.duration
+        codec_family = self._codec_choice or hwaccel.family_for(self._container_choice or "mp4")
+
+        est_bytes = estimate_export_size(
+            duration=export_duration,
+            width=proj.width,
+            height=proj.height,
+            fps=proj.fps,
+            video_codec=codec_family,
+            audio_only=audio_only,
+            audio_codec=self._audio_format_choice or "mp3",
+            is_fast=is_fast,
+            source_size=source_size,
+            source_duration=source_dur,
+        )
+        self._size_label.setText(format_size(est_bytes, estimated=True))
 
     def _drift_text(self, target: TrimTarget, fps: float) -> str:
         if target.anchor is None:
