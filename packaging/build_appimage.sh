@@ -94,10 +94,24 @@ mkdir -p dist
 rm -f "$OUTPUT"
 RUNTIME="$CACHE/runtime-${ARCH}"
 RUNTIME_ARG=()
+if [ ! -f "$RUNTIME" ]; then
+    echo "==> baixando runtime type2 para $ARCH"
+    mkdir -p "$CACHE"
+    curl -fL --progress-bar -o "$RUNTIME.part" \
+        "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${ARCH}" || true
+    if [ -f "$RUNTIME.part" ]; then
+        mv "$RUNTIME.part" "$RUNTIME"
+    fi
+fi
+
 if [ -f "$RUNTIME" ]; then
+    "$PY" packaging/patch_runtime.py "$RUNTIME" >/dev/null 2>&1 || true
     RUNTIME_ARG=("--runtime-file" "$RUNTIME")
 fi
+
 ARCH="$ARCH" "$TOOL" "${RUNTIME_ARG[@]}" "$APPDIR" "$OUTPUT"
+chmod +x "$OUTPUT"
+"$PY" packaging/patch_runtime.py "$OUTPUT" >/dev/null 2>&1 || true
 
 echo "==> conferindo que o AppImage abre"
 ./packaging/smoke_run.sh "$OUTPUT"

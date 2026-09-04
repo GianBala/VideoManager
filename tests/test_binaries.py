@@ -70,3 +70,41 @@ class TestAmbienteDosProcessosFilhos:
         clean_env()
 
         assert os.environ["LD_LIBRARY_PATH"] == "/pacote/_internal"
+
+
+def test_patch_runtime_universal_extract_and_run(tmp_path) -> None:
+    import sys
+    from pathlib import Path
+    pkg_dir = Path(__file__).resolve().parents[1] / "packaging"
+    if str(pkg_dir) not in sys.path:
+        sys.path.insert(0, str(pkg_dir))
+    from patch_runtime import patch_runtime
+
+    target_str = b"APPIMAGE_EXTRACT_AND_RUN\0"
+    header = bytearray(0x2000)
+    str_offset = 0x1500
+    header[str_offset : str_offset + len(target_str)] = target_str
+
+    lea_offset = 0x800
+    disp = str_offset - (lea_offset + 7)
+    header[lea_offset : lea_offset + 3] = b"\x48\x8d\x3d"
+    header[lea_offset + 3 : lea_offset + 7] = disp.to_bytes(4, "little", signed=True)
+
+    after_call = lea_offset + 7 + 5
+    header[after_call : after_call + 3] = b"\x48\x85\xc0"
+    jne_idx = after_call + 3
+    header[jne_idx : jne_idx + 2] = b"\x0f\x85"
+    header[jne_idx + 2 : jne_idx + 6] = (0x100).to_bytes(4, "little", signed=True)
+
+    test_file = tmp_path / "mock_runtime"
+    test_file.write_bytes(header)
+
+    assert patch_runtime(test_file) is True
+    patched = test_file.read_bytes()
+    assert patched[jne_idx] == 0xE9
+    assert patched[jne_idx + 1 : jne_idx + 5] == (0x101).to_bytes(4, "little", signed=True)
+    assert patched[jne_idx + 5] == 0x90
+
+    # Segunda chamada deve reconhecer que já está patcheado
+    assert patch_runtime(test_file) is True
+
