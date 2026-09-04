@@ -29,9 +29,11 @@ que venha a ser acrescentado.
 
 from __future__ import annotations
 
+import glob
+import os
 import subprocess
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .binaries import FFmpegTools, subprocess_kwargs
 
@@ -171,14 +173,25 @@ _probe_locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
 
+def find_vaapi_device() -> str:
+    """Encontra o primeiro nó de renderização VAAPI acessível no Linux."""
+    for node in sorted(glob.glob("/dev/dri/renderD*")):
+        if os.access(node, os.R_OK | os.W_OK):
+            return node
+    return "/dev/dri/renderD128"
+
+
 def _probe_command(encoder: Encoder, tools: FFmpegTools) -> list[str]:
     """Codifica **um quadro** de uma imagem gerada na hora, sem tocar em disco."""
     source = "color=c=black:s=320x240:d=0.1"
     chain = f"format=nv12,{encoder.filter_suffix}" if encoder.filter_suffix else "null"
+    device_args = encoder.device
+    if encoder.name.endswith("_vaapi"):
+        device_args = ("-vaapi_device", find_vaapi_device())
     return [
         tools.ffmpeg_str,
         "-nostdin", "-hide_banner", "-v", "error",
-        *encoder.device,
+        *device_args,
         "-f", "lavfi", "-i", source,
         "-vf", chain,
         "-c:v", encoder.name,
@@ -266,8 +279,11 @@ def resolve(family: str, preference: str, tools: FFmpegTools | None) -> Encoder:
     wanted = ORDER if preference == AUTO else (preference,)
     for kind in wanted:
         encoder = candidates.get(kind)
-        if encoder is not None and probe(encoder, tools):
-            return encoder
+        if encoder is not None:
+            if encoder.name.endswith("_vaapi"):
+                encoder = replace(encoder, device=("-vaapi_device", find_vaapi_device()))
+            if probe(encoder, tools):
+                return encoder
     return fallback
 
 
