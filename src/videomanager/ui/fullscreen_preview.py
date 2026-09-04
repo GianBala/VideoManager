@@ -203,7 +203,16 @@ class FullscreenPreview(QWidget):
         de qualidade do vídeo e não como escolha da prévia. O ajuste continua
         para o intervalo entre trocar de tamanho e o quadro novo chegar.
         """
+        self._master = pixmap
+        self._update_display()
+
+    def _update_display(self) -> None:
+        if not hasattr(self, "_master") or self._master is None or self._master.isNull():
+            return
         area = self._image.size()
+        if area.width() <= 0 or area.height() <= 0:
+            return
+        pixmap = self._master
         if pixmap.width() != area.width() and pixmap.height() != area.height():
             pixmap = pixmap.scaled(
                 area,
@@ -302,6 +311,7 @@ class FullscreenPreview(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._place_bar()
+        self._update_display()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         self._show_bar()

@@ -154,6 +154,25 @@ class AudioPreview(QObject):
             return self._origin
         return self._origin + self._sink.processedUSecs() / 1_000_000
 
+    @property
+    def target_format(self) -> tuple[int, int]:
+        """Devolve (sample_rate, channels) suportados pelo dispositivo de som padrão."""
+        if not self.available:
+            return (SAMPLE_RATE, CHANNELS)
+        device = QMediaDevices.defaultAudioOutput()
+        fmt = QAudioFormat()
+        fmt.setSampleRate(SAMPLE_RATE)
+        fmt.setChannelCount(CHANNELS)
+        fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
+        if device.isFormatSupported(fmt):
+            return (SAMPLE_RATE, CHANNELS)
+        pref = device.preferredFormat()
+        if pref.isValid():
+            rate = pref.sampleRate() if pref.sampleRate() > 0 else SAMPLE_RATE
+            ch = pref.channelCount() if pref.channelCount() > 0 else CHANNELS
+            return (rate, ch)
+        return (SAMPLE_RATE, CHANNELS)
+
     # ------------------------------------------------------------------
 
     def start(self, command: list[str], at: float) -> bool:
@@ -169,15 +188,23 @@ class AudioPreview(QObject):
         except OSError:
             return False
 
+        rate, channels = self.target_format
         fmt = QAudioFormat()
-        fmt.setSampleRate(SAMPLE_RATE)
-        fmt.setChannelCount(CHANNELS)
+        fmt.setSampleRate(rate)
+        fmt.setChannelCount(channels)
         fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
         device = QMediaDevices.defaultAudioOutput()
         if not device.isFormatSupported(fmt):
-            process.terminate()
-            return False
+            pref = device.preferredFormat()
+            if device.isFormatSupported(pref):
+                fmt = pref
+            else:
+                process.terminate()
+                return False
 
+        self._bytes_per_second = (
+            fmt.sampleRate() * fmt.channelCount() * max(1, fmt.bytesPerSample())
+        )
         self._origin = at
         self._finished = False
         # Fila e sinal de parada **novos**, e entregues ao leitor como
@@ -282,8 +309,9 @@ class AudioPreview(QObject):
         # e voltasse a tocar nesse intervalo veria a reprodução nova ser
         # encerrada pelo aviso da anterior.
         generation = self._generation
+        bps = getattr(self, "_bytes_per_second", None) or _BYTES_PER_SECOND
         QTimer.singleShot(
-            int(remaining / _BYTES_PER_SECOND * 1000) + 60,
+            int(remaining / bps * 1000) + 60,
             lambda: self._emit_stopped(generation),
         )
 
