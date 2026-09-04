@@ -24,12 +24,14 @@ certo, em vez de se esticar para preencher o novo tamanho.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import cast
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
     QFontMetrics,
+    QHelpEvent,
     QImage,
     QMouseEvent,
     QPainter,
@@ -38,10 +40,11 @@ from PySide6.QtGui import (
     QPixmap,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from ...core.project import Clip, Project, TrackKind, accepts
 from ...core.trimmer import MIN_SEGMENT, format_timecode, frame_step
+from .. import strings
 
 # Faixas do widget.
 RULER_HEIGHT = 20
@@ -166,6 +169,7 @@ class Timeline(QWidget):
     edit_finished = Signal()
     clip_selected = Signal(int)
     track_mute_clicked = Signal(int)
+    track_reordered = Signal(int, int)  # índice de origem, índice de destino
     view_changed = Signal()
     # Botão direito: o widget diz **onde** foi clicado e o painel monta o menu.
     # As ações são dele (é ele quem tem o projeto e o histórico), e assim o menu
@@ -184,6 +188,8 @@ class Timeline(QWidget):
 
         self._drag = ""
         self._drag_clip = -1
+        self._drag_track = -1
+        self._drop_track_target = -1
         self._grab_offset = 0.0
         # Onde o botão foi apertado, e se o arrasto já passou da folga: até lá
         # nada é alterado no projeto (ver :data:`_DRAG_SLACK`).
@@ -442,6 +448,13 @@ class Timeline(QWidget):
         for index, track in enumerate(self._project.tracks):
             self._paint_header(painter, index, track)
             self._paint_lane(painter, index, track)
+        if (
+            self._drag == "cabecalho"
+            and self._dragging
+            and 0 <= self._drop_track_target < len(self._project.tracks)
+            and self._drop_track_target != self._drag_track
+        ):
+            self._paint_track_drop_indicator(painter)
         self._paint_playhead(painter)
         painter.end()
 
@@ -470,14 +483,25 @@ class Timeline(QWidget):
 
     def _paint_header(self, painter: QPainter, index: int, track) -> None:
         rect = self._header_rect(index)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._color("surface"))
+        is_dragged = (
+            self._drag == "cabecalho"
+            and self._dragging
+            and self._drag_track == index
+        )
+        if is_dragged:
+            painter.setPen(QPen(self._color("accent"), 1.5))
+            painter.setBrush(self._color("accent", 40))
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._color("surface"))
         painter.drawRoundedRect(rect, 5, 5)
 
         font = QFont(self.font())
         font.setPointSizeF(max(7.5, font.pointSizeF() - 1.5))
         painter.setFont(font)
-        painter.setPen(self._color("text_dim"))
+        painter.setPen(
+            self._color("accent_text") if is_dragged else self._color("text_dim")
+        )
         painter.drawText(
             rect.adjusted(8, 0, -34, 0),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
@@ -496,6 +520,19 @@ class Timeline(QWidget):
         )
         painter.drawText(
             box, int(Qt.AlignmentFlag.AlignCenter), "M"
+        )
+
+    def _paint_track_drop_indicator(self, painter: QPainter) -> None:
+        lane = self._lane_rect(self._drop_track_target)
+        header = self._header_rect(self._drop_track_target)
+        y = (
+            lane.top() - 1
+            if self._drop_track_target < self._drag_track
+            else lane.bottom() + 1
+        )
+        painter.setPen(QPen(self._color("accent"), 3))
+        painter.drawLine(
+            int(header.left()), int(y), int(lane.right()), int(y)
         )
 
     def _mute_rect(self, index: int) -> QRectF:
@@ -614,6 +651,30 @@ class Timeline(QWidget):
     # Mouse
     # ------------------------------------------------------------------
 
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            help_event = cast(QHelpEvent, event)
+            pos = help_event.position()
+            kind, index, _ = self._hit(pos.x(), pos.y())
+            if kind == "mudo" and 0 <= index < len(self._project.tracks):
+                track = self._project.tracks[index]
+                text = (
+                    strings.EDIT_TRACK_UNMUTE
+                    if track.muted
+                    else strings.EDIT_TRACK_MUTE
+                )
+                QToolTip.showText(help_event.globalPosition().toPoint(), text, self)
+                return True
+            if kind == "cabecalho" and 0 <= index < len(self._project.tracks):
+                QToolTip.showText(
+                    help_event.globalPosition().toPoint(),
+                    strings.EDIT_TRACK_DRAG_TIP,
+                    self,
+                )
+                return True
+            QToolTip.hideText()
+        return super().event(event)
+
     def _hit(self, x: float, y: float) -> tuple[str, int, int]:
         """O que está sob o ponteiro: (espécie, índice da trilha, clip_id)."""
         if y < RULER_HEIGHT:
@@ -622,7 +683,7 @@ class Timeline(QWidget):
         if index < 0:
             return "cursor", -1, -1
         if x < HEADER_WIDTH:
-            if self._mute_rect(index).contains(x, y):
+            if self._mute_rect(index).adjusted(-3, -3, 3, 3).contains(x, y):
                 return "mudo", index, -1
             return "cabecalho", index, -1
 
@@ -658,6 +719,11 @@ class Timeline(QWidget):
         if kind == "mudo":
             self.track_mute_clicked.emit(index)
             return
+        if kind == "cabecalho":
+            self._drag, self._drag_track = "cabecalho", index
+            self._drop_track_target = index
+            self._press_at, self._dragging = event.position(), False
+            return
         if clip_id >= 0:
             self.select(clip_id)
         if kind in ("inicio", "fim", "corpo"):
@@ -690,9 +756,21 @@ class Timeline(QWidget):
                 Qt.CursorShape.SizeHorCursor
                 if kind in ("inicio", "fim")
                 else Qt.CursorShape.OpenHandCursor
-                if kind == "corpo"
+                if kind in ("corpo", "cabecalho")
+                else Qt.CursorShape.PointingHandCursor
+                if kind == "mudo"
                 else Qt.CursorShape.ArrowCursor
             )
+            return
+
+        if self._drag == "cabecalho":
+            if not self._past_slack(event.position()):
+                return
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            target = self._target_reorder_track(y)
+            if target != self._drop_track_target:
+                self._drop_track_target = target
+                self.update()
             return
 
         if self._drag == "cursor":
@@ -716,6 +794,26 @@ class Timeline(QWidget):
 
         moment = self._snap(self._time_of(x), clip)
         self.clip_resized.emit(clip.clip_id, self._drag, moment)
+
+    def _target_reorder_track(self, y: float) -> int:
+        if not (0 <= self._drag_track < len(self._project.tracks)):
+            return -1
+        moving_kind = self._project.tracks[self._drag_track].kind
+        valid_indices = [
+            i for i, t in enumerate(self._project.tracks) if t.kind is moving_kind
+        ]
+        if not valid_indices:
+            return self._drag_track
+
+        for i in valid_indices:
+            rect = self._lane_rect(i)
+            if rect.top() <= y < rect.bottom() + TRACK_GAP:
+                return i
+
+        first = valid_indices[0]
+        if y < self._lane_rect(first).top():
+            return first
+        return valid_indices[-1]
 
     def _past_slack(self, point: QPointF) -> bool:
         """Se o ponteiro já andou o bastante para isto ser um arrasto.
@@ -772,6 +870,20 @@ class Timeline(QWidget):
         if self._pan_origin is not None:
             self._pan_origin = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
+            return
+        if self._drag == "cabecalho":
+            if (
+                self._dragging
+                and self._drop_track_target >= 0
+                and self._drop_track_target != self._drag_track
+            ):
+                self.track_reordered.emit(self._drag_track, self._drop_track_target)
+            self._drag = ""
+            self._drag_track = -1
+            self._drop_track_target = -1
+            self._press_at, self._dragging = None, False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.update()
             return
         if self._dragging and self._drag in ("inicio", "fim", "corpo"):
             self.edit_finished.emit()
