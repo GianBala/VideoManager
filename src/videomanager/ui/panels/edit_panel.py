@@ -70,6 +70,7 @@ from PySide6.QtGui import (
     QTransform,
 )
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QApplication,
     QButtonGroup,
     QCheckBox,
@@ -130,6 +131,7 @@ from ...core.project import (
     auto_canvas,
     media_ref,
     new_project,
+    next_clip_id,
 )
 from ...core.project_io import ProjectError, load_project, save_project
 from ...core.settings import Settings
@@ -141,6 +143,7 @@ from ...core.trimmer import (
     format_timecode,
     frame_index,
     frame_step,
+    keyframe_after,
     keyframe_at_or_before,
 )
 from ...workers.preview_worker import (
@@ -419,14 +422,35 @@ class _Preview(QLabel):
         self._drag_init_dist: float = 1.0
         self._drag_init_angle: float = 0.0
         self._clip_pixmaps: dict[Path, QPixmap] = {}
+        self._text_pixmaps: dict[tuple, QPixmap] = {}
+        self._is_playing: bool = False
         self.setMouseTracking(True)
+
+    def set_playing(self, playing: bool) -> None:
+        self._is_playing = playing
+        self.update()
 
     def _get_clip_pixmap(self, clip: Clip) -> QPixmap | None:
         if clip.overlay_type == "text":
+            key = (
+                clip.clip_id,
+                clip.text_content,
+                clip.font_family,
+                clip.font_size,
+                clip.font_bold,
+                clip.font_italic,
+                clip.text_color,
+            )
+            pix = self._text_pixmaps.get(key)
+            if pix is not None and not pix.isNull():
+                return pix
             try:
                 from videomanager.core.composer import render_text_to_image
                 txt_path = render_text_to_image(clip)
-                return QPixmap(str(txt_path))
+                pix = QPixmap(str(txt_path))
+                if not pix.isNull():
+                    self._text_pixmaps[key] = pix
+                return pix
             except Exception:
                 return None
         if clip.media is None or not clip.media.path:
@@ -660,7 +684,8 @@ class _Preview(QLabel):
 
         clip = self._active_clip
         if (
-            clip is not None
+            not self._is_playing
+            and clip is not None
             and clip.is_additional
             and clip.overlay_type != "filter"
             and clip.contains(self._position)
@@ -672,7 +697,7 @@ class _Preview(QLabel):
                 painter.translate(cx, cy)
                 painter.rotate(clip.rotation)
 
-                if self._drag_mode and (clip.overlay_type in ("image", "text") or clip.is_image):
+                if clip.overlay_type in ("image", "text") or clip.is_image:
                     img_pix = self._get_clip_pixmap(clip)
                     if img_pix and not img_pix.isNull():
                         painter.save()
@@ -1224,32 +1249,56 @@ class EditPanel(QWidget):
 
         btn_dec = QPushButton("-")
         btn_dec.setFixedSize(30, 28)
-        btn_dec.setToolTip("Diminuir tamanho da fonte")
-        f_dec = btn_dec.font()
-        f_dec.setBold(True)
-        f_dec.setPointSize(14)
-        btn_dec.setFont(f_dec)
-        btn_dec.clicked.connect(lambda: self._font_size_spin.setValue(max(8, self._font_size_spin.value() - 2)))
+        btn_dec.setToolTip("Diminuir tamanho da fonte (1 pt)")
+        btn_dec.setStyleSheet(
+            "QPushButton { font-weight: bold; font-size: 16px; color: #ffffff; background: #2a2a32; border: 1px solid #555; border-radius: 4px; } "
+            "QPushButton:hover { background: #383844; border-color: #777; color: #ffffff; } "
+            "QPushButton:pressed { background: #0284c7; color: #ffffff; }"
+        )
+        btn_dec.clicked.connect(lambda: self._font_size_spin.setValue(max(8, self._font_size_spin.value() - 1)))
         row_size.addWidget(btn_dec)
 
         self._font_size_spin = QSpinBox()
         self._font_size_spin.setRange(8, 200)
         self._font_size_spin.setValue(48)
+        self._font_size_spin.setSingleStep(1)
         self._font_size_spin.setSuffix(" pt")
         self._font_size_spin.setFixedHeight(28)
+        self._font_size_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self._font_size_spin.setStyleSheet(
+            "QSpinBox { background: #1e1e26; border: 1px solid #444; border-radius: 4px; color: #ffffff; padding: 2px 8px; font-size: 13px; } "
+            "QSpinBox:focus { border: 1px solid #0284c7; } "
+            "QSpinBox::up-button, QSpinBox::down-button { width: 0px; height: 0px; border: none; }"
+        )
         self._font_size_spin.valueChanged.connect(lambda _: self._on_text_style_changed())
         row_size.addWidget(self._font_size_spin, 1)
 
         btn_inc = QPushButton("+")
         btn_inc.setFixedSize(30, 28)
-        btn_inc.setToolTip("Aumentar tamanho da fonte")
-        f_inc = btn_inc.font()
-        f_inc.setBold(True)
-        f_inc.setPointSize(14)
-        btn_inc.setFont(f_inc)
-        btn_inc.clicked.connect(lambda: self._font_size_spin.setValue(min(200, self._font_size_spin.value() + 2)))
+        btn_inc.setToolTip("Aumentar tamanho da fonte (1 pt)")
+        btn_inc.setStyleSheet(
+            "QPushButton { font-weight: bold; font-size: 16px; color: #ffffff; background: #2a2a32; border: 1px solid #555; border-radius: 4px; } "
+            "QPushButton:hover { background: #383844; border-color: #777; color: #ffffff; } "
+            "QPushButton:pressed { background: #0284c7; color: #ffffff; }"
+        )
+        btn_inc.clicked.connect(lambda: self._font_size_spin.setValue(min(200, self._font_size_spin.value() + 1)))
         row_size.addWidget(btn_inc)
         layout.addLayout(row_size)
+
+        size_presets = QHBoxLayout()
+        size_presets.setSpacing(4)
+        for sz in (18, 24, 36, 48, 64, 72):
+            btn_sz = QPushButton(f"{sz}")
+            btn_sz.setFixedHeight(24)
+            btn_sz.setToolTip(f"Definir tamanho para {sz} pt")
+            btn_sz.setStyleSheet(
+                "QPushButton { font-size: 11px; font-weight: 500; color: #ddd; background: #2a2a32; border: 1px solid #444; border-radius: 3px; padding: 2px 4px; } "
+                "QPushButton:hover { background: #383844; border-color: #666; color: #fff; } "
+                "QPushButton:pressed { background: #0284c7; color: #fff; }"
+            )
+            btn_sz.clicked.connect(lambda _, s=sz: self._font_size_spin.setValue(s))
+            size_presets.addWidget(btn_sz)
+        layout.addLayout(size_presets)
 
         row_style = QHBoxLayout()
         row_style.setSpacing(4)
@@ -2645,6 +2694,7 @@ class EditPanel(QWidget):
         # do arrasto; agora que um clique simples não conta como edição (ver
         # ``timeline._DRAG_SLACK``), a seleção precisa avisar por conta própria.
         self._refresh_controls()
+        self._request_frame(force=True)
 
     def _show_volume_popup(self) -> None:
         clip = self._timeline.selected_clip
@@ -2909,8 +2959,20 @@ class EditPanel(QWidget):
         self._rendered = self._wanted
         self._frame_token = next(self._tokens)
         size = self._preview_size()
+
+        active = self._timeline.selected_clip
+        if (
+            active is not None
+            and active.is_additional
+            and active.overlay_type != "filter"
+            and active.contains(self._wanted)
+        ):
+            proj = self._project.without_clip(active.clip_id)
+        else:
+            proj = self._project
+
         worker = FrameWorker(
-            frame_command(self._project, self._wanted, size, tools),
+            frame_command(proj, self._wanted, size, tools),
             size,
             self._wanted,
             self._frame_token,
@@ -3303,6 +3365,7 @@ class EditPanel(QWidget):
             self._timeline.set_position(0.0)
 
         self._playing = True
+        self._preview.set_playing(True)
         self._refresh_play_button()
         self._open_stream(seconds)
         self._tick.start()
@@ -3431,6 +3494,7 @@ class EditPanel(QWidget):
         if self._playback is not None:
             self._playback.cancel()
             self._playback = None
+        self._preview.set_playing(False)
         if self._playing:
             self._playing = False
             self._play_token = 0
@@ -3587,9 +3651,6 @@ class EditPanel(QWidget):
         return "mp4" if not suffix or video.media.kind is MediaKind.IMAGE else suffix
 
     def _refresh_plan(self) -> None:
-        pass
-
-    def _refresh_canvas_controls(self) -> None:
         pass
 
     # ------------------------------------------------------------------
