@@ -48,6 +48,7 @@ rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin" \
          "$APPDIR/usr/share/applications" \
          "$APPDIR/usr/share/icons/hicolor/256x256/apps" \
+         "$APPDIR/usr/share/icons/hicolor/512x512/apps" \
          "$APPDIR/usr/share/icons/hicolor/scalable/apps"
 
 cp -a dist/VideoManager/. "$APPDIR/usr/bin/"
@@ -62,6 +63,8 @@ install -m 644 packaging/appimage/videomanager.desktop "$APPDIR/usr/share/applic
 install -m 644 src/videomanager/resources/videomanager.png "$APPDIR/videomanager.png"
 install -m 644 src/videomanager/resources/videomanager.png \
         "$APPDIR/usr/share/icons/hicolor/256x256/apps/"
+install -m 644 src/videomanager/resources/videomanager.png \
+        "$APPDIR/usr/share/icons/hicolor/512x512/apps/"
 install -m 644 src/videomanager/resources/videomanager.svg \
         "$APPDIR/usr/share/icons/hicolor/scalable/apps/"
 # .DirIcon é o ícone que gerenciadores de arquivo mostram para o próprio
