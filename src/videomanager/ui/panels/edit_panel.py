@@ -440,6 +440,8 @@ class _Preview(QLabel):
                 clip.font_bold,
                 clip.font_italic,
                 clip.text_color,
+                clip.stroke_color,
+                clip.stroke_width,
             )
             pix = self._text_pixmaps.get(key)
             if pix is not None and not pix.isNull():
@@ -521,10 +523,14 @@ class _Preview(QLabel):
             font.setItalic(clip.font_italic)
             fm = QFontMetrics(font)
             text = clip.text_content or "Texto"
-            rect = fm.boundingRect(QRect(0, 0, self._proj_w, self._proj_h), int(Qt.TextFlag.TextWordWrap), text)
-            pad = 20
-            full_w = max(40, ((rect.width() + pad * 2 + 3) // 4) * 4)
-            full_h = max(40, ((rect.height() + pad * 2 + 3) // 4) * 4)
+            stroke_w = max(0, clip.stroke_width)
+            pad = 20 + stroke_w
+            lines = text.splitlines() if text else ["Texto"]
+            line_spacing = fm.lineSpacing()
+            total_text_h = (len(lines) - 1) * line_spacing + fm.ascent() + fm.descent()
+            max_tw = max((fm.horizontalAdvance(l) for l in lines), default=100)
+            full_w = max(40, ((max_tw + pad * 2 + 3) // 4) * 4)
+            full_h = max(40, ((total_text_h + pad * 2 + 3) // 4) * 4)
             preview_scale = vrect.width() / max(1.0, float(self._proj_w))
             w = max(20.0, full_w * preview_scale * scale)
             h = max(20.0, full_h * preview_scale * scale)
@@ -1346,6 +1352,56 @@ class EditPanel(QWidget):
         pal_row.addStretch(1)
         layout.addLayout(pal_row)
 
+        # Seção de Contorno
+        layout.addSpacing(6)
+        row_stroke = QHBoxLayout()
+        row_stroke.setSpacing(6)
+
+        self._stroke_checkbox = QCheckBox("Contorno:")
+        self._stroke_checkbox.setToolTip("Ativar ou desativar contorno no texto")
+        self._stroke_checkbox.toggled.connect(self._on_stroke_toggled)
+        row_stroke.addWidget(self._stroke_checkbox)
+
+        self._stroke_spin = QSpinBox()
+        self._stroke_spin.setRange(1, 30)
+        self._stroke_spin.setValue(3)
+        self._stroke_spin.setSingleStep(1)
+        self._stroke_spin.setSuffix(" px")
+        self._stroke_spin.setFixedHeight(28)
+        self._stroke_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self._stroke_spin.setStyleSheet(
+            "QSpinBox { background: #1e1e26; border: 1px solid #444; border-radius: 4px; color: #ffffff; padding: 2px 8px; font-size: 13px; } "
+            "QSpinBox:focus { border: 1px solid #0284c7; } "
+            "QSpinBox::up-button, QSpinBox::down-button { width: 0px; height: 0px; border: none; }"
+        )
+        self._stroke_spin.setToolTip("Grossura do contorno em pixels")
+        self._stroke_spin.setEnabled(False)
+        self._stroke_spin.valueChanged.connect(lambda _: self._on_text_style_changed())
+        row_stroke.addWidget(self._stroke_spin, 1)
+
+        self._stroke_color = "#000000"
+        self._stroke_color_indicator = QPushButton()
+        self._stroke_color_indicator.setFixedSize(28, 28)
+        self._stroke_color_indicator.setStyleSheet(
+            f"background: {self._stroke_color}; border: 1px solid #666; border-radius: 4px;"
+        )
+        self._stroke_color_indicator.setToolTip("Escolher cor do contorno")
+        self._stroke_color_indicator.setEnabled(False)
+        self._stroke_color_indicator.clicked.connect(self._choose_stroke_color)
+        row_stroke.addWidget(self._stroke_color_indicator)
+        layout.addLayout(row_stroke)
+
+        stroke_pal_row = QHBoxLayout()
+        stroke_pal_row.setSpacing(4)
+        for c in ("#000000", "#ffffff", "#1e293b", "#e11d48", "#facc15", "#0284c7"):
+            btn = QPushButton()
+            btn.setFixedSize(22, 22)
+            btn.setStyleSheet(f"background: {c}; border: 1px solid #444; border-radius: 3px;")
+            btn.clicked.connect(lambda _, col=c: self._set_stroke_color(col))
+            stroke_pal_row.addWidget(btn)
+        stroke_pal_row.addStretch(1)
+        layout.addLayout(stroke_pal_row)
+
         layout.addStretch(1)
 
         self._insert_text_btn = QPushButton(strings.EDIT_INSERT_TEXT)
@@ -1370,6 +1426,26 @@ class EditPanel(QWidget):
         self._color_indicator.setStyleSheet(
             f"background: {color_hex}; border: 1px solid #666; border-radius: 4px;"
         )
+        self._on_text_style_changed()
+
+    def _choose_stroke_color(self) -> None:
+        col = QColorDialog.getColor(QColor(self._stroke_color), self, "Cor do Contorno")
+        if col.isValid():
+            self._set_stroke_color(col.name())
+
+    def _set_stroke_color(self, color_hex: str) -> None:
+        self._stroke_color = color_hex
+        self._stroke_color_indicator.setStyleSheet(
+            f"background: {color_hex}; border: 1px solid #666; border-radius: 4px;"
+        )
+        if not self._stroke_checkbox.isChecked():
+            self._stroke_checkbox.setChecked(True)
+        else:
+            self._on_text_style_changed()
+
+    def _on_stroke_toggled(self, checked: bool) -> None:
+        self._stroke_spin.setEnabled(checked)
+        self._stroke_color_indicator.setEnabled(checked)
         self._on_text_style_changed()
 
     def _build_filters_tab(self) -> QWidget:
@@ -1480,6 +1556,8 @@ class EditPanel(QWidget):
         bold = self._bold_btn.isChecked()
         italic = self._italic_btn.isChecked()
         color = self._text_color
+        stroke_color = self._stroke_color
+        stroke_width = self._stroke_spin.value() if self._stroke_checkbox.isChecked() else 0
         self._remember()
         self._apply(
             self._project.with_updated_clip(
@@ -1489,6 +1567,8 @@ class EditPanel(QWidget):
                 font_bold=bold,
                 font_italic=italic,
                 text_color=color,
+                stroke_color=stroke_color,
+                stroke_width=stroke_width,
             )
         )
 
@@ -1509,6 +1589,8 @@ class EditPanel(QWidget):
         bold = self._bold_btn.isChecked()
         italic = self._italic_btn.isChecked()
         color = self._text_color
+        stroke_color = self._stroke_color
+        stroke_width = self._stroke_spin.value() if self._stroke_checkbox.isChecked() else 0
         self._remember()
         self._apply(
             self._project.with_updated_clip(
@@ -1519,6 +1601,8 @@ class EditPanel(QWidget):
                 font_bold=bold,
                 font_italic=italic,
                 text_color=color,
+                stroke_color=stroke_color,
+                stroke_width=stroke_width,
             )
         )
 
@@ -1529,6 +1613,8 @@ class EditPanel(QWidget):
         bold = self._bold_btn.isChecked()
         italic = self._italic_btn.isChecked()
         color = self._text_color
+        stroke_color = self._stroke_color
+        stroke_width = self._stroke_spin.value() if self._stroke_checkbox.isChecked() else 0
 
         ref = MediaRef(
             path=Path(f"Texto_{text[:15]}"),
@@ -1546,6 +1632,8 @@ class EditPanel(QWidget):
             font_bold=bold,
             font_italic=italic,
             text_color=color,
+            stroke_color=stroke_color,
+            stroke_width=stroke_width,
             x=0.5,
             y=0.5,
             scale=1.0,
@@ -1580,7 +1668,19 @@ class EditPanel(QWidget):
             self._font_size_spin.setValue(clip.font_size or 48)
             self._bold_btn.setChecked(bool(clip.font_bold))
             self._italic_btn.setChecked(bool(clip.font_italic))
-            self._set_text_color(clip.text_color or "#ffffff")
+            self._text_color = clip.text_color or "#ffffff"
+            self._color_indicator.setStyleSheet(
+                f"background: {self._text_color}; border: 1px solid #666; border-radius: 4px;"
+            )
+            has_stroke = (clip.stroke_width or 0) > 0
+            self._stroke_checkbox.setChecked(has_stroke)
+            self._stroke_spin.setValue(clip.stroke_width if has_stroke else 3)
+            self._stroke_spin.setEnabled(has_stroke)
+            self._stroke_color = clip.stroke_color or "#000000"
+            self._stroke_color_indicator.setStyleSheet(
+                f"background: {self._stroke_color}; border: 1px solid #666; border-radius: 4px;"
+            )
+            self._stroke_color_indicator.setEnabled(has_stroke)
             self._insert_text_btn.setText(strings.EDIT_UPDATE_TEXT)
             self._insert_new_text_btn.setVisible(True)
             self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)

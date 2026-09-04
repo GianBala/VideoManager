@@ -741,4 +741,37 @@ class TestVelocidadeEFiltros:
         assert "scale=480:360" not in filter_str
         assert "overlay=x='(0.5000*W-w/2)':y='(0.8000*H-h/2)'" in filter_str
 
+    def test_render_text_to_image_com_e_sem_contorno(self) -> None:
+        from videomanager.core.composer import render_text_to_image
+        from PySide6.QtGui import QImage
+
+        c_sem_contorno = clip(
+            FOTO,
+            overlay_type="text",
+            text_content="Sem Contorno",
+            font_size=36,
+            stroke_width=0,
+        )
+        img_path1 = render_text_to_image(c_sem_contorno)
+        assert img_path1.exists()
+        img1 = QImage(str(img_path1))
+        assert not img1.isNull()
+        assert img1.width() > 0
+        assert img1.height() > 0
+
+        c_com_contorno = clip(
+            FOTO,
+            overlay_type="text",
+            text_content="Com Contorno",
+            font_size=36,
+            stroke_color="#ff0000",
+            stroke_width=6,
+        )
+        img_path2 = render_text_to_image(c_com_contorno)
+        assert img_path2.exists()
+        img2 = QImage(str(img_path2))
+        assert not img2.isNull()
+        assert img2.width() > 0
+        assert img2.height() > 0
+
 

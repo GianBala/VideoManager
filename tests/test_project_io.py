@@ -184,6 +184,8 @@ def test_save_load_additional_track_and_speed(tmp_path: Path) -> None:
         font_bold=True,
         font_italic=True,
         text_color="#ffcc00",
+        stroke_color="#123456",
+        stroke_width=5,
         filter_name="pb",
     )
     track_add = Track(kind=TrackKind.ADDITIONAL, name="Adicionais 1", clips=(clip_add,))
@@ -208,4 +210,6 @@ def test_save_load_additional_track_and_speed(tmp_path: Path) -> None:
     assert loaded_clip.font_bold is True
     assert loaded_clip.font_italic is True
     assert loaded_clip.text_color == "#ffcc00"
+    assert loaded_clip.stroke_color == "#123456"
+    assert loaded_clip.stroke_width == 5
     assert loaded_clip.filter_name == "pb"
