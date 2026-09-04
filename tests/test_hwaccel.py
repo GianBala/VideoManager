@@ -199,3 +199,10 @@ class TestSondagemPronta:
         fingir(**{kind: True for kind in hwaccel.ORDER})
         hwaccel.forget_probes()
         assert hwaccel.probes_ready(TOOLS) is False
+
+
+class TestVaapiDevice:
+    def test_find_vaapi_device_returns_valid_path_or_default(self) -> None:
+        device = hwaccel.find_vaapi_device()
+        assert isinstance(device, str)
+        assert device.startswith("/dev/dri/")
