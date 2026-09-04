@@ -15,9 +15,11 @@ if [ ! -x "$PY" ]; then
     exit 1
 fi
 
-echo "==> instalando dependências"
-"$PY" -m pip install -q --upgrade pip
-"$PY" -m pip install -q -e ".[dev]" pyinstaller
+if [ "${SKIP_DEPS:-0}" != "1" ]; then
+    echo "==> instalando dependências"
+    "$PY" -m pip install -q --upgrade pip
+    "$PY" -m pip install -q -e ".[dev]" pyinstaller
+fi
 
 echo "==> testes (um pacote não deve ser gerado sobre suíte vermelha)"
 "$PY" -m pytest -q
