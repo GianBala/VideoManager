@@ -195,6 +195,10 @@ if [ ! -f "$RUNTIME" ]; then
     fi
 fi
 
+if [ -f "$RUNTIME" ]; then
+    "$PY" packaging/patch_runtime.py "$RUNTIME" >/dev/null 2>&1 || true
+fi
+
 # Se FUSE não estiver disponível (ex: container ou sistema sem libfuse2),
 # o appimagetool pode se auto-extrair
 if ! "$TOOL" --version >/dev/null 2>&1; then
@@ -215,6 +219,7 @@ fi
 
 ARCH="$ARCH" "$TOOL" "${RUNTIME_ARG[@]}" "$APPDIR" "$OUTPUT_APPIMAGE"
 chmod +x "$OUTPUT_APPIMAGE"
+"$PY" packaging/patch_runtime.py "$OUTPUT_APPIMAGE" >/dev/null 2>&1 || true
 
 # --- 10. Verificação e Checksum ----------------------------------------------
 echo "--> Executando teste de fumaça (smoke run offscreen)..."
