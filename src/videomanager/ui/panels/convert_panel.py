@@ -45,6 +45,7 @@ from ...core.converter import (
     output_path,
     probe_file,
 )
+from ...core.estimator import estimate_convert_size
 from ...core.errors import VideoManagerError
 from ...core.humanize import format_duration, format_size
 from ...core.job import Job, JobKind
@@ -345,15 +346,27 @@ class ConvertPanel(QWidget):
         self._update_plan()
 
     @staticmethod
-    def _describe(media: LocalMedia) -> str:
+    def _describe(
+        media: LocalMedia, target: VideoTarget | AudioTarget | None = None
+    ) -> str:
         pieces = [media.path.name]
         if media.video:
             pieces.append(f"{media.video.codec} {media.video.width}x{media.video.height}")
         if media.audio:
             pieces.append(f"{media.audio.codec}")
         pieces.append(format_duration(media.duration))
-        pieces.append(format_size(media.size))
+        size_txt = format_size(media.size)
+        if target is not None:
+            est = estimate_convert_size(media, target)
+            size_txt = f"{size_txt} → {format_size(est, estimated=True)}"
+        pieces.append(size_txt)
         return "   ·   ".join(pieces)
+
+    def _refresh_list_items(self, target: VideoTarget | AudioTarget) -> None:
+        for idx, media in enumerate(self._media):
+            item = self._list.item(idx)
+            if item:
+                item.setText(self._describe(media, target))
 
     def _remove_selected(self) -> None:
         for item in self._list.selectedItems():
@@ -407,18 +420,20 @@ class ConvertPanel(QWidget):
             return
 
         target = self._build_target()
+        self._refresh_list_items(target)
         plans = [describe_target(m, target) for m in self._media]
         unique_plans = list(dict.fromkeys(plans))
+        total_estimated = sum(estimate_convert_size(m, target) for m in self._media)
+        formatted_size = format_size(total_estimated, estimated=True)
+        size_info = strings.CONVERT_ESTIMATED_SIZE.format(size=formatted_size)
+
         if len(unique_plans) == 1:
-            self._plan.setText(
-                strings.CONVERT_PLAN.format(plan=unique_plans[0])
-            )
+            plan_str = strings.CONVERT_PLAN.format(plan=unique_plans[0])
         else:
-            self._plan.setText(
-                strings.CONVERT_PLAN.format(
-                    plan=f"{unique_plans[0]} (e outros formatos distintos entre os {len(self._media)} arquivos)"
-                )
+            plan_str = strings.CONVERT_PLAN.format(
+                plan=f"{unique_plans[0]} (e outros formatos distintos entre os {len(self._media)} arquivos)"
             )
+        self._plan.setText(f"{plan_str}\n• {size_info}")
         self._plan.setVisible(True)
         self.changed.emit()
 

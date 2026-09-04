@@ -616,7 +616,7 @@ class MainWindow(QMainWindow):
             return
         self._media = result
         self._card.set_media(result)
-        self._quality.set_matrix(result.matrix)
+        self._quality.set_matrix(result.matrix, duration=result.duration)
         self._profiles.set_enabled(True)
         self._update_add_button()
         # A análise pode acrescentar a linha de trilha de áudio; a divisão da
