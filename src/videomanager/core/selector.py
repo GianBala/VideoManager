@@ -327,7 +327,10 @@ def build_outtmpl(settings: Settings) -> str:
 
     O id no fim garante nomes distintos para vídeos de título igual.
     """
-    name = "%(title).150B [%(id)s].%(ext)s"
+    # Quando separado por site, reduzimos um pouco o teto do título para dar margem
+    # ao nome da pasta do extrator no limite de caminho de 260 bytes do Windows.
+    max_bytes = 120 if settings.separate_by_site else 150
+    name = f"%(title).{max_bytes}B [%(id)s].%(ext)s"
     if settings.separate_by_site:
         return "%(extractor_key,extractor)s/" + name
     return name
@@ -367,7 +370,9 @@ def _base_opts(
     if settings.rate_limit_kbps > 0:
         opts["ratelimit"] = settings.rate_limit_kbps * 1024
 
-    if settings.cookies_browser:
+    if settings.cookies_file and Path(settings.cookies_file).is_file():
+        opts["cookiefile"] = str(Path(settings.cookies_file).resolve())
+    elif settings.cookies_browser:
         # A tupla é o formato esperado: (navegador, perfil, keyring, container).
         opts["cookiesfrombrowser"] = (settings.cookies_browser, None, None, None)
 

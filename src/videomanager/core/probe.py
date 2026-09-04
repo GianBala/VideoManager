@@ -9,6 +9,7 @@ mostrar um traceback nem uma mensagem em inglês vinda do extrator.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 import yt_dlp
@@ -55,7 +56,9 @@ def _probe_opts(settings: Settings, *, flat_playlist: bool) -> dict[str, Any]:
         # analisamos em detalhe o que o usuário marcar.
         "extract_flat": "in_playlist" if flat_playlist else False,
     }
-    if settings.cookies_browser:
+    if settings.cookies_file and Path(settings.cookies_file).is_file():
+        opts["cookiefile"] = str(Path(settings.cookies_file).resolve())
+    elif settings.cookies_browser:
         opts["cookiesfrombrowser"] = (settings.cookies_browser, None, None, None)
     return opts
 
