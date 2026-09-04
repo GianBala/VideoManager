@@ -424,6 +424,7 @@ class _Preview(QLabel):
         self._clip_pixmaps: dict[Path, QPixmap] = {}
         self._text_pixmaps: dict[tuple, QPixmap] = {}
         self._is_playing: bool = False
+        self._clip_visible: bool = True
         self.setMouseTracking(True)
 
     def set_playing(self, playing: bool) -> None:
@@ -489,10 +490,11 @@ class _Preview(QLabel):
     def setPixmap(self, pixmap: QPixmap) -> None:  # noqa: N802
         self.set_frame_pixmap(pixmap)
 
-    def set_active_clip(self, clip: Clip | None, proj_w: int, proj_h: int) -> None:
+    def set_active_clip(self, clip: Clip | None, proj_w: int, proj_h: int, visible: bool = True) -> None:
         self._active_clip = clip
         self._proj_w = max(1, proj_w)
         self._proj_h = max(1, proj_h)
+        self._clip_visible = visible
         self.update()
 
     def set_position(self, pos: float) -> None:
@@ -552,7 +554,8 @@ class _Preview(QLabel):
 
     def _hit_test(self, pos: QPoint) -> tuple[str | None, tuple[float, float, float, float] | None]:
         if (
-            self._active_clip is None
+            not self._clip_visible
+            or self._active_clip is None
             or not self._active_clip.is_additional
             or self._active_clip.overlay_type == "filter"
             or not self._active_clip.contains(self._position)
@@ -690,7 +693,8 @@ class _Preview(QLabel):
 
         clip = self._active_clip
         if (
-            not self._is_playing
+            self._clip_visible
+            and not self._is_playing
             and clip is not None
             and clip.is_additional
             and clip.overlay_type != "filter"
@@ -1872,6 +1876,7 @@ class EditPanel(QWidget):
         self._timeline.clip_resized.connect(self._on_clip_resized)
         self._timeline.clip_selected.connect(self._on_clip_selected)
         self._timeline.track_mute_clicked.connect(self._toggle_track_mute)
+        self._timeline.track_visibility_clicked.connect(self._toggle_track_visibility)
         self._timeline.track_reordered.connect(self._on_track_reordered)
         self._timeline.menu_requested.connect(self._show_menu)
         self._timeline.view_changed.connect(self._on_view_changed)
@@ -2535,11 +2540,18 @@ class EditPanel(QWidget):
         if track_index >= 0:
             menu.addSeparator()
             track = self._project.tracks[track_index]
-            self._act(
-                menu,
-                strings.EDIT_TRACK_UNMUTE if track.muted else strings.EDIT_TRACK_MUTE,
-                lambda: self._toggle_track_mute(track_index),
-            )
+            if track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL):
+                self._act(
+                    menu,
+                    strings.EDIT_TRACK_HIDE if track.visible else strings.EDIT_TRACK_SHOW,
+                    lambda: self._toggle_track_visibility(track_index),
+                )
+            if track.kind is not TrackKind.ADDITIONAL:
+                self._act(
+                    menu,
+                    strings.EDIT_TRACK_UNMUTE if track.muted else strings.EDIT_TRACK_MUTE,
+                    lambda: self._toggle_track_mute(track_index),
+                )
             self._act(
                 menu,
                 strings.EDIT_DELETE_TRACK.format(name=track.name),
@@ -2644,6 +2656,23 @@ class EditPanel(QWidget):
         if self._playing:
             self._live_timer.stop()
             self._restart_stream()
+
+    def _toggle_track_visibility(self, index: int) -> None:
+        self._remember()
+        track = self._project.tracks[index]
+        self._apply(self._project.with_track_visible(index, not track.visible))
+        active = self._timeline.selected_clip
+        if active is not None:
+            found = self._project.find(active.clip_id)
+            if found is not None and found[0] == index:
+                self._preview.set_active_clip(
+                    active, self._project.width, self._project.height, visible=self._project.tracks[index].visible
+                )
+        if self._playing:
+            self._live_timer.stop()
+            self._restart_stream()
+        else:
+            self._request_frame(force=True)
 
     def _on_track_reordered(self, from_index: int, to_index: int) -> None:
         self._remember()
@@ -2889,7 +2918,13 @@ class EditPanel(QWidget):
             self._preview.set_active_clip(None, self._project.width, self._project.height)
             return
 
-        self._preview.set_active_clip(clip, self._project.width, self._project.height)
+        found = self._project.find(clip.clip_id) if clip is not None else None
+        track_visible = True
+        if found is not None:
+            t_idx, _ = found
+            track_visible = self._project.tracks[t_idx].visible
+
+        self._preview.set_active_clip(clip, self._project.width, self._project.height, visible=track_visible)
         info = strings.EDIT_CLIP_INFO.format(
             name=clip.media.name, duration=format_span(clip.duration)
         )
@@ -3063,8 +3098,17 @@ class EditPanel(QWidget):
         size = self._preview_size()
 
         active = self._timeline.selected_clip
+        track_visible = True
+        if active is not None:
+            found = self._project.find(active.clip_id)
+            if found is not None:
+                track_idx, _ = found
+                track_visible = self._project.tracks[track_idx].visible
+
         if (
-            active is not None
+            not self._on_fullscreen
+            and track_visible
+            and active is not None
             and active.is_additional
             and active.overlay_type != "filter"
             and active.contains(self._wanted)

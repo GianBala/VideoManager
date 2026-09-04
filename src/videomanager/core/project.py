@@ -281,6 +281,7 @@ class Track:
     kind: TrackKind
     clips: tuple[Clip, ...] = ()
     muted: bool = False
+    visible: bool = True
     name: str = ""
     track_id: int = field(default_factory=lambda: next(_track_ids), compare=False)
 
@@ -352,6 +353,15 @@ class Project:
         return max((track.duration for track in self.tracks), default=0.0)
 
     @property
+    def export_duration(self) -> float:
+        durations = [
+            track.duration
+            for track in self.tracks
+            if (track.visible if track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL) else (not track.muted and track.visible))
+        ]
+        return max(durations, default=0.0)
+
+    @property
     def is_empty(self) -> bool:
         return not any(track.clips for track in self.tracks)
 
@@ -373,7 +383,11 @@ class Project:
 
     @property
     def has_video(self) -> bool:
-        return any(track.clips for track in (*self.video_tracks, *self.additional_tracks))
+        return any(
+            track.clips
+            for track in (*self.video_tracks, *self.additional_tracks)
+            if track.visible
+        )
 
     @property
     def has_sound(self) -> bool:
@@ -381,7 +395,7 @@ class Project:
         return any(
             clip.has_sound
             for track in self.tracks
-            if not track.muted
+            if not track.muted and track.visible
             for clip in track.clips
         )
 
@@ -498,6 +512,10 @@ class Project:
     def with_track_muted(self, track_index: int, muted: bool) -> Project:
         track = self.tracks[track_index]
         return self._replace_track(track_index, replace(track, muted=muted))
+
+    def with_track_visible(self, track_index: int, visible: bool) -> Project:
+        track = self.tracks[track_index]
+        return self._replace_track(track_index, replace(track, visible=visible))
 
     def moved(self, clip_id: int, track_index: int, start: float) -> Project:
         """Move um bloco no tempo e, se pedido, para outra trilha.

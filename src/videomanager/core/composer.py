@@ -222,6 +222,8 @@ def _pieces(
     pieces: list[_Piece] = []
     input_idx = 0
     for track in ordered:
+        if not track.visible:
+            continue
         if track.muted and track.kind is TrackKind.AUDIO:
             continue
         if track.muted and not want_video:
@@ -354,7 +356,12 @@ def _video_chain(
     clip = piece.clip
     is_overlay = clip.overlay_type in ("image", "text") or clip.is_image
     if is_overlay:
-        steps = [f"trim=duration={piece.duration:.6f}", "setpts=PTS-STARTPTS", f"fps={fps:.6f}"]
+        steps = [f"trim=duration={piece.duration:.6f}"]
+        if piece.offset > 0:
+            steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
+        else:
+            steps.append("setpts=PTS-STARTPTS")
+        steps.append(f"fps={fps:.6f}")
         if clip.overlay_type == "text":
             if abs(clip.scale - 1.0) >= 0.01:
                 steps.append(f"scale=w='trunc(iw*{clip.scale:.4f}/2)*2':h='trunc(ih*{clip.scale:.4f}/2)*2'")
@@ -502,7 +509,7 @@ def build_graph(
     """
     fps = fps or project.fps
     pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio)
-    duration = span if span is not None else max(_MIN_CANVAS, project.duration - at)
+    duration = span if span is not None else max(_MIN_CANVAS, project.export_duration - at)
 
     inputs: list[str] = []
     filters: list[str] = []
@@ -845,6 +852,10 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
         1 for track in project.video_tracks if track.clips
     ) > 1:
         return None
+    if any(clip.is_additional for clip in clips) or any(track.clips for track in project.additional_tracks):
+        return None
+    if any(not track.visible for track in project.tracks if track.clips):
+        return None
     if any(track.muted for track in project.tracks if track.clips):
         return None
 
@@ -957,13 +968,13 @@ def interpolation_segments(
     para perguntar quanta há, o caminho seguro é não multiplicar nada.
     """
     custo = interpolation_bytes(project)
-    if custo <= 0 or project.duration < _MIN_SEGMENT * 2:
+    if custo <= 0 or project.export_duration < _MIN_SEGMENT * 2:
         return 1
     if available is None:
         return 1
 
     por_memoria = int(available * _MEMORY_SHARE) // custo
-    por_duracao = int(project.duration // _MIN_SEGMENT)
+    por_duracao = int(project.export_duration // _MIN_SEGMENT)
     return max(1, min(_MAX_SEGMENTS, cores, por_memoria, por_duracao))
 
 

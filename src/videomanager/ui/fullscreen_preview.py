@@ -352,5 +352,6 @@ class FullscreenPreview(QWidget):
     def closeEvent(self, event) -> None:  # noqa: N802
         self._idle.stop()
         self.unsetCursor()
+        self.hide()
         self.closed.emit()
         super().closeEvent(event)

@@ -603,3 +603,37 @@ class TestOrdemDasTrilhas:
         assert c_slow.speed_label == "0,5x"
         assert c_slow.out_point == 2.5
         assert c_slow.source_time(2.0) == 1.0
+
+    def test_track_visibility_and_export_duration(self) -> None:
+        c_vid = clip(VIDEO, start=0.0, duration=10.0)
+        c_add = clip(FOTO, start=5.0, duration=15.0)  # vai até 20.0
+        c_aud = clip(SOM, start=0.0, duration=25.0)   # vai até 25.0
+
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(c_vid,), name="Vídeo"),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_add,), name="Adicionais"),
+                Track(kind=TrackKind.AUDIO, clips=(c_aud,), name="Áudio"),
+            )
+        )
+        assert all(t.visible for t in p.tracks)
+        assert p.duration == 25.0
+        assert p.export_duration == 25.0
+        assert p.has_video is True
+        assert p.has_sound is True
+
+        # Ocultar vídeo: export_duration passa a ser ditado por adicionais e áudio
+        p_no_vid = p.with_track_visible(0, False)
+        assert p_no_vid.tracks[0].visible is False
+        assert p_no_vid.has_video is True  # adicionais ainda tem imagem
+        # Se ocultarmos adicionais também, não tem mais vídeo
+        p_no_vids = p_no_vid.with_track_visible(1, False)
+        assert p_no_vids.has_video is False
+        assert p_no_vids.has_sound is True  # áudio ainda toca
+        assert p_no_vids.export_duration == 25.0
+
+        # Se calar o áudio com vídeo oculto, não tem som
+        p_no_sound = p_no_vid.with_track_muted(2, True)
+        assert p_no_sound.has_sound is False
+        # export_duration considera apenas o que será exportado (adicionais = 20s)
+        assert p_no_sound.export_duration == 20.0
