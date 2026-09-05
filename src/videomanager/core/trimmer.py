@@ -279,7 +279,6 @@ class TrimTarget:
     # Preferência de codificação por placa. Fica no pedido, e não numa variável
     # global, porque é o pedido que atravessa a fila até o worker.
     hardware: str = hwaccel.SOFTWARE
-    copy_metadata: bool = False
 
     @property
     def extension(self) -> str:
@@ -515,19 +514,13 @@ def _validate(media: LocalMedia, target: TrimTarget) -> None:
         )
 
 
-def tail_args(
-    container: str, destination: Path, *, map_metadata: bool = True
-) -> list[str]:
+def tail_args(container: str, destination: Path) -> list[str]:
     args: list[str] = []
     if container == "mp4":
         # Índice no começo: permite começar a assistir antes de o arquivo todo
         # ser lido, e é o que players web esperam.
         args += ["-movflags", "+faststart"]
-    if map_metadata:
-        args += ["-map_metadata", "0"]
-    else:
-        args += ["-map_metadata", "-1", "-map_chapters", "-1"]
-    args += ["-progress", "pipe:1", "-nostats", str(destination)]
+    args += ["-map_metadata", "0", "-progress", "pipe:1", "-nostats", str(destination)]
     return args
 
 
@@ -581,7 +574,7 @@ def build_single_args(
             # imagem para fora de sincronia logo no primeiro segundo.
             args += _audio_encode_args(_audio_encoder(target.container))
 
-    return args + tail_args(target.container, destination, map_metadata=target.copy_metadata)
+    return args + tail_args(target.container, destination)
 
 
 def build_join_args(
@@ -643,7 +636,7 @@ def build_join_args(
     if has_audio:
         args += ["-map", "[a]"] + _audio_encode_args(_audio_encoder(target.container))
 
-    return args + tail_args(target.container, destination, map_metadata=target.copy_metadata)
+    return args + tail_args(target.container, destination)
 
 
 def build_trim_args(
