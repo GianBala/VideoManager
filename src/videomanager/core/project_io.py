@@ -26,8 +26,10 @@ PROJECT_VERSION = 1
 
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
+    path_str = str(media.path)
+    is_pseudo = path_str.startswith(("Texto_", "Filtro_", "Transição_"))
     data: dict[str, object] = {
-        "path": str(media.path.resolve() if media.path.is_absolute() else media.path),
+        "path": path_str if is_pseudo else str(media.path.resolve() if media.path.is_absolute() else media.path),
         "kind": media.kind.name,
         "duration": media.duration,
         "width": media.width,
@@ -36,7 +38,7 @@ def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
         "has_audio": media.has_audio,
         "channels": media.channels,
     }
-    if base_dir is not None:
+    if base_dir is not None and not is_pseudo and media.path.is_absolute():
         try:
             rel = os.path.relpath(media.path, base_dir)
             data["rel_path"] = rel
@@ -51,8 +53,9 @@ def _dict_to_media(data: dict[str, object], base_dir: Path | None) -> tuple[Medi
     raw_path = Path(str(data["path"]))
     resolved_path = raw_path
     missing: Path | None = None
+    is_pseudo = str(raw_path).startswith(("Texto_", "Filtro_", "Transição_"))
 
-    if not resolved_path.exists():
+    if not is_pseudo and not resolved_path.exists():
         # Tenta pelo caminho relativo se disponível
         rel_path = data.get("rel_path")
         if rel_path and base_dir is not None:
@@ -199,8 +202,9 @@ def project_from_dict(
             media_data = c_data.get("media")
             if not isinstance(media_data, dict):
                 continue
+            overlay_type = str(c_data.get("overlay_type", "none"))
             media, missing = _dict_to_media(media_data, base_dir)
-            if missing is not None and missing not in missing_files:
+            if overlay_type not in ("text", "filter", "transition") and missing is not None and missing not in missing_files:
                 missing_files.append(missing)
 
             clip = Clip(
