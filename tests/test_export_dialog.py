@@ -18,6 +18,7 @@ from videomanager.core.project import (
     MediaKind,
     MediaRef,
     Project,
+    Track,
     TrackKind,
     new_project,
 )
@@ -316,4 +317,66 @@ def test_export_after_loading_saved_project(
         assert "target" in dialog.created_job.opts
     finally:
         panel.shutdown()
+
+
+def test_export_dialog_with_hidden_tracks_ignores_them(
+    qapp: QApplication,
+    sample_media: tuple[MediaRef, LocalMedia],
+    dummy_tools: FFmpegTools,
+    tmp_path: Path,
+) -> None:
+    ref1, local1 = sample_media  # 1920x1080 @ 30fps
+
+    video4k_path = tmp_path / "video4k.mp4"
+    video4k_path.write_bytes(b"dummy 4k data")
+    ref4k = MediaRef(
+        path=video4k_path,
+        kind=MediaKind.VIDEO,
+        duration=30.0,
+        width=3840,
+        height=2160,
+        fps=60.0,
+        has_audio=True,
+    )
+    local4k = LocalMedia(
+        path=video4k_path,
+        duration=30.0,
+        format_name="mov,mp4",
+        size=4096,
+        streams=(
+            LocalStream(index=0, kind="video", codec="h264", width=3840, height=2160, fps=60.0),
+        ),
+    )
+
+    c1 = Clip(media=ref1, start=0.0, duration=10.0)
+    c4k = Clip(media=ref4k, start=0.0, duration=30.0)
+    c_aud = Clip(media=ref1, start=0.0, duration=40.0)
+
+    # Trilha 0 (1080p visível), Trilha 1 (4K oculta), Trilha 2 (Áudio mudo)
+    t0 = Track(kind=TrackKind.VIDEO, clips=(c1,), visible=True)
+    t1_4k = Track(kind=TrackKind.VIDEO, clips=(c4k,), visible=False)
+    t2_aud = Track(kind=TrackKind.AUDIO, clips=(c_aud,), visible=True, muted=True)
+    proj = Project(tracks=(t0, t1_4k, t2_aud))
+
+    settings = Settings()
+    dialog = ExportDialog(
+        project=proj,
+        settings=settings,
+        pool=[ref1, ref4k],
+        probed={ref1.path: local1, ref4k.path: local4k},
+        keyframes=(0.0, 5.0, 10.0),
+        ensure_tools=lambda: dummy_tools,
+    )
+
+    # ExportDialog deve manter apenas a trilha visível (track 0)
+    assert len(dialog._project.tracks) == 1
+    assert len(dialog._project.clips) == 1
+    effective = dialog._effective_project()
+    assert (effective.width, effective.height) == (1920, 1080)
+    assert effective.fps == 30.0
+    assert effective.export_duration == 10.0
+
+    # Corte rápido deve estar disponível porque as outras trilhas estão ocultas/mudas
+    assert dialog._fast.isEnabled()
+
 

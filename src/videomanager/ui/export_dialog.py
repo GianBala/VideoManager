@@ -123,7 +123,7 @@ class ExportDialog(QDialog):
         self.setMinimumWidth(580)
         self.setModal(True)
 
-        self._project = project
+        self._project = project.for_export()
         self._settings = settings
         self._pool = pool
         self._probed = probed
@@ -133,7 +133,7 @@ class ExportDialog(QDialog):
         self._rate_choice = initial_rate
         self._project_path = project_path
 
-        self._container_choice: str = self._default_container(project)
+        self._container_choice: str = self._default_container(self._project)
         self._codec_choice: str | None = None
         self._audio_format_choice: str = "mp3"
 
@@ -431,7 +431,7 @@ class ExportDialog(QDialog):
     def _default_container(project: Project) -> str:
         """Determina o container padrão a partir da mídia principal do projeto."""
         for track in reversed(project.video_tracks):
-            if track.clips:
+            if track.visible and track.clips:
                 clip = track.sorted_clips()[0]
                 ext = clip.media.path.suffix.lstrip(".").lower()
                 if ext in ("mp4", "mkv", "webm", "mov"):
