@@ -1132,6 +1132,100 @@ def test_event_filter_extras_panel_no_deselection(
         panel.shutdown()
 
 
+def test_snap_magnetic_resize_and_escape(qapp: QApplication) -> None:
+    preview = _Preview()
+    preview.resize(800, 600)
+    clip = Clip(
+        media=None,
+        start=0.0,
+        duration=5.0,
+        overlay_type="text",
+        text_content="Teste Snap Resize",
+        x=0.5,
+        y=0.5,
+        scale=1.0,
+        rotation=0.0,
+    )
+    preview.set_active_clip(clip, 1920, 1080)
+    vrect = preview._video_rect()
+    geom = preview._clip_geometry(clip)
+    assert geom is not None
+    cx, cy, w, h = geom
+
+    # 1. Simula início de arraste pela alça inferior direita (scale_br)
+    preview._drag_mode = "scale_br"
+    preview._drag_clip_id = clip.clip_id
+    preview._drag_sx = 1.0
+    preview._drag_sy = 1.0
+    preview._drag_w0 = w
+    preview._drag_h0 = h
+    preview._drag_opp_x = cx - w / 2.0
+    preview._drag_opp_y = cy - h / 2.0
+    preview._drag_init_scale = 1.0
+    preview._drag_init_rot = 0.0
+
+    # Posição onde a borda direita ficaria a 4px de vrect_right (dentro do limiar de 14px)
+    vrect_right = float(vrect.x() + vrect.width())
+    target_x = vrect_right - 4.0
+    # Como a proporção w:h é mantida na projeção raw_factor, calculamos dy correspondente
+    scale_factor = (target_x - preview._drag_opp_x) / w
+    target_y = preview._drag_opp_y + scale_factor * h
+
+    move_event = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(target_x, target_y),
+        QPointF(target_x, target_y),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_event)
+
+    # Deve acionar o snap magnético com guia em vrect_right
+    assert preview._snap_guide_x == vrect_right
+    geom_snapped = preview._clip_geometry(preview._active_clip)
+    assert geom_snapped is not None
+    scx, scy, sw, sh = geom_snapped
+    assert abs((scx + sw / 2.0) - vrect_right) < 0.01
+
+    # 2. Força o redimensionamento para fora da margem de snap (> 14px)
+    forced_target_x = vrect_right + 35.0
+    forced_scale = (forced_target_x - preview._drag_opp_x) / w
+    forced_target_y = preview._drag_opp_y + forced_scale * h
+
+    move_forced = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(forced_target_x, forced_target_y),
+        QPointF(forced_target_x, forced_target_y),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_forced)
+
+    # O snap deve desarmar (escape livre)
+    assert preview._snap_guide_x is None
+    geom_forced = preview._clip_geometry(preview._active_clip)
+    assert geom_forced is not None
+    fcx, fcy, fw, fh = geom_forced
+    assert (fcx + fw / 2.0) > vrect_right + 10.0
+
+    # 3. mouseReleaseEvent limpa as guias
+    release_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonRelease,
+        QPointF(forced_target_x, forced_target_y),
+        QPointF(forced_target_x, forced_target_y),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseReleaseEvent(release_event)
+    assert preview._snap_guide_x is None
+    assert preview._snap_guide_y is None
+    assert preview._drag_mode is None
+
+
+
 
 
 

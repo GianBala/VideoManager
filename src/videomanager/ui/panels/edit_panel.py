@@ -763,7 +763,71 @@ class _Preview(QLabel):
                 w0 = self._drag_w0
                 h0 = self._drag_h0
                 diag_sq = w0 * w0 + h0 * h0
-                factor = (w_proj * w0 + h_proj * h0) / max(1.0, diag_sq)
+                raw_factor = (w_proj * w0 + h_proj * h0) / max(1.0, diag_sq)
+
+                self._snap_guide_x = None
+                self._snap_guide_y = None
+                factor = raw_factor
+
+                if self._snap_enabled:
+                    hw0_proj = (w0 / 2.0) * abs(cos_t) + (h0 / 2.0) * abs(sin_t)
+                    hh0_proj = (w0 / 2.0) * abs(sin_t) + (h0 / 2.0) * abs(cos_t)
+                    dcx = (self._drag_sx * w0 / 2.0) * cos_t - (self._drag_sy * h0 / 2.0) * sin_t
+                    dcy = (self._drag_sx * w0 / 2.0) * sin_t + (self._drag_sy * h0 / 2.0) * cos_t
+
+                    vx_left = float(vrect.x())
+                    vx_right = float(vrect.x() + vrect.width())
+                    vx_center = float(vrect.x() + vrect.width() / 2.0)
+                    vy_top = float(vrect.y())
+                    vy_bottom = float(vrect.y() + vrect.height())
+                    vy_center = float(vrect.y() + vrect.height() / 2.0)
+
+                    threshold = 14.0
+                    candidates: list[tuple[float, float, float | None, float | None]] = []
+
+                    # 1. Borda X móvel (direita se sx > 0, esquerda se sx < 0)
+                    kx_edge = dcx + (hw0_proj if self._drag_sx > 0 else -hw0_proj)
+                    if abs(kx_edge) > 0.001:
+                        targets_x = (vx_right, vx_center) if self._drag_sx > 0 else (vx_left, vx_center)
+                        for target_x in targets_x:
+                            cur_pos = self._drag_opp_x + raw_factor * kx_edge
+                            dist = abs(cur_pos - target_x)
+                            cand_factor = (target_x - self._drag_opp_x) / kx_edge
+                            if dist <= threshold and cand_factor > 0.02:
+                                candidates.append((dist, cand_factor, target_x, None))
+
+                    # 2. Borda Y móvel (inferior se sy > 0, superior se sy < 0)
+                    ky_edge = dcy + (hh0_proj if self._drag_sy > 0 else -hh0_proj)
+                    if abs(ky_edge) > 0.001:
+                        targets_y = (vy_bottom, vy_center) if self._drag_sy > 0 else (vy_top, vy_center)
+                        for target_y in targets_y:
+                            cur_pos = self._drag_opp_y + raw_factor * ky_edge
+                            dist = abs(cur_pos - target_y)
+                            cand_factor = (target_y - self._drag_opp_y) / ky_edge
+                            if dist <= threshold and cand_factor > 0.02:
+                                candidates.append((dist, cand_factor, None, target_y))
+
+                    if candidates:
+                        best_dist, best_factor, gx, gy = min(candidates, key=lambda c: c[0])
+                        factor = best_factor
+                        self._snap_guide_x = gx
+                        self._snap_guide_y = gy
+
+                        # Verifica se com esse factor a outra borda também alinha
+                        if gx is not None and gy is None and abs(ky_edge) > 0.001:
+                            targets_y = (vy_bottom, vy_center) if self._drag_sy > 0 else (vy_top, vy_center)
+                            for ty in targets_y:
+                                pos_y = self._drag_opp_y + factor * ky_edge
+                                if abs(pos_y - ty) <= 2.0:
+                                    self._snap_guide_y = ty
+                                    break
+                        elif gy is not None and gx is None and abs(kx_edge) > 0.001:
+                            targets_x = (vx_right, vx_center) if self._drag_sx > 0 else (vx_left, vx_center)
+                            for tx in targets_x:
+                                pos_x = self._drag_opp_x + factor * kx_edge
+                                if abs(pos_x - tx) <= 2.0:
+                                    self._snap_guide_x = tx
+                                    break
 
                 min_scale = 0.05
                 max_scale = 10.0
