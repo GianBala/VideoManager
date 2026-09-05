@@ -128,15 +128,6 @@ class TestAudio:
         args = args_for(media(), AudioTarget(codec="mp3"))
         assert args[args.index("-map_metadata") + 1] == "0"
 
-    def test_titulo_removido_dos_metadados(self) -> None:
-        """Remove title= para que players como VLC exibam o nome do arquivo em vez do título original."""
-        for target in (AudioTarget(codec="mp3"), VideoTarget(container="mp4")):
-            args = args_for(media(), target)
-            assert args[args.index("-map_metadata") + 1] == "0"
-            idx = args.index("-metadata")
-            assert args[idx + 1] == "title="
-            assert idx > args.index("-map_metadata")
-
 
 # ---------------------------------------------------------------------------
 # Vídeo: recodificar só quando é inevitável

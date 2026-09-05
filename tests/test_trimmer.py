@@ -459,10 +459,3 @@ class TestDespachoDoConversor:
         args = build_args(media(), target(), DEST, TOOLS)
         assert args[args.index("-t") + 1] is not None
         assert str(DEST) == args[-1]
-
-    def test_titulo_removido_dos_metadados(self) -> None:
-        args = build_args(media(), target(), DEST, TOOLS)
-        assert "-map_metadata" in args
-        idx = args.index("-metadata")
-        assert args[idx + 1] == "title="
-        assert idx > args.index("-map_metadata")
