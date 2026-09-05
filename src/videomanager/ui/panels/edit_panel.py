@@ -3233,6 +3233,7 @@ class EditPanel(QWidget):
             ensure_tools=self._ensure_tools,
             initial_canvas=self._canvas_choice,
             initial_rate=self._rate_choice,
+            project_path=self._project_path,
             parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.created_job:
@@ -5346,12 +5347,16 @@ class EditPanel(QWidget):
         self._probed.clear()
         seen_paths: set[Path] = set()
         for clip in project.clips:
-            if clip.overlay_type in ("text", "filter"):
+            if clip.overlay_type in ("text", "filter", "transition"):
                 continue
             if clip.media.path and clip.media.path not in seen_paths:
                 seen_paths.add(clip.media.path)
                 self._pool.append(clip.media)
-                self._probed[clip.media.path] = clip.media
+                if tools and clip.media.path.is_file():
+                    try:
+                        self._probed[clip.media.path] = probe_file(clip.media.path, tools)
+                    except VideoManagerError:
+                        pass
         self._refresh_pool()
         self._apply(project, refit=True)
         self._timeline.fit()
