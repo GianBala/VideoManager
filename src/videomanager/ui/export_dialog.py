@@ -260,6 +260,24 @@ class ExportDialog(QDialog):
         folder_row.addWidget(self._pick_folder_button)
         dest_box.addLayout(folder_row)
 
+        main_init = self._main_clip(self._project)
+        source_init = main_init.media.path if main_init else (self._project.clips[0].media.path if self._project.clips else None)
+        default_stem = f"{source_init.stem}_editado" if source_init else "video_editado"
+
+        name_row = QHBoxLayout()
+        name_row.setSpacing(8)
+        name_label = QLabel("Nome do arquivo:")
+        name_row.addWidget(name_label)
+
+        self._filename_edit = QLineEdit(default_stem)
+        self._filename_edit.setPlaceholderText("Nome do arquivo (sem extensão)")
+        name_row.addWidget(self._filename_edit, 1)
+
+        self._ext_label = QLabel(".mp4")
+        self._ext_label.setProperty("role", "dim")
+        name_row.addWidget(self._ext_label)
+        dest_box.addLayout(name_row)
+
         layout.addWidget(dest_group)
 
         # 4. Plano e avisos
@@ -581,6 +599,9 @@ class ExportDialog(QDialog):
                     memory=format_size(interpolation_bytes(proj))
                 )
 
+        if hasattr(self, "_ext_label"):
+            self._ext_label.setText(f".{container}")
+
         self._plan.setText(strings.EDIT_PLAN.format(plan=plan))
         self._warning.setText(warning)
         self._warning.setVisible(bool(warning))
@@ -684,8 +705,12 @@ class ExportDialog(QDialog):
             dest_dir = Path(dir_str) if dir_str else self._settings.resolved_download_dir()
 
         suffix = strings.EDIT_SUFFIX_ONE if is_fast else strings.EDIT_SUFFIX_EDIT
+        custom_name = self._filename_edit.text().strip() if hasattr(self, "_filename_edit") else ""
+        ext_suffix = f".{target.extension.lower()}"
+        if custom_name.lower().endswith(ext_suffix):
+            custom_name = custom_name[:-len(ext_suffix)].strip()
         try:
-            destination = output_path(source, target, dest_dir, suffix)
+            destination = output_path(source, target, dest_dir, suffix, custom_stem=custom_name or None)
         except VideoManagerError as exc:
             QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(exc))
             return

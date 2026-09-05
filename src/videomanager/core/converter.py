@@ -331,6 +331,7 @@ def output_path(
     target: ConversionTarget,
     dest_dir: Path | None = None,
     suffix: str = "",
+    custom_stem: str | None = None,
 ) -> Path:
     """Caminho de saída, evitando sobrescrever o arquivo de origem.
 
@@ -352,7 +353,8 @@ def output_path(
     parcial em caso de falha ou cancelamento já existia.
     """
     directory = dest_dir or source.parent
-    stem = f"{source.stem}{suffix}"
+    clean_custom = custom_stem.strip() if custom_stem else ""
+    stem = clean_custom if clean_custom else f"{source.stem}{suffix}"
     candidate = directory / f"{stem}.{target.extension}"
     if candidate.resolve() == source.resolve():
         candidate = directory / f"{stem} (convertido).{target.extension}"

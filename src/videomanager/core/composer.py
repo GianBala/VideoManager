@@ -247,9 +247,9 @@ def _pieces(
             has_a = want_audio and clip.has_sound and not track.muted
             if not has_v and not has_a:
                 continue
-            is_filter = clip.overlay_type == "filter"
-            idx = -1 if is_filter else input_idx
-            if not is_filter:
+            is_overlay_filter = clip.overlay_type in ("filter", "transition")
+            idx = -1 if is_overlay_filter else input_idx
+            if not is_overlay_filter:
                 input_idx += 1
             pieces.append(
                 _Piece(
@@ -266,7 +266,7 @@ def _pieces(
 
 def _input_args(piece: _Piece, fps: float) -> list[str]:
     clip = piece.clip
-    if clip.overlay_type == "filter":
+    if clip.overlay_type in ("filter", "transition"):
         return []
     if clip.overlay_type == "text":
         path = render_text_to_image(clip)
@@ -357,6 +357,22 @@ def image_base_size(
     return base_w, base_h
 
 
+def _chromakey_filter(clip: Clip) -> str | None:
+    """Gera a cláusula do filtro chromakey se habilitado no clipe."""
+    if not clip.chromakey_enabled:
+        return None
+    raw_col = clip.chromakey_color or "#00FF00"
+    if raw_col.startswith("#"):
+        col = f"0x{raw_col[1:]}"
+    elif not raw_col.startswith("0x"):
+        col = f"0x{raw_col}"
+    else:
+        col = raw_col
+    sim = max(0.001, min(1.0, clip.chromakey_similarity))
+    blend = max(0.0, min(1.0, clip.chromakey_blend))
+    return f"chromakey=color={col}:similarity={sim:.4f}:blend={blend:.4f}"
+
+
 def _video_chain(
     piece: _Piece, project: Project, fps: float, interpolate: bool = False
 ) -> str:
@@ -384,6 +400,10 @@ def _video_chain(
             steps.append(f"scale={target_w}:{target_h}")
         elif abs(sx - 1.0) >= 0.01 or abs(sy - 1.0) >= 0.01:
             steps.append(f"scale=w='trunc(iw*{sx:.4f}/2)*2':h='trunc(ih*{sy:.4f}/2)*2'")
+        if clip.chromakey_enabled:
+            ck = _chromakey_filter(clip)
+            if ck:
+                steps.append(ck)
         if abs(clip.rotation) >= 0.1:
             rad = math.radians(clip.rotation)
             steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=none")
@@ -413,6 +433,7 @@ def _video_chain(
         or abs(sx - 1.0) >= 0.001
         or abs(sy - 1.0) >= 0.001
         or abs(clip.rotation) >= 0.1
+        or clip.chromakey_enabled
     )
     if has_transform:
         steps.append(_rate_chain(piece, fps, interpolate))
@@ -422,6 +443,10 @@ def _video_chain(
         target_w = max(2, int(round(base_w * sx / 2.0) * 2))
         target_h = max(2, int(round(base_h * sy / 2.0) * 2))
         steps.append(f"scale={target_w}:{target_h}")
+        if clip.chromakey_enabled:
+            ck = _chromakey_filter(clip)
+            if ck:
+                steps.append(ck)
         if abs(clip.rotation) >= 0.1:
             rad = math.radians(clip.rotation)
             steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=none")
@@ -592,6 +617,41 @@ def build_graph(
                 current = label
                 continue
 
+            if piece.clip.overlay_type == "transition":
+                tname = piece.clip.transition_name or "fade_black"
+                start, end = piece.offset, piece.offset + piece.duration
+                half = max(0.01, piece.duration / 2.0)
+                mid = start + half
+                if tname == "fade_black":
+                    fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black,fade=t=in:st={mid:.6f}:d={half:.6f}:color=black"
+                elif tname == "fade_white":
+                    fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=white,fade=t=in:st={mid:.6f}:d={half:.6f}:color=white"
+                elif tname == "flash":
+                    fexpr = (
+                        f"eq=contrast='if(lt(t,{mid:.6f}),1+3*(t-{start:.6f})/{half:.6f},1+3*({end:.6f}-t)/{half:.6f})'"
+                        f":brightness='if(lt(t,{mid:.6f}),0.6*(t-{start:.6f})/{half:.6f},0.6*({end:.6f}-t)/{half:.6f})'"
+                        f":enable='between(t,{start:.6f},{end:.6f})'"
+                    )
+                elif tname == "vignette_pulse":
+                    fexpr = (
+                        f"vignette='PI/3*(if(lt(t,{mid:.6f}),(t-{start:.6f})/{half:.6f},({end:.6f}-t)/{half:.6f}))'"
+                        f":enable='between(t,{start:.6f},{end:.6f})'"
+                    )
+                elif tname == "inverter":
+                    qtr = max(0.01, half / 2.0)
+                    fexpr = f"negate=enable='between(t,{mid - qtr:.6f},{mid + qtr:.6f})'"
+                elif tname == "dissolve_color":
+                    fexpr = (
+                        f"colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"
+                        f":enable='between(t,{start:.6f},{end:.6f})'"
+                    )
+                else:
+                    fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black,fade=t=in:st={mid:.6f}:d={half:.6f}:color=black"
+                label = f"[t{order}]"
+                filters.append(f"{current}{fexpr}{label}")
+                current = label
+                continue
+
             filters.append(_video_chain(piece, project, fps, interpolate))
             start, end = piece.offset, piece.offset + piece.duration
             label = f"[o{order}]"
@@ -602,6 +662,7 @@ def build_graph(
                 or abs(getattr(piece.clip, "scale_x", piece.clip.scale) - 1.0) >= 0.001
                 or abs(getattr(piece.clip, "scale_y", piece.clip.scale) - 1.0) >= 0.001
                 or abs(piece.clip.rotation) >= 0.1
+                or piece.clip.chromakey_enabled
             )
             if is_overlay_item or has_transform:
                 overlay_coords = f"x='({piece.clip.x:.4f}*W-w/2)':y='({piece.clip.y:.4f}*H-h/2)'"
@@ -901,6 +962,7 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
         or abs(getattr(clip, "scale_x", clip.scale) - 1.0) >= 0.001
         or abs(getattr(clip, "scale_y", clip.scale) - 1.0) >= 0.001
         or abs(clip.rotation) >= 0.1
+        or clip.chromakey_enabled
         for clip in clips
     ):
         return None

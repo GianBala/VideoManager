@@ -1104,22 +1104,24 @@ class _ClipPropertiesWidget(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         self._title_lbl = QLabel("Propriedades")
+        self._title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._title_lbl.setMinimumWidth(0)
         f_title = self._title_lbl.font()
         f_title.setBold(True)
         f_title.setPointSize(f_title.pointSize() + 1)
         self._title_lbl.setFont(f_title)
-        header.addWidget(self._title_lbl)
-        header.addStretch(1)
+        header.addWidget(self._title_lbl, 1)
 
         btn_close = QPushButton("✕")
         btn_close.setToolTip("Fechar aba de propriedades")
         btn_close.setFixedSize(24, 24)
         btn_close.setStyleSheet(
-            "QPushButton { border: none; background: transparent; font-size: 13px; color: #888; border-radius: 4px; } "
-            "QPushButton:hover { background: #33333d; color: #fff; }"
+            "QPushButton { border: none; background: transparent; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Ubuntu', sans-serif; font-size: 14px; font-weight: bold; border-radius: 4px; padding: 0px; margin: 0px; min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px; text-align: center; } "
+            "QPushButton:hover { background: #e11d48; color: #ffffff; } "
+            "QPushButton:pressed { background: #be123c; color: #ffffff; }"
         )
         btn_close.clicked.connect(self.close_requested.emit)
-        header.addWidget(btn_close)
+        header.addWidget(btn_close, 0)
         self._layout.addLayout(header)
 
         self._lbl_clip_type = QLabel("")
@@ -1217,6 +1219,111 @@ class _ClipPropertiesWidget(QWidget):
         grid.addLayout(row_presets, 7, 0, 1, 2)
 
         self._layout.addWidget(self._transform_group)
+
+        # Grupo Chroma Key (Fundo Verde)
+        self._chromakey_group = QGroupBox("Fundo Verde (Chroma Key)")
+        ck_layout = QVBoxLayout(self._chromakey_group)
+        ck_layout.setContentsMargins(6, 8, 6, 6)
+        ck_layout.setSpacing(6)
+
+        self._chk_chroma = QCheckBox("Ativar remoção de fundo verde")
+        self._chk_chroma.toggled.connect(self._on_chroma_toggled)
+        ck_layout.addWidget(self._chk_chroma)
+
+        row_color = QHBoxLayout()
+        row_color.setSpacing(6)
+        row_color.addWidget(QLabel("Cor a remover:"))
+        self._btn_chroma_color = QPushButton()
+        self._btn_chroma_color.setFixedSize(40, 22)
+        self._btn_chroma_color.setToolTip("Clique para escolher a cor a ser removida")
+        self._btn_chroma_color.clicked.connect(self._choose_chroma_color)
+        row_color.addWidget(self._btn_chroma_color)
+        row_color.addStretch(1)
+
+        for hex_col, c_tip in (
+            ("#00FF00", "Verde Padrão"),
+            ("#00B140", "Verde Studio"),
+            ("#0000FF", "Azul"),
+        ):
+            btn_preset = QPushButton()
+            btn_preset.setFixedSize(22, 22)
+            btn_preset.setToolTip(f"{c_tip} ({hex_col})")
+            btn_preset.setStyleSheet(
+                f"QPushButton {{ background: {hex_col}; border: 1px solid #555; border-radius: 3px; }} "
+                f"QPushButton:hover {{ border: 2px solid #fff; }}"
+            )
+            btn_preset.clicked.connect(lambda _, c=hex_col: self._set_chroma_color(c))
+            row_color.addWidget(btn_preset)
+        ck_layout.addLayout(row_color)
+
+        row_sim = QHBoxLayout()
+        row_sim.setSpacing(6)
+        row_sim.addWidget(QLabel("Tolerância:"))
+        self._slider_similarity = QSlider(Qt.Orientation.Horizontal)
+        self._slider_similarity.setRange(1, 100)
+        self._slider_similarity.setValue(25)
+        self._slider_similarity.valueChanged.connect(self._on_similarity_slider_changed)
+        row_sim.addWidget(self._slider_similarity, 1)
+
+        self._spin_similarity = QSpinBox()
+        self._spin_similarity.setRange(1, 100)
+        self._spin_similarity.setValue(25)
+        self._spin_similarity.setSuffix("%")
+        self._spin_similarity.setFixedWidth(64)
+        self._spin_similarity.valueChanged.connect(self._on_similarity_spin_changed)
+        row_sim.addWidget(self._spin_similarity)
+        ck_layout.addLayout(row_sim)
+
+        row_blend = QHBoxLayout()
+        row_blend.setSpacing(6)
+        row_blend.addWidget(QLabel("Suavização:"))
+        self._slider_blend = QSlider(Qt.Orientation.Horizontal)
+        self._slider_blend.setRange(0, 100)
+        self._slider_blend.setValue(10)
+        self._slider_blend.valueChanged.connect(self._on_blend_slider_changed)
+        row_blend.addWidget(self._slider_blend, 1)
+
+        self._spin_blend = QSpinBox()
+        self._spin_blend.setRange(0, 100)
+        self._spin_blend.setValue(10)
+        self._spin_blend.setSuffix("%")
+        self._spin_blend.setFixedWidth(64)
+        self._spin_blend.valueChanged.connect(self._on_blend_spin_changed)
+        row_blend.addWidget(self._spin_blend)
+        ck_layout.addLayout(row_blend)
+
+        self._layout.addWidget(self._chromakey_group)
+
+        # Grupo Transição (quando um clipe de transição é selecionado)
+        self._transition_group = QGroupBox("Transição de Vídeo")
+        t_layout = QVBoxLayout(self._transition_group)
+        t_layout.setContentsMargins(6, 8, 6, 6)
+        t_layout.setSpacing(6)
+
+        t_layout.addWidget(QLabel("Efeito:"))
+        self._combo_trans_type = QComboBox()
+        self._combo_trans_type.addItem("🌑 Fade Preto", "fade_black")
+        self._combo_trans_type.addItem("☀️ Fade Branco", "fade_white")
+        self._combo_trans_type.addItem("⚡ Clarão / Flash", "flash")
+        self._combo_trans_type.addItem("🎯 Vinheta Pulse", "vignette_pulse")
+        self._combo_trans_type.addItem("🔄 Inversão Rápida", "inverter")
+        self._combo_trans_type.addItem("🎬 Dissolvência Sépia", "dissolve_color")
+        self._combo_trans_type.currentIndexChanged.connect(self._on_trans_type_changed)
+        t_layout.addWidget(self._combo_trans_type)
+
+        dur_row = QHBoxLayout()
+        dur_row.setSpacing(6)
+        dur_row.addWidget(QLabel("Duração:"))
+        self._spin_trans_dur = QDoubleSpinBox()
+        self._spin_trans_dur.setRange(0.2, 5.0)
+        self._spin_trans_dur.setSingleStep(0.1)
+        self._spin_trans_dur.setValue(1.0)
+        self._spin_trans_dur.setSuffix(" s")
+        self._spin_trans_dur.valueChanged.connect(self._on_trans_dur_changed)
+        dur_row.addWidget(self._spin_trans_dur, 1)
+        t_layout.addLayout(dur_row)
+
+        self._layout.addWidget(self._transition_group)
         self._layout.addStretch(1)
 
     def load_clip(self, clip: Clip, proj_w: int, proj_h: int) -> None:
@@ -1227,8 +1334,23 @@ class _ClipPropertiesWidget(QWidget):
             self._proj_w = max(1, proj_w)
             self._proj_h = max(1, proj_h)
 
-            name = clip.media.name if clip.media else (clip.text_content or clip.overlay_type.title())
-            self._title_lbl.setText(f"Propriedades: {name[:20]}")
+            if clip.overlay_type == "transition":
+                t_labels = {
+                    "fade_black": "Fade Preto",
+                    "fade_white": "Fade Branco",
+                    "flash": "Clarão / Flash",
+                    "vignette_pulse": "Vinheta Pulse",
+                    "inverter": "Inversão Rápida",
+                    "dissolve_color": "Dissolvência Sépia",
+                }
+                tname = clip.transition_name or "fade_black"
+                name = f"Transição: {t_labels.get(tname, tname)}"
+            else:
+                name = clip.media.name if clip.media else (clip.text_content or clip.overlay_type.title())
+
+            display_name = name if len(name) <= 32 else f"{name[:29]}..."
+            self._title_lbl.setText(f"Propriedades: {display_name}")
+            self._title_lbl.setToolTip(f"Propriedades: {name}")
             self._lbl_clip_type.setText(f"ID #{clip.clip_id} · {clip.overlay_type.title() if clip.overlay_type != 'none' else 'Mídia'}")
 
             # Calcular base_w e base_h
@@ -1267,9 +1389,30 @@ class _ClipPropertiesWidget(QWidget):
             cur_h = max(1, round(self._base_h * sy))
             self._aspect_ratio = max(0.001, cur_w / max(1.0, float(cur_h)))
 
-            has_transform = clip.has_image or clip.is_additional
-            self._transform_group.setVisible(has_transform)
-            if has_transform:
+            is_trans = clip.overlay_type == "transition"
+            has_image_media = bool(clip.media and (clip.media.has_video or clip.is_image))
+            can_chroma = has_image_media and clip.overlay_type not in ("text", "filter", "transition")
+
+            self._transform_group.setVisible(not is_trans and (clip.has_image or clip.is_additional))
+            self._chromakey_group.setVisible(can_chroma)
+            self._transition_group.setVisible(is_trans)
+
+            if is_trans:
+                idx = self._combo_trans_type.findData(clip.transition_name or "fade_black")
+                if idx >= 0:
+                    self._combo_trans_type.setCurrentIndex(idx)
+                self._spin_trans_dur.setValue(clip.duration)
+
+            if can_chroma:
+                self._chk_chroma.setChecked(clip.chromakey_enabled)
+                self._set_chroma_color(clip.chromakey_color or "#00FF00")
+                sim_pct = int(round(clip.chromakey_similarity * 100))
+                blend_pct = int(round(clip.chromakey_blend * 100))
+                self._spin_similarity.setValue(max(1, min(100, sim_pct)))
+                self._spin_blend.setValue(max(0, min(100, blend_pct)))
+                self._enable_chroma_controls(clip.chromakey_enabled)
+
+            if not is_trans and (clip.has_image or clip.is_additional):
                 px = round(clip.x * self._proj_w)
                 py = round(clip.y * self._proj_h)
                 self._spin_x.setValue(px)
@@ -1286,6 +1429,69 @@ class _ClipPropertiesWidget(QWidget):
             self._last_rot = clip.rotation
         finally:
             self._updating = False
+
+    def _on_chroma_toggled(self, checked: bool) -> None:
+        self._enable_chroma_controls(checked)
+        if self._updating or self._clip_id < 0:
+            return
+        self.property_changed.emit(self._clip_id, {"chromakey_enabled": checked})
+
+    def _enable_chroma_controls(self, enabled: bool) -> None:
+        self._btn_chroma_color.setEnabled(enabled)
+        self._slider_similarity.setEnabled(enabled)
+        self._spin_similarity.setEnabled(enabled)
+        self._slider_blend.setEnabled(enabled)
+        self._spin_blend.setEnabled(enabled)
+
+    def _choose_chroma_color(self) -> None:
+        cur_col = QColor(getattr(self, "_current_chroma_color", "#00FF00"))
+        chosen = QColorDialog.getColor(cur_col, self, "Escolher cor para remover")
+        if chosen.isValid():
+            self._set_chroma_color(chosen.name().upper())
+
+    def _set_chroma_color(self, hex_color: str) -> None:
+        self._current_chroma_color = hex_color
+        self._btn_chroma_color.setStyleSheet(
+            f"QPushButton {{ background: {hex_color}; border: 1px solid #888; border-radius: 4px; }} "
+            f"QPushButton:hover {{ border: 1px solid #fff; }}"
+        )
+        if self._updating or self._clip_id < 0:
+            return
+        self.property_changed.emit(self._clip_id, {"chromakey_color": hex_color})
+
+    def _on_similarity_slider_changed(self, val: int) -> None:
+        if self._spin_similarity.value() != val:
+            self._spin_similarity.setValue(val)
+
+    def _on_similarity_spin_changed(self, val: int) -> None:
+        if self._slider_similarity.value() != val:
+            self._slider_similarity.setValue(val)
+        if self._updating or self._clip_id < 0:
+            return
+        self.property_changed.emit(self._clip_id, {"chromakey_similarity": val / 100.0})
+
+    def _on_blend_slider_changed(self, val: int) -> None:
+        if self._spin_blend.value() != val:
+            self._spin_blend.setValue(val)
+
+    def _on_blend_spin_changed(self, val: int) -> None:
+        if self._slider_blend.value() != val:
+            self._slider_blend.setValue(val)
+        if self._updating or self._clip_id < 0:
+            return
+        self.property_changed.emit(self._clip_id, {"chromakey_blend": val / 100.0})
+
+    def _on_trans_type_changed(self, index: int) -> None:
+        if self._updating or self._clip_id < 0:
+            return
+        data = self._combo_trans_type.itemData(index)
+        if data:
+            self.property_changed.emit(self._clip_id, {"transition_name": data})
+
+    def _on_trans_dur_changed(self, val: float) -> None:
+        if self._updating or self._clip_id < 0:
+            return
+        self.property_changed.emit(self._clip_id, {"duration": val})
 
     def update_transform_fields(
         self, x: float, y: float, scale_x: float, scale_y: float | None = None, rotation: float = 0.0
@@ -2002,23 +2208,17 @@ class EditPanel(QWidget):
         self._extras_tabs = QTabWidget()
         self._extras_tabs.addTab(self._build_text_tab(), strings.EDIT_TAB_TEXT)
         self._extras_tabs.addTab(self._build_filters_tab(), strings.EDIT_TAB_FILTERS)
-        self._extras_tabs.setTabsClosable(True)
-        self._extras_tabs.tabCloseRequested.connect(self._on_extras_tab_close_requested)
+        self._extras_tabs.addTab(self._build_transitions_tab(), strings.EDIT_TAB_TRANSITIONS)
+        self._extras_tabs.setTabsClosable(False)
         self._properties_widget = _ClipPropertiesWidget()
         self._properties_widget.property_changed.connect(self._on_properties_changed)
         self._properties_widget.close_requested.connect(self._close_properties_tab)
-        self._update_extras_tab_close_buttons()
         layout.addWidget(self._extras_tabs, 1)
 
         return box
 
     def _update_extras_tab_close_buttons(self) -> None:
-        bar = self._extras_tabs.tabBar()
-        for i in range(self._extras_tabs.count()):
-            widget = self._extras_tabs.widget(i)
-            if widget is not self._properties_widget:
-                bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, None)
-                bar.setTabButton(i, QTabBar.ButtonPosition.LeftSide, None)
+        pass
 
     def _on_extras_tab_close_requested(self, index: int) -> None:
         if self._extras_tabs.widget(index) is self._properties_widget:
@@ -2457,6 +2657,152 @@ class EditPanel(QWidget):
         )
         self._place_clip(clip)
 
+    def _build_transitions_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(4, 6, 4, 6)
+        layout.setSpacing(6)
+
+        layout.addWidget(QLabel("Escolha uma transição de vídeo:"))
+
+        self._trans_specs = (
+            ("fade_black", "🌑 Fade Preto"),
+            ("fade_white", "☀️ Fade Branco"),
+            ("flash", "⚡ Clarão / Flash"),
+            ("vignette_pulse", "🎯 Vinheta Pulse"),
+            ("inverter", "🔄 Inversão Rápida"),
+            ("dissolve_color", "🎬 Dissolvência Sépia"),
+        )
+        self._selected_trans_name = "fade_black"
+
+        self._trans_group = QButtonGroup(self)
+        self._trans_group.setExclusive(True)
+        self._trans_buttons: list[QPushButton] = []
+        for tid, tlabel in self._trans_specs:
+            btn = QPushButton(tlabel)
+            btn.setCheckable(True)
+            btn.setChecked(tid == self._selected_trans_name)
+            btn.setStyleSheet(
+                "QPushButton { text-align: left; padding: 6px 10px; border-radius: 4px; border: 1px solid #444; background: #2a2a32; color: #fff; font-size: 12px; }"
+                "QPushButton:hover { background: #353540; border-color: #666; }"
+                "QPushButton:checked { background: #2a2a32; border: 2px solid #fbbf24; font-weight: bold; color: #ffffff; }"
+                "QPushButton:checked:hover { background: #32323c; border: 2px solid #fbbf24; }"
+            )
+            self._trans_group.addButton(btn)
+            btn.clicked.connect(lambda _, t=tid: self._select_transition(t))
+            layout.addWidget(btn)
+            self._trans_buttons.append(btn)
+
+        dur_row = QHBoxLayout()
+        dur_row.addWidget(QLabel("Duração:"))
+        self._trans_dur = QDoubleSpinBox()
+        self._trans_dur.setRange(0.2, 5.0)
+        self._trans_dur.setValue(1.0)
+        self._trans_dur.setSingleStep(0.1)
+        self._trans_dur.setSuffix(" s")
+        self._trans_dur.valueChanged.connect(self._on_transition_dur_changed)
+        dur_row.addWidget(self._trans_dur)
+        layout.addLayout(dur_row)
+
+        hint = QLabel("A transição é posicionada na interseção dos blocos de vídeo mais próximos.")
+        hint.setWordWrap(True)
+        hint.setProperty("role", "dim")
+        hint.setStyleSheet("font-size: 11px; color: #94a3b8;")
+        layout.addWidget(hint)
+
+        layout.addStretch(1)
+
+        self._apply_trans_btn = QPushButton("+ Inserir Transição")
+        self._apply_trans_btn.setProperty("role", "primary")
+        self._apply_trans_btn.clicked.connect(self._handle_apply_or_update_transition)
+        layout.addWidget(self._apply_trans_btn)
+
+        self._insert_new_trans_btn = QPushButton("+ Inserir como Nova Transição")
+        self._insert_new_trans_btn.clicked.connect(lambda: self._insert_transition_clip(self._selected_trans_name))
+        self._insert_new_trans_btn.setVisible(False)
+        layout.addWidget(self._insert_new_trans_btn)
+
+        return tab
+
+    def _select_transition(self, trans_name: str) -> None:
+        self._selected_trans_name = trans_name
+        for i, (tid, _) in enumerate(self._trans_specs):
+            if i < len(self._trans_buttons):
+                self._trans_buttons[i].setChecked(tid == trans_name)
+        clip = self._timeline.selected_clip
+        if not self._syncing and clip is not None and clip.overlay_type == "transition":
+            self._remember()
+            self._apply(self._project.with_updated_clip(clip.clip_id, transition_name=trans_name))
+
+    def _on_transition_dur_changed(self, dur: float) -> None:
+        clip = self._timeline.selected_clip
+        if not self._syncing and clip is not None and clip.overlay_type == "transition":
+            self._remember()
+            self._apply(self._project.with_updated_clip(clip.clip_id, duration=dur))
+
+    def _handle_apply_or_update_transition(self) -> None:
+        clip = self._timeline.selected_clip
+        if clip is not None and clip.overlay_type == "transition":
+            self._remember()
+            self._apply(
+                self._project.with_updated_clip(
+                    clip.clip_id,
+                    transition_name=self._selected_trans_name,
+                    duration=self._trans_dur.value(),
+                )
+            )
+        else:
+            self._insert_transition_clip(self._selected_trans_name)
+
+    def _find_nearest_video_cut(self, current_pos: float) -> float | None:
+        cuts: list[float] = []
+        for track in self._project.tracks:
+            if track.kind != TrackKind.VIDEO:
+                continue
+            sorted_clips = sorted(track.clips, key=lambda c: c.start)
+            for i in range(len(sorted_clips) - 1):
+                c1 = sorted_clips[i]
+                c2 = sorted_clips[i + 1]
+                c1_end = c1.start + c1.duration
+                if abs(c2.start - c1_end) < 2.0:
+                    cuts.append((c1_end + c2.start) / 2.0)
+                else:
+                    cuts.append(c1_end)
+                    cuts.append(c2.start)
+            for c in sorted_clips:
+                cuts.append(c.start)
+                cuts.append(c.start + c.duration)
+
+        if not cuts:
+            return None
+        cuts.sort(key=lambda pt: abs(pt - current_pos))
+        return cuts[0]
+
+    def _insert_transition_clip(self, trans_name: str | None = None) -> None:
+        tname = trans_name or getattr(self, "_selected_trans_name", "fade_black")
+        label = next((lbl for tid, lbl in getattr(self, "_trans_specs", ()) if tid == tname), tname)
+        duration = self._trans_dur.value() if hasattr(self, "_trans_dur") else 1.0
+
+        cut = self._find_nearest_video_cut(self._position)
+        if cut is not None:
+            start = max(0.0, cut - duration / 2.0)
+        else:
+            start = max(0.0, self._position - duration / 2.0)
+
+        ref = MediaRef(
+            path=Path(f"Transição_{label}"),
+            kind=MediaKind.IMAGE,
+            duration=duration,
+        )
+        clip = Clip(
+            media=ref,
+            start=start,
+            duration=duration,
+            overlay_type="transition",
+            transition_name=tname,
+        )
+        self._place_clip(clip)
+
     def _sync_extras_controls(self, clip: Clip | None) -> None:
         if hasattr(self, "_properties_widget") and self._extras_tabs.indexOf(self._properties_widget) >= 0:
             if clip is not None:
@@ -2488,6 +2834,9 @@ class EditPanel(QWidget):
             self._insert_new_text_btn.setVisible(True)
             self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)
             self._insert_new_filter_btn.setVisible(False)
+            if hasattr(self, "_apply_trans_btn"):
+                self._apply_trans_btn.setText("+ Inserir Transição")
+                self._insert_new_trans_btn.setVisible(False)
         elif clip is not None and clip.overlay_type == "filter":
             self._extras_tabs.setCurrentIndex(1)
             fname = clip.filter_name or "pb"
@@ -2500,11 +2849,32 @@ class EditPanel(QWidget):
             self._insert_new_filter_btn.setVisible(True)
             self._insert_text_btn.setText(strings.EDIT_INSERT_TEXT)
             self._insert_new_text_btn.setVisible(False)
+            if hasattr(self, "_apply_trans_btn"):
+                self._apply_trans_btn.setText("+ Inserir Transição")
+                self._insert_new_trans_btn.setVisible(False)
+        elif clip is not None and clip.overlay_type == "transition":
+            self._extras_tabs.setCurrentIndex(2)
+            tname = clip.transition_name or "fade_black"
+            self._selected_trans_name = tname
+            for i, (tid, _) in enumerate(getattr(self, "_trans_specs", ())):
+                if i < len(self._trans_buttons):
+                    self._trans_buttons[i].setChecked(tid == tname)
+            self._trans_dur.setValue(clip.duration)
+            if hasattr(self, "_apply_trans_btn"):
+                self._apply_trans_btn.setText("✓ Atualizar Transição Selecionada")
+                self._insert_new_trans_btn.setVisible(True)
+            self._insert_text_btn.setText(strings.EDIT_INSERT_TEXT)
+            self._insert_new_text_btn.setVisible(False)
+            self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)
+            self._insert_new_filter_btn.setVisible(False)
         else:
             self._insert_text_btn.setText(strings.EDIT_INSERT_TEXT)
             self._insert_new_text_btn.setVisible(False)
             self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)
             self._insert_new_filter_btn.setVisible(False)
+            if hasattr(self, "_apply_trans_btn"):
+                self._apply_trans_btn.setText("+ Inserir Transição")
+                self._insert_new_trans_btn.setVisible(False)
 
     def _build_player(self) -> QWidget:
         box = QWidget()
@@ -3960,8 +4330,21 @@ class EditPanel(QWidget):
         borrada, que se lê como perda de qualidade do vídeo e não como escolha
         da prévia. Medido: 1920×1080 a 60 fps atravessa o cano sem atrasar.
         """
-        area = self._fullscreen.size() if self._on_fullscreen else self._preview.size()
-        ceiling = _FULLSCREEN_MAX_WIDTH if self._on_fullscreen else _PREVIEW_MAX_WIDTH
+        if self._on_fullscreen:
+            area = self._fullscreen.size()
+            if area.width() <= 640 or area.height() <= 480:
+                screen = self._fullscreen.screen() or QApplication.primaryScreen()
+                if screen is not None:
+                    area = screen.geometry().size()
+            ceiling = max(_FULLSCREEN_MAX_WIDTH, area.width())
+            return fit_size(
+                self._project.width,
+                self._project.height,
+                min(ceiling, max(160, area.width())),
+                max(120, area.height()),
+            )
+        area = self._preview.size()
+        ceiling = _PREVIEW_MAX_WIDTH
         return fit_size(
             self._project.width,
             self._project.height,
@@ -4317,12 +4700,13 @@ class EditPanel(QWidget):
 
     def _update_time_labels(self) -> None:
         curr = format_timecode(self._position, milliseconds=False)
-        tot = format_timecode(self._duration, milliseconds=False)
+        visible_dur = self._project.export_duration if hasattr(self, "_project") else self._duration
+        tot = format_timecode(visible_dur, milliseconds=False)
         self._time_label.setText(
             strings.EDIT_POSITION.format(current=curr, total=tot)
         )
         self._time_label.setToolTip(
-            f"{format_timecode(self._position)}  /  {format_timecode(self._duration)}"
+            f"{format_timecode(self._position)}  /  {format_timecode(visible_dur)}"
         )
         self._frame_label.setText(
             strings.EDIT_FRAME_NUMBER.format(index=frame_index(self._position, self._fps))
@@ -4336,12 +4720,13 @@ class EditPanel(QWidget):
         Em tipo proporcional o "1" é mais estreito que o "8": sem largura fixa,
         a barra de transporte inteira treme a cada quadro.
         """
-        biggest = format_timecode(max(self._duration, 3600.0), milliseconds=False)
+        visible_dur = self._project.export_duration if hasattr(self, "_project") else self._duration
+        biggest = format_timecode(max(visible_dur, 3600.0), milliseconds=False)
         text = strings.EDIT_POSITION.format(current=biggest, total=biggest)
         self._time_label.setFixedWidth(
             QFontMetrics(self._time_label.font()).horizontalAdvance(text) + 12
         )
-        max_idx = max(99999, frame_index(self._duration, self._fps))
+        max_idx = max(99999, frame_index(visible_dur, self._fps))
         frames = strings.EDIT_FRAME_NUMBER.format(index=max_idx)
         self._frame_label.setFixedWidth(
             QFontMetrics(self._frame_label.font()).horizontalAdvance(frames) + 12
@@ -4569,6 +4954,7 @@ class EditPanel(QWidget):
             self._fullscreen.volume_changed.connect(self._volume.setValue)
             self._fullscreen.mute_toggled.connect(self._mute.setChecked)
             self._fullscreen.closed.connect(self._restart_frames)
+            self._fullscreen.resized.connect(self._on_fullscreen_resized)
 
         self._fullscreen.set_audio(
             self._has_sound, self._volume.value(), self._mute.isChecked()
@@ -4579,6 +4965,10 @@ class EditPanel(QWidget):
         self._sync_fullscreen()
         self._restart_frames()
 
+    def _on_fullscreen_resized(self, size: QSize) -> None:
+        if self._on_fullscreen:
+            self._restart_frames()
+
     def _restart_frames(self) -> None:
         if self._playing:
             self._start_frames(self._position)
@@ -4587,7 +4977,8 @@ class EditPanel(QWidget):
 
     def _sync_fullscreen(self) -> None:
         if self._on_fullscreen:
-            self._fullscreen.set_state(self._position, self._duration, self._playing)
+            dur = self._project.export_duration if hasattr(self, "_project") else self._duration
+            self._fullscreen.set_state(self._position, dur, self._playing)
 
     # ------------------------------------------------------------------
     # Zoom e rolagem
