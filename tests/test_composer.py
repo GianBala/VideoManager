@@ -21,6 +21,7 @@ import pytest
 from videomanager.core.binaries import FFmpegTools, decode_threads
 from videomanager.core.composer import (
     SAMPLE_RATE,
+    Composition,
     audio_command,
     build_graph,
     can_interpolate,
@@ -844,5 +845,80 @@ class TestVelocidadeEFiltros:
         c1 = clip(VIDEO, start=0.0, duration=5.0, scale=0.8)
         p = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(c1,), visible=True),))
         assert simple_trim(p) is None
+
+    def test_simple_trim_com_outra_trilha_oculta_ou_muda_funciona(self) -> None:
+        c1 = clip(VIDEO, start=0.0, duration=5.0)
+        c2 = clip(OUTRO, start=0.0, duration=10.0)
+        c_aud_mudo = clip(MONO, start=0.0, duration=10.0)
+
+        # Trilha de vídeo 1 visível + Trilha de vídeo 2 oculta + Trilha de áudio muda
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(c1,), visible=True),
+                Track(kind=TrackKind.VIDEO, clips=(c2,), visible=False),
+                Track(kind=TrackKind.AUDIO, clips=(c_aud_mudo,), visible=True, muted=True),
+            )
+        )
+        segs = simple_trim(p)
+        assert segs is not None
+        assert len(segs) == 1
+        assert segs[0].start == 0.0
+        assert segs[0].end == 5.0
+
+    def test_export_args_com_trilhas_ocultas_identico_a_deletadas(self) -> None:
+        c1 = clip(VIDEO, start=0.0, duration=5.0)
+        c2 = clip(OUTRO, start=0.0, duration=10.0)
+
+        p_oculto = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(c1,), visible=True),
+                Track(kind=TrackKind.VIDEO, clips=(c2,), visible=False),
+            )
+        )
+        p_deletado = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(c1,), visible=True),
+            )
+        )
+        out_path = Path("/tmp/out.mp4")
+        args_oculto = export_args(p_oculto, out_path, TOOLS)
+        args_deletado = export_args(p_deletado, out_path, TOOLS)
+        assert args_oculto == args_deletado
+
+    def test_audio_embutido_em_video_visivel_e_exportado(self) -> None:
+        c_vid = clip(VIDEO, start=0.0, duration=5.0)  # VIDEO possui has_audio=True
+        p = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(c_vid,), visible=True, muted=False),))
+        graph = build_graph(p)
+        assert graph.audio_label == "[a0]"
+        filters_str = ";".join(graph.filters)
+        assert "[0:a]" in filters_str
+
+    def test_audio_embutido_em_video_mutado_nao_e_exportado(self) -> None:
+        # Caso 1: clipe mutado
+        c_vid_mudo = clip(VIDEO, start=0.0, duration=5.0, muted=True)
+        p1 = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(c_vid_mudo,), visible=True, muted=False),))
+        graph1 = build_graph(p1)
+        assert graph1.audio_label is None
+        assert "[0:a]" not in ";".join(graph1.filters)
+
+        # Caso 2: trilha de vídeo mutada
+        c_vid = clip(VIDEO, start=0.0, duration=5.0, muted=False)
+        p2 = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(c_vid,), visible=True, muted=True),))
+        graph2 = build_graph(p2)
+        assert graph2.audio_label is None
+        assert "[0:a]" not in ";".join(graph2.filters)
+
+    def test_composition_output_duration_usa_export_duration(self) -> None:
+        c1 = clip(VIDEO, start=0.0, duration=5.0)
+        c2 = clip(OUTRO, start=0.0, duration=20.0)
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(c1,), visible=True),
+                Track(kind=TrackKind.VIDEO, clips=(c2,), visible=False),
+            )
+        )
+        comp = Composition(p)
+        assert comp.output_duration == 5.0
+
 
 

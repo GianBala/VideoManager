@@ -110,7 +110,9 @@ class Composition:
 
     @property
     def output_duration(self) -> float:
-        return self.project.duration
+        if self.audio_only:
+            return self.project.audible_duration
+        return self.project.export_duration
 
 
 @dataclass(frozen=True)
@@ -716,6 +718,7 @@ def export_args(
     audio_codec: str | None = None,
 ) -> list[str]:
     """Comando que grava o projeto inteiro em um arquivo."""
+    project = project.for_export()
     if project.is_empty:
         raise ConversionError("Não há nada na linha do tempo para exportar.")
 
@@ -927,6 +930,7 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     sendo instantâneo e sem perda. Basta uma dessas coisas para a resposta ser
     ``None`` e a exportação passar a compor.
     """
+    project = project.for_export()
     clips = project.clips
     if not clips:
         return None
@@ -1003,6 +1007,7 @@ def _interpolated_clips(project: Project) -> list[Clip]:
     return [
         clip
         for track in project.video_tracks
+        if track.visible
         for clip in track.clips
         if clip.has_image and clip.media.fps and clip.media.fps < project.fps - 0.01
     ]
@@ -1215,13 +1220,15 @@ def describe_export(
     audio_codec: str | None = None,
 ) -> str:
     """Resumo do que a exportação vai produzir."""
+    project = project.for_export()
     audios = sum(len(track.clips) for track in project.audio_tracks)
     if audio_only:
         codec_name = (audio_codec or container).upper()
         parts = [f".{container} (Áudio · {codec_name})"]
-        if audios:
-            parts.append(f"{audios} bloco(s) de áudio")
-        parts.append(f"{format_span(project.duration)} de duração")
+        audible_count = len(project.audible_clips)
+        if audible_count:
+            parts.append(f"{audible_count} bloco(s) de áudio")
+        parts.append(f"{format_span(project.audible_duration)} de duração")
         return " · ".join(parts)
 
     videos = sum(len(track.clips) for track in project.video_tracks)
@@ -1237,5 +1244,5 @@ def describe_export(
         parts.append("movimento interpolado (lento)")
     if hardware != hwaccel.SOFTWARE:
         parts.append("placa de vídeo, se disponível")
-    parts.append(f"{format_span(project.duration)} de duração")
+    parts.append(f"{format_span(project.export_duration)} de duração")
     return " · ".join(parts)

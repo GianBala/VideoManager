@@ -367,12 +367,14 @@ class Project:
 
     @property
     def export_duration(self) -> float:
-        durations = [
-            track.duration
-            for track in self.tracks
-            if (track.visible if track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL) else (not track.muted and track.visible))
+        ends = [clip.end for clip in self.visible_video_clips] + [
+            clip.end for clip in self.audible_clips
         ]
-        return max(durations, default=0.0)
+        return max(ends, default=0.0)
+
+    @property
+    def audible_duration(self) -> float:
+        return max((clip.end for clip in self.audible_clips), default=0.0)
 
     @property
     def is_empty(self) -> bool:
@@ -381,6 +383,16 @@ class Project:
     @property
     def clips(self) -> tuple[Clip, ...]:
         return tuple(clip for track in self.tracks for clip in track.clips)
+
+    @property
+    def visible_video_clips(self) -> tuple[Clip, ...]:
+        return tuple(
+            clip
+            for track in (*self.video_tracks, *self.additional_tracks)
+            if track.visible
+            for clip in track.clips
+            if clip.has_image
+        )
 
     @property
     def video_tracks(self) -> tuple[Track, ...]:
@@ -397,9 +409,10 @@ class Project:
     @property
     def has_video(self) -> bool:
         return any(
-            track.clips
+            clip.has_image
             for track in (*self.video_tracks, *self.additional_tracks)
             if track.visible
+            for clip in track.clips
         )
 
     @property
@@ -411,6 +424,29 @@ class Project:
             if not track.muted and track.visible
             for clip in track.clips
         )
+
+    @property
+    def audible_clips(self) -> tuple[Clip, ...]:
+        return tuple(
+            clip
+            for track in self.tracks
+            if not track.muted and track.visible
+            for clip in track.clips
+            if clip.has_sound
+        )
+
+    def for_export(self) -> Project:
+        """Devolve uma cópia do projeto para exportação.
+
+        Contém apenas as trilhas que contribuem para a saída:
+        trilhas visíveis com blocos (e para áudio, que não estejam totalmente mudas).
+        """
+        active = tuple(
+            t
+            for t in self.tracks
+            if t.visible and t.clips and not (t.kind is TrackKind.AUDIO and t.muted)
+        )
+        return replace(self, tracks=active)
 
     def track_index(self, track_id: int) -> int:
         return next(
@@ -820,8 +856,21 @@ def auto_canvas(project: Project) -> Project:
     Sem imagem nenhuma, volta ao padrão: é o que faz a próxima importação
     definir a tela de novo, em vez de herdar a de um material que já saiu.
     """
-    visible = [clip for track in project.video_tracks for clip in track.clips
-               if clip.has_image]
+    visible = [
+        clip
+        for track in project.video_tracks
+        if track.visible
+        for clip in track.clips
+        if clip.has_image and clip.media
+    ]
+    if not visible:
+        visible = [
+            clip
+            for track in project.additional_tracks
+            if track.visible
+            for clip in track.clips
+            if clip.has_image and clip.media
+        ]
     videos = [c for c in visible if c.media.kind is MediaKind.VIDEO] or visible
     sized = [c.media for c in videos if c.media.width and c.media.height]
     if not sized:
