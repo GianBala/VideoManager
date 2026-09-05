@@ -765,7 +765,8 @@ def export_args(
         else:
             args += encode_audio_args(container)
         return args + [
-            "-map_metadata", "0",
+            "-map_metadata", "-1",
+            "-map_chapters", "-1",
             "-progress", "pipe:1",
             "-nostats",
             str(destination),
@@ -810,7 +811,7 @@ def export_args(
         raise ConversionError(
             "Todos os blocos estão mudos ou vazios: não há o que exportar."
         )
-    return args + tail_args(container, destination)
+    return args + tail_args(container, destination, map_metadata=False)
 
 
 def _limited_inputs(inputs: list[str]) -> list[str]:
@@ -1178,6 +1179,10 @@ def segment_video_args(
         "-an",
         "-t",
         f"{span:.6f}",
+        "-map_metadata",
+        "-1",
+        "-map_chapters",
+        "-1",
         str(destination),
     ]
 
@@ -1195,6 +1200,8 @@ def concat_args(
         tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", "-y",
         "-f", "concat", "-safe", "0", "-i", str(parts),
         "-c", "copy",
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
         str(destination),
     ]
 
@@ -1209,7 +1216,11 @@ def audio_only_args(
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", "-y"]
     args += [*graph.inputs, "-filter_complex", ";".join(graph.filters)]
     args += ["-map", graph.audio_label, *encode_audio_args(container)]
-    return args + [str(destination)]
+    return args + [
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
+        str(destination),
+    ]
 
 
 def mux_args(
@@ -1225,6 +1236,7 @@ def mux_args(
         # milissegundos de arredondamento, e um arquivo mais longo que o vídeo
         # termina em tela preta.
         args += ["-shortest"]
+    args += ["-map_metadata", "-1", "-map_chapters", "-1"]
     return args + [str(destination)]
 
 
@@ -1267,3 +1279,104 @@ def describe_export(
         parts.append("placa de vídeo, se disponível")
     parts.append(f"{format_span(project.export_duration)} de duração")
     return " · ".join(parts)
+
+
+def embed_thumbnail(destination: Path, tools: FFmpegTools) -> None:
+    """Emite um banner/thumbnail no arquivo exportado para visualização no explorador de arquivos.
+
+    Gera uma imagem estática do vídeo e a incorpora no container como capa (cover art),
+    sem incluir outros metadados de texto.
+    - MP4/MOV: grava o atom nativo 'covr' via mutagen (ou ffmpeg em fallback)
+    - MKV: anexa a imagem via ffmpeg -attach
+    - WebM e formatos de áudio puro: ignorados
+    """
+    import shutil
+    import subprocess
+
+    container = destination.suffix.lstrip(".").lower()
+    if container not in ("mp4", "mov", "m4v", "mkv", "matroska"):
+        return
+
+    tmp_thumb = destination.with_suffix(".thumb_export_tmp.jpg")
+    ffmpeg = tools.ffmpeg_str
+
+    try:
+        # Extrai 1 quadro de alta qualidade (tenta em 0.5s para evitar fade-in preto inicial, cai para 0s se o vídeo for curto)
+        thumb_cmd = [
+            ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
+            "-y", "-ss", "0.5", "-i", str(destination),
+            "-frames:v", "1", "-q:v", "2",
+            str(tmp_thumb),
+        ]
+        res = subprocess.run(thumb_cmd, capture_output=True)
+        if res.returncode != 0 or not tmp_thumb.is_file() or tmp_thumb.stat().st_size == 0:
+            thumb_cmd = [
+                ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
+                "-y", "-i", str(destination),
+                "-vf", r"select=eq(n\,0)", "-frames:v", "1", "-q:v", "2",
+                str(tmp_thumb),
+            ]
+            res = subprocess.run(thumb_cmd, capture_output=True)
+            if res.returncode != 0 or not tmp_thumb.is_file() or tmp_thumb.stat().st_size == 0:
+                return
+
+        thumb_bytes = tmp_thumb.read_bytes()
+        if not thumb_bytes:
+            return
+
+        if container in ("mp4", "mov", "m4v"):
+            # 1. Tenta mutagen para gravação nativa e direta do atom 'covr' (reconhecido pelo Nautilus/Totem/Explorer/macOS)
+            try:
+                from mutagen.mp4 import MP4, MP4Cover
+                mp4 = MP4(destination)
+                mp4["covr"] = [MP4Cover(thumb_bytes, imageformat=MP4Cover.FORMAT_JPEG)]
+                mp4.save()
+                return
+            except Exception:
+                pass
+
+            # 2. Fallback: remux via ffmpeg com attached_pic
+            tmp_out = destination.with_suffix(f".thumbed{destination.suffix}")
+            mux_cmd = [
+                ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
+                "-y",
+                "-i", str(destination),
+                "-i", str(tmp_thumb),
+                "-map", "0",
+                "-map", "1",
+                "-c", "copy",
+                "-c:v:1", "mjpeg",
+                "-disposition:v:1", "attached_pic",
+                "-map_metadata", "-1",
+                "-map_chapters", "-1",
+                "-movflags", "+faststart",
+                str(tmp_out),
+            ]
+            res = subprocess.run(mux_cmd, capture_output=True)
+            if res.returncode == 0 and tmp_out.is_file() and tmp_out.stat().st_size > 0:
+                shutil.move(str(tmp_out), str(destination))
+
+        elif container in ("mkv", "matroska"):
+            tmp_out = destination.with_suffix(f".thumbed{destination.suffix}")
+            mux_cmd = [
+                ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
+                "-y",
+                "-i", str(destination),
+                "-attach", str(tmp_thumb),
+                "-metadata:s:t:0", "mimetype=image/jpeg",
+                "-metadata:s:t:0", "filename=cover.jpg",
+                "-map", "0",
+                "-c", "copy",
+                "-map_metadata", "-1",
+                "-map_chapters", "-1",
+                str(tmp_out),
+            ]
+            res = subprocess.run(mux_cmd, capture_output=True)
+            if res.returncode == 0 and tmp_out.is_file() and tmp_out.stat().st_size > 0:
+                shutil.move(str(tmp_out), str(destination))
+
+    except Exception:
+        pass
+    finally:
+        tmp_thumb.unlink(missing_ok=True)
+
