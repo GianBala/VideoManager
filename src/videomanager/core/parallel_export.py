@@ -49,6 +49,7 @@ from .composer import (
     Composition,
     audio_only_args,
     concat_args,
+    embed_thumbnail,
     interpolation_segments,
     mux_args,
     segment_bounds,
@@ -243,10 +244,16 @@ class ParallelExport:
         pronto = temp / f"pronto.{self._composition.container}"
         self._step(mux_args(video, som, pronto, self._tools), "juntar imagem e som")
         self._check_cancelled()
+        if not self._composition.audio_only:
+            embed_thumbnail(pronto, self._tools)
         # ``replace`` e não ``move``: o destino pode existir de uma exportação
         # anterior, e a troca precisa ser atômica dentro do mesmo sistema de
         # arquivos. Quando não é o mesmo, ``shutil.move`` resolve.
         shutil.move(str(pronto), str(self._destination))
+        try:
+            os.utime(str(self._destination), None)
+        except OSError:
+            pass
         self._emit(self._composition.project.duration, share=1.0)
         return self._destination
 

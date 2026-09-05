@@ -799,7 +799,11 @@ class Converter:
             if segments > 1:
                 return self._run_parallel(self._target, segments)
 
-        args = build_args(self._media, self._target, self._destination, self._tools)
+        # Renderiza num arquivo temporário na mesma pasta para evitar que o explorador
+        # de arquivos (Nautilus/Nemo) tente gerar miniaturas em cima do arquivo 0-byte ou
+        # incompleto e grave uma falha definitiva no cache de thumbnails.
+        render_target = self._destination.with_name(f".tmp_{self._destination.name}")
+        args = build_args(self._media, self._target, render_target, self._tools)
         self._destination.parent.mkdir(parents=True, exist_ok=True)
 
         kwargs = subprocess_kwargs()
@@ -809,6 +813,8 @@ class Converter:
         try:
             process = subprocess.Popen(args, text=True, bufsize=1, **kwargs)
         except OSError as exc:
+            render_target.unlink(missing_ok=True)
+            self._destination.unlink(missing_ok=True)
             raise ConversionError(f"Não foi possível iniciar o ffmpeg: {exc}") from exc
 
         with self._lock:
@@ -860,31 +866,36 @@ class Converter:
 
         if self._cancelled:
             # Saída parcial é lixo: um arquivo truncado ludibriaria o usuário.
+            render_target.unlink(missing_ok=True)
             self._destination.unlink(missing_ok=True)
             raise JobCancelled("Conversão cancelada.")
 
         if process.returncode != 0:
+            render_target.unlink(missing_ok=True)
             self._destination.unlink(missing_ok=True)
             detail = _last_error_line(stderr)
             raise ConversionError(f"O ffmpeg falhou na conversão: {detail}")
 
-        # Vazio conta como ausente: :func:`output_path` reserva o nome criando um
-        # arquivo de zero byte, então "existe" deixou de significar "foi
-        # gravado". Sem esta conta, um ffmpeg que terminasse com código 0 sem
-        # escrever nada entregaria a reserva como se fosse o resultado.
-        if not self._destination.is_file() or self._destination.stat().st_size == 0:
+        # Vazio conta como ausente.
+        if not render_target.is_file() or render_target.stat().st_size == 0:
+            render_target.unlink(missing_ok=True)
             self._destination.unlink(missing_ok=True)
             raise ConversionError(
                 "O ffmpeg terminou sem erro mas não gerou o arquivo de saída."
             )
 
-        # Emite o banner (thumbnail) no arquivo exportado para aparecer no explorador.
-        # Só faz sentido para exportações de edição (composição e corte rápido)
-        # que produzem um container de vídeo — não para conversão/áudio puro.
-        _is_video_export = isinstance(self._target, (Composition, TrimTarget))
+        # Emite o banner (thumbnail) no arquivo exportado antes da substituição atômica.
+        _is_video_export = not isinstance(self._target, AudioTarget)
         _audio_only = isinstance(self._target, Composition) and self._target.audio_only
         if _is_video_export and not _audio_only:
-            embed_thumbnail(self._destination, self._tools)
+            embed_thumbnail(render_target, self._tools)
+
+        import shutil
+        shutil.move(str(render_target), str(self._destination))
+        try:
+            os.utime(str(self._destination), None)
+        except OSError:
+            pass
 
         return self._destination
 
