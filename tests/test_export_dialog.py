@@ -434,31 +434,3 @@ def test_export_dialog_quality_selector(
     assert dialog._quality_box.isEnabled()
 
 
-def test_export_dialog_fast_cut_strips_metadata(
-    qapp: QApplication,
-    sample_media: tuple[MediaRef, LocalMedia],
-    single_clip_project: Project,
-    dummy_tools: FFmpegTools,
-) -> None:
-    from videomanager.core.trimmer import TrimTarget
-
-    ref, local = sample_media
-    settings = Settings()
-    dialog = ExportDialog(
-        project=single_clip_project,
-        settings=settings,
-        pool=[ref],
-        probed={ref.path: local},
-        keyframes=(0.0, 5.0, 10.0),
-        ensure_tools=lambda: dummy_tools,
-    )
-
-    dialog._fast.setChecked(True)
-    dialog._on_enqueue()
-    assert dialog.created_job is not None
-    target = dialog.created_job.opts["target"]
-    assert isinstance(target, TrimTarget)
-    assert target.copy_metadata is False
-
-
-

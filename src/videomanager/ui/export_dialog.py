@@ -557,7 +557,6 @@ class ExportDialog(QDialog):
             mode=CutMode.FAST,
             anchor=anchor,
             hardware=self._settings.hardware_encoder,
-            copy_metadata=False,
         )
 
     def _main_clip(self, proj: Project) -> Clip | None:
