@@ -1301,10 +1301,27 @@ def embed_thumbnail(destination: Path, tools: FFmpegTools) -> None:
     ffmpeg = tools.ffmpeg_str
 
     try:
-        # Extrai 1 quadro de alta qualidade (tenta em 0.5s para evitar fade-in preto inicial, cai para 0s se o vídeo for curto)
+        # Descobre a duração do vídeo para extrair o quadro da metade exata
+        seek_time = 0.0
+        try:
+            probe_cmd = [
+                tools.ffprobe_str, "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(destination),
+            ]
+            res_probe = subprocess.run(probe_cmd, capture_output=True, text=True)
+            if res_probe.returncode == 0 and res_probe.stdout.strip():
+                dur = float(res_probe.stdout.strip())
+                if dur > 0:
+                    seek_time = dur / 2.0
+        except (ValueError, OSError):
+            seek_time = 0.0
+
+        # Extrai 1 quadro de alta qualidade da metade do vídeo (com fallback para o início)
         thumb_cmd = [
             ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
-            "-y", "-ss", "0.5", "-i", str(destination),
+            "-y", "-ss", f"{seek_time:.3f}", "-i", str(destination),
             "-frames:v", "1", "-q:v", "2",
             str(tmp_thumb),
         ]
