@@ -1071,6 +1071,11 @@ class _ClipPropertiesWidget(QWidget):
         self._base_h: float = 1080.0
         self._aspect_ratio: float = 16.0 / 9.0
         self._updating: bool = False
+        self._last_w: int = 100
+        self._last_h: int = 100
+        self._last_x: float = 0.5
+        self._last_y: float = 0.5
+        self._last_rot: float = 0.0
 
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1270,6 +1275,12 @@ class _ClipPropertiesWidget(QWidget):
                 self._spin_h.setValue(cur_h)
                 self._spin_scale.setValue((sx + sy) / 2.0)
                 self._spin_rot.setValue(clip.rotation % 360.0)
+
+            self._last_w = cur_w
+            self._last_h = cur_h
+            self._last_x = clip.x
+            self._last_y = clip.y
+            self._last_rot = clip.rotation
         finally:
             self._updating = False
 
@@ -1285,25 +1296,63 @@ class _ClipPropertiesWidget(QWidget):
         try:
             px = round(x * self._proj_w)
             py = round(y * self._proj_h)
+            cur_w = max(1, round(self._base_w * scale_x))
+            cur_h = max(1, round(self._base_h * scale_y))
             self._spin_x.setValue(px)
             self._spin_y.setValue(py)
-            self._spin_w.setValue(max(1, round(self._base_w * scale_x)))
-            self._spin_h.setValue(max(1, round(self._base_h * scale_y)))
+            self._spin_w.setValue(cur_w)
+            self._spin_h.setValue(cur_h)
             self._spin_scale.setValue((scale_x + scale_y) / 2.0)
             self._spin_rot.setValue(rotation % 360.0)
+            self._last_w = cur_w
+            self._last_h = cur_h
+            self._last_x = x
+            self._last_y = y
+            self._last_rot = rotation
         finally:
             self._updating = False
+
+    def _calc_anchor_shift(self, new_w: int, new_h: int) -> tuple[float, float]:
+        """Calcula o novo centro (new_x, new_y) normalizado para que a expansão ocorra
+
+        exclusivamente para a DIREITA e para CIMA, mantendo o canto inferior esquerdo
+        (bottom-left) rigorosamente fixo.
+        """
+        old_w = getattr(self, "_last_w", self._spin_w.value())
+        old_h = getattr(self, "_last_h", self._spin_h.value())
+        old_x = getattr(self, "_last_x", self._spin_x.value() / max(1.0, float(self._proj_w)))
+        old_y = getattr(self, "_last_y", self._spin_y.value() / max(1.0, float(self._proj_h)))
+        rot = getattr(self, "_last_rot", self._spin_rot.value())
+
+        dw = float(new_w - old_w)
+        dh = float(new_h - old_h)
+
+        theta_rad = math.radians(rot)
+        cos_t = math.cos(theta_rad)
+        sin_t = math.sin(theta_rad)
+
+        old_cx_px = old_x * float(self._proj_w)
+        old_cy_px = old_y * float(self._proj_h)
+
+        new_cx_px = old_cx_px + (dw / 2.0) * cos_t + (dh / 2.0) * sin_t
+        new_cy_px = old_cy_px + (dw / 2.0) * sin_t - (dh / 2.0) * cos_t
+
+        new_x = new_cx_px / max(1.0, float(self._proj_w))
+        new_y = new_cy_px / max(1.0, float(self._proj_h))
+        return new_x, new_y
 
     def _on_x_changed(self, val: int) -> None:
         if self._updating or self._clip_id < 0:
             return
         new_x = val / max(1.0, float(self._proj_w))
+        self._last_x = new_x
         self.property_changed.emit(self._clip_id, {"x": new_x})
 
     def _on_y_changed(self, val: int) -> None:
         if self._updating or self._clip_id < 0:
             return
         new_y = val / max(1.0, float(self._proj_h))
+        self._last_y = new_y
         self.property_changed.emit(self._clip_id, {"y": new_y})
 
     def _on_lock_ratio_toggled(self, checked: bool) -> None:
@@ -1320,9 +1369,8 @@ class _ClipPropertiesWidget(QWidget):
             if self._chk_lock_ratio.isChecked():
                 new_w = max(1, round(self._base_w * val))
                 new_h = max(1, round(self._base_h * val))
-                self._spin_w.setValue(new_w)
-                self._spin_h.setValue(new_h)
-                changes = {"scale": val, "scale_x": val, "scale_y": val}
+                new_sx = val
+                new_sy = val
             else:
                 cur_sx = self._spin_w.value() / max(1.0, self._base_w)
                 cur_sy = self._spin_h.value() / max(1.0, self._base_h)
@@ -1330,9 +1378,27 @@ class _ClipPropertiesWidget(QWidget):
                 factor = val / avg
                 new_sx = max(0.05, min(10.0, cur_sx * factor))
                 new_sy = max(0.05, min(10.0, cur_sy * factor))
-                self._spin_w.setValue(max(1, round(self._base_w * new_sx)))
-                self._spin_h.setValue(max(1, round(self._base_h * new_sy)))
-                changes = {"scale": val, "scale_x": new_sx, "scale_y": new_sy}
+                new_w = max(1, round(self._base_w * new_sx))
+                new_h = max(1, round(self._base_h * new_sy))
+
+            new_x, new_y = self._calc_anchor_shift(new_w, new_h)
+            self._spin_w.setValue(new_w)
+            self._spin_h.setValue(new_h)
+            self._spin_x.setValue(round(new_x * self._proj_w))
+            self._spin_y.setValue(round(new_y * self._proj_h))
+
+            self._last_w = new_w
+            self._last_h = new_h
+            self._last_x = new_x
+            self._last_y = new_y
+
+            changes = {
+                "x": new_x,
+                "y": new_y,
+                "scale": val,
+                "scale_x": new_sx,
+                "scale_y": new_sy,
+            }
         finally:
             self._updating = False
         self.property_changed.emit(self._clip_id, changes)
@@ -1349,12 +1415,37 @@ class _ClipPropertiesWidget(QWidget):
                 self._spin_h.setValue(new_h)
                 avg_scale = (new_scale_x + new_scale_y) / 2.0
                 self._spin_scale.setValue(avg_scale)
-                changes = {"scale": avg_scale, "scale_x": new_scale_x, "scale_y": new_scale_y}
             else:
+                new_h = getattr(self, "_last_h", self._spin_h.value())
                 cur_sy = self._spin_h.value() / max(1.0, self._base_h)
+                new_scale_y = cur_sy
                 avg_scale = (new_scale_x + cur_sy) / 2.0
                 self._spin_scale.setValue(avg_scale)
-                changes = {"scale": avg_scale, "scale_x": new_scale_x}
+
+            new_x, new_y = self._calc_anchor_shift(val, new_h)
+            self._spin_x.setValue(round(new_x * self._proj_w))
+            self._spin_y.setValue(round(new_y * self._proj_h))
+
+            self._last_w = val
+            self._last_h = new_h
+            self._last_x = new_x
+            self._last_y = new_y
+
+            if self._chk_lock_ratio.isChecked():
+                changes = {
+                    "x": new_x,
+                    "y": new_y,
+                    "scale": avg_scale,
+                    "scale_x": new_scale_x,
+                    "scale_y": new_scale_y,
+                }
+            else:
+                changes = {
+                    "x": new_x,
+                    "y": new_y,
+                    "scale": avg_scale,
+                    "scale_x": new_scale_x,
+                }
         finally:
             self._updating = False
         self.property_changed.emit(self._clip_id, changes)
@@ -1371,12 +1462,37 @@ class _ClipPropertiesWidget(QWidget):
                 self._spin_w.setValue(new_w)
                 avg_scale = (new_scale_x + new_scale_y) / 2.0
                 self._spin_scale.setValue(avg_scale)
-                changes = {"scale": avg_scale, "scale_x": new_scale_x, "scale_y": new_scale_y}
             else:
+                new_w = getattr(self, "_last_w", self._spin_w.value())
                 cur_sx = self._spin_w.value() / max(1.0, self._base_w)
+                new_scale_x = cur_sx
                 avg_scale = (cur_sx + new_scale_y) / 2.0
                 self._spin_scale.setValue(avg_scale)
-                changes = {"scale": avg_scale, "scale_y": new_scale_y}
+
+            new_x, new_y = self._calc_anchor_shift(new_w, val)
+            self._spin_x.setValue(round(new_x * self._proj_w))
+            self._spin_y.setValue(round(new_y * self._proj_h))
+
+            self._last_w = new_w
+            self._last_h = val
+            self._last_x = new_x
+            self._last_y = new_y
+
+            if self._chk_lock_ratio.isChecked():
+                changes = {
+                    "x": new_x,
+                    "y": new_y,
+                    "scale": avg_scale,
+                    "scale_x": new_scale_x,
+                    "scale_y": new_scale_y,
+                }
+            else:
+                changes = {
+                    "x": new_x,
+                    "y": new_y,
+                    "scale": avg_scale,
+                    "scale_y": new_scale_y,
+                }
         finally:
             self._updating = False
         self.property_changed.emit(self._clip_id, changes)
@@ -1384,7 +1500,8 @@ class _ClipPropertiesWidget(QWidget):
     def _on_rot_changed(self, val: float) -> None:
         if self._updating or self._clip_id < 0:
             return
-        self.property_changed.emit(self._clip_id, {"rotation": val % 360.0})
+        self._last_rot = val % 360.0
+        self.property_changed.emit(self._clip_id, {"rotation": self._last_rot})
 
     def _set_preset_rotation(self, angle: float) -> None:
         self._spin_rot.setValue(angle)
