@@ -1279,3 +1279,95 @@ def describe_export(
         parts.append("placa de vídeo, se disponível")
     parts.append(f"{format_span(project.export_duration)} de duração")
     return " · ".join(parts)
+
+
+# Containers que suportam thumbnail embutido como imagem estática.
+# WebM não tem suporte estável a ``attached_pic`` via remux, e formatos de
+# áudio puro (mp3, m4a, etc.) já não passam por aqui.
+_THUMBNAIL_CONTAINERS_MP4 = {"mp4", "mov"}
+_THUMBNAIL_CONTAINERS_MKV = {"mkv", "matroska"}
+
+
+def embed_thumbnail(destination: Path, tools: FFmpegTools) -> None:
+    """Emite um banner no arquivo exportado para aparecer no explorador de arquivos.
+
+    Extrai o primeiro quadro do vídeo gerado e o reemite como imagem
+    ``attached_pic`` dentro do mesmo container, sem recodificar as trilhas
+    de vídeo e áudio. A operação usa um arquivo temporário na mesma pasta
+    e é atômica: se falhar por qualquer motivo, o arquivo original é
+    preservado intacto.
+
+    Containers suportados: MP4/MOV e MKV. WebM e áudio puro são ignorados.
+    """
+    import shutil
+    import subprocess
+
+    container = destination.suffix.lstrip(".").lower()
+    if container not in _THUMBNAIL_CONTAINERS_MP4 | _THUMBNAIL_CONTAINERS_MKV:
+        return
+
+    ffmpeg = tools.ffmpeg_str
+    tmp_thumb = destination.with_suffix(".thumb.jpg")
+    tmp_out = destination.with_suffix(f".thumbed{destination.suffix}")
+
+    try:
+        # 1. Extrai o primeiro quadro como JPEG.
+        thumb_cmd = [
+            ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
+            "-y", "-i", str(destination),
+            "-vf", r"select=eq(n\,0)", "-frames:v", "1",
+            "-q:v", "3",  # qualidade JPEG: 1–31, menor é melhor
+            str(tmp_thumb),
+        ]
+        result = subprocess.run(thumb_cmd, capture_output=True)
+        if result.returncode != 0 or not tmp_thumb.is_file() or tmp_thumb.stat().st_size == 0:
+            return
+
+        # 2. Re-muxa o arquivo original adicionando o thumbnail como faixa estática.
+        if container in _THUMBNAIL_CONTAINERS_MP4:
+            # MP4/MOV: stream adicional com disposition=attached_pic.
+            mux_cmd = [
+                ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
+                "-y",
+                "-i", str(destination),
+                "-i", str(tmp_thumb),
+                "-map", "0",
+                "-map", "1",
+                "-c", "copy",
+                "-c:v:1", "mjpeg",
+                "-disposition:v:1", "attached_pic",
+                "-map_metadata", "-1",
+                "-map_chapters", "-1",
+                "-movflags", "+faststart",
+                str(tmp_out),
+            ]
+        else:
+            # MKV: attachment com mimetype declarado — reconhecido por mais
+            # players e exploradores do que a abordagem de stream adicional.
+            mux_cmd = [
+                ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
+                "-y",
+                "-i", str(destination),
+                "-attach", str(tmp_thumb),
+                "-metadata:s:t:0", "mimetype=image/jpeg",
+                "-map", "0",
+                "-c", "copy",
+                "-map_metadata", "-1",
+                "-map_chapters", "-1",
+                str(tmp_out),
+            ]
+
+        result = subprocess.run(mux_cmd, capture_output=True)
+        if result.returncode != 0 or not tmp_out.is_file() or tmp_out.stat().st_size == 0:
+            return
+
+        # 3. Substitui o original pelo arquivo com thumbnail (mesma pasta → atômico).
+        shutil.move(str(tmp_out), str(destination))
+
+    except OSError:
+        # Permissões, disco cheio, etc. Não deixar a exportação principal falhar.
+        pass
+    finally:
+        tmp_thumb.unlink(missing_ok=True)
+        tmp_out.unlink(missing_ok=True)
+
