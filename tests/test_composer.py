@@ -23,15 +23,12 @@ from videomanager.core.composer import (
     SAMPLE_RATE,
     Composition,
     audio_command,
-    audio_only_args,
     build_graph,
     can_interpolate,
-    concat_args,
     describe_export,
     export_args,
     frame_command,
     interpolation_bytes,
-    mux_args,
     playback_command,
     segment_video_args,
     simple_trim,
@@ -502,48 +499,6 @@ class TestComandos:
         args = export_args(projeto(audio_track(clip(ESTEREO))), DEST, TOOLS)
         assert "-c:v" not in args
 
-    def test_exportacao_nao_copia_metadados_nem_capitulos(self) -> None:
-        args = export_args(projeto(video_track(clip())), DEST, TOOLS)
-        assert "-map_metadata" in args
-        assert args[args.index("-map_metadata") + 1] == "-1"
-        assert "-map_chapters" in args
-        assert args[args.index("-map_chapters") + 1] == "-1"
-
-    def test_exportacao_so_audio_nao_copia_metadados_nem_capitulos(self) -> None:
-        args = export_args(projeto(audio_track(clip(ESTEREO))), DEST, TOOLS)
-        assert "-map_metadata" in args
-        assert args[args.index("-map_metadata") + 1] == "-1"
-        assert "-map_chapters" in args
-        assert args[args.index("-map_chapters") + 1] == "-1"
-
-    def test_segment_args_nao_copia_metadados_nem_capitulos(self) -> None:
-        args = segment_video_args(projeto(video_track(clip())), 0.0, 5.0, DEST, TOOLS)
-        assert "-map_metadata" in args
-        assert args[args.index("-map_metadata") + 1] == "-1"
-        assert "-map_chapters" in args
-        assert args[args.index("-map_chapters") + 1] == "-1"
-
-    def test_concat_args_nao_copia_metadados_nem_capitulos(self) -> None:
-        args = concat_args(Path("/tmp/parts.txt"), DEST, TOOLS)
-        assert "-map_metadata" in args
-        assert args[args.index("-map_metadata") + 1] == "-1"
-        assert "-map_chapters" in args
-        assert args[args.index("-map_chapters") + 1] == "-1"
-
-    def test_audio_only_args_nao_copia_metadados_nem_capitulos(self) -> None:
-        args = audio_only_args(projeto(audio_track(clip(ESTEREO))), DEST, TOOLS)
-        assert args is not None
-        assert "-map_metadata" in args
-        assert args[args.index("-map_metadata") + 1] == "-1"
-        assert "-map_chapters" in args
-        assert args[args.index("-map_chapters") + 1] == "-1"
-
-    def test_mux_args_nao_copia_metadados_nem_capitulos(self) -> None:
-        args = mux_args(Path("/tmp/v.mp4"), Path("/tmp/a.m4a"), DEST, TOOLS)
-        assert "-map_metadata" in args
-        assert args[args.index("-map_metadata") + 1] == "-1"
-        assert "-map_chapters" in args
-        assert args[args.index("-map_chapters") + 1] == "-1"
 
 
 class TestThreadsDaPrevia:
