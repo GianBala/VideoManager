@@ -42,6 +42,102 @@ from .binaries import FFmpegTools, subprocess_kwargs
 SOFTWARE = "software"
 AUTO = "auto"
 
+# Níveis de qualidade de codificação de vídeo
+QUALITY_BALANCED = "balanced"
+QUALITY_HIGH = "high"
+QUALITY_ECONOMY = "economy"
+DEFAULT_QUALITY = QUALITY_BALANCED
+
+QUALITY_LABELS: dict[str, str] = {
+    QUALITY_BALANCED: "qualidade equilibrada",
+    QUALITY_HIGH: "alta qualidade",
+    QUALITY_ECONOMY: "qualidade econômica",
+}
+
+
+def quality_label(quality: str) -> str:
+    return QUALITY_LABELS.get(quality, quality)
+
+
+# Mapeamento de argumentos de qualidade por encoder e nível de qualidade.
+# O padrão recomendado é QUALITY_BALANCED (CRF 23 / QP 23), que produz excelente
+# fidelidade visual a uma taxa de bits muito mais eficiente (~35-45 MB por minuto em 1080p).
+_ENCODER_QUALITY: dict[str, dict[str, tuple[str, ...]]] = {
+    # Software
+    "libx264": {
+        QUALITY_HIGH: ("-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p"),
+        QUALITY_BALANCED: ("-crf", "23", "-preset", "medium", "-pix_fmt", "yuv420p"),
+        QUALITY_ECONOMY: ("-crf", "28", "-preset", "medium", "-pix_fmt", "yuv420p"),
+    },
+    "libx265": {
+        QUALITY_HIGH: ("-crf", "20", "-pix_fmt", "yuv420p"),
+        QUALITY_BALANCED: ("-crf", "25", "-pix_fmt", "yuv420p"),
+        QUALITY_ECONOMY: ("-crf", "30", "-pix_fmt", "yuv420p"),
+    },
+    "libvpx-vp9": {
+        QUALITY_HIGH: ("-crf", "25", "-b:v", "0"),
+        QUALITY_BALANCED: ("-crf", "31", "-b:v", "0"),
+        QUALITY_ECONOMY: ("-crf", "38", "-b:v", "0"),
+    },
+    "libsvtav1": {
+        QUALITY_HIGH: ("-crf", "26",),
+        QUALITY_BALANCED: ("-crf", "32",),
+        QUALITY_ECONOMY: ("-crf", "38",),
+    },
+    # NVIDIA NVENC
+    "h264_nvenc": {
+        QUALITY_HIGH: ("-preset", "p5", "-rc", "constqp", "-qp", "18", "-pix_fmt", "yuv420p"),
+        QUALITY_BALANCED: ("-preset", "p5", "-rc", "constqp", "-qp", "23", "-pix_fmt", "yuv420p"),
+        QUALITY_ECONOMY: ("-preset", "p5", "-rc", "constqp", "-qp", "28", "-pix_fmt", "yuv420p"),
+    },
+    "hevc_nvenc": {
+        QUALITY_HIGH: ("-preset", "p5", "-rc", "constqp", "-qp", "20", "-pix_fmt", "yuv420p"),
+        QUALITY_BALANCED: ("-preset", "p5", "-rc", "constqp", "-qp", "25", "-pix_fmt", "yuv420p"),
+        QUALITY_ECONOMY: ("-preset", "p5", "-rc", "constqp", "-qp", "30", "-pix_fmt", "yuv420p"),
+    },
+    # Intel Quick Sync
+    "h264_qsv": {
+        QUALITY_HIGH: ("-global_quality", "18", "-pix_fmt", "nv12"),
+        QUALITY_BALANCED: ("-global_quality", "23", "-pix_fmt", "nv12"),
+        QUALITY_ECONOMY: ("-global_quality", "28", "-pix_fmt", "nv12"),
+    },
+    "hevc_qsv": {
+        QUALITY_HIGH: ("-global_quality", "20", "-pix_fmt", "nv12"),
+        QUALITY_BALANCED: ("-global_quality", "25", "-pix_fmt", "nv12"),
+        QUALITY_ECONOMY: ("-global_quality", "30", "-pix_fmt", "nv12"),
+    },
+    # AMD AMF
+    "h264_amf": {
+        QUALITY_HIGH: ("-quality", "quality", "-qp_i", "18", "-qp_p", "18"),
+        QUALITY_BALANCED: ("-quality", "balanced", "-qp_i", "23", "-qp_p", "23"),
+        QUALITY_ECONOMY: ("-quality", "speed", "-qp_i", "28", "-qp_p", "28"),
+    },
+    "hevc_amf": {
+        QUALITY_HIGH: ("-quality", "quality", "-qp_i", "20", "-qp_p", "20"),
+        QUALITY_BALANCED: ("-quality", "balanced", "-qp_i", "25", "-qp_p", "25"),
+        QUALITY_ECONOMY: ("-quality", "speed", "-qp_i", "30", "-qp_p", "30"),
+    },
+    # Linux VAAPI
+    "h264_vaapi": {
+        QUALITY_HIGH: ("-qp", "18",),
+        QUALITY_BALANCED: ("-qp", "23",),
+        QUALITY_ECONOMY: ("-qp", "28",),
+    },
+    "hevc_vaapi": {
+        QUALITY_HIGH: ("-qp", "20",),
+        QUALITY_BALANCED: ("-qp", "25",),
+        QUALITY_ECONOMY: ("-qp", "30",),
+    },
+}
+
+
+def encoder_quality(encoder_name: str, quality: str = QUALITY_BALANCED) -> tuple[str, ...]:
+    """Retorna argumentos de qualidade para um determinado encoder."""
+    by_enc = _ENCODER_QUALITY.get(encoder_name)
+    if by_enc:
+        return by_enc.get(quality, by_enc.get(QUALITY_BALANCED, ()))
+    return ()
+
 
 @dataclass(frozen=True)
 class Encoder:
@@ -59,49 +155,53 @@ class Encoder:
     label: str = ""
 
 
-# Encoders de software: o que o aplicativo sempre usou.
+# Encoders de software: com qualidade equilibrada (CRF 23) por padrão.
 _SOFTWARE: dict[str, Encoder] = {
     "h264": Encoder(
         "libx264",
-        quality=("-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p"),
+        quality=encoder_quality("libx264", QUALITY_BALANCED),
         label="Software (x264)",
     ),
     "hevc": Encoder(
-        "libx265", quality=("-crf", "20", "-pix_fmt", "yuv420p"), label="Software (x265)"
+        "libx265",
+        quality=encoder_quality("libx265", QUALITY_BALANCED),
+        label="Software (x265)",
     ),
     "vp9": Encoder(
-        "libvpx-vp9", quality=("-crf", "30", "-b:v", "0"), label="Software (VP9)"
+        "libvpx-vp9",
+        quality=encoder_quality("libvpx-vp9", QUALITY_BALANCED),
+        label="Software (VP9)",
     ),
-    "av1": Encoder("libsvtav1", quality=("-crf", "30",), label="Software (AV1)"),
+    "av1": Encoder(
+        "libsvtav1",
+        quality=encoder_quality("libsvtav1", QUALITY_BALANCED),
+        label="Software (AV1)",
+    ),
 }
 
 # Por família de codec, os encoders de placa em ordem de preferência.
 _HARDWARE: dict[str, dict[str, Encoder]] = {
     "h264": {
         # ``-rc constqp`` não é enfeite: sem declarar o controle de taxa, o NVENC
-        # ignora o número de qualidade e cai num bitrate padrão. Medido aqui, num
-        # trecho de 30 s a 1080p, codificando com ``-cq 20``, ``-cq 16`` e
-        # ``-cq 14``: os três saíram com 58 MB e SSIM 0,7932 — o mesmo resultado,
-        # como se o pedido não existisse, e bem longe do 0,9786 do x264. Com o
-        # controle de taxa explícito, a placa passa a empatar com o software
-        # (SSIM 0,9960 contra 0,9959) gastando um terço do tempo.
+        # ignora o número de qualidade e cai num bitrate padrão.
         "nvenc": Encoder(
             "h264_nvenc",
-            quality=("-preset", "p5", "-rc", "constqp", "-qp", "18", "-pix_fmt", "yuv420p"),
+            quality=encoder_quality("h264_nvenc", QUALITY_BALANCED),
             label="NVIDIA (NVENC)",
         ),
         "qsv": Encoder(
             "h264_qsv",
-            quality=("-global_quality", "22", "-pix_fmt", "nv12"),
+            quality=encoder_quality("h264_qsv", QUALITY_BALANCED),
             label="Intel (Quick Sync)",
         ),
         "amf": Encoder(
-            "h264_amf", quality=("-quality", "balanced", "-qp_i", "22", "-qp_p", "22"),
+            "h264_amf",
+            quality=encoder_quality("h264_amf", QUALITY_BALANCED),
             label="AMD (AMF)",
         ),
         "vaapi": Encoder(
             "h264_vaapi",
-            quality=("-qp", "22",),
+            quality=encoder_quality("h264_vaapi", QUALITY_BALANCED),
             device=("-vaapi_device", "/dev/dri/renderD128"),
             filter_suffix="format=nv12,hwupload",
             label="VAAPI",
@@ -110,18 +210,25 @@ _HARDWARE: dict[str, dict[str, Encoder]] = {
     "hevc": {
         "nvenc": Encoder(
             "hevc_nvenc",
-            quality=("-preset", "p5", "-rc", "constqp", "-qp", "20", "-pix_fmt", "yuv420p"),
+            quality=encoder_quality("hevc_nvenc", QUALITY_BALANCED),
             label="NVIDIA (NVENC)",
         ),
         "qsv": Encoder(
-            "hevc_qsv", quality=("-global_quality", "24", "-pix_fmt", "nv12"),
+            "hevc_qsv",
+            quality=encoder_quality("hevc_qsv", QUALITY_BALANCED),
             label="Intel (Quick Sync)",
         ),
-        "amf": Encoder("hevc_amf", quality=("-qp_i", "24", "-qp_p", "24"), label="AMD (AMF)"),
+        "amf": Encoder(
+            "hevc_amf",
+            quality=encoder_quality("hevc_amf", QUALITY_BALANCED),
+            label="AMD (AMF)",
+        ),
         "vaapi": Encoder(
-            "hevc_vaapi", quality=("-qp", "24",),
+            "hevc_vaapi",
+            quality=encoder_quality("hevc_vaapi", QUALITY_BALANCED),
             device=("-vaapi_device", "/dev/dri/renderD128"),
-            filter_suffix="format=nv12,hwupload", label="VAAPI",
+            filter_suffix="format=nv12,hwupload",
+            label="VAAPI",
         ),
     },
 }
@@ -260,7 +367,12 @@ def software_encoder(family: str) -> Encoder:
     return _SOFTWARE.get(family, _SOFTWARE["h264"])
 
 
-def resolve(family: str, preference: str, tools: FFmpegTools | None) -> Encoder:
+def resolve(
+    family: str,
+    preference: str,
+    tools: FFmpegTools | None,
+    quality: str = QUALITY_BALANCED,
+) -> Encoder:
     """Encoder a usar de fato, já com a queda para software embutida.
 
     Nunca devolve algo que não abre: é isto que faz uma máquina sem placa — ou
@@ -268,23 +380,24 @@ def resolve(family: str, preference: str, tools: FFmpegTools | None) -> Encoder:
     mensagem do ffmpeg no meio da fila.
     """
     fallback = software_encoder(family)
-    if preference == SOFTWARE or tools is None:
-        return fallback
+    chosen = fallback
+    if preference != SOFTWARE and tools is not None:
+        candidates = _HARDWARE.get(family, {})
+        if candidates:
+            wanted = ORDER if preference == AUTO else (preference,)
+            for kind in wanted:
+                encoder = candidates.get(kind)
+                if encoder is not None:
+                    if encoder.name.endswith("_vaapi"):
+                        encoder = replace(encoder, device=("-vaapi_device", find_vaapi_device()))
+                    if probe(encoder, tools):
+                        chosen = encoder
+                        break
 
-    candidates = _HARDWARE.get(family, {})
-    if not candidates:
-        # Família sem equivalente em placa (VP9, AV1 nas builds comuns).
-        return fallback
-
-    wanted = ORDER if preference == AUTO else (preference,)
-    for kind in wanted:
-        encoder = candidates.get(kind)
-        if encoder is not None:
-            if encoder.name.endswith("_vaapi"):
-                encoder = replace(encoder, device=("-vaapi_device", find_vaapi_device()))
-            if probe(encoder, tools):
-                return encoder
-    return fallback
+    q_args = encoder_quality(chosen.name, quality)
+    if q_args:
+        return replace(chosen, quality=q_args)
+    return chosen
 
 
 def available(tools: FFmpegTools | None, family: str = "h264") -> list[str]:
@@ -295,9 +408,14 @@ def available(tools: FFmpegTools | None, family: str = "h264") -> list[str]:
     return [k for k in ORDER if k in candidates and probe(candidates[k], tools)]
 
 
-def describe(preference: str, tools: FFmpegTools | None, family: str = "h264") -> str:
+def describe(
+    preference: str,
+    tools: FFmpegTools | None,
+    family: str = "h264",
+    quality: str = QUALITY_BALANCED,
+) -> str:
     """Frase para a tela dizendo o que **vai** acontecer, não o que se pediu."""
-    encoder = resolve(family, preference, tools)
+    encoder = resolve(family, preference, tools, quality=quality)
     if preference == SOFTWARE:
         return f"Usando {encoder.label}."
     if encoder.name.startswith("lib"):
@@ -310,15 +428,31 @@ def describe(preference: str, tools: FFmpegTools | None, family: str = "h264") -
     return f"Placa em uso: {encoder.label}."
 
 
-def encode_args(family: str, preference: str, tools: FFmpegTools | None) -> list[str]:
+def encode_args(
+    family: str,
+    preference: str,
+    tools: FFmpegTools | None,
+    quality: str = QUALITY_BALANCED,
+) -> list[str]:
     """Argumentos de codificação de vídeo já resolvidos."""
-    encoder = resolve(family, preference, tools)
+    encoder = resolve(family, preference, tools, quality=quality)
     return ["-c:v", encoder.name, *encoder.quality]
 
 
-def device_args(family: str, preference: str, tools: FFmpegTools | None) -> list[str]:
-    return list(resolve(family, preference, tools).device)
+def device_args(
+    family: str,
+    preference: str,
+    tools: FFmpegTools | None,
+    quality: str = QUALITY_BALANCED,
+) -> list[str]:
+    return list(resolve(family, preference, tools, quality=quality).device)
 
 
-def filter_suffix(family: str, preference: str, tools: FFmpegTools | None) -> str:
-    return resolve(family, preference, tools).filter_suffix
+def filter_suffix(
+    family: str,
+    preference: str,
+    tools: FFmpegTools | None,
+    quality: str = QUALITY_BALANCED,
+) -> str:
+    return resolve(family, preference, tools, quality=quality).filter_suffix
+

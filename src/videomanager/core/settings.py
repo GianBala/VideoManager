@@ -90,6 +90,8 @@ class Settings:
     # uma placa. É só uma preferência — o que vale é o que abre na máquina, e a
     # queda para software é automática (ver core/hwaccel.py).
     hardware_encoder: str = "software"
+    # Qualidade padrão de exportação da edição: "balanced" (CRF 23), "high" (CRF 18), "economy" (CRF 28)
+    default_export_quality: str = "balanced"
 
     # --- interface ---
     theme: str = "dark"

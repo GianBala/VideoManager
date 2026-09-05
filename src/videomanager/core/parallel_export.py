@@ -263,6 +263,7 @@ class ParallelExport:
                 container=self._composition.container,
                 family=self._composition.family,
                 hardware=self._composition.hardware,
+                quality=self._composition.quality,
             )
         except ConversionError as exc:
             self._fail(str(exc))
