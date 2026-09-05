@@ -115,6 +115,7 @@ class ExportDialog(QDialog):
         ensure_tools: Callable[[], FFmpegTools | None] | None = None,
         initial_canvas: tuple[int, int] | None = None,
         initial_rate: float | None = None,
+        project_path: Path | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -130,6 +131,7 @@ class ExportDialog(QDialog):
         self._ensure_tools = ensure_tools
         self._canvas_choice = initial_canvas
         self._rate_choice = initial_rate
+        self._project_path = project_path
 
         self._container_choice: str = self._default_container(project)
         self._codec_choice: str | None = None
@@ -261,8 +263,17 @@ class ExportDialog(QDialog):
         dest_box.addLayout(folder_row)
 
         main_init = self._main_clip(self._project)
-        source_init = main_init.media.path if main_init else (self._project.clips[0].media.path if self._project.clips else None)
-        default_stem = f"{source_init.stem}_editado" if source_init else "video_editado"
+        source_init = (
+            main_init.media.path
+            if (main_init and main_init.media and main_init.media.path.is_file())
+            else None
+        )
+        if source_init:
+            default_stem = f"{source_init.stem}_editado"
+        elif self._project_path:
+            default_stem = f"{self._project_path.stem}_editado"
+        else:
+            default_stem = "video_editado"
 
         name_row = QHBoxLayout()
         name_row.setSpacing(8)
@@ -498,6 +509,9 @@ class ExportDialog(QDialog):
         # é necessário recompor / recodificar.
         if self._canvas_choice is not None or self._rate_choice is not None:
             return False
+        main = self._main_clip(proj)
+        if not main or main.is_additional or not (main.media and main.media.path.is_file()):
+            return False
         segments = simple_trim(proj)
         return bool(segments) and len(segments) == 1
 
@@ -505,7 +519,7 @@ class ExportDialog(QDialog):
         segments = simple_trim(proj)
         if not segments or len(segments) != 1:
             return None
-        clip = proj.clips[0]
+        clip = self._main_clip(proj) or proj.clips[0]
         anchor = keyframe_at_or_before(self._keyframes, segments[0].start)
         return TrimTarget(
             segments=segments,
@@ -518,9 +532,19 @@ class ExportDialog(QDialog):
     def _main_clip(self, proj: Project) -> Clip | None:
         for track in reversed(proj.video_tracks):
             if track.visible and track.clips:
-                return track.sorted_clips()[0]
-        clips = [c for t in proj.tracks if t.visible for c in t.clips]
-        return clips[0] if clips else None
+                for clip in track.sorted_clips():
+                    if clip.overlay_type not in ("text", "filter", "transition") and clip.media and clip.media.path.is_file():
+                        return clip
+        for t in proj.tracks:
+            if t.visible:
+                for c in t.clips:
+                    if c.overlay_type not in ("text", "filter", "transition") and c.media and c.media.path.is_file():
+                        return c
+        clips = [c for t in proj.tracks if t.visible for c in t.clips if c.overlay_type not in ("text", "filter", "transition")]
+        if clips:
+            return clips[0]
+        all_visible = [c for t in proj.tracks if t.visible for c in t.clips]
+        return all_visible[0] if all_visible else None
 
     def _container(self, proj: Project) -> str:
         video = self._main_clip(proj)
@@ -608,10 +632,14 @@ class ExportDialog(QDialog):
 
         # Calcula estimativa de tamanho do arquivo exportado
         main = self._main_clip(proj)
-        source = main.media.path if main else (proj.clips[0].media.path if proj.clips else None)
+        source = (
+            main.media.path
+            if (main and main.media and main.media.path.is_file())
+            else (proj.clips[0].media.path if proj.clips else None)
+        )
         local = self._probed.get(source) if source else None
-        source_size = local.size if local else None
-        source_dur = local.duration if local else None
+        source_size = getattr(local, "size", None)
+        source_dur = getattr(local, "duration", None)
 
         export_duration = target.output_duration if (is_fast and target) else proj.export_duration
         codec_family = self._codec_choice or hwaccel.family_for(self._container_choice or "mp4")
@@ -659,17 +687,33 @@ class ExportDialog(QDialog):
             return
 
         main = self._main_clip(proj)
-        source = main.media.path if main else proj.clips[0].media.path
-        local = self._probed.get(source)
-        if local is None:
-            try:
-                local = probe_file(source, tools)
-            except VideoManagerError as exc:
-                QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(exc))
-                return
+        source: Path | None = (
+            main.media.path
+            if (main and main.media and main.media.path.is_file())
+            else None
+        )
+        if source is None:
+            for c in proj.clips:
+                if (
+                    c.overlay_type not in ("text", "filter", "transition")
+                    and c.media
+                    and c.media.path.is_file()
+                ):
+                    source = c.media.path
+                    break
+
+        local: LocalMedia | None = None
+        if source and source.is_file():
+            local = self._probed.get(source)
+            if not isinstance(local, LocalMedia):
+                try:
+                    local = probe_file(source, tools)
+                    self._probed[source] = local
+                except VideoManagerError:
+                    local = None
 
         audio_only = self._audio_only_check.isChecked()
-        can_fast = self._fast_available(proj) and not audio_only
+        can_fast = self._fast_available(proj) and not audio_only and (local is not None)
         is_fast = self._fast.isChecked() and can_fast
         interpolating = self._interpolate.isChecked() and can_interpolate(proj) and not audio_only
 
@@ -699,10 +743,24 @@ class ExportDialog(QDialog):
         if target is None:
             return
 
+        if source is None:
+            if self._project_path:
+                source = self._project_path.with_suffix(f".{target.extension.lower()}")
+            else:
+                dest_fallback = self._settings.resolved_download_dir()
+                source = dest_fallback / f"edicao.{target.extension.lower()}"
+
         dest_dir: Path | None = None
         if not self._same_folder.isChecked():
             dir_str = self._dest_edit.text().strip()
             dest_dir = Path(dir_str) if dir_str else self._settings.resolved_download_dir()
+        else:
+            if source.is_file() or source.is_absolute():
+                dest_dir = source.parent
+            elif self._project_path:
+                dest_dir = self._project_path.parent
+            else:
+                dest_dir = self._settings.resolved_download_dir()
 
         suffix = strings.EDIT_SUFFIX_ONE if is_fast else strings.EDIT_SUFFIX_EDIT
         custom_name = self._filename_edit.text().strip() if hasattr(self, "_filename_edit") else ""

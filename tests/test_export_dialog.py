@@ -249,3 +249,71 @@ def test_edit_panel_top_layout_and_media_list(
         assert len(panel._project.clips) == initial_clips + 1
     finally:
         panel.shutdown()
+
+
+def test_export_after_loading_saved_project(
+    qapp: QApplication,
+    sample_media: tuple[MediaRef, LocalMedia],
+    dummy_tools: FFmpegTools,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from videomanager.core.project_io import save_project, load_project
+    ref, local = sample_media
+    monkeypatch.setattr(
+        "videomanager.ui.panels.edit_panel.probe_file", lambda p, t: local
+    )
+    monkeypatch.setattr(
+        "videomanager.ui.export_dialog.probe_file", lambda p, t: local
+    )
+    settings = Settings()
+    proj = new_project().with_track(TrackKind.VIDEO)
+    clip_video = Clip(media=ref, start=0.0, duration=10.0)
+    clip_text = Clip(
+        media=MediaRef(path=Path("Texto_Titulo"), kind=MediaKind.IMAGE),
+        start=0.0,
+        duration=5.0,
+        overlay_type="text",
+        text_content="Titulo",
+    )
+    clip_trans = Clip(
+        media=MediaRef(path=Path("Transição_Fade"), kind=MediaKind.IMAGE),
+        start=5.0,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="fade_black",
+    )
+    proj = proj.with_clip(0, clip_video)
+    proj = proj.with_track(TrackKind.VIDEO).with_clip(1, clip_text).with_clip(1, clip_trans)
+
+    proj_file = tmp_path / "projeto_teste.vmp"
+    save_project(proj, proj_file)
+
+    loaded_proj, missing = load_project(proj_file, dummy_tools)
+    assert missing == []
+
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    try:
+        loaded = panel.open_project(proj_file)
+        assert loaded is True
+        assert ref.path in panel._probed
+        assert isinstance(panel._probed[ref.path], LocalMedia)
+
+        # Abre o ExportDialog como o usuário faria após abrir o projeto
+        dialog = ExportDialog(
+            project=panel._project,
+            settings=settings,
+            pool=panel._pool,
+            probed=panel._probed,
+            keyframes=panel._keyframes,
+            ensure_tools=lambda: dummy_tools,
+            project_path=panel._project_path,
+        )
+        assert "editado" in dialog._filename_edit.text()
+        dialog._on_enqueue()
+        assert dialog.result() == QDialog.DialogCode.Accepted
+        assert dialog.created_job is not None
+        assert "target" in dialog.created_job.opts
+    finally:
+        panel.shutdown()
+

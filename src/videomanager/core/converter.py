@@ -608,7 +608,7 @@ def build_args(
     return build_video_args(media, target, destination, tools)
 
 
-def output_duration(media: LocalMedia, target: ConversionTarget) -> float | None:
+def output_duration(media: LocalMedia | None, target: ConversionTarget) -> float | None:
     """Duração que a saída vai ter — a régua do percentual de progresso.
 
     Só um recorte tem duração diferente da origem, e é justamente onde usar a
@@ -616,7 +616,7 @@ def output_duration(media: LocalMedia, target: ConversionTarget) -> float | None
     """
     if isinstance(target, (TrimTarget, Composition)):
         return target.output_duration or None
-    return media.duration
+    return media.duration if media else None
 
 
 def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
