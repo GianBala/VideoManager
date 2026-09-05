@@ -30,6 +30,13 @@ _CODEC_EFFICIENCY: dict[str, float] = {
     "libsvtav1": 0.50,
 }
 
+# Fator multiplicador de taxa de bits por nível de qualidade (base: balanced / CRF 23 = 1.0)
+_QUALITY_FACTOR: dict[str, float] = {
+    "high": 1.75,      # ~CRF 18: ~75% maior bitrate
+    "balanced": 1.0,   # ~CRF 23: baseline (~4500 kbps para 1080p30)
+    "economy": 0.55,   # ~CRF 28: ~45% menor bitrate
+}
+
 # Bitrate de áudio padrão (kbps) para formatos conhecidos
 _AUDIO_STANDARD_BITRATES: dict[str, float] = {
     "mp3": 192.0,
@@ -49,6 +56,7 @@ def estimate_video_bitrate(
     height: int | None,
     fps: float = 30.0,
     codec: str = "h264",
+    quality: str = "balanced",
 ) -> float:
     """Calcula estimativa de taxa de bits de vídeo em kbps para CRF médio.
 
@@ -65,7 +73,7 @@ def estimate_video_bitrate(
     else:
         pixels = 1920 * 1080
 
-    # 1080p a 30 fps em H.264 tem referência típica de ~4500 kbps (CRF 22)
+    # 1080p a 30 fps em H.264 tem referência típica de ~4500 kbps (CRF 22/23)
     base_kbps = 4500.0 * ((pixels / 2_073_600) ** 0.75)
 
     safe_fps = max(1.0, fps or 30.0)
@@ -73,8 +81,9 @@ def estimate_video_bitrate(
 
     clean_codec = codec.lower().strip()
     efficiency = _CODEC_EFFICIENCY.get(clean_codec, 1.0)
+    q_factor = _QUALITY_FACTOR.get(quality.lower().strip(), 1.0)
 
-    return max(200.0, base_kbps * fps_factor * efficiency)
+    return max(200.0, base_kbps * fps_factor * efficiency * q_factor)
 
 
 def estimate_audio_bitrate(
@@ -234,6 +243,7 @@ def estimate_export_size(
     is_fast: bool = False,
     source_size: int | None = None,
     source_duration: float | None = None,
+    quality: str = "balanced",
 ) -> int:
     """Estima tamanho de exportação da edição em bytes."""
     if duration <= 0:
@@ -246,6 +256,6 @@ def estimate_export_size(
     if is_fast and source_size and source_duration and source_duration > 0:
         return int((source_size / source_duration) * duration)
 
-    v_rate = estimate_video_bitrate(width, height, fps, video_codec)
+    v_rate = estimate_video_bitrate(width, height, fps, video_codec, quality=quality)
     a_rate = 192.0  # exportação de vídeo compõe áudio padrão a ~192 kbps
     return int(((v_rate + a_rate) * 1000 / 8) * duration * 1.015)

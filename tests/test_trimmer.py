@@ -85,12 +85,14 @@ def target(
     container: str = "mp4",
     anchor: float | None = None,
     extra: tuple[Segment, ...] = (),
+    copy_metadata: bool = False,
 ) -> TrimTarget:
     return TrimTarget(
         segments=(Segment(start, end), *extra),
         container=container,
         mode=mode,
         anchor=anchor,
+        copy_metadata=copy_metadata,
     )
 
 
@@ -459,3 +461,17 @@ class TestDespachoDoConversor:
         args = build_args(media(), target(), DEST, TOOLS)
         assert args[args.index("-t") + 1] is not None
         assert str(DEST) == args[-1]
+
+    def test_recorte_nao_copia_metadados_por_padrao(self) -> None:
+        args = build_args(media(), target(), DEST, TOOLS)
+        assert "-map_metadata" in args
+        assert args[args.index("-map_metadata") + 1] == "-1"
+        assert "-map_chapters" in args
+        assert args[args.index("-map_chapters") + 1] == "-1"
+
+    def test_recorte_copia_metadados_quando_pedido(self) -> None:
+        alvo = target(copy_metadata=True)
+        args = build_args(media(), alvo, DEST, TOOLS)
+        assert "-map_metadata" in args
+        assert args[args.index("-map_metadata") + 1] == "0"
+        assert "-map_chapters" not in args

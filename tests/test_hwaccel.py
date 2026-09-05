@@ -82,9 +82,27 @@ class TestArgumentos:
         assert args[:2] == ["-c:v", "h264_nvenc"]
         assert "-qp" in args and "-crf" not in args
 
-    def test_software_mantem_o_crf_alto_de_sempre(self) -> None:
+    def test_software_usa_crf_equilibrado_por_padrao(self) -> None:
         args = hwaccel.encode_args("h264", hwaccel.SOFTWARE, TOOLS)
-        assert args[args.index("-crf") + 1] == "18"
+        assert args[args.index("-crf") + 1] == "23"
+
+    def test_software_qualidade_alta_e_economica(self) -> None:
+        args_high = hwaccel.encode_args("h264", hwaccel.SOFTWARE, TOOLS, quality=hwaccel.QUALITY_HIGH)
+        assert args_high[args_high.index("-crf") + 1] == "18"
+
+        args_eco = hwaccel.encode_args("h264", hwaccel.SOFTWARE, TOOLS, quality=hwaccel.QUALITY_ECONOMY)
+        assert args_eco[args_eco.index("-crf") + 1] == "28"
+
+    def test_nvenc_ajusta_qp_conforme_qualidade(self) -> None:
+        fingir(nvenc=True)
+        args_bal = hwaccel.encode_args("h264", "nvenc", TOOLS, quality=hwaccel.QUALITY_BALANCED)
+        assert args_bal[args_bal.index("-qp") + 1] == "23"
+
+        args_high = hwaccel.encode_args("h264", "nvenc", TOOLS, quality=hwaccel.QUALITY_HIGH)
+        assert args_high[args_high.index("-qp") + 1] == "18"
+
+        args_eco = hwaccel.encode_args("h264", "nvenc", TOOLS, quality=hwaccel.QUALITY_ECONOMY)
+        assert args_eco[args_eco.index("-qp") + 1] == "28"
 
     def test_nvenc_declara_o_controle_de_taxa(self) -> None:
         """Sem ``-rc``, o NVENC descarta o número de qualidade em silêncio.
