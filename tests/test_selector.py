@@ -315,8 +315,7 @@ class TestAudio:
         )
         extract = next(pp for pp in opts["postprocessors"] if pp["key"] == "FFmpegExtractAudio")
         assert extract["preferredquality"] == "320"
-        assert opts["postprocessor_args"]["extractaudio"] == ["-id3v2_version", "3", "-metadata", "title="]
-        assert opts["postprocessor_args"]["default"] == ["-metadata", "title="]
+        assert opts["postprocessor_args"]["extractaudio"] == ["-id3v2_version", "3"]
 
     @pytest.mark.parametrize("codec", ("flac", "wav", "alac"))
     def test_formatos_sem_perda_nao_recebem_bitrate(self, codec: str) -> None:

@@ -755,13 +755,7 @@ def export_args(
             args += ["-c:a", "libvorbis", "-q:a", "5"]
         else:
             args += encode_audio_args(container)
-        return args + [
-            "-map_metadata", "0",
-            "-metadata", "title=",
-            "-progress", "pipe:1",
-            "-nostats",
-            str(destination),
-        ]
+        return args + ["-map_metadata", "0", "-progress", "pipe:1", "-nostats", str(destination)]
 
     graph = build_graph(project, interpolate=interpolate)
     codec_family = family or hwaccel.family_for(container)
@@ -1178,7 +1172,7 @@ def concat_args(
     return [
         tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", "-y",
         "-f", "concat", "-safe", "0", "-i", str(parts),
-        "-c", "copy", "-metadata", "title=", str(destination),
+        "-c", "copy", str(destination),
     ]
 
 
@@ -1192,7 +1186,7 @@ def audio_only_args(
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", "-y"]
     args += [*graph.inputs, "-filter_complex", ";".join(graph.filters)]
     args += ["-map", graph.audio_label, *encode_audio_args(container)]
-    return args + ["-metadata", "title=", str(destination)]
+    return args + [str(destination)]
 
 
 def mux_args(
@@ -1208,7 +1202,6 @@ def mux_args(
         # milissegundos de arredondamento, e um arquivo mais longo que o vídeo
         # termina em tela preta.
         args += ["-shortest"]
-    args += ["-metadata", "title="]
     return args + [str(destination)]
 
 

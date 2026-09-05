@@ -415,13 +415,7 @@ def build_audio_args(
         # Sem ID3v2.3 o Windows Explorer não mostra título nem artista.
         args += ["-id3v2_version", "3"]
 
-    args += [
-        "-map_metadata", "0",
-        "-metadata", "title=",
-        "-progress", "pipe:1",
-        "-nostats",
-        str(destination),
-    ]
+    args += ["-map_metadata", "0", "-progress", "pipe:1", "-nostats", str(destination)]
     return args
 
 
@@ -574,13 +568,7 @@ def build_video_args(
         # o arquivo todo, e é o que players web esperam.
         args += ["-movflags", "+faststart"]
 
-    args += [
-        "-map_metadata", "0",
-        "-metadata", "title=",
-        "-progress", "pipe:1",
-        "-nostats",
-        str(destination),
-    ]
+    args += ["-map_metadata", "0", "-progress", "pipe:1", "-nostats", str(destination)]
     return args
 
 
