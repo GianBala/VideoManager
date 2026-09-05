@@ -1225,6 +1225,83 @@ def test_snap_magnetic_resize_and_escape(qapp: QApplication) -> None:
     assert preview._drag_mode is None
 
 
+def test_properties_resize_anchored_bottom_left_right_and_up(
+    qapp: QApplication, dummy_tools: FFmpegTools
+) -> None:
+    """Verifica que alterar largura/altura na aba de propriedades expande apenas
+
+    para a direita e para cima, mantendo o canto inferior esquerdo estático.
+    """
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    try:
+        panel._text_input.setText("Âncora BL")
+        panel._insert_text_clip()
+        clip = panel._project.additional_tracks[0].clips[0]
+        panel._open_properties_tab(clip.clip_id)
+        pw = panel._properties_widget
+
+        pw._chk_lock_ratio.setChecked(False)
+
+        init_w = pw._spin_w.value()
+        init_h = pw._spin_h.value()
+        init_px = pw._spin_x.value()
+        init_py = pw._spin_y.value()
+
+        # Bordas iniciais
+        init_left = init_px - init_w / 2.0
+        init_right = init_px + init_w / 2.0
+        init_bottom = init_py + init_h / 2.0
+        init_top = init_py - init_h / 2.0
+
+        # 1. Aumenta apenas a largura em 60px
+        pw._spin_w.setValue(init_w + 60)
+        new_w = pw._spin_w.value()
+        new_px = pw._spin_x.value()
+        new_py = pw._spin_y.value()
+
+        # Borda esquerda deve continuar IDÊNTICA
+        assert abs((new_px - new_w / 2.0) - init_left) < 0.5
+        # Borda direita deve ter expandido exatamente para a direita
+        assert (new_px + new_w / 2.0) > init_right + 50
+        # Eixo Y deve permanecer inalterado
+        assert new_py == init_py
+
+        # 2. Aumenta apenas a altura em 40px
+        pw._spin_h.setValue(init_h + 40)
+        h_new_w = pw._spin_w.value()
+        h_new_h = pw._spin_h.value()
+        h_new_px = pw._spin_x.value()
+        h_new_py = pw._spin_y.value()
+
+        # Borda inferior (bottom) deve continuar IDÊNTICA
+        assert abs((h_new_py + h_new_h / 2.0) - init_bottom) < 0.5
+        # Borda superior (top) deve ter expandido para cima (menor Y)
+        assert (h_new_py - h_new_h / 2.0) < init_top - 30
+        # Borda esquerda continua mantida
+        assert abs((h_new_px - h_new_w / 2.0) - init_left) < 0.5
+
+        # 3. Trava a proporção e expande via escala
+        pw._chk_lock_ratio.setChecked(True)
+        cur_left = h_new_px - h_new_w / 2.0
+        cur_bottom = h_new_py + h_new_h / 2.0
+        pw._spin_scale.setValue(pw._spin_scale.value() * 1.5)
+
+        scale_w = pw._spin_w.value()
+        scale_h = pw._spin_h.value()
+        scale_px = pw._spin_x.value()
+        scale_py = pw._spin_y.value()
+
+        # O canto inferior esquerdo permanece intacto!
+        assert abs((scale_px - scale_w / 2.0) - cur_left) < 1.0
+        assert abs((scale_py + scale_h / 2.0) - cur_bottom) < 1.0
+        # E expandiu para a direita e para cima
+        assert (scale_px + scale_w / 2.0) > (h_new_px + h_new_w / 2.0)
+        assert (scale_py - scale_h / 2.0) < (h_new_py - h_new_h / 2.0)
+    finally:
+        panel.shutdown()
+
+
+
 
 
 
