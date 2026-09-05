@@ -32,7 +32,7 @@ from . import hwaccel
 from .binaries import FFmpegTools, subprocess_kwargs
 from .downloader import Progress
 from .errors import ConversionError, JobCancelled
-from .composer import Composition, describe_export, embed_thumbnail, export_args
+from .composer import Composition, describe_export, export_args
 from .parallel_export import ParallelExport, plan_segments
 from .trimmer import TrimTarget, build_trim_args, describe_trim
 
@@ -749,14 +749,10 @@ class Converter:
             # começariam depois de o usuário já ter desistido.
             raise JobCancelled("Conversão cancelada.")
         try:
-            path = export.run()
+            return export.run()
         finally:
             with self._lock:
                 self._parallel = None
-        # Thumbnail embutido na exportação interpolada, igual ao caminho serial.
-        if not composition.audio_only:
-            embed_thumbnail(path, self._tools)
-        return path
 
     @staticmethod
     def _drain(stream, into: deque[str]) -> None:
@@ -877,15 +873,6 @@ class Converter:
             raise ConversionError(
                 "O ffmpeg terminou sem erro mas não gerou o arquivo de saída."
             )
-
-        # Emite o banner (thumbnail) no arquivo exportado para aparecer no explorador.
-        # Só faz sentido para exportações de edição (composição e corte rápido)
-        # que produzem um container de vídeo — não para conversão/áudio puro.
-        _is_video_export = isinstance(self._target, (Composition, TrimTarget))
-        _audio_only = isinstance(self._target, Composition) and self._target.audio_only
-        if _is_video_export and not _audio_only:
-            embed_thumbnail(self._destination, self._tools)
-
         return self._destination
 
 
