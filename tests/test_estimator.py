@@ -243,6 +243,37 @@ class TestExportSizeEstimation:
         )
         assert size_fast == 50 * 1024 * 1024
 
+    def test_export_quality_presets_affect_size(self) -> None:
+        size_high = estimate_export_size(
+            duration=60.0,
+            width=1920,
+            height=1080,
+            fps=30.0,
+            video_codec="h264",
+            quality="high",
+        )
+        size_balanced = estimate_export_size(
+            duration=60.0,
+            width=1920,
+            height=1080,
+            fps=30.0,
+            video_codec="h264",
+            quality="balanced",
+        )
+        size_economy = estimate_export_size(
+            duration=60.0,
+            width=1920,
+            height=1080,
+            fps=30.0,
+            video_codec="h264",
+            quality="economy",
+        )
+        assert size_high > size_balanced > size_economy
+        # Alta deve ser ~70-80% maior que equilibrada
+        assert size_high > size_balanced * 1.5
+        # Econômica deve ser ~40-50% menor que equilibrada
+        assert size_economy < size_balanced * 0.7
+
 
 class TestUIIntegration:
     def test_quality_panel_estimated_size_display(self, qapp: QApplication) -> None:

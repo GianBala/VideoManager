@@ -380,3 +380,85 @@ def test_export_dialog_with_hidden_tracks_ignores_them(
     assert dialog._fast.isEnabled()
 
 
+def test_export_dialog_quality_selector(
+    qapp: QApplication,
+    sample_media: tuple[MediaRef, LocalMedia],
+    single_clip_project: Project,
+    dummy_tools: FFmpegTools,
+) -> None:
+    from videomanager.core.composer import Composition
+
+    ref, local = sample_media
+    settings = Settings()
+    dialog = ExportDialog(
+        project=single_clip_project,
+        settings=settings,
+        pool=[ref],
+        probed={ref.path: local},
+        ensure_tools=lambda: dummy_tools,
+    )
+
+    # Verifica presets no combo
+    assert dialog._quality_box.count() == 3
+    items = [dialog._quality_box.itemData(i) for i in range(dialog._quality_box.count())]
+    assert items == ["balanced", "high", "economy"]
+    assert dialog._quality_box.currentData() == "balanced"
+
+    # Muda para alta qualidade e enfileira
+    dialog._fast.setChecked(False)
+    dialog._quality_box.setCurrentIndex(1)  # high
+    assert dialog._quality_choice == "high"
+
+    dialog._on_enqueue()
+    assert dialog.created_job is not None
+    target = dialog.created_job.opts["target"]
+    assert isinstance(target, Composition)
+    assert target.quality == "high"
+    assert settings.default_export_quality == "high"
+
+    # Visibilidade com somente áudio
+    dialog.show()
+    dialog._audio_only_check.setChecked(True)
+    assert not dialog._quality_box.isVisible()
+    assert not dialog._quality_label.isVisible()
+
+    dialog._audio_only_check.setChecked(False)
+    assert dialog._quality_box.isVisible()
+    assert dialog._quality_label.isVisible()
+
+    # Desabilitado no modo corte rápido
+    dialog._fast.setChecked(True)
+    assert not dialog._quality_box.isEnabled()
+
+    dialog._fast.setChecked(False)
+    assert dialog._quality_box.isEnabled()
+
+
+def test_export_dialog_fast_cut_strips_metadata(
+    qapp: QApplication,
+    sample_media: tuple[MediaRef, LocalMedia],
+    single_clip_project: Project,
+    dummy_tools: FFmpegTools,
+) -> None:
+    from videomanager.core.trimmer import TrimTarget
+
+    ref, local = sample_media
+    settings = Settings()
+    dialog = ExportDialog(
+        project=single_clip_project,
+        settings=settings,
+        pool=[ref],
+        probed={ref.path: local},
+        keyframes=(0.0, 5.0, 10.0),
+        ensure_tools=lambda: dummy_tools,
+    )
+
+    dialog._fast.setChecked(True)
+    dialog._on_enqueue()
+    assert dialog.created_job is not None
+    target = dialog.created_job.opts["target"]
+    assert isinstance(target, TrimTarget)
+    assert target.copy_metadata is False
+
+
+

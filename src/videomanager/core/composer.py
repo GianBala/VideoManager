@@ -103,6 +103,7 @@ class Composition:
     interpolate: bool = False
     audio_only: bool = False
     audio_codec: str | None = None
+    quality: str = hwaccel.DEFAULT_QUALITY
 
     @property
     def extension(self) -> str:
@@ -143,9 +144,13 @@ def render_text_to_image(clip: Clip) -> Path:
 
     if QGuiApplication.instance() is None:
         try:
-            _ = QGuiApplication(["videomanager", "-platform", "offscreen"])
+            from PySide6.QtWidgets import QApplication
+            _ = QApplication(["videomanager", "-platform", "offscreen"])
         except Exception:
-            _ = QGuiApplication(["videomanager"])
+            try:
+                _ = QGuiApplication(["videomanager", "-platform", "offscreen"])
+            except Exception:
+                _ = QGuiApplication(["videomanager"])
 
     try:
         from ..ui.fonts import ensure_application_fonts
@@ -716,6 +721,7 @@ def export_args(
     interpolate: bool = False,
     audio_only: bool = False,
     audio_codec: str | None = None,
+    quality: str = hwaccel.DEFAULT_QUALITY,
 ) -> list[str]:
     """Comando que grava o projeto inteiro em um arquivo."""
     project = project.for_export()
@@ -758,11 +764,17 @@ def export_args(
             args += ["-c:a", "libvorbis", "-q:a", "5"]
         else:
             args += encode_audio_args(container)
-        return args + ["-map_metadata", "0", "-progress", "pipe:1", "-nostats", str(destination)]
+        return args + [
+            "-map_metadata", "-1",
+            "-map_chapters", "-1",
+            "-progress", "pipe:1",
+            "-nostats",
+            str(destination),
+        ]
 
     graph = build_graph(project, interpolate=interpolate)
     codec_family = family or hwaccel.family_for(container)
-    encoder = hwaccel.resolve(codec_family, hardware, tools)
+    encoder = hwaccel.resolve(codec_family, hardware, tools, quality=quality)
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y"]
     # O dispositivo é declarado antes das entradas: o VAAPI precisa dele para
     # abrir o contexto em que os quadros serão enviados à placa.
@@ -799,7 +811,7 @@ def export_args(
         raise ConversionError(
             "Todos os blocos estão mudos ou vazios: não há o que exportar."
         )
-    return args + tail_args(container, destination)
+    return args + tail_args(container, destination, map_metadata=False)
 
 
 def _limited_inputs(inputs: list[str]) -> list[str]:
@@ -1121,6 +1133,7 @@ def segment_video_args(
     container: str = "mp4",
     family: str | None = None,
     hardware: str = hwaccel.SOFTWARE,
+    quality: str = hwaccel.DEFAULT_QUALITY,
 ) -> list[str]:
     """Um trecho da composição, **só vídeo**, para ser concatenado depois.
 
@@ -1139,7 +1152,7 @@ def segment_video_args(
     if not graph.video_label:
         raise ConversionError("O trecho não tem imagem para exportar.")
     codec_family = family or hwaccel.family_for(container)
-    encoder = hwaccel.resolve(codec_family, hardware, tools)
+    encoder = hwaccel.resolve(codec_family, hardware, tools, quality=quality)
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y", "-progress", "pipe:1"]
     args += [*encoder.device, *graph.inputs]
     filters = list(graph.filters)
@@ -1162,7 +1175,16 @@ def segment_video_args(
         args += ["-tag:v", "hvc1"]
     # ``-t`` na saída, e não ``-frames:v``: a conta que interessa é a do tempo,
     # e é ela que faz a soma dos trechos bater com a duração do projeto.
-    return args + ["-an", "-t", f"{span:.6f}", str(destination)]
+    return args + [
+        "-an",
+        "-t",
+        f"{span:.6f}",
+        "-map_metadata",
+        "-1",
+        "-map_chapters",
+        "-1",
+        str(destination),
+    ]
 
 
 def concat_args(
@@ -1177,7 +1199,10 @@ def concat_args(
     return [
         tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", "-y",
         "-f", "concat", "-safe", "0", "-i", str(parts),
-        "-c", "copy", str(destination),
+        "-c", "copy",
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
+        str(destination),
     ]
 
 
@@ -1191,7 +1216,11 @@ def audio_only_args(
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", "-y"]
     args += [*graph.inputs, "-filter_complex", ";".join(graph.filters)]
     args += ["-map", graph.audio_label, *encode_audio_args(container)]
-    return args + [str(destination)]
+    return args + [
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
+        str(destination),
+    ]
 
 
 def mux_args(
@@ -1207,6 +1236,7 @@ def mux_args(
         # milissegundos de arredondamento, e um arquivo mais longo que o vídeo
         # termina em tela preta.
         args += ["-shortest"]
+    args += ["-map_metadata", "-1", "-map_chapters", "-1"]
     return args + [str(destination)]
 
 
@@ -1218,6 +1248,7 @@ def describe_export(
     family: str | None = None,
     audio_only: bool = False,
     audio_codec: str | None = None,
+    quality: str = hwaccel.DEFAULT_QUALITY,
 ) -> str:
     """Resumo do que a exportação vai produzir."""
     project = project.for_export()
@@ -1240,6 +1271,8 @@ def describe_export(
         parts.append(f"{audios} de áudio")
     if project.has_video:
         parts.append(f"{project.width}×{project.height} · {project.fps:g} fps")
+    if quality != hwaccel.DEFAULT_QUALITY:
+        parts.append(hwaccel.quality_label(quality))
     if interpolate and can_interpolate(project):
         parts.append("movimento interpolado (lento)")
     if hardware != hwaccel.SOFTWARE:

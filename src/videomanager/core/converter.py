@@ -592,6 +592,7 @@ def build_args(
             interpolate=target.interpolate,
             audio_only=target.audio_only,
             audio_codec=target.audio_codec,
+            quality=target.quality,
         )
     return build_video_args(media, target, destination, tools)
 
@@ -618,6 +619,7 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
             family=target.family,
             audio_only=target.audio_only,
             audio_codec=target.audio_codec,
+            quality=target.quality,
         )
     if isinstance(target, TrimTarget):
         return describe_trim(media, target)

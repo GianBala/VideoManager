@@ -87,6 +87,12 @@ _VIDEO_CODEC_PRESETS: tuple[tuple[str, str], ...] = (
     ("VP9 (web)", "vp9"),
 )
 
+_QUALITY_PRESETS: tuple[tuple[str, str], ...] = (
+    (strings.EXPORT_QUALITY_BALANCED, hwaccel.QUALITY_BALANCED),
+    (strings.EXPORT_QUALITY_HIGH, hwaccel.QUALITY_HIGH),
+    (strings.EXPORT_QUALITY_ECONOMY, hwaccel.QUALITY_ECONOMY),
+)
+
 _AUDIO_FORMAT_PRESETS: tuple[tuple[str, str], ...] = (
     ("MP3 (.mp3 - 192 kbps)", "mp3"),
     ("AAC / M4A (.m4a - 192 kbps)", "m4a"),
@@ -135,6 +141,7 @@ class ExportDialog(QDialog):
 
         self._container_choice: str = self._default_container(self._project)
         self._codec_choice: str | None = None
+        self._quality_choice: str = getattr(self._settings, "default_export_quality", hwaccel.QUALITY_BALANCED)
         self._audio_format_choice: str = "mp3"
 
         self.created_job: Job | None = None
@@ -190,6 +197,13 @@ class ExportDialog(QDialog):
         self._video_codec_box.setToolTip(strings.EXPORT_VIDEO_CODEC_TIP)
         self._video_codec_box.currentIndexChanged.connect(self._on_video_codec_changed)
         self._form.addRow(self._video_codec_label, self._video_codec_box)
+
+        # Qualidade de vídeo
+        self._quality_label = QLabel(strings.EXPORT_QUALITY)
+        self._quality_box = QComboBox()
+        self._quality_box.setToolTip(strings.EXPORT_QUALITY_TIP)
+        self._quality_box.currentIndexChanged.connect(self._on_quality_changed)
+        self._form.addRow(self._quality_label, self._quality_box)
 
         # Formato de áudio (visível no modo somente áudio)
         self._audio_format_label = QLabel(strings.EXPORT_AUDIO_FORMAT)
@@ -377,6 +391,15 @@ class ExportDialog(QDialog):
         # Codec de vídeo (filtrado pelo container)
         self._sync_codecs()
 
+        # Qualidade de vídeo
+        self._quality_box.blockSignals(True)
+        self._quality_box.clear()
+        for label, val in _QUALITY_PRESETS:
+            self._quality_box.addItem(label, val)
+        idx_q = _index_of(self._quality_box, self._quality_choice)
+        self._quality_box.setCurrentIndex(max(0, idx_q))
+        self._quality_box.blockSignals(False)
+
         # Formato de áudio (somente áudio)
         self._audio_format_box.blockSignals(True)
         self._audio_format_box.clear()
@@ -418,6 +441,7 @@ class ExportDialog(QDialog):
         for widget in (
             self._container_label, self._container_box,
             self._video_codec_label, self._video_codec_box,
+            self._quality_label, self._quality_box,
             self._canvas_label, self._canvas_box,
             self._rate_label, self._rate_box,
             self._advanced_widget,
@@ -476,6 +500,12 @@ class ExportDialog(QDialog):
         self._codec_choice = self._video_codec_box.itemData(index)
         self._update_plan()
 
+    def _on_quality_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        self._quality_choice = self._quality_box.itemData(index) or hwaccel.QUALITY_BALANCED
+        self._update_plan()
+
     def _on_audio_format_changed(self, index: int) -> None:
         if index < 0:
             return
@@ -527,6 +557,7 @@ class ExportDialog(QDialog):
             mode=CutMode.FAST,
             anchor=anchor,
             hardware=self._settings.hardware_encoder,
+            copy_metadata=False,
         )
 
     def _main_clip(self, proj: Project) -> Clip | None:
@@ -585,6 +616,12 @@ class ExportDialog(QDialog):
         interpolating = self._interpolate.isChecked() and can_interp
         target: TrimTarget | None = None
 
+        self._quality_box.setEnabled(not is_fast)
+        if is_fast:
+            self._quality_box.setToolTip(strings.EDIT_MODE_TIP)
+        else:
+            self._quality_box.setToolTip(strings.EXPORT_QUALITY_TIP)
+
         if audio_only:
             container = self._audio_format_choice or "mp3"
             plan = describe_export(
@@ -616,6 +653,7 @@ class ExportDialog(QDialog):
                 self._settings.hardware_encoder,
                 interpolating,
                 family=codec_family,
+                quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
             )
             warning = ""
             if interpolating:
@@ -655,6 +693,7 @@ class ExportDialog(QDialog):
             is_fast=is_fast,
             source_size=source_size,
             source_duration=source_dur,
+            quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
         )
         self._size_label.setText(format_size(est_bytes, estimated=True))
 
@@ -738,7 +777,9 @@ class ExportDialog(QDialog):
                 family=codec_family,
                 hardware=self._settings.hardware_encoder,
                 interpolate=interpolating,
+                quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
             )
+            self._settings.default_export_quality = self._quality_choice
 
         if target is None:
             return
@@ -794,6 +835,7 @@ class ExportDialog(QDialog):
                 self._settings.hardware_encoder,
                 interpolating,
                 family=target.family,
+                quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
             )
 
         self.created_job = Job(
