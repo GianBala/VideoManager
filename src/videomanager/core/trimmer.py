@@ -520,7 +520,13 @@ def tail_args(container: str, destination: Path) -> list[str]:
         # Índice no começo: permite começar a assistir antes de o arquivo todo
         # ser lido, e é o que players web esperam.
         args += ["-movflags", "+faststart"]
-    args += ["-map_metadata", "0", "-progress", "pipe:1", "-nostats", str(destination)]
+    args += [
+        "-map_metadata", "0",
+        "-metadata", "title=",
+        "-progress", "pipe:1",
+        "-nostats",
+        str(destination),
+    ]
     return args
 
 

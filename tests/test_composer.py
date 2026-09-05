@@ -498,6 +498,15 @@ class TestComandos:
         args = export_args(projeto(audio_track(clip(ESTEREO))), DEST, TOOLS)
         assert "-c:v" not in args
 
+    def test_titulo_removido_dos_metadados_na_exportacao(self) -> None:
+        args_video = export_args(projeto(video_track(clip(VIDEO))), DEST, TOOLS)
+        assert "-metadata" in args_video
+        assert args_video[args_video.index("-metadata") + 1] == "title="
+
+        args_audio = export_args(projeto(audio_track(clip(ESTEREO))), DEST, TOOLS)
+        assert "-metadata" in args_audio
+        assert args_audio[args_audio.index("-metadata") + 1] == "title="
+
 
 class TestThreadsDaPrevia:
     """O teto de threads vale para a prévia, e só para ela.
