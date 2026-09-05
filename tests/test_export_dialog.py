@@ -183,6 +183,33 @@ def test_export_dialog_enqueue_composition(
     assert dialog.created_job.kind == JobKind.TRIM
 
 
+def test_export_dialog_custom_filename(
+    qapp: QApplication,
+    sample_media: tuple[MediaRef, LocalMedia],
+    single_clip_project: Project,
+    dummy_tools: FFmpegTools,
+) -> None:
+    ref, local = sample_media
+    settings = Settings()
+    dialog = ExportDialog(
+        project=single_clip_project,
+        settings=settings,
+        pool=[ref],
+        probed={ref.path: local},
+        ensure_tools=lambda: dummy_tools,
+    )
+    assert hasattr(dialog, "_filename_edit")
+    assert hasattr(dialog, "_ext_label")
+    assert dialog._ext_label.text() in (".mp4", ".mkv", ".webm")
+
+    dialog._filename_edit.setText("meu_video_personalizado")
+    dialog._on_enqueue()
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert dialog.created_job is not None
+    dest_path = Path(dialog.created_job.opts["destination"])
+    assert "meu_video_personalizado" in dest_path.name
+
+
 def test_edit_panel_top_layout_and_media_list(
     qapp: QApplication,
     sample_media: tuple[MediaRef, LocalMedia],

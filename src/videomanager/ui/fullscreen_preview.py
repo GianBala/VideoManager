@@ -20,6 +20,7 @@ from __future__ import annotations
 from PySide6.QtCore import (
     QEasingCurve,
     QPropertyAnimation,
+    QSize,
     Qt,
     QTimer,
     Signal,
@@ -81,6 +82,7 @@ class FullscreenPreview(QWidget):
     volume_changed = Signal(int)
     mute_toggled = Signal(bool)
     closed = Signal()
+    resized = Signal(QSize)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         # Janela de verdade, mas filha do painel: assim ela é destruída junto
@@ -312,6 +314,7 @@ class FullscreenPreview(QWidget):
         super().resizeEvent(event)
         self._place_bar()
         self._update_display()
+        self.resized.emit(self.size())
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         self._show_bar()

@@ -636,6 +636,12 @@ class Timeline(QWidget):
                     painter.fillRect(rect, grad)
                 else:
                     painter.fillRect(rect, QColor(94, 53, 177, 200))
+            elif clip.overlay_type == "transition":
+                grad = QLinearGradient(rect.topLeft(), rect.topRight())
+                grad.setColorAt(0.0, QColor("#d97706"))
+                grad.setColorAt(0.5, QColor("#f59e0b"))
+                grad.setColorAt(1.0, QColor("#b45309"))
+                painter.fillRect(rect, grad)
             elif clip.is_image or clip.overlay_type == "image":
                 painter.fillRect(rect, QColor("#1e1e24"))
             else:
@@ -664,6 +670,8 @@ class Timeline(QWidget):
                     "contraste": QColor("#ffb74d"),
                 }
                 border_pen = QPen(f_borders.get(clip.filter_name, QColor(186, 104, 200)), 1)
+            elif clip.overlay_type == "transition":
+                border_pen = QPen(QColor("#fbbf24"), 1)
             elif clip.is_image or clip.overlay_type == "image":
                 border_pen = QPen(QColor("#00bcd4"), 1)
             else:
@@ -749,6 +757,17 @@ class Timeline(QWidget):
                 "contraste": "Contraste",
             }
             text = f"🎨 {f_labels.get(fname, fname or 'Filtro')}"
+        elif clip.overlay_type == "transition":
+            tname = clip.transition_name
+            t_labels = {
+                "fade_black": "Fade Preto",
+                "fade_white": "Fade Branco",
+                "flash": "Clarão / Flash",
+                "vignette_pulse": "Vinheta Pulse",
+                "inverter": "Inversão Rápida",
+                "dissolve_color": "Dissolvência Sépia",
+            }
+            text = f"⏳ {t_labels.get(tname, tname or 'Transição')}"
         elif clip.overlay_type == "image" or clip.is_image:
             text = f"🖼️ {clip.media.name}"
         else:
