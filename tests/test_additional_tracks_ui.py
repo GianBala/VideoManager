@@ -1301,6 +1301,56 @@ def test_properties_resize_anchored_bottom_left_right_and_up(
         panel.shutdown()
 
 
+def test_calibri_and_rapier_zero_fonts_availability(qapp: QApplication) -> None:
+    """Verifica que Calibri e Rapier Zero estão disponíveis no seletor e renderizam com sucesso."""
+    from videomanager.core.composer import render_text_to_image
+    from videomanager.core.project import Clip
+    from videomanager.ui.fonts import ensure_application_fonts
+    from videomanager.ui.panels.edit_panel import _FontSelectorWidget
+
+    ensure_application_fonts()
+    selector = _FontSelectorWidget("Calibri")
+
+    all_fonts = [selector._font_list.item(i).text() for i in range(selector._font_list.count())]
+    assert "Calibri" in all_fonts
+    assert "Rapier Zero" in all_fonts
+    assert "Rapier Zero Hollow" in all_fonts
+
+    # Teste de seleção de Rapier Zero
+    for i in range(selector._font_list.count()):
+        item = selector._font_list.item(i)
+        if item.text() == "Rapier Zero":
+            selector._on_item_clicked(item)
+            break
+    assert selector.current_family() == "Rapier Zero"
+
+    # Teste de renderização gráfica com as duas fontes
+    clip_rapier = Clip(
+        media=None,
+        start=0.0,
+        duration=5.0,
+        overlay_type="text",
+        text_content="Rapier Zero Font Test",
+        font_family="Rapier Zero",
+        font_size=32,
+    )
+    img_rapier = render_text_to_image(clip_rapier)
+    assert img_rapier.is_file() and img_rapier.stat().st_size > 0
+
+    clip_calibri = Clip(
+        media=None,
+        start=0.0,
+        duration=5.0,
+        overlay_type="text",
+        text_content="Calibri Font Test",
+        font_family="Calibri",
+        font_size=32,
+    )
+    img_calibri = render_text_to_image(clip_calibri)
+    assert img_calibri.is_file() and img_calibri.stat().st_size > 0
+
+
+
 
 
 

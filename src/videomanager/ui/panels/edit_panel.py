@@ -552,6 +552,9 @@ class _Preview(QLabel):
         sy = max(0.05, getattr(clip, "scale_y", clip.scale))
 
         if clip.overlay_type == "text":
+            from ..fonts import ensure_application_fonts
+
+            ensure_application_fonts()
             font = QFont(clip.font_family or "Sans Serif", clip.font_size or 36)
             font.setBold(clip.font_bold)
             font.setItalic(clip.font_italic)
@@ -1571,24 +1574,27 @@ class _MediaListWidget(QListWidget):
 
 _POPULAR_FONTS = [
     "Arial",
+    "Calibri",
     "Comic Sans MS",
-    "Helvetica",
-    "Times New Roman",
     "Courier New",
-    "Verdana",
-    "Georgia",
-    "Impact",
-    "Trebuchet MS",
-    "Ubuntu",
-    "Roboto",
     "DejaVu Sans",
-    "DejaVu Serif",
     "DejaVu Sans Mono",
+    "DejaVu Serif",
+    "Georgia",
+    "Helvetica",
+    "Impact",
     "Inter",
     "Liberation Sans",
+    "Monospace",
+    "Rapier Zero",
+    "Rapier Zero Hollow",
+    "Roboto",
     "Sans Serif",
     "Serif",
-    "Monospace",
+    "Times New Roman",
+    "Trebuchet MS",
+    "Ubuntu",
+    "Verdana",
 ]
 
 
@@ -1599,6 +1605,9 @@ class _FontSelectorWidget(QWidget):
 
     def __init__(self, initial_family: str = "Sans Serif", parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        from ..fonts import ensure_application_fonts
+
+        ensure_application_fonts()
         self._current_family = initial_family
         self._expanded = False
 

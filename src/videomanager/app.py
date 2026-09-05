@@ -128,6 +128,10 @@ def build_app(argv: list[str] | None = None) -> tuple[QApplication, MainWindow]:
     app.setApplicationVersion(__version__)
     app.setDesktopFileName("videomanager.desktop")
 
+    from .ui.fonts import ensure_application_fonts
+
+    ensure_application_fonts()
+
     if sys.platform == "win32":
         try:
             import ctypes
