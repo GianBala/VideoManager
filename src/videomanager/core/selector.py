@@ -365,6 +365,9 @@ def _base_opts(
         "no_warnings": False,
         "noprogress": True,
         "consoletitle": False,
+        "postprocessor_args": {
+            "default": ["-metadata", "title="],
+        },
     }
 
     if settings.rate_limit_kbps > 0:
@@ -501,7 +504,9 @@ def build_audio_opts(
     if request.codec == "mp3":
         # Sem ID3v2.3 o Windows Explorer e vários aparelhos antigos não exibem
         # título nem artista; o padrão do ffmpeg é a versão 2.4.
-        opts["postprocessor_args"] = {"extractaudio": ["-id3v2_version", "3"]}
+        pp_args = dict(opts.get("postprocessor_args", {}))
+        pp_args["extractaudio"] = ["-id3v2_version", "3", "-metadata", "title="]
+        opts["postprocessor_args"] = pp_args
 
     return opts
 
