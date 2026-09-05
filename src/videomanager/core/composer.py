@@ -145,6 +145,13 @@ def render_text_to_image(clip: Clip) -> Path:
         except Exception:
             _ = QGuiApplication(["videomanager"])
 
+    try:
+        from ..ui.fonts import ensure_application_fonts
+
+        ensure_application_fonts()
+    except Exception:
+        pass
+
     font = QFont(clip.font_family or "Sans Serif", clip.font_size or 36)
     font.setBold(clip.font_bold)
     font.setItalic(clip.font_italic)
