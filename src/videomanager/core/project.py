@@ -211,6 +211,12 @@ class Clip:
     stroke_color: str = "#000000"
     stroke_width: int = 0  # 0 significa sem contorno
     filter_name: str = ""  # "pb", "sepia", "contraste", "vinheta", "inverter"
+    transition_name: str = ""  # "fade_black", "fade_white", "flash", "vignette_pulse", "inverter", "dissolve_color"
+    # Configurações de Fundo Verde (Chroma Key)
+    chromakey_enabled: bool = False
+    chromakey_color: str = "#00FF00"
+    chromakey_similarity: float = 0.25
+    chromakey_blend: float = 0.10
     # Identidade estável, preservada por ``dataclasses.replace``: é por ela que
     # a seleção, o cache de miniaturas e o desfazer reconhecem o mesmo bloco
     # depois de qualquer alteração.
@@ -240,13 +246,13 @@ class Clip:
         Não basta a mídia ter vídeo: o bloco de "separar áudio" nasce do mesmo
         arquivo e não mostra nada.
         """
-        if self.overlay_type in ("image", "text", "filter"):
+        if self.overlay_type in ("image", "text", "filter", "transition"):
             return True
         return bool(self.media and self.media.has_video and not self.audio_only)
 
     @property
     def is_additional(self) -> bool:
-        return self.overlay_type in ("image", "text", "filter") or self.is_image
+        return self.overlay_type in ("image", "text", "filter", "transition") or self.is_image
 
     @property
     def can_adjust_sound(self) -> bool:

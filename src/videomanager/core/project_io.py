@@ -128,6 +128,11 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                     "stroke_color": clip.stroke_color,
                     "stroke_width": clip.stroke_width,
                     "filter_name": clip.filter_name,
+                    "transition_name": clip.transition_name,
+                    "chromakey_enabled": clip.chromakey_enabled,
+                    "chromakey_color": clip.chromakey_color,
+                    "chromakey_similarity": clip.chromakey_similarity,
+                    "chromakey_blend": clip.chromakey_blend,
                     "media": _media_to_dict(clip.media, base_dir),
                 }
             )
@@ -224,6 +229,11 @@ def project_from_dict(
                 stroke_color=str(c_data.get("stroke_color", "#000000")),
                 stroke_width=int(c_data.get("stroke_width", 0)),
                 filter_name=str(c_data.get("filter_name", "")),
+                transition_name=str(c_data.get("transition_name", "")),
+                chromakey_enabled=bool(c_data.get("chromakey_enabled", False)),
+                chromakey_color=str(c_data.get("chromakey_color", "#00FF00")),
+                chromakey_similarity=float(c_data.get("chromakey_similarity", 0.25)),
+                chromakey_blend=float(c_data.get("chromakey_blend", 0.10)),
                 clip_id=int(c_data.get("clip_id", 0)),
             )
             clips.append(clip)
