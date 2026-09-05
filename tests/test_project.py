@@ -637,3 +637,43 @@ class TestOrdemDasTrilhas:
         assert p_no_sound.has_sound is False
         # export_duration considera apenas o que será exportado (adicionais = 20s)
         assert p_no_sound.export_duration == 20.0
+
+    def test_for_export_descarta_trilhas_invisiveis_e_audios_mudos(self) -> None:
+        c_vid1 = clip(VIDEO, start=0.0, duration=10.0)
+        c_vid2 = clip(MUDO, start=0.0, duration=20.0)
+        c_aud_mudo = clip(SOM, start=0.0, duration=25.0)
+        c_aud_ativo = clip(SOM, start=0.0, duration=15.0)
+
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(c_vid1,), visible=True, name="V1"),
+                Track(kind=TrackKind.VIDEO, clips=(c_vid2,), visible=False, name="V2_oculto"),
+                Track(kind=TrackKind.AUDIO, clips=(c_aud_mudo,), visible=True, muted=True, name="A_mudo"),
+                Track(kind=TrackKind.AUDIO, clips=(c_aud_ativo,), visible=True, muted=False, name="A_ativo"),
+            )
+        )
+        exp = p.for_export()
+        assert len(exp.tracks) == 2
+        assert exp.tracks[0].name == "V1"
+        assert exp.tracks[1].name == "A_ativo"
+        assert exp.duration == 15.0
+        assert exp.export_duration == 15.0
+
+    def test_auto_canvas_ignora_trilhas_invisiveis(self) -> None:
+        c_1080p = clip(VIDEO, start=0.0, duration=10.0)  # 1920x1080 @ 30fps
+        quatro_k = MediaRef(
+            path=Path("/m/4k.mp4"), kind=MediaKind.VIDEO, duration=20, width=3840,
+            height=2160, fps=60,
+        )
+        c_4k = clip(quatro_k, start=0.0, duration=20.0)
+
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(c_1080p,), visible=True),
+                Track(kind=TrackKind.VIDEO, clips=(c_4k,), visible=False),
+            )
+        )
+        # Como o 4K está invisível, auto_canvas deve escolher 1080p a 30fps
+        canvas = auto_canvas(p)
+        assert (canvas.width, canvas.height) == (1920, 1080)
+        assert canvas.fps == 30.0
