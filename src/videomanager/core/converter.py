@@ -32,8 +32,10 @@ from . import hwaccel
 from .binaries import FFmpegTools, subprocess_kwargs
 from .downloader import Progress
 from .errors import ConversionError, JobCancelled
-from .composer import Composition, describe_export, embed_thumbnail, export_args
+from .process import ProcessControl
+from .composer import Composition, describe_export, export_args
 from .parallel_export import ParallelExport, plan_segments
+from .thumbnail import embed_thumbnail
 from .trimmer import TrimTarget, build_trim_args, describe_trim
 
 # --- alvos de áudio ---------------------------------------------------------
@@ -207,7 +209,7 @@ ConversionTarget = AudioTarget | VideoTarget | TrimTarget | Composition
 # ---------------------------------------------------------------------------
 
 
-def probe_file(path: Path, tools: FFmpegTools) -> LocalMedia:
+def probe_file(path: Path, tools: FFmpegTools, *, control: ProcessControl | None = None) -> LocalMedia:
     """Inspeciona um arquivo local com ffprobe."""
     if not path.is_file():
         raise ConversionError(f"Arquivo não encontrado: {path}")
@@ -221,7 +223,7 @@ def probe_file(path: Path, tools: FFmpegTools) -> LocalMedia:
         str(path),
     ]
     try:
-        proc = subprocess.run(command, timeout=60, check=False, **subprocess_kwargs())
+        proc = (control or ProcessControl()).run(command, timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:
         raise ConversionError(f"Falha ao inspecionar o arquivo: {exc}") from exc
 
@@ -699,10 +701,12 @@ class Converter:
         self._process: subprocess.Popen | None = None
         self._parallel: ParallelExport | None = None
         self._cancelled = False
+        self._postprocess = ProcessControl()
         self._lock = threading.Lock()
 
     def cancel(self) -> None:
         self._cancelled = True
+        self._postprocess.cancel()
         with self._lock:
             process = self._process
             parallel = self._parallel
@@ -753,9 +757,6 @@ class Converter:
         finally:
             with self._lock:
                 self._parallel = None
-        # Thumbnail embutido na exportação interpolada, igual ao caminho serial.
-        if not composition.audio_only:
-            embed_thumbnail(path, self._tools)
         return path
 
     @staticmethod
@@ -888,7 +889,18 @@ class Converter:
         _is_video_export = not isinstance(self._target, AudioTarget)
         _audio_only = isinstance(self._target, Composition) and self._target.audio_only
         if _is_video_export and not _audio_only:
-            embed_thumbnail(render_target, self._tools)
+            try:
+                embed_thumbnail(render_target, self._tools, control=self._postprocess)
+            except JobCancelled:
+                render_target.unlink(missing_ok=True)
+                self.discard_reservation()
+                raise
+        try:
+            self._postprocess.check()
+        except JobCancelled:
+            render_target.unlink(missing_ok=True)
+            self.discard_reservation()
+            raise
 
         import shutil
         shutil.move(str(render_target), str(self._destination))

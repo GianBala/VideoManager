@@ -1,14 +1,8 @@
-"""Testes de ponta a ponta, com rede e ffmpeg de verdade.
+"""Integração com ffmpeg real e cenários de plataformas externas.
 
-Fora da execução padrão (marcados ``network``), porque dependem de conexão, de
-mídias que podem sair do ar e de extratores que mudam. Rode com::
-
-    pytest -m network
-
-Estes testes verificam o que nenhum teste offline consegue: que o arquivo
-produzido tem de fato as trilhas, os codecs e o bitrate pedidos. A conferência é
-feita com ffprobe sobre a saída — não pela ausência de exceção, que é justamente
-como um download de vídeo mudo passaria despercebido.
+Casos com mídia gerada localmente entram na suíte padrão, com marca ``ffmpeg``.
+Somente downloads e conversões que usam fontes remotas têm marca ``network``.
+A saída é medida com ffprobe: duração, streams, codecs, volume e quadros.
 """
 
 from __future__ import annotations
@@ -34,7 +28,7 @@ from videomanager.core.probe import probe
 from videomanager.core.selector import AudioRequest, VideoRequest, build_opts
 from videomanager.core.settings import Settings
 
-pytestmark = pytest.mark.network
+pytestmark = pytest.mark.ffmpeg
 
 # Fluxo HLS com trilhas de áudio separadas: exige mesclagem, que é o caminho em
 # que um erro produz vídeo mudo em vez de falhar.
@@ -79,6 +73,7 @@ def stream_of(streams: list[dict], kind: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.network
 def test_hls_com_trilhas_separadas_sai_com_audio(tools, settings, tmp_path: Path) -> None:
     """O arquivo final precisa ter **vídeo e áudio**.
 
@@ -110,6 +105,7 @@ def test_hls_com_trilhas_separadas_sai_com_audio(tools, settings, tmp_path: Path
     assert "mp4" in container["format_name"]
 
 
+@pytest.mark.network
 def test_audio_recodificado_atinge_o_bitrate_pedido(tools, settings, tmp_path: Path) -> None:
     """Quando os codecs diferem, o bitrate escolhido tem de valer de fato."""
     info = probe(AUDIO_URL, settings)
@@ -131,6 +127,7 @@ def test_audio_recodificado_atinge_o_bitrate_pedido(tools, settings, tmp_path: P
     assert 300 <= int(audio["bit_rate"]) // 1000 <= 340
 
 
+@pytest.mark.network
 def test_metadados_gravados_no_mp3(tools, settings, tmp_path: Path) -> None:
     info = probe(AUDIO_URL, settings)
     opts, _ = build_opts(
@@ -142,6 +139,7 @@ def test_metadados_gravados_no_mp3(tools, settings, tmp_path: Path) -> None:
     assert container.get("tags", {}).get("title"), "sem título, o arquivo aparece sem nome nos players"
 
 
+@pytest.mark.network
 def test_parciais_nao_vazam_para_a_pasta_de_destino(tools, settings, tmp_path: Path) -> None:
     destino = tmp_path / "final"
     destino.mkdir()
@@ -155,6 +153,7 @@ def test_parciais_nao_vazam_para_a_pasta_de_destino(tools, settings, tmp_path: P
     assert not restos, f"sobras na pasta final: {restos}"
 
 
+@pytest.mark.network
 def test_cancelamento_interrompe_e_nao_deixa_arquivo(tools, settings, tmp_path: Path) -> None:
     """Cancelar tem de parar o download e não deixar arquivo final."""
     from videomanager.core.errors import JobCancelled
@@ -194,6 +193,7 @@ def arquivo_local(tools, tmp_path_factory) -> Path:
     return result.path
 
 
+@pytest.mark.network
 def test_copia_direta_preserva_o_bitrate_exato(tools, arquivo_local: Path, tmp_path: Path) -> None:
     """Cópia direta não pode alterar o áudio em nada."""
     media = probe_file(arquivo_local, tools)
@@ -211,6 +211,7 @@ def test_copia_direta_preserva_o_bitrate_exato(tools, arquivo_local: Path, tmp_p
     assert abs(convertido.audio.bitrate - original) < 1.0
 
 
+@pytest.mark.network
 def test_conversao_para_mp3_reporta_progresso(tools, arquivo_local: Path, tmp_path: Path) -> None:
     """O progresso vem do ``-progress pipe:1``, não de raspar o stderr."""
     media = probe_file(arquivo_local, tools)
@@ -228,6 +229,7 @@ def test_conversao_para_mp3_reporta_progresso(tools, arquivo_local: Path, tmp_pa
     assert percentuais == sorted(percentuais), "o progresso não pode andar para trás"
 
 
+@pytest.mark.network
 def test_arquivo_de_saida_nunca_sobrescreve_a_origem(tools, arquivo_local: Path) -> None:
     media = probe_file(arquivo_local, tools)
     codec = media.audio.codec if media.audio else "mp3"

@@ -49,7 +49,6 @@ from .composer import (
     Composition,
     audio_only_args,
     concat_args,
-    embed_thumbnail,
     interpolation_segments,
     mux_args,
     segment_bounds,
@@ -57,7 +56,9 @@ from .composer import (
 )
 from .downloader import Progress
 from .errors import ConversionError, JobCancelled
+from .thumbnail import embed_thumbnail
 from .memory import available_bytes
+from .process import ProcessControl
 
 _PROGRESS_LINE = re.compile(r"^([a-z_]+)=(.*)$")
 
@@ -121,6 +122,7 @@ class ParallelExport:
         # Confundir as duas fazia a falha de um trecho ser relatada como
         # cancelamento — e o usuário via "Cancelado" numa tarefa que ninguém
         # cancelou, sem a causa em lugar nenhum.
+        self._postprocess = ProcessControl()
         self._cancelled = False
         self._aborted = False
         self._lock = threading.Lock()
@@ -135,6 +137,7 @@ class ParallelExport:
 
     def cancel(self) -> None:
         self._cancelled = True
+        self._postprocess.cancel()
         self._abort()
 
     def _abort(self) -> None:
@@ -245,7 +248,8 @@ class ParallelExport:
         self._step(mux_args(video, som, pronto, self._tools), "juntar imagem e som")
         self._check_cancelled()
         if not self._composition.audio_only:
-            embed_thumbnail(pronto, self._tools)
+            embed_thumbnail(pronto, self._tools, control=self._postprocess)
+        self._check_cancelled()
         # ``replace`` e não ``move``: o destino pode existir de uma exportação
         # anterior, e a troca precisa ser atômica dentro do mesmo sistema de
         # arquivos. Quando não é o mesmo, ``shutil.move`` resolve.

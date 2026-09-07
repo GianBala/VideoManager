@@ -150,14 +150,14 @@ def test_edit_panel_top_project_controls_and_label(qapp: QApplication, dummy_too
         assert "*" not in panel._project_label.text()
 
         # Altera projeto para sujo e verifica atualização do rótulo
-        panel._is_dirty = True
+        panel._apply(panel._project.with_track(TrackKind.VIDEO))
         panel._update_project_label()
-        # Sem clipes não é considered has_unsaved_changes
-        assert "*" not in panel._project_label.text()
+        # Uma trilha nova também faz parte do conteúdo persistido.
+        assert "*" in panel._project_label.text()
 
         # Simula salvar
         panel._project_path = Path("/tmp/teste_video.vmp")
-        panel._is_dirty = False
+        panel._session.mark_saved()
         panel._update_project_label()
         assert "teste_video.vmp" in panel._project_label.text()
     finally:

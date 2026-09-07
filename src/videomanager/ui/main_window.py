@@ -899,16 +899,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         """Confirma a saída quando há alterações não salvas ou tarefas em andamento."""
-        if hasattr(self, "_edit") and self._edit.has_unsaved_changes:
-            answer = QMessageBox.question(
-                self,
-                strings.PROJECT_MODIFIED_TITLE,
-                strings.PROJECT_MODIFIED_BODY,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                event.ignore()
-                return
+        if hasattr(self, "_edit") and not self._edit._project_actions.confirm_replace():
+            event.ignore()
+            return
 
         unfinished = sum(1 for job in self._queue.jobs if not job.status.is_final)
         if unfinished:

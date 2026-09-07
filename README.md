@@ -74,7 +74,7 @@ Sem ele o Qt falha com *“Could not load the Qt platform plugin xcb”*.
 ## Testes
 
 ```bash
-.venv/bin/python -m pytest -q          # suíte offline, sem rede
+.venv/bin/python -m pytest -q          # offline, inclui integração local com ffmpeg
 .venv/bin/python -m pytest -m network  # testes que acessam a internet
 ```
 
@@ -130,8 +130,14 @@ src/videomanager/
 ```
 
 A dependência é de mão única: `ui` → `workers` → `core`. É o que permite testar
-toda a lógica de mídia sem abrir uma janela — os testes da suíte offline não
-instanciam Qt nem tocam a rede.
+a lógica de mídia sem depender de Qt. Os testes de interface usam Qt offscreen
+e simulam a disponibilidade do áudio; a suíte padrão não acessa a rede. Testes
+locais de exportação usam ffmpeg e ffprobe, quando disponíveis.
+
+A sessão de edição (`core/editor_session.py`) mantém o histórico e o ponto salvo.
+`ui/editor_project.py` coordena a abertura e a importação em workers canceláveis;
+`ui/panels/edit_widgets.py` contém os widgets visuais. A rasterização de texto
+fica em `ui/text_renderer.py`, conectada ao domínio por `core/text_assets.py`.
 
 ### Os módulos que importam
 
