@@ -8,6 +8,8 @@ pasta do projeto junto com as mídias.
 from __future__ import annotations
 
 import json
+import math
+import tempfile
 import os
 from pathlib import Path
 
@@ -20,6 +22,8 @@ from .project import (
     Project,
     Track,
     TrackKind,
+    next_clip_id,
+    reserve_project_ids,
 )
 
 PROJECT_VERSION = 1
@@ -159,7 +163,115 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
     }
 
 
-def project_from_dict(
+def _validate_project(data: dict[str, object]) -> None:
+    """Valida o documento inteiro antes de construir ou substituir a edição."""
+    def fail(field: str) -> None:
+        raise ProjectError(f"Estrutura do arquivo de projeto inválida: {field}.")
+
+    def number(obj, name, *, minimum=None, positive=False, integer=False):
+        if name not in obj:
+            return
+        value = obj[name]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            fail(name)
+        if integer and not isinstance(value, int):
+            fail(name)
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            finite = False
+        if not finite or (positive and value <= 0) or (minimum is not None and value < minimum):
+            fail(name)
+
+    def booleans(obj, names):
+        for name in names:
+            if name in obj and not isinstance(obj[name], bool):
+                fail(name)
+
+    def strings(obj, names):
+        for name in names:
+            if name in obj and not isinstance(obj[name], str):
+                fail(name)
+
+    if not isinstance(data, dict):
+        fail("documento")
+    version = data.get("version", 1)
+    if type(version) is not int or not 1 <= version <= PROJECT_VERSION:
+        raise ProjectError(f"Versão de projeto {version} não é suportada por esta versão do aplicativo.")
+    for name in ("width", "height", "fps"):
+        number(data, name, positive=True, integer=name != "fps")
+    tracks = data.get("tracks", [])
+    if not isinstance(tracks, list):
+        fail("trilhas")
+    clip_ids, track_ids = set(), set()
+    for track in tracks:
+        if not isinstance(track, dict):
+            fail("trilha")
+        number(track, "track_id", positive=True, integer=True)
+        if "track_id" in track:
+            if track["track_id"] in track_ids:
+                fail("ID de trilha duplicado")
+            track_ids.add(track["track_id"])
+        if track.get("kind", "VIDEO") not in TrackKind.__members__:
+            fail("tipo de trilha")
+        booleans(track, ("muted", "visible"))
+        strings(track, ("name",))
+        clips = track.get("clips", [])
+        if not isinstance(clips, list):
+            fail("clipes")
+        for clip in clips:
+            if not isinstance(clip, dict):
+                fail("clipe")
+            number(clip, "clip_id", positive=True, integer=True)
+            if "clip_id" in clip:
+                if clip["clip_id"] in clip_ids:
+                    fail("ID de clipe duplicado")
+                clip_ids.add(clip["clip_id"])
+            if "duration" not in clip:
+                fail("duração do clipe")
+            for name in ("duration", "speed", "scale", "scale_x", "scale_y"):
+                number(clip, name, positive=True)
+            for name in ("start", "in_point", "stroke_width", "chromakey_similarity", "chromakey_blend"):
+                number(clip, name, minimum=0, integer=name == "stroke_width")
+            number(clip, "font_size", positive=True, integer=True)
+            for name in ("gain_db", "x", "y", "rotation"):
+                number(clip, name)
+            for name in ("chromakey_similarity", "chromakey_blend"):
+                if clip.get(name, 0) > 1:
+                    fail(name)
+            booleans(clip, ("muted", "detached", "audio_only", "font_bold", "font_italic", "chromakey_enabled"))
+            strings(clip, ("overlay_type", "text_content", "font_family", "text_color", "stroke_color", "filter_name", "transition_name", "chromakey_color"))
+            if clip.get("overlay_type", "none") not in ("none", "image", "text", "filter", "transition"):
+                fail("tipo de sobreposição")
+            media = clip.get("media")
+            if not isinstance(media, dict) or not isinstance(media.get("path"), str) or not media["path"]:
+                fail("caminho da mídia")
+            if media.get("kind", "VIDEO") not in MediaKind.__members__:
+                fail("tipo de mídia")
+            strings(media, ("rel_path",))
+            booleans(media, ("has_audio",))
+            for name in ("duration", "width", "height", "fps", "channels"):
+                if media.get(name) is not None:
+                    number(media, name, positive=True, integer=name in ("width", "height", "channels"))
+
+
+def project_from_dict(data: dict[str, object], base_dir: Path | None = None,
+                      tools: FFmpegTools | None = None) -> tuple[Project, list[Path]]:
+    """Carrega apenas projetos válidos e apresenta falhas como erros de domínio."""
+    try:
+        _validate_project(data)
+        # Reserva todos os IDs antes de gerar os ausentes em documentos antigos.
+        tracks = data.get("tracks", [])
+        reserve_project_ids(
+            (clip.get("clip_id", 0) for track in tracks for clip in track.get("clips", [])),
+            (track.get("track_id", 0) for track in tracks),
+        )
+        return _project_from_dict(data, base_dir, tools)
+    except (ValueError, TypeError, KeyError, OverflowError, OSError) as exc:
+        raise ProjectError(f"Estrutura do arquivo de projeto inválida: {exc}") from exc
+
+
+def _project_from_dict(
     data: dict[str, object],
     base_dir: Path | None = None,
     tools: FFmpegTools | None = None,
@@ -193,7 +305,7 @@ def project_from_dict(
         name = str(t_data.get("name", ""))
         muted = bool(t_data.get("muted", False))
         visible = bool(t_data.get("visible", True))
-        track_id = int(t_data.get("track_id", 0))
+        track_identity = {"track_id": t_data["track_id"]} if "track_id" in t_data else {}
 
         clips: list[Clip] = []
         for c_data in t_data.get("clips", []):
@@ -238,7 +350,7 @@ def project_from_dict(
                 chromakey_color=str(c_data.get("chromakey_color", "#00FF00")),
                 chromakey_similarity=float(c_data.get("chromakey_similarity", 0.25)),
                 chromakey_blend=float(c_data.get("chromakey_blend", 0.10)),
-                clip_id=int(c_data.get("clip_id", 0)),
+                clip_id=c_data["clip_id"] if "clip_id" in c_data else next_clip_id(),
             )
             clips.append(clip)
 
@@ -249,7 +361,7 @@ def project_from_dict(
                 muted=muted,
                 visible=visible,
                 clips=tuple(sorted(clips, key=lambda c: c.start)),
-                track_id=track_id,
+                **track_identity,
             )
         )
 
@@ -264,15 +376,27 @@ def project_from_dict(
 
 def save_project(project: Project, path: Path) -> None:
     """Grava o projeto em disco no formato JSON."""
+    tmp_path = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = project_to_dict(project, base_dir=path.parent)
-        text = json.dumps(data, indent=2, ensure_ascii=False)
-        tmp_path = path.with_suffix(".tmp")
-        tmp_path.write_text(text, encoding="utf-8")
+        text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=f".{path.name}-", suffix=".tmp", delete=False) as handle:
+            tmp_path = Path(handle.name)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
         tmp_path.replace(path)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         raise ProjectError(f"Não foi possível salvar o projeto em {path}: {exc}") from exc
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                # Uma falha de limpeza não pode esconder o erro de gravação.
+                pass
 
 
 def load_project(path: Path, tools: FFmpegTools | None = None) -> tuple[Project, list[Path]]:
@@ -283,7 +407,7 @@ def load_project(path: Path, tools: FFmpegTools | None = None) -> tuple[Project,
     try:
         content = path.read_text(encoding="utf-8")
         data = json.loads(content)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ProjectError(f"Arquivo de projeto corrompido ou inválido: {exc}") from exc
     except OSError as exc:
         raise ProjectError(f"Erro ao ler arquivo de projeto: {exc}") from exc

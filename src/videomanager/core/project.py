@@ -24,7 +24,8 @@ depois as de áudio. Na composição isso se inverte — a trilha de vídeo mais
 
 from __future__ import annotations
 
-import itertools
+import threading
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
@@ -56,18 +57,39 @@ DEFAULT_FPS = 30.0
 # continua possível, mas explicitamente, pela escolha de taxa da tela.
 MAX_AUTO_FPS = 60.0
 
-_clip_ids = itertools.count(1)
-_track_ids = itertools.count(1)
+
+class _IdentitySequence:
+    """Reserva também IDs restaurados, para não reutilizá-los após abrir um projeto."""
+
+    def __init__(self) -> None:
+        self._last = 0
+        self._lock = threading.Lock()
+
+    def next(self) -> int:
+        with self._lock:
+            self._last += 1
+            return self._last
+
+    def reserve(self, identity: int) -> None:
+        with self._lock:
+            self._last = max(self._last, identity)
+
+
+_clip_ids = _IdentitySequence()
+_track_ids = _IdentitySequence()
 
 
 def next_clip_id() -> int:
-    """Identidade nova para um bloco.
+    """Identidade nova para inserção, divisão e cópia de blocos."""
+    return _clip_ids.next()
 
-    Público porque colar cria um bloco que não é o copiado: sem identidade
-    própria, a seleção e o cache de miniaturas tratariam os dois como o mesmo.
-    Um contador só para todos evita duas fontes de identidade se cruzarem.
-    """
-    return next(_clip_ids)
+
+def reserve_project_ids(clip_ids: Iterable[int], track_ids: Iterable[int]) -> None:
+    """Reserva identidades de um documento antes de gerar quaisquer IDs ausentes."""
+    for identity in clip_ids:
+        _clip_ids.reserve(identity)
+    for identity in track_ids:
+        _track_ids.reserve(identity)
 
 
 class MediaKind(Enum):
@@ -223,6 +245,7 @@ class Clip:
     clip_id: int = field(default_factory=next_clip_id, compare=False)
 
     def __post_init__(self) -> None:
+        _clip_ids.reserve(self.clip_id)
         if self.scale != 1.0 and self.scale_x == 1.0 and self.scale_y == 1.0:
             object.__setattr__(self, "scale_x", self.scale)
             object.__setattr__(self, "scale_y", self.scale)
@@ -296,7 +319,10 @@ class Track:
     muted: bool = False
     visible: bool = True
     name: str = ""
-    track_id: int = field(default_factory=lambda: next(_track_ids), compare=False)
+    track_id: int = field(default_factory=_track_ids.next, compare=False)
+
+    def __post_init__(self) -> None:
+        _track_ids.reserve(self.track_id)
 
     @property
     def duration(self) -> float:

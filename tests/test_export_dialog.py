@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QDialog
 
 from videomanager.core.binaries import FFmpegTools
@@ -216,10 +214,11 @@ def test_edit_panel_top_layout_and_media_list(
     sample_media: tuple[MediaRef, LocalMedia],
     dummy_tools: FFmpegTools,
     monkeypatch: pytest.MonkeyPatch,
+    wait_until,
 ) -> None:
     ref, local = sample_media
     monkeypatch.setattr(
-        "videomanager.ui.panels.edit_panel.probe_file", lambda p, t: local
+        "videomanager.workers.media_worker.probe_file", lambda p, t, **kw: local
     )
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
@@ -238,6 +237,7 @@ def test_edit_panel_top_layout_and_media_list(
 
         # Importa mídia
         panel.import_files([ref.path], insert=True)
+        wait_until(lambda: not panel._project_actions.busy)
         assert panel._media_list.count() == 1
         assert panel._export_button.isEnabled()
         assert not panel._project.is_empty
@@ -258,11 +258,12 @@ def test_export_after_loading_saved_project(
     dummy_tools: FFmpegTools,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    wait_until,
 ) -> None:
     from videomanager.core.project_io import save_project, load_project
     ref, local = sample_media
     monkeypatch.setattr(
-        "videomanager.ui.panels.edit_panel.probe_file", lambda p, t: local
+        "videomanager.workers.media_worker.probe_file", lambda p, t, **kw: local
     )
     monkeypatch.setattr(
         "videomanager.ui.export_dialog.probe_file", lambda p, t: local
@@ -296,6 +297,7 @@ def test_export_after_loading_saved_project(
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
     try:
         loaded = panel.open_project(proj_file)
+        wait_until(lambda: not panel._project_actions.busy)
         assert loaded is True
         assert ref.path in panel._probed
         assert isinstance(panel._probed[ref.path], LocalMedia)

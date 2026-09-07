@@ -8,7 +8,6 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QApplication
 
 from videomanager.core.composer import build_graph, simple_trim
@@ -20,12 +19,7 @@ from videomanager.core.project import (
     Track,
     TrackKind,
 )
-from videomanager.core.project_io import (
-    load_project,
-    project_from_dict,
-    project_to_dict,
-    save_project,
-)
+from videomanager.core.project_io import load_project, save_project
 from videomanager.ui.fullscreen_preview import FullscreenPreview
 from videomanager.ui.panels.edit_panel import _ClipPropertiesWidget
 

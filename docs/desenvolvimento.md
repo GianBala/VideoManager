@@ -17,20 +17,29 @@ PYTHONPATH=src .venv/bin/python -m videomanager
 
 ```bash
 .venv/bin/python -m pytest -q                                 # suíte offline (padrão)
-.venv/bin/python -m pytest -m network                         # testes com rede e ffmpeg reais
+.venv/bin/python -m pytest -m network                         # testes com serviços externos
 .venv/bin/python -m pytest tests/test_selector.py -k formato  # um teste só
 ```
 
-A suíte padrão (`addopts = -m 'not network'` em `pyproject.toml`) não abre
-rede nem instancia Qt — é por isso que ela roda em segundos e pode rodar em
-qualquer máquina, inclusive sem display. Os testes marcados `network`
-dependem de mídias reais, que podem sair do ar; por isso ficam fora da
-execução padrão e só rodam quando pedidos explicitamente.
+A suíte padrão (`addopts = -m 'not network'`) não acessa a internet. Ela inclui
+Qt offscreen, com áudio isolado pelas fixtures, e testes de mídia local marcados
+`ffmpeg`. Os testes de hardware são ignorados quando o dispositivo não responde.
+Apenas testes que acessam plataformas externas têm marca `network`.
+
+Para verificar somente regras e interface, sem executar a integração de mídia:
+
+```bash
+.venv/bin/python -m pytest -q -m "not network and not ffmpeg"
+```
+
+Importações e abertura de projetos são assíncronas. Em testes de interface,
+use a fixture `wait_until` para aguardar o término processando eventos Qt, em
+vez de assumir que o resultado existe assim que o método retorna.
 
 ### Lint
 
 ```bash
-.venv/bin/python -m pyflakes src/videomanager/**/*.py tests/*.py
+.venv/bin/python -m pyflakes src/videomanager tests
 ```
 
 ## A filosofia de teste do projeto
@@ -80,8 +89,8 @@ comparação de strings, só no primeiro download de um usuário de verdade.
 
 ## Inspecionando a interface sem abrir uma janela
 
-A suíte offline não instancia Qt. Para conferir layout — alinhamento,
-tamanhos, se um painel nasce cortado — use o Qt em modo *offscreen* num
+Os testes de interface usam Qt offscreen. Para conferir layout — alinhamento,
+tamanhos, se um painel nasce cortado — use também esse modo num
 script de rascunho e leia o PNG gerado:
 
 ```python

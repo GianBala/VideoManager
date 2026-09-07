@@ -11,8 +11,9 @@ src/videomanager/
 
 A dependência é de **mão única**: `ui` → `workers` → `core`. Nada em `core`
 importa Qt, o que permite testar toda a lógica de mídia (seleção de formato,
-montagem de comandos do ffmpeg, corte, composição) sem abrir uma janela — é
-por isso que a suíte de testes roda em segundos e não precisa de display.
+montagem de comandos do ffmpeg, corte, composição) sem abrir uma janela.
+Os testes de domínio independem da interface. A suíte também contém testes Qt
+offscreen e integração local com ffmpeg; nenhum deles exige display.
 
 - **`core/`** — análise de URL, matriz de formatos, seleção, download,
   conversão, preferências, binários externos, projeto de edição, composição,
@@ -35,7 +36,10 @@ por isso que a suíte de testes roda em segundos e não precisa de display.
 | `downloader.py` | Executa um download com progresso e cancelamento, numa instância nova de `YoutubeDL` por tarefa. |
 | `converter.py` | Conversão de arquivos locais já em disco: monta e executa o comando de ffmpeg, reserva o nome de saída, mede o resultado. |
 | `trimmer.py` | Recorte de vídeo (aba Editar): mapeia keyframes com `ffprobe`, decide entre corte exato (recodifica) e corte rápido (copia, começa no keyframe anterior). |
-| `project.py` | Modelo imutável da edição: trilhas, blocos, undo/redo como pilha de projetos. |
+| `project.py` | Modelo imutável da edição e identidades de trilhas e clipes. |
+| `editor_session.py` | Projeto atual, histórico de desfazer/refazer e comparação com o ponto salvo. |
+| `text_assets.py` | Contrato de rasterização, implementado pelo adaptador Qt em `ui/text_renderer.py`. |
+| `process.py` / `thumbnail.py` | Subprocessos com prazo/cancelamento e capa opcional antes da entrega do arquivo. |
 | `composer.py` | Traduz um `Project` num grafo de filtros do ffmpeg. O mesmo grafo serve para exportar, desenhar o quadro parado da prévia e alimentar a reprodução. |
 | `preview.py` | Chama o ffmpeg para produzir quadro, tira de miniaturas e forma de onda — sempre pelo ffmpeg, nunca por um player, porque a prévia precisa mostrar o quadro exato do corte. |
 | `parallel_export.py` | Divide uma exportação com interpolação de quadros (`minterpolate`, de uma thread só) em trechos processados em paralelo. |
@@ -168,6 +172,18 @@ inclusive nas etapas finais de uma exportação paralela, que ganharam prazo e
 registro por esse motivo.
 
 ## Interface (`ui/`)
+
+O editor distribui suas responsabilidades entre `panels/edit_panel.py`
+(coordenação da edição e reprodução), `panels/edit_widgets.py` (widgets visuais)
+e `editor_project.py` (acervo e ciclo de vida de arquivos). A abertura de `.vmp`
+e a inspeção de mídias usam `workers/media_worker.py`, com progresso,
+cancelamento e tokens para descartar respostas de operações anteriores.
+
+`text_renderer.py` prepara PNGs identificados pelo conteúdo em um diretório
+exclusivo do processo. O compositor recebe esse adaptador pelo contrato
+`core/text_assets.py`, sem importar Qt. Versões distintas do mesmo texto não
+sobrescrevem arquivos que uma prévia ou exportação ainda estejam usando.
+
 
 - **`ui/theme.py`** é a fonte única de cores, QSS e paleta da aplicação —
   necessária porque QSS sozinho não alcança tudo que um `delegate` desenha

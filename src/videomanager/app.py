@@ -16,6 +16,7 @@ from .core.settings import Settings
 from .preflight import check_or_explain
 from .ui.main_window import MainWindow
 from .ui.theme import qpalette, stylesheet
+from .ui.text_renderer import configure_text_renderer
 
 
 def _icon_path() -> Path:
@@ -123,6 +124,7 @@ def build_app(argv: list[str] | None = None) -> tuple[QApplication, MainWindow]:
     e fechá-la sem bloquear.
     """
     app = QApplication(argv if argv is not None else sys.argv)
+    configure_text_renderer()
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_DISPLAY_NAME)
     app.setApplicationVersion(__version__)
