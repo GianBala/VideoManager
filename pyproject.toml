@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pyflakes>=3.0"]
 
 [project.gui-scripts]
 videomanager = "videomanager.__main__:main"
@@ -32,6 +32,7 @@ videomanager = ["resources/*"]
 testpaths = ["tests"]
 markers = [
     "network: testes que acessam a internet de verdade",
+    "ffmpeg: integração com ffmpeg e ffprobe locais",
 ]
 # Testes de rede ficam fora da execução padrão: dependem de vídeos que podem
 # sair do ar e de extratores que mudam. Rode-os com: pytest -m network

@@ -7,9 +7,10 @@ com as trilhas sobrepostas na ordem certa, com os volumes e os mudos aplicados �
 e não uma aproximação que só vira o resultado na hora de exportar.
 
 O que muda entre os três usos é só onde a leitura começa (``at``), quanto dura
-(``span``) e para onde vai a saída. Por isso :func:`build_graph` é uma função
-pura: recebe o projeto e devolve entradas, filtros e rótulos; quem chama decide
-se aquilo vira arquivo, um quadro cru ou um fluxo de PCM.
+(``span``) e para onde vai a saída. O montador :func:`build_graph`
+recebe o projeto e devolve entradas, filtros e rótulos; quem chama decide
+se aquilo vira arquivo, um quadro cru ou um fluxo de PCM. Textos usam o
+adaptador de rasterização instalado pela interface, sem importar Qt no domínio.
 
 Três decisões de montagem:
 
@@ -31,13 +32,13 @@ e a soma é responsabilidade dele.
 from __future__ import annotations
 
 import math
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import hwaccel
 from .binaries import FFmpegTools, decode_thread_args
 from .errors import ConversionError
+from .text_assets import render_text_to_image
 from .preview import fit_size
 from .project import Clip, MediaKind, Project, TrackKind
 from .trimmer import (
@@ -128,87 +129,6 @@ class _Piece:
     track_muted: bool = False
 
 
-def render_text_to_image(clip: Clip) -> Path:
-    from PySide6.QtCore import Qt
-    from PySide6.QtGui import (
-        QBrush,
-        QColor,
-        QFont,
-        QFontMetrics,
-        QGuiApplication,
-        QImage,
-        QPainter,
-        QPainterPath,
-        QPen,
-    )
-
-    if QGuiApplication.instance() is None:
-        try:
-            from PySide6.QtWidgets import QApplication
-            _ = QApplication(["videomanager", "-platform", "offscreen"])
-        except Exception:
-            try:
-                _ = QGuiApplication(["videomanager", "-platform", "offscreen"])
-            except Exception:
-                _ = QGuiApplication(["videomanager"])
-
-    try:
-        from ..ui.fonts import ensure_application_fonts
-
-        ensure_application_fonts()
-    except Exception:
-        pass
-
-    font = QFont(clip.font_family or "Sans Serif", clip.font_size or 36)
-    font.setBold(clip.font_bold)
-    font.setItalic(clip.font_italic)
-
-    text = clip.text_content or "Texto"
-    metrics = QFontMetrics(font)
-    stroke_w = max(0, clip.stroke_width)
-    pad = 20 + stroke_w
-
-    lines = text.splitlines() if text else ["Texto"]
-    line_spacing = metrics.lineSpacing()
-    total_text_h = (len(lines) - 1) * line_spacing + metrics.ascent() + metrics.descent()
-    max_tw = max((metrics.horizontalAdvance(l) for l in lines), default=100)
-
-    w = max(40, ((max_tw + pad * 2 + 3) // 4) * 4)
-    h = max(40, ((total_text_h + pad * 2 + 3) // 4) * 4)
-
-    img = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
-    img.fill(Qt.GlobalColor.transparent)
-
-    painter = QPainter(img)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-
-    start_y = (h - total_text_h) / 2 + metrics.ascent()
-    path = QPainterPath()
-    for i, line in enumerate(lines):
-        tw = metrics.horizontalAdvance(line)
-        lx = (w - tw) / 2
-        ly = start_y + i * line_spacing
-        path.addText(lx, ly, font, line)
-
-    if stroke_w > 0:
-        pen = QPen(
-            QColor(clip.stroke_color or "#000000"),
-            stroke_w * 2,
-            Qt.PenStyle.SolidLine,
-            Qt.PenCapStyle.RoundCap,
-            Qt.PenJoinStyle.RoundJoin,
-        )
-        painter.strokePath(path, pen)
-
-    painter.fillPath(path, QBrush(QColor(clip.text_color or "#ffffff")))
-    painter.end()
-
-    cache_dir = Path(tempfile.gettempdir()) / "videomanager_cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    out_path = cache_dir / f"text_{clip.clip_id}.png"
-    img.save(str(out_path), "PNG")
-    return out_path
 
 
 def _pieces(
@@ -1279,121 +1199,4 @@ def describe_export(
         parts.append("placa de vídeo, se disponível")
     parts.append(f"{format_span(project.export_duration)} de duração")
     return " · ".join(parts)
-
-
-def embed_thumbnail(destination: Path, tools: FFmpegTools) -> None:
-    """Emite um banner/thumbnail no arquivo exportado para visualização no explorador de arquivos.
-
-    Gera uma imagem estática do vídeo e a incorpora no container como capa (cover art),
-    sem incluir outros metadados de texto.
-    - MP4/MOV: grava o atom nativo 'covr' via mutagen (ou ffmpeg em fallback)
-    - MKV: anexa a imagem via ffmpeg -attach
-    - WebM e formatos de áudio puro: ignorados
-    """
-    import shutil
-    import subprocess
-
-    container = destination.suffix.lstrip(".").lower()
-    if container not in ("mp4", "mov", "m4v", "mkv", "matroska"):
-        return
-
-    tmp_thumb = destination.with_suffix(".thumb_export_tmp.jpg")
-    ffmpeg = tools.ffmpeg_str
-
-    try:
-        # Descobre a duração do vídeo para extrair o quadro da metade exata
-        seek_time = 0.0
-        try:
-            probe_cmd = [
-                tools.ffprobe_str, "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                str(destination),
-            ]
-            res_probe = subprocess.run(probe_cmd, capture_output=True, text=True)
-            if res_probe.returncode == 0 and res_probe.stdout.strip():
-                dur = float(res_probe.stdout.strip())
-                if dur > 0:
-                    seek_time = dur / 2.0
-        except (ValueError, OSError):
-            seek_time = 0.0
-
-        # Extrai 1 quadro de alta qualidade da metade do vídeo (com fallback para o início)
-        thumb_cmd = [
-            ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
-            "-y", "-ss", f"{seek_time:.3f}", "-i", str(destination),
-            "-frames:v", "1", "-q:v", "2",
-            str(tmp_thumb),
-        ]
-        res = subprocess.run(thumb_cmd, capture_output=True)
-        if res.returncode != 0 or not tmp_thumb.is_file() or tmp_thumb.stat().st_size == 0:
-            thumb_cmd = [
-                ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
-                "-y", "-i", str(destination),
-                "-vf", r"select=eq(n\,0)", "-frames:v", "1", "-q:v", "2",
-                str(tmp_thumb),
-            ]
-            res = subprocess.run(thumb_cmd, capture_output=True)
-            if res.returncode != 0 or not tmp_thumb.is_file() or tmp_thumb.stat().st_size == 0:
-                return
-
-        thumb_bytes = tmp_thumb.read_bytes()
-        if not thumb_bytes:
-            return
-
-        if container in ("mp4", "mov", "m4v"):
-            # 1. Tenta mutagen para gravação nativa e direta do atom 'covr' (reconhecido pelo Nautilus/Totem/Explorer/macOS)
-            try:
-                from mutagen.mp4 import MP4, MP4Cover
-                mp4 = MP4(destination)
-                mp4["covr"] = [MP4Cover(thumb_bytes, imageformat=MP4Cover.FORMAT_JPEG)]
-                mp4.save()
-                return
-            except Exception:
-                pass
-
-            # 2. Fallback: remux via ffmpeg com attached_pic
-            tmp_out = destination.with_suffix(f".thumbed{destination.suffix}")
-            mux_cmd = [
-                ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
-                "-y",
-                "-i", str(destination),
-                "-i", str(tmp_thumb),
-                "-map", "0",
-                "-map", "1",
-                "-c", "copy",
-                "-c:v:1", "mjpeg",
-                "-disposition:v:1", "attached_pic",
-                "-map_metadata", "-1",
-                "-map_chapters", "-1",
-                "-movflags", "+faststart",
-                str(tmp_out),
-            ]
-            res = subprocess.run(mux_cmd, capture_output=True)
-            if res.returncode == 0 and tmp_out.is_file() and tmp_out.stat().st_size > 0:
-                shutil.move(str(tmp_out), str(destination))
-
-        elif container in ("mkv", "matroska"):
-            tmp_out = destination.with_suffix(f".thumbed{destination.suffix}")
-            mux_cmd = [
-                ffmpeg, "-nostdin", "-hide_banner", "-v", "error",
-                "-y",
-                "-i", str(destination),
-                "-attach", str(tmp_thumb),
-                "-metadata:s:t:0", "mimetype=image/jpeg",
-                "-metadata:s:t:0", "filename=cover.jpg",
-                "-map", "0",
-                "-c", "copy",
-                "-map_metadata", "-1",
-                "-map_chapters", "-1",
-                str(tmp_out),
-            ]
-            res = subprocess.run(mux_cmd, capture_output=True)
-            if res.returncode == 0 and tmp_out.is_file() and tmp_out.stat().st_size > 0:
-                shutil.move(str(tmp_out), str(destination))
-
-    except Exception:
-        pass
-    finally:
-        tmp_thumb.unlink(missing_ok=True)
 

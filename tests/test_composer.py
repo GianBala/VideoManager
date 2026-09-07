@@ -28,7 +28,6 @@ from videomanager.core.composer import (
     can_interpolate,
     concat_args,
     describe_export,
-    embed_thumbnail,
     export_args,
     frame_command,
     interpolation_bytes,
@@ -37,6 +36,7 @@ from videomanager.core.composer import (
     segment_video_args,
     simple_trim,
 )
+from videomanager.core.thumbnail import embed_thumbnail
 from videomanager.core.errors import ConversionError
 from videomanager.core.project import (
     Clip,

@@ -568,3 +568,9 @@ DIALOG_ENGINE_PACKAGED = (
     "com o aplicativo. Baixe a versão mais recente do Video Manager para "
     "receber os extratores novos."
 )
+
+# Leitura assíncrona da edição
+EDIT_READING_MEDIA = "Lendo projeto e inspecionando mídias…"
+EDIT_LOAD_CHANGED = "A edição mudou durante a leitura. Abra o projeto novamente para substituir a edição atual."
+EDIT_MISSING_MEDIA = "O projeto foi aberto, mas os seguintes arquivos não foram encontrados:\n\n{files}"
+EDIT_READ_CANCEL = "Cancelar"

@@ -354,7 +354,7 @@ def test_media_cleanup_restriction_and_clear_unused(qapp: QApplication, dummy_to
         panel.shutdown()
 
 
-def test_project_lifecycle_media_management(qapp: QApplication, dummy_tools: FFmpegTools, tmp_path: Path) -> None:
+def test_project_lifecycle_media_management(qapp: QApplication, dummy_tools: FFmpegTools, tmp_path: Path, wait_until) -> None:
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
     try:
@@ -371,13 +371,14 @@ def test_project_lifecycle_media_management(qapp: QApplication, dummy_tools: FFm
         panel.save_project()
 
         # Iniciar novo projeto deve limpar o acervo de mídias
-        panel._is_dirty = False
+        panel._session.mark_saved()
         panel.new_project()
         assert len(panel._pool) == 0
         assert panel._media_list.count() == 0
 
         # Abrir projeto existente deve resgatar as mídias para a aba "Mídia do projeto"
         panel.open_project(proj_file)
+        wait_until(lambda: not panel._project_actions.busy)
         assert len(panel._pool) == 1
         assert panel._pool[0].path == sample_file
         assert panel._media_list.count() == 1
@@ -609,7 +610,7 @@ def test_timeline_track_visibility_toggle_and_menu(qapp: QApplication, dummy_too
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
     try:
         # Insere um vídeo fictício na timeline
-        from videomanager.core.project import new_project, TrackKind, MediaRef, Clip, MediaKind
+        from videomanager.core.project import new_project, MediaRef, Clip, MediaKind
         ref = MediaRef(Path("/m/teste.mp4"), MediaKind.VIDEO, duration=10.0, width=1280, height=720, has_audio=True)
         clip_v = Clip(media=ref, start=0.0, duration=10.0)
         proj = new_project().with_clip(0, clip_v)
@@ -676,7 +677,6 @@ def test_video_track_button_positions_and_version(qapp: QApplication) -> None:
     # Verifica que os recursos de ícone existem e são válidos
     res_dir = Path(__file__).resolve().parent.parent / "src" / "videomanager" / "resources"
     svg_icon = res_dir / "videomanager.svg"
-    png_icon = res_dir / "videomanager.png"
     assert svg_icon.is_file() and svg_icon.stat().st_size > 0
     assert res_dir.exists()
 
@@ -696,8 +696,6 @@ def test_opposite_corner_anchored_resizing(qapp: QApplication) -> None:
 
     # Ponto Top-Left inicial
     init_tl = (cx0 - w0 / 2.0, cy0 - h0 / 2.0)
-    # Ponto Bottom-Right inicial
-    init_br = (cx0 + w0 / 2.0, cy0 + h0 / 2.0)
 
     # 1. Clica no canto BR (Bottom-Right) e arrasta para expandir
     br_pos = QPointF(cx0 + w0 / 2.0, cy0 + h0 / 2.0)
@@ -1045,7 +1043,7 @@ def test_properties_lock_ratio_independent_scaling(qapp: QApplication, dummy_too
         assert pw._chk_lock_ratio.isChecked()
         init_w = pw._spin_w.value()
         init_h = pw._spin_h.value()
-        ratio = init_w / init_h
+        _ = init_w / init_h
 
         # Altera largura: altura deve mudar proporcionalmente
         pw._spin_w.setValue(init_w * 2)

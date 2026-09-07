@@ -27,14 +27,7 @@ from videomanager.core.models import (
     Mode,
     VideoChoice,
 )
-from videomanager.core.project import (
-    Clip,
-    MediaKind,
-    MediaRef,
-    Project,
-    TrackKind,
-    new_project,
-)
+from videomanager.core.project import Clip, MediaKind, MediaRef, TrackKind, new_project
 from videomanager.core.settings import Settings
 from videomanager.ui.export_dialog import ExportDialog
 from videomanager.ui.panels.convert_panel import ConvertPanel
