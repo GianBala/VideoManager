@@ -17,8 +17,10 @@ exercita é o modelo, que é aritmética.
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QImage
 
-from videomanager.presentation.qt.panels.timeline import _Strip
+from videomanager.presentation.qt.panels.timeline import _Strip, _image_preview
 
 
 def tira(inicio: float, fim: float, quantas: int) -> _Strip:
@@ -78,6 +80,7 @@ class TestMiniaturasAtravessandoOZoom:
             assert comeco >= nova.in_point - nova.span
             assert fim <= nova.out_point + nova.span
 
+
     def test_a_imagem_de_fora_do_trecho_nao_e_herdada(self) -> None:
         # Aproximando de 12 s para 1,83 s, só as duas primeiras imagens ainda
         # têm onde ser desenhadas; guardar as outras dez seria carregar imagens
@@ -110,6 +113,20 @@ class TestMiniaturasAtravessandoOZoom:
         momentos = sorted(strip.thumbs)
         assert momentos == sorted(momentos)
         assert momentos[0] < momentos[-1]
+
+
+class TestPreviaDeImagem:
+    def test_previa_preserva_proporcao_em_bloco_largo(self) -> None:
+        """Uma foto em Adicionais não pode ser achatada pela largura do bloco."""
+        image = QImage(400, 100, QImage.Format.Format_RGB32)
+        preview, drawn = _image_preview(image, QRectF(0, 0, 600, 44))
+
+        # O preenchimento corta as laterais/altura excedente, mas nunca altera
+        # a razão 4:1 da imagem original.
+        assert preview.width() / preview.height() == pytest.approx(4.0)
+        assert drawn.width() == preview.width()
+        assert drawn.height() == preview.height()
+        assert drawn.top() < 0 or drawn.bottom() > 44
 
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
