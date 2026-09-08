@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
-# Confere que o executável gerado abre de verdade.
-#
-# Existe porque o modo de falha típico do PyInstaller é silencioso na geração e
-# fatal na abertura: um import que o analisador não enxerga produz um pacote
-# aparentemente completo que morre no primeiro segundo. Foi exatamente o que
-# aconteceu — o pacote saiu sem o PySide6 inteiro e ninguém percebeu.
-#
-# Uso: smoke_run.sh <executável> [segundos]
+# Exige a conclusão do diagnóstico interno, não apenas um processo ainda vivo.
+# Uso: smoke_run.sh <executável> [prazo em segundos]
 set -uo pipefail
 
 exe="${1:?informe o executável}"
-seconds="${2:-12}"
+seconds="${2:-30}"
 log="$(mktemp)"
-trap 'rm -f "$log"' EXIT
+profile="$(mktemp -d)"
+pid=""
+cleanup() {
+    if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
+    rm -f "$log"
+    rm -rf "$profile"
+}
+trap cleanup EXIT
 
-# offscreen: roda sem servidor gráfico, então isto funciona igual em CI.
-QT_QPA_PLATFORM=offscreen "$exe" >"$log" 2>&1 &
+QT_QPA_PLATFORM=offscreen XDG_CONFIG_HOME="$profile/config" \
+XDG_DATA_HOME="$profile/data" XDG_CACHE_HOME="$profile/cache" \
+"$exe" --smoke-test >"$log" 2>&1 &
 pid=$!
-
 waited=0
 while [ "$waited" -lt "$seconds" ]; do
     kill -0 "$pid" 2>/dev/null || break
@@ -26,16 +27,18 @@ while [ "$waited" -lt "$seconds" ]; do
 done
 
 if kill -0 "$pid" 2>/dev/null; then
-    # Continua de pé depois da janela montada e do bootstrap: é o que queríamos.
-    kill "$pid" 2>/dev/null
-    wait "$pid" 2>/dev/null
-    echo "ok: abriu e continuou rodando por ${seconds}s"
-    exit 0
+    echo "FALHOU: diagnóstico não terminou em ${seconds}s" >&2
+    cat "$log" >&2
+    exit 1
 fi
 
 wait "$pid"
 code=$?
-echo "FALHOU: o executável saiu com código $code antes de ${seconds}s" >&2
-echo "--- saída ---" >&2
+pid=""
+if [ "$code" -eq 0 ] && grep -q '^VM_SMOKE_OK:' "$log"; then
+    grep '^VM_SMOKE_OK:' "$log"
+    exit 0
+fi
+echo "FALHOU: diagnóstico saiu com código $code" >&2
 cat "$log" >&2
 exit 1

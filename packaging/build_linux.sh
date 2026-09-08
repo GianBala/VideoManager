@@ -9,6 +9,8 @@ cd "$(dirname "$0")/.."
 
 VENV="${VENV:-.venv}"
 PY="$VENV/bin/python"
+DIST="${VM_DIST_DIR:-dist}"
+BUILD="${VM_BUILD_DIR:-build}"
 
 if [ ! -x "$PY" ]; then
     echo "venv não encontrado em $VENV. Crie com: python3 -m venv $VENV" >&2
@@ -32,12 +34,11 @@ else
 fi
 
 echo "==> empacotando"
-rm -rf build dist
-"$PY" -m PyInstaller --noconfirm --clean packaging/videomanager.spec
+"$PY" -m PyInstaller --noconfirm --clean --distpath "$DIST" --workpath "$BUILD" packaging/videomanager.spec
 
 echo "==> conferindo que o pacote abre"
-./packaging/smoke_run.sh dist/VideoManager/VideoManager
+./packaging/smoke_run.sh "$DIST/VideoManager/VideoManager"
 
 echo
-echo "pronto: dist/VideoManager/VideoManager"
-du -sh dist/VideoManager
+echo "pronto: $DIST/VideoManager/VideoManager"
+du -sh "$DIST/VideoManager"

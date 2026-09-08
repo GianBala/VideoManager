@@ -26,7 +26,9 @@ done
 VENV="${VENV:-.venv}"
 PY="$VENV/bin/python"
 ARCH="$(uname -m)"
-APPDIR="build/AppDir"
+DIST="${VM_DIST_DIR:-dist}"
+BUILD="${VM_BUILD_DIR:-build}"
+APPDIR="$BUILD/AppDir"
 
 if [ ! -x "$PY" ]; then
     echo "venv não encontrado em $VENV. Crie com: python3 -m venv $VENV" >&2
@@ -34,10 +36,10 @@ if [ ! -x "$PY" ]; then
 fi
 
 VERSION="$("$PY" -c 'import re,pathlib; print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("src/videomanager/__init__.py").read_text()).group(1))')"
-OUTPUT="dist/Video_Manager-${VERSION}-${ARCH}.AppImage"
+OUTPUT="$DIST/Video_Manager-${VERSION}-${ARCH}.AppImage"
 
-if [ "$REUSE_DIST" = 1 ] && [ -x dist/VideoManager/VideoManager ]; then
-    echo "==> reaproveitando dist/VideoManager"
+if [ "$REUSE_DIST" = 1 ] && [ -x "$DIST/VideoManager/VideoManager" ]; then
+    echo "==> reaproveitando $DIST/VideoManager"
 else
     ./packaging/build_linux.sh
 fi
@@ -51,7 +53,7 @@ mkdir -p "$APPDIR/usr/bin" \
          "$APPDIR/usr/share/icons/hicolor/512x512/apps" \
          "$APPDIR/usr/share/icons/hicolor/scalable/apps"
 
-cp -a dist/VideoManager/. "$APPDIR/usr/bin/"
+cp -a "$DIST/VideoManager/." "$APPDIR/usr/bin/"
 
 install -m 755 packaging/appimage/AppRun "$APPDIR/AppRun"
 
@@ -93,28 +95,34 @@ if ! "$TOOL" --version >/dev/null 2>&1; then
 fi
 
 echo "==> gerando o AppImage"
-mkdir -p dist
+mkdir -p "$DIST"
 rm -f "$OUTPUT"
 RUNTIME="$CACHE/runtime-${ARCH}"
 RUNTIME_ARG=()
 if [ ! -f "$RUNTIME" ]; then
     echo "==> baixando runtime type2 para $ARCH"
     mkdir -p "$CACHE"
-    curl -fL --progress-bar -o "$RUNTIME.part" \
-        "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${ARCH}" || true
-    if [ -f "$RUNTIME.part" ]; then
+    if curl -fL --progress-bar -o "$RUNTIME.part" \
+        "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${ARCH}"; then
         mv "$RUNTIME.part" "$RUNTIME"
+    else
+        rm -f "$RUNTIME.part"
+        echo "Falha ao baixar runtime; o cache não foi atualizado." >&2
+        exit 1
     fi
 fi
 
 if [ -f "$RUNTIME" ]; then
-    "$PY" packaging/patch_runtime.py "$RUNTIME" >/dev/null 2>&1 || true
-    RUNTIME_ARG=("--runtime-file" "$RUNTIME")
+    # Altera uma cópia: o cache continua utilizável por outras execuções.
+    cp "$RUNTIME" "$BUILD/runtime-${ARCH}"
+    if ! "$PY" packaging/patch_runtime.py "$BUILD/runtime-${ARCH}"; then
+        echo "Runtime sem patch: use APPIMAGE_EXTRACT_AND_RUN=1 quando não houver FUSE." >&2
+    fi
+    RUNTIME_ARG=("--runtime-file" "$BUILD/runtime-${ARCH}")
 fi
 
 ARCH="$ARCH" "$TOOL" "${RUNTIME_ARG[@]}" "$APPDIR" "$OUTPUT"
 chmod +x "$OUTPUT"
-"$PY" packaging/patch_runtime.py "$OUTPUT" >/dev/null 2>&1 || true
 
 echo "==> conferindo que o AppImage abre"
 ./packaging/smoke_run.sh "$OUTPUT"
@@ -122,3 +130,4 @@ echo "==> conferindo que o AppImage abre"
 echo
 echo "pronto: $OUTPUT"
 du -h "$OUTPUT"
+sha256sum "$OUTPUT" > "$OUTPUT.sha256"

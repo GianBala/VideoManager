@@ -17,7 +17,8 @@ from pathlib import Path
 REPO_ROOT = Path(SPECPATH).parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from videomanager.core.binaries import exe_name, platform_key  # noqa: E402
+from videomanager.infrastructure.system.binaries import exe_name
+from videomanager.infrastructure.system.binaries import platform_key  # noqa: E402
 
 # Binários preparados por packaging/fetch_binaries.py. Se ausentes, o pacote
 # ainda funciona: a aplicação oferece o download na primeira execução.
@@ -53,7 +54,7 @@ a = Analysis(
     # Módulos Qt que a aplicação não usa. Excluí-los tira dezenas de MB.
     #
     # QtMultimedia **não** está na lista, ainda que seja o mais pesado deles:
-    # é ele que toca o som da prévia na aba de edição (ver ui/audio_preview.py).
+    # é ele que toca o som da prévia na aba de edição (ver infrastructure/qt/audio.py).
     # Cortar áudio de um editor de vídeo para economizar espaço seria economizar
     # no lugar errado. Ele traz junto o próprio backend de mídia do Qt, que o
     # hook do PySide6 coleta em PySide6/Qt/plugins/multimedia.
@@ -78,7 +79,7 @@ a = Analysis(
 #
 # O caso extremo é o tema GTK. ``platformthemes/libqgtk3.so`` tem 236 KB e
 # arrasta 15 MB de GTK, cairo, pango e atk — e a aplicação nunca o usa: ela
-# força o estilo Fusion e pinta a própria paleta (``ui/theme.py``), então nada
+# força o estilo Fusion e pinta a própria paleta (``presentation/qt/theme.py``), então nada
 # do que esse plugin decide sobrevive ao QSS. O que se perde ao tirá-lo é o
 # seletor de arquivos do GTK, no lugar do qual entra o do próprio Qt (ou o do
 # portal, cujo plugin continua no pacote).
