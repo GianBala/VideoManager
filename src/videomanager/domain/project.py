@@ -234,7 +234,7 @@ class Clip:
     stroke_color: str = "#000000"
     stroke_width: int = 0  # 0 significa sem contorno
     filter_name: str = ""  # "pb", "sepia", "contraste", "vinheta", "inverter"
-    transition_name: str = ""  # "fade_black", "fade_white", "flash", "vignette_pulse", "inverter", "dissolve_color"
+    transition_name: str = ""  # nomes do filtro xfade (fade, dissolve, wipe*, slide*)
     # Configurações de Fundo Verde (Chroma Key)
     chromakey_enabled: bool = False
     chromakey_color: str = "#00FF00"
@@ -270,13 +270,18 @@ class Clip:
         Não basta a mídia ter vídeo: o bloco de "separar áudio" nasce do mesmo
         arquivo e não mostra nada.
         """
-        if self.overlay_type in ("image", "text", "filter", "transition"):
+        if self.overlay_type in ("image", "text", "filter"):
             return True
         return bool(self.media and self.media.has_video and not self.audio_only)
 
     @property
     def is_additional(self) -> bool:
         return self.overlay_type in ("image", "text", "filter", "transition") or self.is_image
+
+    @property
+    def is_transition(self) -> bool:
+        """Se este bloco representa uma transição entre dois vídeos."""
+        return self.overlay_type == "transition"
 
     @property
     def can_adjust_sound(self) -> bool:
@@ -823,6 +828,8 @@ def accepts(kind: TrackKind, clip: Clip) -> bool:
     saía da mídia, esse bloco não podia ser arrastado nem dentro da própria
     trilha, e colar mandava o som para a trilha de vídeo.
     """
+    if clip.is_transition:
+        return kind is TrackKind.VIDEO
     if kind is TrackKind.ADDITIONAL:
         return clip.is_additional
     if clip.is_additional:

@@ -792,12 +792,14 @@ class Timeline(QWidget):
         elif clip.overlay_type == "transition":
             tname = clip.transition_name
             t_labels = {
-                "fade_black": "Fade Preto",
-                "fade_white": "Fade Branco",
-                "flash": "Clarão / Flash",
-                "vignette_pulse": "Vinheta Pulse",
-                "inverter": "Inversão Rápida",
-                "dissolve_color": "Dissolvência Sépia",
+                "fade": "Fade",
+                "fadeblack": "Fade para Preto",
+                "fadewhite": "Fade para Branco",
+                "dissolve": "Dissolve",
+                "wipeleft": "Wipe para Esquerda",
+                "wiperight": "Wipe para Direita",
+                "slideleft": "Slide para Esquerda",
+                "slideright": "Slide para Direita",
             }
             text = f"⏳ {t_labels.get(tname, tname or 'Transição')}"
         elif clip.overlay_type == "image" or clip.is_image:

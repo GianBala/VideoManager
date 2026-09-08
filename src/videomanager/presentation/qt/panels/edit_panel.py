@@ -1037,14 +1037,16 @@ class EditPanel(QWidget):
         layout.addWidget(QLabel("Escolha uma transição de vídeo:"))
 
         self._trans_specs = (
-            ("fade_black", "🌑 Fade Preto"),
-            ("fade_white", "☀️ Fade Branco"),
-            ("flash", "⚡ Clarão / Flash"),
-            ("vignette_pulse", "🎯 Vinheta Pulse"),
-            ("inverter", "🔄 Inversão Rápida"),
-            ("dissolve_color", "🎬 Dissolvência Sépia"),
+            ("fade", "🌑 Fade"),
+            ("fadeblack", "⬛ Fade para Preto"),
+            ("fadewhite", "⬜ Fade para Branco"),
+            ("dissolve", "🎬 Dissolve"),
+            ("wipeleft", "◀ Wipe para Esquerda"),
+            ("wiperight", "▶ Wipe para Direita"),
+            ("slideleft", "◀ Slide para Esquerda"),
+            ("slideright", "▶ Slide para Direita"),
         )
-        self._selected_trans_name = "fade_black"
+        self._selected_trans_name = "fade"
 
         self._trans_group = QButtonGroup(self)
         self._trans_group.setExclusive(True)
@@ -1150,7 +1152,7 @@ class EditPanel(QWidget):
         return cuts[0]
 
     def _insert_transition_clip(self, trans_name: str | None = None) -> None:
-        tname = trans_name or getattr(self, "_selected_trans_name", "fade_black")
+        tname = trans_name or getattr(self, "_selected_trans_name", "fade")
         label = next((lbl for tid, lbl in getattr(self, "_trans_specs", ()) if tid == tname), tname)
         duration = self._trans_dur.value() if hasattr(self, "_trans_dur") else 1.0
 
@@ -1172,7 +1174,19 @@ class EditPanel(QWidget):
             overlay_type="transition",
             transition_name=tname,
         )
-        self._place_clip(clip)
+        # Transições pertencem à sequência de vídeo, no próprio corte. Elas
+        # não são overlays de Adicionais: podem ocupar o mesmo intervalo dos
+        # dois clipes que conectam.
+        video_index = next(
+            (i for i, track in enumerate(self._project.tracks) if track.kind is TrackKind.VIDEO),
+            None,
+        )
+        if video_index is None:
+            self._project = self._project.with_track(TrackKind.VIDEO)
+            video_index = next(i for i, track in enumerate(self._project.tracks) if track.kind is TrackKind.VIDEO)
+        self._project = self._project.with_clip(video_index, clip)
+        self._timeline.select(clip.clip_id)
+        self._after_edit()
 
     def _sync_extras_controls(self, clip: Clip | None) -> None:
         if hasattr(self, "_properties_widget") and self._extras_tabs.indexOf(self._properties_widget) >= 0:
@@ -1225,7 +1239,7 @@ class EditPanel(QWidget):
                 self._insert_new_trans_btn.setVisible(False)
         elif clip is not None and clip.overlay_type == "transition":
             self._extras_tabs.setCurrentIndex(2)
-            tname = clip.transition_name or "fade_black"
+            tname = clip.transition_name or "fade"
             self._selected_trans_name = tname
             for i, (tid, _) in enumerate(getattr(self, "_trans_specs", ())):
                 if i < len(self._trans_buttons):
@@ -1975,7 +1989,9 @@ class EditPanel(QWidget):
             kind = (
                 TrackKind.ADDITIONAL
                 if clip.is_additional
-                else (TrackKind.VIDEO if clip.has_image else TrackKind.AUDIO)
+                else TrackKind.VIDEO
+                if clip.is_transition or clip.has_image
+                else TrackKind.AUDIO
             )
             self._project = self._project.with_track(kind)
             index = self._free_track(clip)
