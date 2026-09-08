@@ -235,6 +235,8 @@ class Clip:
     stroke_width: int = 0  # 0 significa sem contorno
     filter_name: str = ""  # "pb", "sepia", "contraste", "vinheta", "inverter"
     transition_name: str = ""  # nomes do filtro xfade (fade, dissolve, wipe*, slide*)
+    transition_left_id: int | None = None
+    transition_right_id: int | None = None
     # Configurações de Fundo Verde (Chroma Key)
     chromakey_enabled: bool = False
     chromakey_color: str = "#00FF00"
@@ -348,7 +350,7 @@ class Track:
         movimento, acomoda no vão mais próximo que couber.
         """
         occupied = sorted(
-            (clip for clip in self.clips if clip.clip_id != ignore),
+            (clip for clip in self.clips if clip.clip_id != ignore and not clip.is_transition),
             key=lambda clip: clip.start,
         )
         result: list[tuple[float, float]] = []
@@ -588,7 +590,32 @@ class Project:
                 key=lambda c: c.start,
             )
         )
-        return self._replace_track(index, replace(track, clips=clips))
+        updated_project = self._replace_track(index, replace(track, clips=clips))
+        if "start" in changes and clip.is_transition is False:
+            updated_project = updated_project._sync_transition_markers(clip_id)
+        return updated_project
+
+    def _sync_transition_markers(self, clip_id: int) -> Project:
+        """Move a transition with either clip it connects."""
+        clips_by_id = {c.clip_id: c for c in self.clips}
+        tracks = []
+        changed = False
+        for track in self.tracks:
+            new_clips = []
+            for marker in track.clips:
+                if not marker.is_transition or clip_id not in (marker.transition_left_id, marker.transition_right_id):
+                    new_clips.append(marker)
+                    continue
+                left = clips_by_id.get(marker.transition_left_id)
+                right = clips_by_id.get(marker.transition_right_id)
+                if left is None or right is None:
+                    new_clips.append(marker)
+                    continue
+                cut = (left.end + right.start) / 2.0
+                new_clips.append(replace(marker, start=max(0.0, cut - marker.duration / 2.0)))
+                changed = True
+            tracks.append(replace(track, clips=tuple(sorted(new_clips, key=lambda c: c.start))))
+        return replace(self, tracks=tuple(tracks)) if changed else self
 
     def with_track_muted(self, track_index: int, muted: bool) -> Project:
         track = self.tracks[track_index]
@@ -639,7 +666,7 @@ class Project:
         moved = replace(clip, start=start)
         if origin == track_index:
             return self.with_updated_clip(clip_id, start=start)
-        return self.without_clip(clip_id).with_clip(track_index, moved)
+        return self.without_clip(clip_id).with_clip(track_index, moved)._sync_transition_markers(clip_id)
 
     def _swapped(self, track_index: int, moving: Clip, start: float) -> Project | None:
         """Troca ``moving`` de lugar com o vizinho do lado para onde ele vai.
@@ -668,7 +695,7 @@ class Project:
         others = [
             clip
             for clip in self.tracks[track_index].clips
-            if clip.clip_id != moving.clip_id
+            if clip.clip_id != moving.clip_id and not clip.is_transition
         ]
         if start < moving.start:
             partner = max(
