@@ -195,6 +195,9 @@ def test_transicao_entre_dois_videos_usa_xfade() -> None:
     graph = build_graph(project)
     assert any("xfade=transition=dissolve" in item for item in graph.filters)
 
+    preview = build_graph(project, at=3.2, span=2.0)
+    assert any("offset=0.300000" in item for item in preview.filters)
+
 
 def test_marcador_sem_duas_fontes_nao_apaga_a_composicao() -> None:
     media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=12.0)
