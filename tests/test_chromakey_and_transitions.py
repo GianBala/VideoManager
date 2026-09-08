@@ -212,6 +212,17 @@ def test_marcador_sem_duas_fontes_nao_apaga_a_composicao() -> None:
     assert not any("[base]fade=" in item for item in graph.filters)
 
 
+def test_duracao_excessiva_e_limitada_ao_material_do_corte() -> None:
+    media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=2.0)
+    clips = (Clip(media=media, start=0.0, duration=2.0), Clip(media=media, start=2.0, duration=2.0))
+    marker = Clip(
+        media=MediaRef(path=Path("Transição"), kind=MediaKind.IMAGE, duration=5.0),
+        start=0.0, duration=5.0, overlay_type="transition", transition_name="fade",
+    )
+    graph = build_graph(Project(tracks=(Track(kind=TrackKind.VIDEO, clips=clips + (marker,)),)))
+    assert any("xfade=transition=fade:duration=2.000000" in item for item in graph.filters)
+
+
 def test_export_duration_with_hidden_tracks() -> None:
     c1 = Clip(media=MediaRef(path=Path("v1.mp4"), kind=MediaKind.VIDEO, duration=10.0), start=0.0, duration=10.0)
     c2 = Clip(media=MediaRef(path=Path("v2.mp4"), kind=MediaKind.VIDEO, duration=25.0), start=0.0, duration=25.0)
