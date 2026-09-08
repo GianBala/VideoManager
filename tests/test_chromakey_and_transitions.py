@@ -11,6 +11,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from videomanager.infrastructure.ffmpeg.composer import build_graph
+from videomanager.infrastructure.ffmpeg.composer import _pieces
 from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
@@ -156,6 +157,28 @@ def test_composer_transitions_graph() -> None:
             assert "negate" in filters_str
         elif tname == "dissolve_color":
             assert "colorchannelmixer=" in filters_str
+
+
+def test_transicao_e_processada_depois_dos_videos() -> None:
+    video = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=8.0)
+    base = Clip(media=video, start=0.0, duration=4.0)
+    next_clip = Clip(media=video, start=4.0, duration=4.0)
+    marker = Clip(
+        media=MediaRef(path=Path("Transição"), kind=MediaKind.IMAGE, duration=1.0),
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="fade_black",
+    )
+    project = Project(
+        tracks=(
+            Track(kind=TrackKind.VIDEO, clips=(base, next_clip)),
+            Track(kind=TrackKind.ADDITIONAL, clips=(marker,)),
+        )
+    )
+
+    pieces = _pieces(project, 0.0, None)
+    assert [piece.clip.overlay_type for piece in pieces] == ["none", "none", "transition"]
 
 
 def test_export_duration_with_hidden_tracks() -> None:
