@@ -23,19 +23,21 @@ repositório para uma visão geral rápida; esta pasta traz o manual completo.
 
 ## Para quem desenvolve o aplicativo
 
-- [**Arquitetura**](arquitetura.md) — como `core`, `workers` e `ui` se
-  relacionam, os módulos que concentram a dificuldade do projeto (matriz de
-  formatos, seletor, compositor, corte, aceleração por placa de vídeo) e como
-  a fila de tarefas evita esgotar a memória da máquina.
+- [**Guia completo de Clean Architecture**](clean-architecture/README.md) —
+  conceitos, camadas, fluxos de ponta a ponta, concorrência, testes e catálogo
+  de módulos para quem está chegando ao projeto.
+- [**Arquitetura**](arquitetura.md) — mapa resumido da estrutura atual.
+- [**Plano de migração para Clean Architecture**](plano-clean-architecture.md)
+  — registro da proposta original; veja as entregas e evidências no
+  [registro da migração](clean-architecture/migracao.md).
 - [**Guia de desenvolvimento**](desenvolvimento.md) — ambiente, testes,
   fixtures de extratores, convenções do projeto.
 - [**Empacotamento**](empacotamento.md) — gerar os pacotes de Linux
   (pasta e AppImage) e Windows.
 
-Para o raciocínio detalhado por trás de cada decisão não-óbvia do código —
-com as medições que a sustentam — ver `CLAUDE.md` na raiz do repositório:
-escrito para orientar mudanças futuras, é a referência mais profunda que o
-projeto tem.
+`AGENTS.md` na raiz oferece uma visão geral para trabalho no repositório.
+`CLAUDE.md`, quando disponível localmente, registra decisões históricas e pode
+conter caminhos anteriores à migração; o guia acima descreve o código atual.
 
 ## Aviso
 

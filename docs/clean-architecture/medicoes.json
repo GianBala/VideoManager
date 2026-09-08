@@ -1,0 +1,269 @@
+{
+  "python": "3.12.3",
+  "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
+  "repeat": 5,
+  "fixture": "testsrc2+sine, 640x360, 24fps, 3s",
+  "runs": {
+    "baseline_startup": {
+      "samples": [
+        {
+          "seconds": 0.8656250319909304,
+          "python_peak_mib": 143.08984375,
+          "child_peak_mib": 75.23046875
+        },
+        {
+          "seconds": 0.896239815003355,
+          "python_peak_mib": 142.640625,
+          "child_peak_mib": 75.07421875
+        },
+        {
+          "seconds": 0.8662447899987455,
+          "python_peak_mib": 142.76953125,
+          "child_peak_mib": 75.0546875
+        },
+        {
+          "seconds": 0.8679129629890667,
+          "python_peak_mib": 142.4453125,
+          "child_peak_mib": 74.92578125
+        },
+        {
+          "seconds": 0.8674045960069634,
+          "python_peak_mib": 142.8828125,
+          "child_peak_mib": 74.63671875
+        }
+      ],
+      "median_seconds": 0.8674045960069634,
+      "min_seconds": 0.8656250319909304,
+      "max_seconds": 0.896239815003355
+    },
+    "current_startup": {
+      "samples": [
+        {
+          "seconds": 0.9064984150027158,
+          "python_peak_mib": 142.9921875,
+          "child_peak_mib": 97.68359375
+        },
+        {
+          "seconds": 0.8793171019933652,
+          "python_peak_mib": 143.52734375,
+          "child_peak_mib": 98.31640625
+        },
+        {
+          "seconds": 0.8788700239965692,
+          "python_peak_mib": 143.45703125,
+          "child_peak_mib": 98.28515625
+        },
+        {
+          "seconds": 0.8846944460092345,
+          "python_peak_mib": 143.109375,
+          "child_peak_mib": 97.83984375
+        },
+        {
+          "seconds": 0.8833909270033473,
+          "python_peak_mib": 143.30859375,
+          "child_peak_mib": 97.91796875
+        }
+      ],
+      "median_seconds": 0.8833909270033473,
+      "min_seconds": 0.8788700239965692,
+      "max_seconds": 0.9064984150027158
+    },
+    "baseline_preview": {
+      "samples": [
+        {
+          "seconds": 0.03265266999369487,
+          "python_peak_mib": 42.80859375,
+          "child_peak_mib": 50.45703125
+        },
+        {
+          "seconds": 0.0270347799960291,
+          "python_peak_mib": 42.83203125,
+          "child_peak_mib": 51.38671875
+        },
+        {
+          "seconds": 0.03149556499556638,
+          "python_peak_mib": 42.85546875,
+          "child_peak_mib": 51.015625
+        },
+        {
+          "seconds": 0.03135857499728445,
+          "python_peak_mib": 43.00390625,
+          "child_peak_mib": 51.79296875
+        },
+        {
+          "seconds": 0.02894531999481842,
+          "python_peak_mib": 43.140625,
+          "child_peak_mib": 51.31640625
+        }
+      ],
+      "median_seconds": 0.03135857499728445,
+      "min_seconds": 0.0270347799960291,
+      "max_seconds": 0.03265266999369487
+    },
+    "current_preview": {
+      "samples": [
+        {
+          "seconds": 0.03515665499435272,
+          "python_peak_mib": 25.64453125,
+          "child_peak_mib": 51.45703125
+        },
+        {
+          "seconds": 0.028786858994862996,
+          "python_peak_mib": 25.64453125,
+          "child_peak_mib": 51.4765625
+        },
+        {
+          "seconds": 0.0270599790092092,
+          "python_peak_mib": 25.6875,
+          "child_peak_mib": 51.6796875
+        },
+        {
+          "seconds": 0.02876795300107915,
+          "python_peak_mib": 25.6171875,
+          "child_peak_mib": 51.50390625
+        },
+        {
+          "seconds": 0.025228772006812505,
+          "python_peak_mib": 25.7265625,
+          "child_peak_mib": 51.21875
+        }
+      ],
+      "median_seconds": 0.02876795300107915,
+      "min_seconds": 0.025228772006812505,
+      "max_seconds": 0.03515665499435272
+    },
+    "baseline_seek": {
+      "samples": [
+        {
+          "seconds": 0.030575889992178418,
+          "python_peak_mib": 42.87890625,
+          "child_peak_mib": 51.50390625
+        },
+        {
+          "seconds": 0.029114753007888794,
+          "python_peak_mib": 42.921875,
+          "child_peak_mib": 52.1953125
+        },
+        {
+          "seconds": 0.028102885000407696,
+          "python_peak_mib": 42.9921875,
+          "child_peak_mib": 51.15234375
+        },
+        {
+          "seconds": 0.03497049199359026,
+          "python_peak_mib": 42.9921875,
+          "child_peak_mib": 52.015625
+        },
+        {
+          "seconds": 0.032650295994244516,
+          "python_peak_mib": 43.01953125,
+          "child_peak_mib": 51.7109375
+        }
+      ],
+      "median_seconds": 0.030575889992178418,
+      "min_seconds": 0.028102885000407696,
+      "max_seconds": 0.03497049199359026
+    },
+    "current_seek": {
+      "samples": [
+        {
+          "seconds": 0.0312642839999171,
+          "python_peak_mib": 25.71484375,
+          "child_peak_mib": 51.77734375
+        },
+        {
+          "seconds": 0.029362588000367396,
+          "python_peak_mib": 25.94921875,
+          "child_peak_mib": 51.15234375
+        },
+        {
+          "seconds": 0.02955427901179064,
+          "python_peak_mib": 25.58203125,
+          "child_peak_mib": 51.0703125
+        },
+        {
+          "seconds": 0.029926293005701154,
+          "python_peak_mib": 25.6484375,
+          "child_peak_mib": 51.921875
+        },
+        {
+          "seconds": 0.03353490300651174,
+          "python_peak_mib": 25.85546875,
+          "child_peak_mib": 51.48828125
+        }
+      ],
+      "median_seconds": 0.029926293005701154,
+      "min_seconds": 0.029362588000367396,
+      "max_seconds": 0.03353490300651174
+    },
+    "baseline_export": {
+      "samples": [
+        {
+          "seconds": 0.2264408510091016,
+          "python_peak_mib": 42.84375,
+          "child_peak_mib": 150.05859375
+        },
+        {
+          "seconds": 0.21464546299830545,
+          "python_peak_mib": 42.83203125,
+          "child_peak_mib": 150.31640625
+        },
+        {
+          "seconds": 0.22891363200324122,
+          "python_peak_mib": 42.953125,
+          "child_peak_mib": 149.703125
+        },
+        {
+          "seconds": 0.22105716800433584,
+          "python_peak_mib": 43.1171875,
+          "child_peak_mib": 150.18359375
+        },
+        {
+          "seconds": 0.23458634898997843,
+          "python_peak_mib": 43.16015625,
+          "child_peak_mib": 149.3828125
+        }
+      ],
+      "median_seconds": 0.2264408510091016,
+      "min_seconds": 0.21464546299830545,
+      "max_seconds": 0.23458634898997843
+    },
+    "current_export": {
+      "samples": [
+        {
+          "seconds": 0.22887113399337977,
+          "python_peak_mib": 27.76171875,
+          "child_peak_mib": 150.58203125
+        },
+        {
+          "seconds": 0.227229634008836,
+          "python_peak_mib": 27.64453125,
+          "child_peak_mib": 149.3359375
+        },
+        {
+          "seconds": 0.23440481899888255,
+          "python_peak_mib": 27.6875,
+          "child_peak_mib": 148.96875
+        },
+        {
+          "seconds": 0.23683099800837226,
+          "python_peak_mib": 27.76953125,
+          "child_peak_mib": 149.20703125
+        },
+        {
+          "seconds": 0.23382937999849673,
+          "python_peak_mib": 27.55859375,
+          "child_peak_mib": 149.99609375
+        }
+      ],
+      "median_seconds": 0.23382937999849673,
+      "min_seconds": 0.227229634008836,
+      "max_seconds": 0.23683099800837226
+    }
+  },
+  "baseline_commit": "e2e91d0",
+  "recorded_date": "2026-09-07",
+  "cpu": "13th Gen Intel(R) Core(TM) i7-13650HX",
+  "ffmpeg_version": "ffmpeg version n7.1.5-12-g1fdbca85aa-20260812 Copyright (c) 2000-2026 the FFmpeg developers",
+  "startup_audio_device_disabled": true
+}
