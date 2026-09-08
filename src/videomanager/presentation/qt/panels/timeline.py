@@ -68,6 +68,32 @@ _HANDLE_WIDTH = 5
 _SNAP_PIXELS = 7
 _MIN_VIEW = 0.4
 
+
+def _image_preview(image: QImage, target: QRectF) -> tuple[QImage, QRectF]:
+    """Prepara uma imagem para preencher a área sem deformá-la.
+
+    Blocos de imagem podem durar vários minutos e, por isso, o retângulo do
+    bloco costuma ser muito mais largo que a proporção da fotografia. Passar
+    esse retângulo diretamente a ``drawImage`` comprime a fotografia até virar
+    uma faixa colorida. O modo *expanding* mantém a proporção e corta apenas o
+    excedente, como as miniaturas de vídeo fazem.
+    """
+    width = max(1, round(target.width()))
+    height = max(1, round(target.height()))
+    scaled = image.scaled(
+        width,
+        height,
+        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    rect = QRectF(
+        target.left() + (target.width() - scaled.width()) / 2,
+        target.top() + (target.height() - scaled.height()) / 2,
+        scaled.width(),
+        scaled.height(),
+    )
+    return scaled, rect
+
 # Quanto o ponteiro precisa andar para um clique virar arrasto. Sem essa folga,
 # selecionar um bloco já contava como edição: cada clique empilhava um desfazer
 # que não desfazia nada, e o Ctrl+Z passava a exigir uma dúzia de repetições
@@ -706,10 +732,11 @@ class Timeline(QWidget):
         if clip.is_image or clip.overlay_type == "image":
             first_thumb = next(iter(strip.thumbs.values()), None)
             if first_thumb is not None:
-                painter.drawImage(
-                    QRectF(rect.left(), rect.top() + 13, rect.width(), max(1.0, rect.height() - 13)),
-                    first_thumb,
+                area = QRectF(
+                    rect.left(), rect.top() + 13, rect.width(), max(1.0, rect.height() - 13)
                 )
+                image, image_rect = _image_preview(first_thumb, area)
+                painter.drawImage(image_rect, image)
             return
         for moment, image in sorted(strip.thumbs.items()):
             begin, end = strip.cell_of(moment)
