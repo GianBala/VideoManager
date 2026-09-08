@@ -165,6 +165,11 @@ def _pieces(
                     track_muted=track.muted,
                 )
             )
+    # Transições são efeitos sobre a composição visual. Elas precisam ser
+    # processadas depois das fontes de vídeo; quando ficavam antes, o primeiro
+    # ``overlay`` de vídeo cobria o efeito inteiro e a transição parecia não
+    # funcionar.
+    pieces.sort(key=lambda piece: piece.clip.overlay_type == "transition")
     return pieces
 
 
