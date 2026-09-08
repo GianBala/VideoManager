@@ -551,9 +551,16 @@ def build_graph(
                     cut = max(0.0, second.clip.start - first.clip.start - piece.duration / 2.0)
                     label = f"[t{order}]"
                     filters.append(
-                        f"[tr_a][tr_b]xfade=transition={xfade_name}:duration={piece.duration:.6f}:offset={cut:.6f}{label}"
+                        f"[tr_a][tr_b]xfade=transition={xfade_name}:duration={piece.duration:.6f}:offset={cut:.6f},"
+                        f"tpad=stop_mode=clone:stop_duration={piece.duration:.6f}{label}"
                     )
                     current = label
+                    continue
+                # Um marcador sem duas fontes elegíveis não pode filtrar a
+                # composição inteira: isso fazia a prévia ficar preta até o
+                # usuário reiniciar a reprodução. Mantemos o quadro atual e
+                # deixamos o marcador pronto para a próxima renderização.
+                if sources:
                     continue
                 if tname in ("fade", "fadeblack", "fade_black"):
                     fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black,fade=t=in:st={mid:.6f}:d={half:.6f}:color=black"
