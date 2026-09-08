@@ -122,28 +122,32 @@ não montar por falta de FUSE na máquina, roda assim mesmo:
 
 ## Como o projeto está organizado
 
-```
+```text
 src/videomanager/
-├── core/      lógica de mídia, sem nenhuma dependência de Qt
-├── workers/   ponte para a interface: QRunnable + sinais
-└── ui/        janela e painéis (PySide6)
+├── domain/          modelos imutáveis e regras puras
+├── application/     casos de uso, sessão, tarefas e portas
+├── infrastructure/  ffmpeg, yt-dlp, arquivos e adaptadores Qt
+├── presentation/    janela, controllers, painéis e widgets
+├── bootstrap.py     montagem explícita dos serviços
+└── app.py           inicialização Qt e recursos
 ```
 
-A dependência é de mão única: `ui` → `workers` → `core`. É o que permite testar
-a lógica de mídia sem depender de Qt. Os testes de interface usam Qt offscreen
-e simulam a disponibilidade do áudio; a suíte padrão não acessa a rede. Testes
-locais de exportação usam ffmpeg e ffprobe, quando disponíveis.
+O projeto usa Clean Architecture. Domínio e aplicação funcionam sem Qt,
+yt-dlp ou ffmpeg instalados; as integrações ficam em adaptadores externos.
+A apresentação recebe os serviços por injeção, sem importar infraestrutura.
+Testes verificam dependências, ausência de ciclos e resultados de mídia reais.
 
-A sessão de edição (`core/editor_session.py`) mantém o histórico e o ponto salvo.
-`ui/editor_project.py` coordena a abertura e a importação em workers canceláveis;
-`ui/panels/edit_widgets.py` contém os widgets visuais. A rasterização de texto
-fica em `ui/text_renderer.py`, conectada ao domínio por `core/text_assets.py`.
+O [guia completo para desenvolvedores](docs/clean-architecture/README.md)
+explica cada camada, os fluxos, a concorrência e o papel de cada módulo.
+A sessão de edição possui histórico e ponto salvo; a fila possui transições
+por tentativa. Pedidos tipados substituem opções de ferramentas na interface.
+Texto usa rasterização injetada e prévia/exportação compartilham o compositor.
 
 ### Os módulos que importam
 
-O trabalho difícil não está na interface, e sim em três arquivos.
+Alguns algoritmos ajudam a entender as principais decisões do aplicativo.
 
-**`core/format_matrix.py`** normaliza a resposta crua de cada extrator. Cada
+**`infrastructure/yt_dlp/formats.py`** normaliza a resposta crua de cada extrator. Cada
 plataforma devolve uma estrutura diferente, e a diferença não é cosmética:
 
 - O YouTube manda DASH com trilhas separadas, três codecs por resolução, HDR, e
@@ -159,7 +163,7 @@ como a mesma coisa descarta mídia perfeitamente baixável — e foi exatamente 
 que as fixtures pegaram: o archive.org ficava 100% inacessível e o HLS da Apple
 baixava vídeo **mudo**.
 
-**`core/selector.py`** traduz a escolha em opções do yt-dlp, sob duas regras:
+**`infrastructure/yt_dlp/selector.py`** traduz a escolha em opções do yt-dlp, sob duas regras:
 
 - **Filtros não-estritos.** Todo limite sai como `[height<=?720]`. O `?` impede
   que formatos sem aquele campo sejam descartados. Sem ele, pedir “no máximo
@@ -170,7 +174,7 @@ baixava vídeo **mudo**.
   **trocar de container** — nunca recodificar por conta própria. Toda substituição
   vira um aviso na tela, antes de o download começar.
 
-**`core/trimmer.py`** é o recorte, e vive do fato de que vídeo comprimido só
+**`infrastructure/ffmpeg/trimmer.py`** é o recorte, e vive do fato de que vídeo comprimido só
 pode ser cortado sem recodificar **num keyframe** — quadros completos que
 aparecem a cada poucos segundos; entre eles há apenas diferenças, que sozinhas
 não formam imagem. Daí as duas saídas honestas, e as duas na tela:
@@ -189,7 +193,7 @@ A prévia e as miniaturas saem do próprio ffmpeg, em quadros crus, e não de um
 player: um player entrega o quadro que conseguir — normalmente o keyframe mais
 próximo —, e aqui o que está na tela precisa ser exatamente o quadro do corte.
 
-**`core/composer.py`** monta a edição inteira num grafo de filtros do ffmpeg, e
+**`infrastructure/ffmpeg/composer.py`** monta a edição inteira num grafo de filtros do ffmpeg, e
 esse **mesmo grafo serve três usos**: exportar o arquivo, desenhar o quadro
 parado da prévia e alimentar a reprodução. A consequência é a que importa —
 trilha sobreposta, vão preto, volume em decibéis e mudo aparecem na tela como
