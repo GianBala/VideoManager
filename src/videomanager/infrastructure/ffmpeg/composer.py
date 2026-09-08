@@ -527,6 +527,34 @@ def build_graph(
                 start, end = piece.offset, piece.offset + piece.duration
                 half = max(0.01, piece.duration / 2.0)
                 mid = start + half
+                sources = [p for p in video_parts if not p.clip.is_transition]
+                if len(sources) == 2 and all(p.clip.overlay_type == "none" for p in sources):
+                    first, second = sources
+                    # xfade exige as duas entradas começando em PTS zero. Os
+                    # clipes já foram preparados em [vN], então só removemos o
+                    # deslocamento da timeline antes da emenda.
+                    filters.append(f"[v{first.index}]setpts=PTS-STARTPTS[tr_a]")
+                    filters.append(f"[v{second.index}]setpts=PTS-STARTPTS[tr_b]")
+                    xfade_name = {
+                        "fade": "fade",
+                        "fadeblack": "fadeblack",
+                        "fadewhite": "fadewhite",
+                        "dissolve": "dissolve",
+                        "wipeleft": "wipeleft",
+                        "wiperight": "wiperight",
+                        "slideleft": "slideleft",
+                        "slideright": "slideright",
+                        # nomes antigos permanecem legíveis em projetos já salvos
+                        "fade_black": "fadeblack",
+                        "fade_white": "fadewhite",
+                    }.get(tname, "fade")
+                    cut = max(0.0, second.clip.start - first.clip.start - piece.duration / 2.0)
+                    label = f"[t{order}]"
+                    filters.append(
+                        f"[tr_a][tr_b]xfade=transition={xfade_name}:duration={piece.duration:.6f}:offset={cut:.6f}{label}"
+                    )
+                    current = label
+                    continue
                 if tname in ("fade", "fadeblack", "fade_black"):
                     fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black,fade=t=in:st={mid:.6f}:d={half:.6f}:color=black"
                 elif tname in ("fadewhite", "fade_white"):
