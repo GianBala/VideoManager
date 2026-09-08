@@ -1188,12 +1188,23 @@ class EditPanel(QWidget):
             kind=MediaKind.IMAGE,
             duration=duration,
         )
+        left_id = right_id = None
+        for track in self._project.video_tracks:
+            ordered = sorted((c for c in track.clips if not c.is_transition), key=lambda c: c.start)
+            for left, right in zip(ordered, ordered[1:]):
+                if abs(((left.end + right.start) / 2.0) - (cut or self._position)) < 1e-4:
+                    left_id, right_id = left.clip_id, right.clip_id
+                    break
+            if left_id is not None:
+                break
         clip = Clip(
             media=ref,
             start=start,
             duration=duration,
             overlay_type="transition",
             transition_name=tname,
+            transition_left_id=left_id,
+            transition_right_id=right_id,
         )
         # Transições pertencem à sequência de vídeo, no próprio corte. Elas
         # não são overlays de Adicionais: podem ocupar o mesmo intervalo dos
