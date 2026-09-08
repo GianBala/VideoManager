@@ -75,15 +75,15 @@ def _image_preview(image: QImage, target: QRectF) -> tuple[QImage, QRectF]:
     Blocos de imagem podem durar vários minutos e, por isso, o retângulo do
     bloco costuma ser muito mais largo que a proporção da fotografia. Passar
     esse retângulo diretamente a ``drawImage`` comprime a fotografia até virar
-    uma faixa colorida. O modo *expanding* mantém a proporção e corta apenas o
-    excedente, como as miniaturas de vídeo fazem.
+    uma faixa colorida. O modo *keep* mantém a proporção e limita a imagem à
+    altura da trilha, evitando que logos cresçam em blocos longos.
     """
     width = max(1, round(target.width()))
     height = max(1, round(target.height()))
     scaled = image.scaled(
         width,
         height,
-        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        Qt.AspectRatioMode.KeepAspectRatio,
         Qt.TransformationMode.SmoothTransformation,
     )
     rect = QRectF(
