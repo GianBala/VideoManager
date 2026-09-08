@@ -14,19 +14,20 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.core import binaries
-from videomanager.core.converter import (
-    AudioTarget,
-    Converter,
-    can_copy_audio,
-    output_path,
-    probe_file,
-)
-from videomanager.core.downloader import Downloader
-from videomanager.core.format_matrix import pick_audio, pick_video
-from videomanager.core.probe import probe
-from videomanager.core.selector import AudioRequest, VideoRequest, build_opts
-from videomanager.core.settings import Settings
+from videomanager.infrastructure.system import binaries
+from videomanager.domain.media import AudioTarget
+from videomanager.infrastructure.ffmpeg.converter import Converter
+from videomanager.domain.compatibility import can_copy_audio
+from videomanager.infrastructure.ffmpeg.converter import output_path
+from videomanager.infrastructure.ffmpeg.converter import probe_file
+from videomanager.infrastructure.yt_dlp.downloader import Downloader
+from videomanager.domain.format_policy import pick_audio
+from videomanager.domain.format_policy import pick_video
+from videomanager.infrastructure.yt_dlp.probe import probe
+from videomanager.domain.selection import AudioRequest
+from videomanager.domain.selection import VideoRequest
+from videomanager.infrastructure.yt_dlp.selector import build_opts
+from videomanager.infrastructure.storage.settings import Settings
 
 pytestmark = pytest.mark.ffmpeg
 
@@ -156,7 +157,7 @@ def test_parciais_nao_vazam_para_a_pasta_de_destino(tools, settings, tmp_path: P
 @pytest.mark.network
 def test_cancelamento_interrompe_e_nao_deixa_arquivo(tools, settings, tmp_path: Path) -> None:
     """Cancelar tem de parar o download e não deixar arquivo final."""
-    from videomanager.core.errors import JobCancelled
+    from videomanager.application.errors import JobCancelled
 
     info = probe(HLS_URL, settings)
     opts, _ = build_opts(
@@ -333,9 +334,11 @@ class TestExportacaoDaEdicao:
         material mono. O defeito não levanta erro, não aparece na duração e não
         aparece em nenhuma tela: só medindo.
         """
-        from videomanager.core.composer import Composition
-        from videomanager.core.converter import Converter, probe_file
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.domain.composition import Composition
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         for canais in (1, 2):
             origem = gerar_video(tmp_path / f"fonte{canais}.mp4", tools, canais=canais)
@@ -362,9 +365,11 @@ class TestExportacaoDaEdicao:
     def test_bloco_mudo_e_trilha_muda_nao_chegam_ao_arquivo(
         self, tmp_path: Path, tools
     ) -> None:
-        from videomanager.core.composer import Composition
-        from videomanager.core.converter import Converter, probe_file
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.domain.composition import Composition
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         origem = gerar_video(tmp_path / "fonte.mp4", tools)
         projeto = new_project(media_ref(probe_file(origem, tools)))
@@ -379,9 +384,12 @@ class TestExportacaoDaEdicao:
     def test_montagem_de_duas_trilhas_tem_a_duracao_da_mais_longa(
         self, tmp_path: Path, tools
     ) -> None:
-        from videomanager.core.composer import Composition
-        from videomanager.core.project import Clip, media_ref, new_project
-        from videomanager.core.converter import Converter, probe_file
+        from videomanager.domain.composition import Composition
+        from videomanager.domain.project import Clip
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
 
         curto = gerar_video(tmp_path / "curto.mp4", tools, duracao=3.0)
         longo = gerar_video(tmp_path / "longo.mp4", tools, duracao=6.0)
@@ -408,9 +416,11 @@ class TestExportacaoDaEdicao:
         arrastado. Não levanta erro, não muda a duração e não muda os streams —
         só medindo a imagem no trecho em que ela não devia existir.
         """
-        from videomanager.core.composer import Composition
-        from videomanager.core.converter import Converter, probe_file
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.domain.composition import Composition
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         origem = gerar_video(tmp_path / "fonte.mp4", tools, duracao=4.0)
         projeto = new_project(media_ref(probe_file(origem, tools)))
@@ -446,9 +456,11 @@ class TestExportacaoDaEdicao:
         duração certa, taxa certa no container, nenhum erro — e o único jeito de
         afirmar qualquer coisa aqui é contar as imagens **distintas**.
         """
-        from videomanager.core.composer import Composition
-        from videomanager.core.converter import Converter, probe_file
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.domain.composition import Composition
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         duracao = 2.0
         origem = tmp_path / "cinema.mp4"
@@ -501,9 +513,11 @@ class TestExportacaoDaEdicao:
         — tamanho da tela, imagens distintas de verdade e o fim do bloco ainda
         reposto pelo ``tpad``, que agora corre antes do encaixe.
         """
-        from videomanager.core.composer import Composition
-        from videomanager.core.converter import Converter, probe_file
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.domain.composition import Composition
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         duracao = 2.0
         origem = tmp_path / "pequeno.mp4"
@@ -548,9 +562,11 @@ class TestExportacaoDaEdicao:
         depois fixava pixel quadrado: a imagem saía 3:2, achatada. Nada falhava
         — nem duração, nem streams, nem código de saída.
         """
-        from videomanager.core.composer import Composition
-        from videomanager.core.converter import Converter, probe_file
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.domain.composition import Composition
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         origem = tmp_path / "anamorfico.mp4"
         subprocess.run(
@@ -585,9 +601,12 @@ class TestExportacaoDaEdicao:
         mudarem de um lado sem o outro, o som toca acelerado ou lento em vez de
         falhar — foi exatamente esse o defeito relatado (som ao dobro).
         """
-        from videomanager.core.composer import CHANNELS, SAMPLE_RATE, audio_command
-        from videomanager.core.converter import probe_file
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.infrastructure.ffmpeg.composer import CHANNELS
+        from videomanager.infrastructure.ffmpeg.composer import SAMPLE_RATE
+        from videomanager.infrastructure.ffmpeg.composer import audio_command
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         origem = gerar_video(tmp_path / "fonte.mp4", tools, duracao=3.0)
         projeto = new_project(media_ref(probe_file(origem, tools)))
@@ -650,7 +669,7 @@ class TestCodificacaoPorPlaca:
         perdida, sem erro nenhum, sem aviso, com a duração correta. É o defeito
         que este teste existe para não deixar voltar.
         """
-        from videomanager.core import hwaccel
+        from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 
         if "nvenc" not in hwaccel.available(tools):
             pytest.skip("nenhuma placa NVIDIA responde nesta máquina")
@@ -708,12 +727,10 @@ class TestTiraDeMiniaturas:
     def test_cada_miniatura_cai_no_instante_dela(
         self, tmp_path: Path, tools, duracao: float, passe_unico: bool
     ) -> None:
-        from videomanager.core.preview import (
-            _one_pass_worth_it,
-            filmstrip_frames,
-            filmstrip_times,
-            render_frame,
-        )
+        from videomanager.infrastructure.ffmpeg.preview import _one_pass_worth_it
+        from videomanager.infrastructure.ffmpeg.preview import filmstrip_frames
+        from videomanager.domain.preview import filmstrip_times
+        from videomanager.infrastructure.ffmpeg.preview import render_frame
 
         origem = self.fonte(tmp_path / "fade.mp4", tools, duracao)
         quantas = 12
@@ -743,7 +760,7 @@ class TestTiraDeMiniaturas:
             )
 
     def test_as_miniaturas_saem_em_ordem_e_completas(self, tmp_path: Path, tools) -> None:
-        from videomanager.core.preview import filmstrip_frames
+        from videomanager.infrastructure.ffmpeg.preview import filmstrip_frames
 
         origem = self.fonte(tmp_path / "fade.mp4", tools, 12.0)
         saida = list(filmstrip_frames(origem, 0.0, 12.0, 12, (160, 90), tools))
@@ -762,7 +779,7 @@ class TestTiraDeMiniaturas:
         decodificando um trecho que ninguém vai mais ver — que é a raiz do
         estouro de memória que esta aba já causou.
         """
-        from videomanager.core import preview
+        from videomanager.infrastructure.ffmpeg import preview
 
         abertos: list[subprocess.Popen] = []
         original = preview.subprocess.Popen
@@ -809,10 +826,12 @@ class TestInterpolacaoEmTrechos:
         return path
 
     def exporta(self, origem: Path, destino: Path, tools, trechos: int) -> Path:
-        from videomanager.core import parallel_export
-        from videomanager.core.composer import Composition
-        from videomanager.core.converter import Converter, probe_file
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.infrastructure.ffmpeg import parallel as parallel_export
+        from videomanager.domain.composition import Composition
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         projeto = replace(new_project(media_ref(probe_file(origem, tools))), fps=60.0)
         comp = Composition(projeto, "mp4", interpolate=True)
@@ -822,7 +841,7 @@ class TestInterpolacaoEmTrechos:
         original = parallel_export.plan_segments
         parallel_export.plan_segments = lambda _c: trechos
         try:
-            from videomanager.core import converter as mod
+            from videomanager.infrastructure.ffmpeg import converter as mod
             mod.plan_segments = lambda _c: trechos
             return Converter(probe_file(origem, tools), comp, destino, tools).run()
         finally:
@@ -891,9 +910,11 @@ class TestInterpolacaoEmTrechos:
         e só ele: o caminho serial escreve tudo num arquivo só e nunca passa por
         aqui. É o tipo de defeito que não aparece em nenhum projeto .mp4.
         """
-        from videomanager.core.composer import Composition
-        from videomanager.core.converter import Converter, probe_file
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.domain.composition import Composition
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         origem = tmp_path / "fonte.webm"
         subprocess.run(
@@ -907,7 +928,7 @@ class TestInterpolacaoEmTrechos:
         projeto = replace(new_project(media_ref(probe_file(origem, tools))), fps=60.0)
         destino = tmp_path / "saida.webm"
 
-        from videomanager.core import converter as mod
+        from videomanager.infrastructure.ffmpeg import converter as mod
         original = mod.plan_segments
         mod.plan_segments = lambda _c: 3
         try:
@@ -936,10 +957,12 @@ class TestInterpolacaoEmTrechos:
         nunca tem nada especial —, então a sintaxe do ffmpeg deixou de encostar
         no caminho que o usuário escolheu.
         """
-        from videomanager.core import converter as mod
-        from videomanager.core.composer import Composition
-        from videomanager.core.converter import Converter, probe_file
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.infrastructure.ffmpeg import converter as mod
+        from videomanager.domain.composition import Composition
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         origem = self.fonte(tmp_path / "fonte.mp4", tools)
         pasta = tmp_path / "vídeos do joão's [2026]"
@@ -974,10 +997,12 @@ class TestInterpolacaoEmTrechos:
         """
         import threading
 
-        from videomanager.core.composer import Composition
-        from videomanager.core.converter import Converter, probe_file
-        from videomanager.core.errors import JobCancelled
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.domain.composition import Composition
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+        from videomanager.application.errors import JobCancelled
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         origem = self.fonte(tmp_path / "fonte.mp4", tools, duracao=20.0)
         projeto = replace(new_project(media_ref(probe_file(origem, tools))), fps=60.0)
@@ -1058,10 +1083,11 @@ class TestReservaDoNomeComFfmpegDeVerdade:
         # O caminho paralelo não grava no destino: ele monta num temporário e
         # move por cima. Com o destino já existindo, esse ``move`` precisa
         # substituir em vez de recusar.
-        from videomanager.core import converter as mod
-        from videomanager.core import parallel_export
-        from videomanager.core.composer import Composition
-        from videomanager.core.project import media_ref, new_project
+        from videomanager.infrastructure.ffmpeg import converter as mod
+        from videomanager.infrastructure.ffmpeg import parallel as parallel_export
+        from videomanager.domain.composition import Composition
+        from videomanager.domain.project import media_ref
+        from videomanager.domain.project import new_project
 
         origem = self.fonte(tmp_path / "fonte.mp4", tools)
         media = probe_file(origem, tools)

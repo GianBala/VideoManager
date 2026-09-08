@@ -7,8 +7,8 @@ import threading
 
 import pytest
 
-from videomanager.core.errors import JobCancelled
-from videomanager.core.process import ProcessControl
+from videomanager.application.errors import JobCancelled
+from videomanager.infrastructure.system.process import ProcessControl
 
 
 def test_cancelar_encerra_filho_bloqueado(tmp_path):

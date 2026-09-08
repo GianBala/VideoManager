@@ -11,22 +11,21 @@ from __future__ import annotations
 import pytest
 from conftest import FIXTURE_NAMES, fixture_formats
 
-from videomanager.core.format_matrix import (
-    audio_family,
-    available_families,
-    available_fps,
-    available_heights,
-    build_matrix,
-    classify,
-    extract_fps,
-    extract_height,
-    find_video,
-    normalize_codec,
-    pick_audio,
-    pick_video,
-    video_family,
-)
-from videomanager.core.models import Kind
+from videomanager.infrastructure.yt_dlp.formats import audio_family
+from videomanager.domain.format_policy import available_families
+from videomanager.domain.format_policy import available_fps
+from videomanager.domain.format_policy import available_heights
+from videomanager.infrastructure.yt_dlp.formats import build_matrix
+from videomanager.infrastructure.yt_dlp.formats import classify
+from videomanager.infrastructure.yt_dlp.formats import extract_fps
+from videomanager.infrastructure.yt_dlp.formats import extract_height
+from videomanager.domain.format_policy import find_video
+from videomanager.infrastructure.yt_dlp.formats import normalize_codec
+from videomanager.domain.format_policy import pick_audio
+from videomanager.domain.format_policy import pick_video
+from videomanager.infrastructure.yt_dlp.formats import video_family
+from videomanager.domain.formats import Kind
+from videomanager.application.format_labels import choice_label
 
 # ---------------------------------------------------------------------------
 # Invariantes: valem para qualquer extrator
@@ -64,7 +63,7 @@ def test_toda_escolha_tem_formato_e_rotulo(name: str) -> None:
     for choice in (*matrix.video, *matrix.audio):
         assert choice.formats, "escolha sem nenhum formato torna best inválido"
         assert choice.best.format_id
-        assert choice.label.strip(), "rótulo vazio deixaria o combo em branco"
+        assert choice_label(choice).strip(), "rótulo vazio deixaria o combo em branco"
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)
@@ -114,7 +113,7 @@ def test_nao_levanta_com_campos_nulos_ou_do_tipo_errado() -> None:
     ]
     matrix = build_matrix(lixo)  # não deve levantar
     for choice in (*matrix.video, *matrix.audio):
-        assert choice.label.strip()
+        assert choice_label(choice).strip()
 
 
 def test_entrada_nao_lista_devolve_matriz_vazia() -> None:
@@ -334,7 +333,7 @@ def test_audio_de_fonte_mesclada_prefere_o_menor_arquivo() -> None:
     )
     assert matrix.audio[0].best.format_id == "pequeno"
     assert matrix.audio[0].is_extracted_from_video is True
-    assert "extraído do vídeo" in matrix.audio[0].label
+    assert "extraído do vídeo" in choice_label(matrix.audio[0])
 
 
 def test_audio_com_bitrate_conhecido_prefere_o_maior() -> None:

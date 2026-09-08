@@ -16,29 +16,27 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.core import memory
-from videomanager.core.binaries import FFmpegTools
-from videomanager.core.composer import (
-    Composition,
-    audio_only_args,
-    concat_args,
-    interpolation_bytes,
-    interpolation_segments,
-    mux_args,
-    segment_bounds,
-    segment_video_args,
-)
-from videomanager.core.project import (
-    Clip,
-    MediaKind,
-    MediaRef,
-    Project,
-    Track,
-    TrackKind,
-)
-from videomanager.core import parallel_export
-from videomanager.core.errors import ConversionError, JobCancelled
-from videomanager.core.parallel_export import ParallelExport, plan_segments
+from videomanager.infrastructure.system import memory
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.domain.composition import Composition
+from videomanager.infrastructure.ffmpeg.composer import audio_only_args
+from videomanager.infrastructure.ffmpeg.composer import concat_args
+from videomanager.domain.render_cost import interpolation_bytes
+from videomanager.infrastructure.ffmpeg.composer import interpolation_segments
+from videomanager.infrastructure.ffmpeg.composer import mux_args
+from videomanager.infrastructure.ffmpeg.composer import segment_bounds
+from videomanager.infrastructure.ffmpeg.composer import segment_video_args
+from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaKind
+from videomanager.domain.project import MediaRef
+from videomanager.domain.project import Project
+from videomanager.domain.project import Track
+from videomanager.domain.project import TrackKind
+from videomanager.infrastructure.ffmpeg import parallel as parallel_export
+from videomanager.application.errors import ConversionError
+from videomanager.application.errors import JobCancelled
+from videomanager.infrastructure.ffmpeg.parallel import ParallelExport
+from videomanager.infrastructure.ffmpeg.parallel import plan_segments
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
 GIGA = 1024 ** 3
@@ -171,7 +169,9 @@ class TestEmendaEMixagem:
     def test_juntar_copia_os_dois(self) -> None:
         args = mux_args(Path("/tmp/v.mp4"), Path("/tmp/a.m4a"), Path("/tmp/f.mp4"), TOOLS)
         assert args[args.index("-c") + 1] == "copy"
-        assert "-shortest" in args
+        # O grafo já limitou ambas as entradas. Um novo corte no remux pode
+        # perder quadros válidos quando os pacotes AAC terminam antes.
+        assert "-shortest" not in args
 
     def test_sem_som_nao_ha_segunda_entrada(self) -> None:
         args = mux_args(Path("/tmp/v.mp4"), None, Path("/tmp/f.mp4"), TOOLS)
@@ -220,6 +220,10 @@ class ProcessoDeMentira:
         self._ao_esperar = ao_esperar
         self.terminado = False
         self.morto = False
+        self.stdout = self.stderr = None
+
+    def wait(self, timeout=None):
+        return self.returncode
 
     def poll(self) -> int | None:
         return self.returncode if (self.terminado or self.morto) else None

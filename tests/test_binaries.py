@@ -9,8 +9,23 @@ teste afirma o conteúdo do ambiente, e não que a chamada funcionou.
 from __future__ import annotations
 
 import os
+import pytest
 
-from videomanager.core.binaries import clean_env, subprocess_kwargs
+from videomanager.infrastructure.system.binaries import clean_env
+from videomanager.infrastructure.system.binaries import subprocess_kwargs
+
+
+@pytest.mark.network
+@pytest.mark.parametrize('platform', ['win64', 'linux64', 'linuxarm64'])
+def test_publicacao_de_ffmpeg_configurada_existe(platform, monkeypatch):
+    from urllib.request import Request, urlopen
+    from videomanager.infrastructure.system import binaries
+    monkeypatch.setattr(binaries, 'platform_key', lambda: platform)
+    request = Request(binaries.download_url(), method='HEAD',
+                      headers={'User-Agent': 'VideoManager/validacao'})
+    with urlopen(request, timeout=30) as response:
+        assert response.status == 200
+        assert response.url.startswith('https://')
 
 
 class TestAmbienteDosProcessosFilhos:
@@ -107,4 +122,3 @@ def test_patch_runtime_universal_extract_and_run(tmp_path) -> None:
 
     # Segunda chamada deve reconhecer que já está patcheado
     assert patch_runtime(test_file) is True
-

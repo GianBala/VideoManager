@@ -14,19 +14,22 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent, QKeySequence
 from PySide6.QtWidgets import QApplication
 
-from videomanager.core.binaries import FFmpegTools
-from videomanager.core.converter import LocalMedia, LocalStream
-from videomanager.core.project import TrackKind
-from videomanager.core.settings import Settings
-from videomanager.ui import strings
-from videomanager.ui.main_window import (
-    _TAB_CONVERT,
-    _TAB_DOWNLOAD,
-    _TAB_EDIT,
-    MainWindow,
-)
-from videomanager.ui.panels.convert_panel import ConvertPanel
-from videomanager.ui.panels.edit_panel import EditPanel
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.domain.media import LocalMedia
+from videomanager.domain.media import LocalStream
+from videomanager.domain.project import TrackKind
+from videomanager.infrastructure.storage.settings import Settings
+from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.main_window import _TAB_CONVERT
+from videomanager.presentation.qt.main_window import _TAB_DOWNLOAD
+from videomanager.presentation.qt.main_window import _TAB_EDIT
+from videomanager.presentation.qt.main_window import MainWindow
+from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
+from videomanager.presentation.qt.panels.edit_panel import EditPanel
+from videomanager.bootstrap import build_editor_service
+from videomanager.bootstrap import build_processing_service
+from videomanager.bootstrap import build_download_service
+from videomanager.bootstrap import build_desktop_runtime
 
 
 @pytest.fixture
@@ -49,9 +52,9 @@ def dummy_tools() -> FFmpegTools:
 def test_main_window_menu_scope_per_tab(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings()
     # Mock do FFmpeg setup para não disparar sondagens pesadas
-    monkeypatch.setattr("videomanager.ui.main_window.ensure_ffmpeg", lambda parent: None)
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.ensure_ffmpeg", lambda parent, **kw: None)
 
-    window = MainWindow(settings)
+    window = MainWindow(settings, editor=build_editor_service(), processing=build_processing_service(), downloads=build_download_service(), runtime=build_desktop_runtime())
     try:
         # 1. Aba Download
         window._tabs.setCurrentIndex(_TAB_DOWNLOAD)
@@ -137,7 +140,7 @@ def test_main_window_menu_scope_per_tab(qapp: QApplication, monkeypatch: pytest.
 
 def test_edit_panel_top_project_controls_and_label(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         # Verifica a existência dos novos botões de projeto no topo do editor
         assert hasattr(panel, "_new_btn")
@@ -166,7 +169,7 @@ def test_edit_panel_top_project_controls_and_label(qapp: QApplication, dummy_too
 
 def test_convert_panel_clear_and_delete_key(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = ConvertPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = ConvertPanel(settings=settings, ensure_tools=lambda: dummy_tools, processing=build_processing_service(), runtime=build_desktop_runtime())
 
     media1 = LocalMedia(
         path=Path("/tmp/sample1.mp4"),
@@ -199,7 +202,7 @@ def test_convert_panel_clear_and_delete_key(qapp: QApplication, dummy_tools: FFm
 
 def test_edit_panel_splitter_anti_overlap_bounds(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         assert panel._player_box.minimumWidth() >= 1040
         assert panel._media_box.minimumWidth() >= 200
@@ -211,7 +214,7 @@ def test_edit_panel_splitter_anti_overlap_bounds(qapp: QApplication, dummy_tools
 
 def test_edit_panel_track_reordered_undo_redo(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         # Projeto inicial: 1 trilha de vídeo e 1 de áudio
         assert len(panel._project.tracks) == 2
@@ -244,7 +247,7 @@ def test_edit_panel_track_reordered_undo_redo(qapp: QApplication, dummy_tools: F
 
 def test_timeline_track_reordering_target_detection(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         timeline = panel._timeline
         panel._add_track(TrackKind.VIDEO)
@@ -268,3 +271,7 @@ def test_timeline_track_reordering_target_detection(qapp: QApplication, dummy_to
     finally:
         panel.shutdown()
 
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")

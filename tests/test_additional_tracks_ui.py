@@ -14,21 +14,20 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QMessageBox
 
-from videomanager.core.binaries import FFmpegTools
-from videomanager.core.project import (
-    Clip,
-    MediaKind,
-    MediaRef,
-)
-from videomanager.core.settings import Settings
-from videomanager.ui import strings
-from videomanager.ui.panels.edit_panel import (
-    EditPanel,
-    _FontSelectorWidget,
-    _Preview,
-    _SpeedPopup,
-    _VolumePopup,
-)
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaKind
+from videomanager.domain.project import MediaRef
+from videomanager.infrastructure.storage.settings import Settings
+from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.panels.edit_panel import EditPanel
+from videomanager.presentation.qt.panels.edit_widgets import _FontSelectorWidget
+from videomanager.presentation.qt.panels.edit_widgets import _Preview
+from videomanager.presentation.qt.panels.edit_widgets import _SpeedPopup
+from videomanager.presentation.qt.panels.edit_widgets import _VolumePopup
+from videomanager.bootstrap import build_editor_service
+from videomanager.bootstrap import build_processing_service
+from videomanager.bootstrap import build_desktop_runtime
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +56,7 @@ def dummy_tools() -> FFmpegTools:
 
 def test_extras_box_text_and_filter_insertion(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         # Insere clipe de texto
         panel._text_input.setText("Olá Mundo")
@@ -94,7 +93,7 @@ def test_extras_box_text_and_filter_insertion(qapp: QApplication, dummy_tools: F
 
 def test_image_inserted_into_additional_track(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         img_ref = MediaRef(
             path=Path("/tmp/foto.png"),
@@ -115,7 +114,7 @@ def test_image_inserted_into_additional_track(qapp: QApplication, dummy_tools: F
 
 def test_speed_adjustment_and_popups(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         vid_ref = MediaRef(
             path=Path("/tmp/video.mp4"),
@@ -235,7 +234,7 @@ def test_preview_interactive_transform(qapp: QApplication) -> None:
 
 
 def test_font_selector_widget(qapp: QApplication) -> None:
-    from videomanager.ui.panels.edit_panel import _FontSelectorWidget
+    from videomanager.presentation.qt.panels.edit_widgets import _FontSelectorWidget
 
     selector = _FontSelectorWidget("Sans Serif")
     assert selector.current_family() == "Sans Serif"
@@ -260,7 +259,7 @@ def test_font_selector_widget(qapp: QApplication) -> None:
 
 def test_bidirectional_text_and_filter_editing(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         # 1. Inserção de texto inicial
         panel._text_input.setText("Legenda Original")
@@ -323,7 +322,7 @@ def test_bidirectional_text_and_filter_editing(qapp: QApplication, dummy_tools: 
 
 def test_media_cleanup_restriction_and_clear_unused(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         ref_used = MediaRef(path=Path("/tmp/used.mp4"), kind=MediaKind.VIDEO, duration=10.0)
         ref_unused = MediaRef(path=Path("/tmp/unused.mp4"), kind=MediaKind.VIDEO, duration=5.0)
@@ -356,7 +355,7 @@ def test_media_cleanup_restriction_and_clear_unused(qapp: QApplication, dummy_to
 
 def test_project_lifecycle_media_management(qapp: QApplication, dummy_tools: FFmpegTools, tmp_path: Path, wait_until) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         sample_file = tmp_path / "sample.mp4"
         sample_file.write_bytes(b"dummy")
@@ -388,7 +387,7 @@ def test_project_lifecycle_media_management(qapp: QApplication, dummy_tools: FFm
 
 def test_loop_playback_logic(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         ref = MediaRef(path=Path("/tmp/loop_test.mp4"), kind=MediaKind.VIDEO, duration=4.0)
         panel._pool.append(ref)
@@ -421,7 +420,7 @@ def test_loop_playback_logic(qapp: QApplication, dummy_tools: FFmpegTools) -> No
 
 def test_media_list_delete_shortcut_and_context_menu(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         ref1 = MediaRef(path=Path("/tmp/media1.mp4"), kind=MediaKind.VIDEO, duration=5.0)
         ref2 = MediaRef(path=Path("/tmp/media2.mp4"), kind=MediaKind.VIDEO, duration=5.0)
@@ -475,7 +474,7 @@ def test_font_selector_popular_fonts_and_search(qapp: QApplication) -> None:
 
 def test_font_size_controls_and_presets(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         text_tab = panel._extras_tabs.widget(0)
         button_texts = {b.text() for b in text_tab.findChildren(type(panel._bold_btn))}
@@ -512,7 +511,7 @@ def test_font_size_controls_and_presets(qapp: QApplication, dummy_tools: FFmpegT
 
 def test_preview_ghost_avoidance_and_playback_state(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         # Insere clipe de texto na trilha de adicionais
         panel._text_input.setText("Overlay Text")
@@ -546,7 +545,7 @@ def test_preview_ghost_avoidance_and_playback_state(qapp: QApplication, dummy_to
 
 def test_filter_selection_highlight_style(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         # Check stylesheet of filter buttons
         for btn in panel._filter_buttons:
@@ -562,7 +561,7 @@ def test_filter_selection_highlight_style(qapp: QApplication, dummy_tools: FFmpe
 
 def test_text_stroke_controls_and_bidirectional_sync(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         # 1. Configura texto com contorno ativo
         panel._text_input.setText("Texto com Borda")
@@ -607,10 +606,13 @@ def test_text_stroke_controls_and_bidirectional_sync(qapp: QApplication, dummy_t
 
 def test_timeline_track_visibility_toggle_and_menu(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         # Insere um vídeo fictício na timeline
-        from videomanager.core.project import new_project, MediaRef, Clip, MediaKind
+        from videomanager.domain.project import new_project
+        from videomanager.domain.project import MediaRef
+        from videomanager.domain.project import Clip
+        from videomanager.domain.project import MediaKind
         ref = MediaRef(Path("/m/teste.mp4"), MediaKind.VIDEO, duration=10.0, width=1280, height=720, has_audio=True)
         clip_v = Clip(media=ref, start=0.0, duration=10.0)
         proj = new_project().with_clip(0, clip_v)
@@ -648,9 +650,11 @@ def test_timeline_track_visibility_toggle_and_menu(qapp: QApplication, dummy_too
 
 def test_video_track_button_positions_and_version(qapp: QApplication) -> None:
     import videomanager
-    from videomanager.ui.panels.timeline import Timeline
-    from videomanager.ui.theme import DARK
-    from videomanager.core.project import Project, Track, TrackKind
+    from videomanager.presentation.qt.panels.timeline import Timeline
+    from videomanager.presentation.qt.theme import DARK
+    from videomanager.domain.project import Project
+    from videomanager.domain.project import Track
+    from videomanager.domain.project import TrackKind
 
     assert videomanager.__version__ == "1.0"
 
@@ -682,7 +686,7 @@ def test_video_track_button_positions_and_version(qapp: QApplication) -> None:
 
 
 def test_opposite_corner_anchored_resizing(qapp: QApplication) -> None:
-    from videomanager.ui.panels.edit_panel import _Preview
+    from videomanager.presentation.qt.panels.edit_widgets import _Preview
     preview = _Preview()
     preview.resize(800, 600)
     ref = MediaRef(path=Path("/tmp/box.png"), kind=MediaKind.IMAGE, width=400, height=200)
@@ -739,7 +743,7 @@ def test_opposite_corner_anchored_resizing(qapp: QApplication) -> None:
 
 
 def test_video_clip_manipulation_in_preview(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
-    from videomanager.ui.panels.edit_panel import _Preview
+    from videomanager.presentation.qt.panels.edit_widgets import _Preview
     preview = _Preview()
     preview.resize(800, 600)
 
@@ -768,8 +772,8 @@ def test_video_clip_manipulation_in_preview(qapp: QApplication, dummy_tools: FFm
 
 
 def test_deselection_when_clicking_outside(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
-    from videomanager.ui.panels.edit_panel import EditPanel
-    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    from videomanager.presentation.qt.panels.edit_panel import EditPanel
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         # Adiciona um clipe de texto na trilha de adicionais
         panel._text_input.setText("Texto Selecionado")
@@ -970,7 +974,7 @@ def test_snap_magnetic_rotation_and_escape(qapp: QApplication) -> None:
 
 def test_snap_toggle_button_and_persistence(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         assert panel._snap_btn.isChecked() is True
         assert panel._preview._snap_enabled is True
@@ -989,7 +993,7 @@ def test_snap_toggle_button_and_persistence(qapp: QApplication, dummy_tools: FFm
 
 
 def test_properties_tab_opening_editing_and_closing(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
-    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         panel._text_input.setText("Texto Propriedades")
         panel._insert_text_clip()
@@ -1031,7 +1035,7 @@ def test_properties_tab_opening_editing_and_closing(qapp: QApplication, dummy_to
 
 
 def test_properties_lock_ratio_independent_scaling(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
-    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         panel._text_input.setText("Texto Proporção")
         panel._insert_text_clip()
@@ -1075,7 +1079,7 @@ def test_properties_lock_ratio_independent_scaling(qapp: QApplication, dummy_too
 def test_properties_edit_when_deselected_reselects_and_updates_preview(
     qapp: QApplication, dummy_tools: FFmpegTools
 ) -> None:
-    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         panel._text_input.setText("Item Desselecionado")
         panel._insert_text_clip()
@@ -1105,7 +1109,7 @@ def test_event_filter_extras_panel_no_deselection(
     from PySide6.QtCore import QEvent, QPointF
     from PySide6.QtGui import QMouseEvent
 
-    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         panel._text_input.setText("Item EventFilter")
         panel._insert_text_clip()
@@ -1230,7 +1234,7 @@ def test_properties_resize_anchored_bottom_left_right_and_up(
 
     para a direita e para cima, mantendo o canto inferior esquerdo estático.
     """
-    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         panel._text_input.setText("Âncora BL")
         panel._insert_text_clip()
@@ -1301,10 +1305,11 @@ def test_properties_resize_anchored_bottom_left_right_and_up(
 
 def test_calibri_and_rapier_zero_fonts_availability(qapp: QApplication) -> None:
     """Verifica que Calibri e Rapier Zero estão disponíveis no seletor e renderizam com sucesso."""
-    from videomanager.core.composer import render_text_to_image
-    from videomanager.core.project import Clip
-    from videomanager.ui.fonts import ensure_application_fonts
-    from videomanager.ui.panels.edit_panel import _FontSelectorWidget
+    from videomanager.infrastructure.qt.text import QtTextRasterizer
+    render_text_to_image = QtTextRasterizer().render
+    from videomanager.domain.project import Clip
+    from videomanager.presentation.qt.fonts import ensure_application_fonts
+    from videomanager.presentation.qt.panels.edit_widgets import _FontSelectorWidget
 
     ensure_application_fonts()
     selector = _FontSelectorWidget("Calibri")
@@ -1356,3 +1361,7 @@ def test_calibri_and_rapier_zero_fonts_availability(qapp: QApplication) -> None:
 
 
 
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")

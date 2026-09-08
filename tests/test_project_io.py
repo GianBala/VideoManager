@@ -7,21 +7,17 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.core.errors import ProjectError
-from videomanager.core.project import (
-    Clip,
-    MediaKind,
-    MediaRef,
-    Project,
-    Track,
-    TrackKind,
-)
-from videomanager.core.project_io import (
-    load_project,
-    project_from_dict,
-    project_to_dict,
-    save_project,
-)
+from videomanager.application.errors import ProjectError
+from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaKind
+from videomanager.domain.project import MediaRef
+from videomanager.domain.project import Project
+from videomanager.domain.project import Track
+from videomanager.domain.project import TrackKind
+from videomanager.infrastructure.storage.project_json import load_project
+from videomanager.infrastructure.storage.project_json import project_from_dict
+from videomanager.infrastructure.storage.project_json import project_to_dict
+from videomanager.infrastructure.storage.project_json import save_project
 
 
 def _sample_project(media_path: Path) -> Project:

@@ -13,7 +13,7 @@ extratores de verdade. Mas a resposta crua não vai para o repositório como vei
   automáticas em massa) são removidos para a fixture continuar legível numa
   revisão de código.
 
-Todos os campos que :mod:`videomanager.core.format_matrix` consulta são
+Todos os campos que :mod:`videomanager.infrastructure.yt_dlp.formats` consulta são
 preservados exatamente como vieram — inclusive quando vieram ausentes, nulos ou
 com o tipo errado, que é justamente o que se quer testar.
 """

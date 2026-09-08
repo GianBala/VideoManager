@@ -12,20 +12,18 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.core.binaries import FFmpegTools
-from videomanager.core.converter import (
-    AudioTarget,
-    LocalMedia,
-    LocalStream,
-    VideoTarget,
-    _ratio,
-    build_args,
-    can_copy_audio,
-    describe_target,
-    needs_video_reencode,
-    output_path,
-)
-from videomanager.core.errors import ConversionError
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.domain.media import AudioTarget
+from videomanager.domain.media import LocalMedia
+from videomanager.domain.media import LocalStream
+from videomanager.domain.media import VideoTarget
+from videomanager.infrastructure.ffmpeg.converter import _ratio
+from videomanager.infrastructure.ffmpeg.converter import build_args
+from videomanager.domain.compatibility import can_copy_audio
+from videomanager.application.media.conversion_description import describe_target
+from videomanager.domain.compatibility import needs_video_reencode
+from videomanager.infrastructure.ffmpeg.converter import output_path
+from videomanager.application.errors import ConversionError
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
 DEST = Path("/saida/arquivo.mp3")

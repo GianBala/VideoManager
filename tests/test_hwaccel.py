@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.core import hwaccel
-from videomanager.core.binaries import FFmpegTools
+from videomanager.infrastructure.ffmpeg import hardware as hwaccel
+from videomanager.application.capabilities import FFmpegTools
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
 
