@@ -111,4 +111,3 @@ def resolved_audio_codec(media: LocalMedia, target: VideoTarget) -> str:
     if target.audio_codec != "copy":
         return target.audio_codec
     return _CONTAINER_AUDIO_FALLBACK.get(target.container, "aac")
-

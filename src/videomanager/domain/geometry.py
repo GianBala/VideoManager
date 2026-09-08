@@ -10,4 +10,3 @@ def image_base_size(
     base_w = max(2, int(round(w * fit_ratio / 2.0) * 2))
     base_h = max(2, int(round(h * fit_ratio / 2.0) * 2))
     return base_w, base_h
-

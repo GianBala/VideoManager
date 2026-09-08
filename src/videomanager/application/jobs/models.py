@@ -91,4 +91,3 @@ class Job:
     @property
     def percent(self) -> float | None:
         return self.progress.percent if self.progress else None
-

@@ -101,4 +101,3 @@ def _interpolated_clips(project: Project) -> list[Clip]:
 def can_interpolate(project: Project) -> bool:
     """Se há bloco abaixo da taxa da tela — o único caso com o que interpolar."""
     return bool(_interpolated_clips(project))
-

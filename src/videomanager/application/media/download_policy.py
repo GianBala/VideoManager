@@ -193,4 +193,3 @@ def describe_request(request: Request, plan: ContainerPlan | None) -> str:
     container = plan.container if plan else request.container
     parts.append(".mkv" if container == CONTAINER_AUTO else f".{container}")
     return " · ".join(parts)
-

@@ -49,4 +49,3 @@ CHOICES: tuple[tuple[str, str], ...] = (
     ("amf", "AMD (AMF)"),
     ("vaapi", "VAAPI (Linux)"),
 )
-
