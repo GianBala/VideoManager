@@ -548,7 +548,11 @@ def build_graph(
                         "fade_black": "fadeblack",
                         "fade_white": "fadewhite",
                     }.get(tname, "fade")
-                    cut = max(0.0, second.clip.start - first.clip.start - piece.duration / 2.0)
+                    # ``piece.offset`` é relativo à janela solicitada (na
+                    # prévia ela começa no cursor). Usar ``clip.start`` aqui
+                    # deixava o xfade procurando o corte fora da janela e o
+                    # quadro ficava preto depois de avançar a reprodução.
+                    cut = max(0.0, second.offset - piece.duration / 2.0)
                     label = f"[t{order}]"
                     filters.append(
                         f"[tr_a][tr_b]xfade=transition={xfade_name}:duration={piece.duration:.6f}:offset={cut:.6f},"
