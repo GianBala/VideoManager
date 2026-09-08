@@ -6,13 +6,23 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QMessageBox
 
-from videomanager.core.editor_session import EditorSession
-from videomanager.core.errors import ProjectError
-from videomanager.core.project import Clip, MediaKind, MediaRef, Track, TrackKind, next_clip_id
-from videomanager.core.project_io import load_project, project_from_dict, save_project
-from videomanager.core.settings import Settings
-from videomanager.ui.panels.edit_panel import EditPanel
-from videomanager.ui.text_renderer import render_text_to_image
+from videomanager.application.editor.session import EditorSession
+from videomanager.application.errors import ProjectError
+from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaKind
+from videomanager.domain.project import MediaRef
+from videomanager.domain.project import Track
+from videomanager.domain.project import TrackKind
+from videomanager.domain.project import next_clip_id
+from videomanager.infrastructure.storage.project_json import load_project
+from videomanager.infrastructure.storage.project_json import project_from_dict
+from videomanager.infrastructure.storage.project_json import save_project
+from videomanager.infrastructure.storage.settings import Settings
+from videomanager.presentation.qt.panels.edit_panel import EditPanel
+from videomanager.infrastructure.qt.text import QtTextRasterizer
+from videomanager.bootstrap import build_editor_service
+from videomanager.bootstrap import build_processing_service
+from videomanager.bootstrap import build_desktop_runtime
 
 
 def document(identity=1):
@@ -85,7 +95,7 @@ def test_ponto_salvo_acompanha_desfazer_refazer_e_exclusao_total():
     original, _ = project_from_dict(document())
     session.reset(original)
     session.remember()
-    session.project = original.without_clip(original.clips[0].clip_id)
+    session.replace_current(original.without_clip(original.clips[0].clip_id))
     assert session.project.is_empty and session.has_changes
     assert session.undo() and not session.has_changes
     assert session.redo() and session.has_changes
@@ -97,7 +107,7 @@ def test_ponto_salvo_acompanha_desfazer_refazer_e_exclusao_total():
 def panel(monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Ok)
     monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Discard)
-    instance = EditPanel(Settings(), ensure_tools=lambda: None)
+    instance = EditPanel(Settings(), ensure_tools=lambda: None, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     yield instance
     instance.shutdown()
 
@@ -151,6 +161,7 @@ def test_falha_ao_abrir_preserva_projeto_e_caminho(panel, tmp_path, wait_until):
 def test_textos_de_versoes_distintas_sao_imutaveis():
     clip = Clip(MediaRef(Path("Texto_teste"), MediaKind.IMAGE), 0, 2,
                 overlay_type="text", text_content="Primeira versão")
+    render_text_to_image = QtTextRasterizer().render
     first = render_text_to_image(clip)
     content = first.read_bytes()
     changed = render_text_to_image(replace(clip, text_content="Segunda versão"))
@@ -163,8 +174,9 @@ def test_textos_de_versoes_distintas_sao_imutaveis():
 def test_importacao_nao_bloqueia_eventos_e_pode_ser_cancelada(panel, monkeypatch, wait_until):
     import threading
     from PySide6.QtCore import QTimer
-    from videomanager.core.binaries import FFmpegTools
-    from videomanager.core.converter import LocalMedia, LocalStream
+    from videomanager.application.capabilities import FFmpegTools
+    from videomanager.domain.media import LocalMedia
+    from videomanager.domain.media import LocalStream
 
     started, release = threading.Event(), threading.Event()
     ticks = []
@@ -175,7 +187,7 @@ def test_importacao_nao_bloqueia_eventos_e_pode_ser_cancelada(panel, monkeypatch
         return LocalMedia(path, 2, "mp4", 100,
                           (LocalStream(0, "video", "h264", width=160, height=90, fps=24),))
     panel._ensure_tools = lambda: FFmpegTools(Path("/missing/ffmpeg"), Path("/missing/ffprobe"), "teste")
-    monkeypatch.setattr("videomanager.workers.media_worker.probe_file", inspect)
+    monkeypatch.setattr("videomanager.infrastructure.qt.workers.media_worker.probe_file", inspect)
     try:
         panel.import_files([Path("/missing/media.mp4")], insert=True)
         QTimer.singleShot(0, lambda: ticks.append(True))
@@ -191,7 +203,7 @@ def test_importacao_nao_bloqueia_eventos_e_pode_ser_cancelada(panel, monkeypatch
 
 
 def test_resposta_de_projeto_anterior_nao_substitui_novo(panel):
-    from videomanager.workers.media_worker import MediaResult
+    from videomanager.application.editor.media import MediaResult
     previous_token = panel._project_actions.token
     project, _ = project_from_dict(document())
     panel.new_project()
@@ -228,8 +240,44 @@ def test_importar_compositor_nao_carrega_qt_ou_interface():
     import sys
     result = subprocess.run([
         sys.executable, "-c",
-        "import videomanager.core.composer, sys; "
+        "import videomanager.infrastructure.ffmpeg.composer, sys; "
         "assert not any(n.startswith(('PySide6', 'videomanager.ui')) for n in sys.modules)",
     ], capture_output=True, timeout=10,
         env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")})
     assert result.returncode == 0, result.stderr.decode()
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+def test_salvar_snapshot_de_sessao_substituida_nao_autoriza_descartar_atual(panel, tmp_path, monkeypatch):
+    from videomanager.domain.project import new_project
+    panel._project_path = tmp_path / 'snapshot.vmp'
+    panel._insert_text_clip()
+    accept = panel.editor.accept_saved
+    def replaced(snapshot, path):
+        panel.editor.session.reset(new_project())
+        return accept(snapshot, path)
+    monkeypatch.setattr(panel.editor, 'accept_saved', replaced)
+    assert not panel.save_project()
+    assert (tmp_path / 'snapshot.vmp').exists()
+    assert panel.editor.session.path is None
+
+
+def test_dialogo_de_gravacao_so_fecha_com_resultado_do_worker(desktop_app):
+    from videomanager.presentation.qt.editor_project import _SaveProgress
+    dialog = _SaveProgress()
+    dialog.setCancelButton(None)
+    dialog.show()
+    desktop_app.processEvents()
+    try:
+        dialog.close()
+        assert dialog.isVisible()
+        dialog.reject()
+        assert dialog.isVisible()
+        dialog.finish(True)
+        assert not dialog.isVisible()
+    finally:
+        dialog.finish(False)
+        dialog.deleteLater()

@@ -13,17 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.core.binaries import FFmpegTools, decode_threads
-from videomanager.core.preview import (
-    MAX_PREVIEW_FPS,
-    FramePump,
-    _one_pass_worth_it,
-    _strip_command,
-    filmstrip_times,
-    fit_size,
-    preview_fps,
-)
-from videomanager.workers.preview_worker import PlaybackWorker
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.infrastructure.system.binaries import decode_threads
+from videomanager.domain.preview import MAX_PREVIEW_FPS
+from videomanager.infrastructure.ffmpeg.preview import FramePump
+from videomanager.infrastructure.ffmpeg.preview import _one_pass_worth_it
+from videomanager.infrastructure.ffmpeg.preview import _strip_command
+from videomanager.domain.preview import filmstrip_times
+from videomanager.domain.preview import fit_size
+from videomanager.domain.preview import preview_fps
+from videomanager.infrastructure.qt.workers.preview_worker import PlaybackWorker
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
 
@@ -145,3 +144,7 @@ class TestTiraDeMiniaturas:
         )
         assert comando.index("-threads") < comando.index("-i")
         assert comando[comando.index("-threads") + 1] == str(decode_threads())
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")

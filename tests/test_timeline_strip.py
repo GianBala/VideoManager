@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from videomanager.ui.panels.timeline import _Strip
+from videomanager.presentation.qt.panels.timeline import _Strip
 
 
 def tira(inicio: float, fim: float, quantas: int) -> _Strip:
@@ -110,3 +110,7 @@ class TestMiniaturasAtravessandoOZoom:
         momentos = sorted(strip.thumbs)
         assert momentos == sorted(momentos)
         assert momentos[0] < momentos[-1]
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")

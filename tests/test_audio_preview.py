@@ -15,11 +15,14 @@ entregues em 4 s, som ao dobro da velocidade.
 
 from __future__ import annotations
 
+import pytest
+
 import queue
 import subprocess
 import threading
 
-from videomanager.ui.audio_preview import AudioPreview, _reap
+from videomanager.infrastructure.qt.audio import AudioPreview
+from videomanager.infrastructure.qt.audio import _reap
 
 
 class SinkDeMentira:
@@ -251,3 +254,102 @@ def test_o_sinal_de_parada_do_leitor_e_o_dele() -> None:
     )
 
     assert fila.get_nowait() is None, "só o fim do fluxo, nenhum áudio"
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+def test_fim_do_audio_nao_se_perde_quando_o_ultimo_pedaco_enche_a_fila():
+    fila = queue.Queue(1)
+    stopping = threading.Event()
+    thread = threading.Thread(target=AudioPreview._read, args=(
+        Tocador(), ProcessoComCano([b"fim"]), fila, stopping,
+    ))
+    thread.start()
+    try:
+        # Deixa o produtor chegar ao EOF antes de consumir o último pedaço.
+        thread.join(0.1)
+        assert fila.get(timeout=1) == b"fim"
+        assert fila.get(timeout=1) is None
+    finally:
+        stopping.set()
+        thread.join(1)
+    assert not thread.is_alive()
+
+
+def test_leitor_com_fila_cheia_responde_ao_cancelamento():
+    fila = queue.Queue(1)
+    stopping = threading.Event()
+    thread = threading.Thread(target=AudioPreview._read, args=(
+        Tocador(), ProcessoComCano([b"fim"]), fila, stopping,
+    ))
+    thread.start()
+    stopping.set()
+    thread.join(1)
+    assert not thread.is_alive()
+
+
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+def test_runtime_produz_pcm_no_mesmo_formato_negociado_com_a_placa(monkeypatch):
+    from types import SimpleNamespace
+    from videomanager.infrastructure.qt.runtime import DesktopRuntime
+    from videomanager.infrastructure.qt import runtime
+    requested = []
+    started = []
+    def command(*args, **kwargs):
+        requested.append(kwargs)
+        return ['ffmpeg', 'pcm']
+    monkeypatch.setattr(runtime.composer, 'audio_command', command)
+    output = SimpleNamespace(
+        available=True, target_format=(44100, 1),
+        start=lambda *args, **kwargs: started.append((args, kwargs)),
+    )
+    DesktopRuntime.play_audio(None, output, object(), 2.5, object())
+    assert requested[0]['sample_rate'] == 44100
+    assert requested[0]['channels'] == 1
+    assert started == [((['ffmpeg', 'pcm'], 2.5), {'pcm_format': (44100, 1)})]
+
+
+def test_audio_continua_sendo_relogio_enquanto_a_placa_drena_o_final():
+    from types import SimpleNamespace
+    output = SimpleNamespace(_sink=object(), _finished=True)
+    assert AudioPreview.playing.fget(output)
+    output._sink = None
+    assert not AudioPreview.playing.fget(output)
+
+
+def test_formato_incompativel_nao_inicia_ffmpeg(monkeypatch):
+    from types import SimpleNamespace
+    from videomanager.infrastructure.qt import audio
+    monkeypatch.setattr(AudioPreview, 'available', property(lambda self: True))
+    monkeypatch.setattr(audio, 'QMediaDevices', SimpleNamespace(
+        defaultAudioOutput=lambda: SimpleNamespace(isFormatSupported=lambda fmt: False),
+    ))
+    def unexpected(*args, **kwargs):
+        pytest.fail('formato incompatível não deve iniciar processo')
+    monkeypatch.setattr(audio.subprocess, 'Popen', unexpected)
+    output = AudioPreview()
+    assert not output.start(['ffmpeg'], 0, pcm_format=(44100, 1))
+    assert not output.playing
+
+
+def test_falha_na_abertura_da_placa_encerra_o_produtor(monkeypatch):
+    from types import SimpleNamespace
+    from videomanager.infrastructure.qt import audio
+    monkeypatch.setattr(AudioPreview, 'available', property(lambda self: True))
+    monkeypatch.setattr(audio, 'QMediaDevices', SimpleNamespace(
+        defaultAudioOutput=lambda: SimpleNamespace(isFormatSupported=lambda fmt: True),
+    ))
+    process = ProcessoDeMentira(atende_terminate=True)
+    process.stdout = CanoDeMentira([])
+    monkeypatch.setattr(audio.subprocess, 'Popen', lambda *args, **kwargs: process)
+    monkeypatch.setattr(audio, '_dispose', _reap)
+    monkeypatch.setattr(audio, 'QAudioSink', lambda *args: SimpleNamespace(
+        start=lambda: None, stop=lambda: None, deleteLater=lambda: None,
+        setVolume=lambda volume: None,
+    ))
+    output = AudioPreview()
+    assert not output.start(['ffmpeg'], 0)
+    assert not process.vivo
+    assert not output.playing
+    assert output._process is None

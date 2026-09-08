@@ -10,28 +10,33 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from videomanager.core.binaries import FFmpegTools
-from videomanager.core.converter import AudioTarget, LocalMedia, LocalStream, VideoTarget
-from videomanager.core.estimator import (
-    estimate_audio_bitrate,
-    estimate_convert_size,
-    estimate_download_size,
-    estimate_export_size,
-    estimate_video_bitrate,
-)
-from videomanager.core.models import (
-    AudioChoice,
-    Fmt,
-    FormatMatrix,
-    Kind,
-    Mode,
-    VideoChoice,
-)
-from videomanager.core.project import Clip, MediaKind, MediaRef, TrackKind, new_project
-from videomanager.core.settings import Settings
-from videomanager.ui.export_dialog import ExportDialog
-from videomanager.ui.panels.convert_panel import ConvertPanel
-from videomanager.ui.panels.quality_panel import QualityPanel
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.domain.media import AudioTarget
+from videomanager.domain.media import LocalMedia
+from videomanager.domain.media import LocalStream
+from videomanager.domain.media import VideoTarget
+from videomanager.domain.estimator import estimate_audio_bitrate
+from videomanager.domain.estimator import estimate_convert_size
+from videomanager.domain.estimator import estimate_download_size
+from videomanager.domain.estimator import estimate_export_size
+from videomanager.domain.estimator import estimate_video_bitrate
+from videomanager.domain.formats import AudioChoice
+from videomanager.domain.formats import Fmt
+from videomanager.domain.formats import FormatMatrix
+from videomanager.domain.formats import Kind
+from videomanager.domain.formats import Mode
+from videomanager.domain.formats import VideoChoice
+from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaKind
+from videomanager.domain.project import MediaRef
+from videomanager.domain.project import TrackKind
+from videomanager.domain.project import new_project
+from videomanager.infrastructure.storage.settings import Settings
+from videomanager.presentation.qt.export_dialog import ExportDialog
+from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
+from videomanager.presentation.qt.panels.quality_panel import QualityPanel
+from videomanager.bootstrap import build_processing_service
+from videomanager.bootstrap import build_desktop_runtime
 
 
 @pytest.fixture
@@ -306,7 +311,7 @@ class TestUIIntegration:
         self, qapp: QApplication, dummy_tools: FFmpegTools, tmp_path: Path
     ) -> None:
         settings = Settings()
-        panel = ConvertPanel(settings, ensure_tools=lambda: dummy_tools)
+        panel = ConvertPanel(settings, ensure_tools=lambda: dummy_tools, processing=build_processing_service(), runtime=build_desktop_runtime())
 
         v_file = tmp_path / "clip.mp4"
         v_file.write_bytes(b"dummy")
@@ -367,7 +372,7 @@ class TestUIIntegration:
             pool=[ref],
             probed={video_path: local},
             ensure_tools=lambda: dummy_tools,
-        )
+         processing=build_processing_service(), runtime=build_desktop_runtime())
         try:
             assert dialog._size_label.text() != "—"
             assert "MB" in dialog._size_label.text() or "GB" in dialog._size_label.text()
@@ -381,3 +386,7 @@ class TestUIIntegration:
             assert "MB" in audio_text or "KB" in audio_text
         finally:
             dialog.close()
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
