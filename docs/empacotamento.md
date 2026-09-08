@@ -48,7 +48,7 @@ numa máquina x86_64.
 Baixa `ffmpeg`/`ffprobe` para `vendor/<plataforma>/` **antes** do
 empacotamento, para que o executável já saia com os binários dentro e
 funcione no primeiro clique, sem precisar baixar nada na primeira execução.
-Reaproveita `core.binaries` — a mesma lógica de fonte e validação que a
+Reaproveita `infrastructure.system.binaries` — a mesma lógica de fonte e validação que a
 aplicação usa em tempo de execução, então não existe uma segunda cópia dela
 para sair de sincronia.
 
@@ -89,10 +89,17 @@ Existe porque o modo de falha típico do PyInstaller é silencioso na geração
 e fatal só na abertura: um import que o analisador não enxerga produz um
 pacote aparentemente completo que morre no primeiro segundo — foi
 exatamente o que já aconteceu neste projeto (pacote sem o PySide6 inteiro,
-sem nenhum aviso na geração). O script abre o executável em modo
-`QT_QPA_PLATFORM=offscreen` (funciona sem servidor gráfico, inclusive em CI)
-e confere que ele continua de pé depois da janela montada e do bootstrap —
-não só que ele "rodou sem erro".
+sem nenhum aviso na geração). O script usa `QT_QPA_PLATFORM=offscreen` e o
+argumento `--smoke-test`, com perfil temporário e prazo padrão de 30 segundos.
+Exige código de saída zero e o marcador `VM_SMOKE_OK`: janela montada, fonte
+Carlito carregada, prévia de texto renderizada e vídeo de 1 segundo exportado
+e inspecionado. Um processo que apenas continua aberto não passa no teste.
+
+A consulta a dispositivos de áudio fica desabilitada nesse diagnóstico.
+ffmpeg/ffprobe precisam estar empacotados, provisionados ou no PATH. Com
+`VM_BUNDLE_FFMPEG=0`, disponibilize as ferramentas antes de rodar o teste.
+No Windows, execute `VideoManager.exe --smoke-test`, aguarde o término e confira
+o código de saída. Valide também áudio e interação no sistema de destino.
 
 ## Distribuindo o AppImage
 
@@ -108,3 +115,24 @@ máquina sem FUSE, ainda roda assim:
 ```bash
 ./Video_Manager-<versão>-x86_64.AppImage --appimage-extract-and-run
 ```
+
+## Diagnóstico e diretórios isolados
+
+O build Windows executa `packaging/smoke_windows.ps1` e exige código zero
+antes de anunciar sucesso. O diagnóstico cria a janela, carrega fontes, gera
+uma prévia com texto e exporta mídia de um segundo. O script encerra o processo
+se ele ultrapassar o prazo. A CI gera o pacote no Windows e guarda o artefato
+por sete dias.
+
+Em Linux, `VM_DIST_DIR` e `VM_BUILD_DIR` permitem escolher diretórios separados
+para PyInstaller e AppImage. O build não precisa apagar todo o `dist` existente.
+O AppImage gera um arquivo `.sha256` após passar no diagnóstico. O download do
+runtime só atualiza o cache quando termina com sucesso e o patch trabalha numa
+cópia; auto-extração não é garantia de suporte a toda distribuição Linux.
+
+As evidências da migração estão no [checkup final](clean-architecture/validacao-final.md).
+
+O provisionamento usa uma publicação mensal fixa do BtbN, revisão
+`n7.1.5-12-g1fdbca85aa`, porque os assets 7.1 foram retirados do `latest`.
+A alteração de versão é explícita para manter os requisitos de driver NVIDIA
+validados. Os testes de rede verificam os três endereços configurados.
