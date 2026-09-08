@@ -147,7 +147,7 @@ def _pieces(
             finish = clip.end if end is None else min(clip.end, end)
             if finish - begin <= 0:
                 continue
-            has_v = want_video and clip.has_image
+            has_v = want_video and (clip.has_image or clip.is_transition)
             has_a = want_audio and clip.has_sound and not track.muted
             if not has_v and not has_a:
                 continue
@@ -527,10 +527,22 @@ def build_graph(
                 start, end = piece.offset, piece.offset + piece.duration
                 half = max(0.01, piece.duration / 2.0)
                 mid = start + half
-                if tname == "fade_black":
+                if tname in ("fade", "fadeblack", "fade_black"):
                     fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black,fade=t=in:st={mid:.6f}:d={half:.6f}:color=black"
-                elif tname == "fade_white":
+                elif tname in ("fadewhite", "fade_white"):
                     fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=white,fade=t=in:st={mid:.6f}:d={half:.6f}:color=white"
+                elif tname == "dissolve_color":
+                    fexpr = (
+                        f"colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"
+                        f":enable='between(t,{start:.6f},{end:.6f})'"
+                    )
+                elif tname == "dissolve":
+                    fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black,fade=t=in:st={mid:.6f}:d={half:.6f}:color=black"
+                elif tname in ("wipeleft", "wiperight", "slideleft", "slideright"):
+                    # A composição entre duas fontes será feita pelo xfade na
+                    # etapa de emenda; este fallback mantém projetos antigos
+                    # renderizáveis enquanto não houver duas fontes elegíveis.
+                    fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black"
                 elif tname == "flash":
                     fexpr = (
                         f"eq=contrast='if(lt(t,{mid:.6f}),1+3*(t-{start:.6f})/{half:.6f},1+3*({end:.6f}-t)/{half:.6f})'"
