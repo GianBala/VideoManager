@@ -194,6 +194,8 @@ def test_transicao_entre_dois_videos_usa_xfade() -> None:
     project = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=clips + (transition,)),))
     graph = build_graph(project)
     assert any("xfade=transition=dissolve" in item for item in graph.filters)
+    assert any("fps=30.000000,format=yuv420p[tr_a]" in item for item in graph.filters)
+    assert not any("[base]" in item for item in graph.filters)
 
     preview = build_graph(project, at=3.2, span=2.0)
     assert any("offset=0.300000" in item for item in preview.filters)
