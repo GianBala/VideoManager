@@ -1110,18 +1110,39 @@ class EditPanel(QWidget):
     def _on_transition_dur_changed(self, dur: float) -> None:
         clip = self._timeline.selected_clip
         if not self._syncing and clip is not None and clip.overlay_type == "transition":
+            dur = min(dur, self._transition_max_duration(clip))
+            if abs(self._trans_dur.value() - dur) > 1e-6:
+                self._trans_dur.blockSignals(True)
+                self._trans_dur.setValue(dur)
+                self._trans_dur.blockSignals(False)
             self._remember()
             self._apply(self._project.with_updated_clip(clip.clip_id, duration=dur))
+
+    def _transition_max_duration(self, marker: Clip) -> float:
+        """Maior sobreposição possível entre os clipes do corte."""
+        found = self._project.find(marker.clip_id)
+        if found is None:
+            return marker.duration
+        index, _ = found
+        track = self._project.tracks[index]
+        clips = sorted((c for c in track.clips if not c.is_transition), key=lambda c: c.start)
+        cut = marker.start + marker.duration / 2.0
+        before = max((c for c in clips if c.end <= cut + 1e-6), key=lambda c: c.end, default=None)
+        after = min((c for c in clips if c.start >= cut - 1e-6), key=lambda c: c.start, default=None)
+        if before is None or after is None:
+            return marker.duration
+        return max(0.2, min(5.0, before.duration, after.duration))
 
     def _handle_apply_or_update_transition(self) -> None:
         clip = self._timeline.selected_clip
         if clip is not None and clip.overlay_type == "transition":
             self._remember()
+            duration = min(self._trans_dur.value(), self._transition_max_duration(clip))
             self._apply(
                 self._project.with_updated_clip(
                     clip.clip_id,
                     transition_name=self._selected_trans_name,
-                    duration=self._trans_dur.value(),
+                    duration=duration,
                 )
             )
         else:

@@ -537,6 +537,11 @@ def build_graph(
                 sources = transition_sources
                 if len(sources) == 2 and all(p.clip.overlay_type == "none" for p in sources):
                     first, second = sources
+                    # A janela da prévia pode conter apenas parte do clipe;
+                    # não reduza a transição por esse recorte temporário.
+                    transition_duration = max(
+                        0.01, min(piece.clip.duration, first.clip.duration, second.clip.duration)
+                    )
                     # xfade exige as duas entradas começando em PTS zero. Os
                     # clipes já foram preparados em [vN], então só removemos o
                     # deslocamento da timeline antes da emenda.
@@ -559,11 +564,11 @@ def build_graph(
                     # prévia ela começa no cursor). Usar ``clip.start`` aqui
                     # deixava o xfade procurando o corte fora da janela e o
                     # quadro ficava preto depois de avançar a reprodução.
-                    cut = max(0.0, second.offset - piece.duration / 2.0)
+                    cut = max(0.0, second.offset - transition_duration / 2.0)
                     label = f"[t{order}]"
                     filters.append(
-                        f"[tr_a][tr_b]xfade=transition={xfade_name}:duration={piece.duration:.6f}:offset={cut:.6f},"
-                        f"tpad=stop_mode=clone:stop_duration={piece.duration:.6f}{label}"
+                        f"[tr_a][tr_b]xfade=transition={xfade_name}:duration={transition_duration:.6f}:offset={cut:.6f},"
+                        f"tpad=stop_mode=clone:stop_duration={transition_duration:.6f}{label}"
                     )
                     current = label
                     continue
