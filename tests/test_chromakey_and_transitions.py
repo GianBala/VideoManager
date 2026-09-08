@@ -196,6 +196,17 @@ def test_transicao_entre_dois_videos_usa_xfade() -> None:
     assert any("xfade=transition=dissolve" in item for item in graph.filters)
 
 
+def test_marcador_sem_duas_fontes_nao_apaga_a_composicao() -> None:
+    media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=12.0)
+    clips = tuple(Clip(media=media, start=i * 4.0, duration=4.0) for i in range(3))
+    marker = Clip(
+        media=MediaRef(path=Path("Transição"), kind=MediaKind.IMAGE, duration=1.0),
+        start=3.5, duration=1.0, overlay_type="transition", transition_name="fade",
+    )
+    graph = build_graph(Project(tracks=(Track(kind=TrackKind.VIDEO, clips=clips + (marker,)),)))
+    assert not any("[base]fade=" in item for item in graph.filters)
+
+
 def test_export_duration_with_hidden_tracks() -> None:
     c1 = Clip(media=MediaRef(path=Path("v1.mp4"), kind=MediaKind.VIDEO, duration=10.0), start=0.0, duration=10.0)
     c2 = Clip(media=MediaRef(path=Path("v2.mp4"), kind=MediaKind.VIDEO, duration=25.0), start=0.0, duration=25.0)
