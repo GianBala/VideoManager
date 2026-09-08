@@ -24,7 +24,7 @@ if [ "${SKIP_DEPS:-0}" != "1" ]; then
 fi
 
 echo "==> testes (um pacote não deve ser gerado sobre suíte vermelha)"
-if [ "${VM_FAST_TESTS:-0}" = "1" ]; then
+if [ "${VM_FAST_TESTS:-1}" = "1" ]; then
     echo "    modo rápido: testes de integração com ffmpeg ficam para a CI"
     "$PY" -m pytest -q -m "not ffmpeg and not network"
 else
