@@ -7,6 +7,7 @@
 #
 #   ./packaging/build_appimage.sh                  # build completo
 #   ./packaging/build_appimage.sh --reuse-dist     # reaproveita dist/ existente
+#   VM_FAST_TESTS=1 ./packaging/build_appimage.sh   # testes rápidos (sem ffmpeg)
 #   VM_BUNDLE_FFMPEG=0 ./packaging/build_appimage.sh   # ~290 MB a menos
 #
 # Sem compilação cruzada: um AppImage x86_64 precisa ser gerado numa máquina

@@ -91,6 +91,16 @@ Cada sistema gera o seu próprio pacote — o PyInstaller não faz compilação 
 Os scripts rodam os testes, baixam o `ffmpeg` para embutir, empacotam e por fim
 abrem o executável gerado para conferir que ele realmente sobe.
 
+Os testes de integração com o `ffmpeg` são os mais demorados. Para uma
+iteração local rápida, deixe esses testes para a CI:
+
+```bash
+VM_FAST_TESTS=1 ./packaging/build_appimage.sh
+```
+
+Esse modo ainda executa os testes de domínio, aplicação, interface e
+arquitetura. A suíte completa continua sendo o padrão, sem essa variável.
+
 ### AppImage
 
 Um arquivo só, sem instalação: baixe, dê permissão de execução, clique.
