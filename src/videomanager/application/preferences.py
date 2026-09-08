@@ -90,5 +90,3 @@ class Preferences:
             elif spec.type in ("list[str]",) and isinstance(value, list):
                 kwargs[name] = [str(item) for item in value]
         return cls(**kwargs)
-
-

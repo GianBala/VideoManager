@@ -43,4 +43,3 @@ def describe_export(
         parts.append("placa de vídeo, se disponível")
     parts.append(f"{format_span(project.export_duration)} de duração")
     return " · ".join(parts)
-

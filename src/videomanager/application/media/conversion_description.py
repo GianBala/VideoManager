@@ -50,4 +50,3 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
     if target.fps:
         parts.append(f"{target.fps:g} fps")
     return " · ".join(parts)
-

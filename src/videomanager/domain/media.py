@@ -104,4 +104,3 @@ class VideoTarget:
     @property
     def extension(self) -> str:
         return self.container
-

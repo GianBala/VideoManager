@@ -25,4 +25,3 @@ def interpolation_bytes(project: Project) -> int:
             pixels = min(pixels, clip.media.width * clip.media.height)
         total += pixels * _INTERPOLATE_BYTES_PER_PIXEL
     return total
-
