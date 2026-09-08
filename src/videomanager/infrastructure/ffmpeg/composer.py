@@ -493,11 +493,18 @@ def build_graph(
 
     video_label = None
     if want_video and project.has_video:
-        filters.append(
-            f"color=c=black:s={project.width}x{project.height}"
-            f":r={fps:.6f}:d={max(_MIN_CANVAS, duration):.6f}[base]"
-        )
+        transition_sources = [p for p in video_parts if not p.clip.is_transition]
+        can_xfade = len(transition_sources) == 2 and all(
+            p.clip.overlay_type == "none" for p in transition_sources
+        ) and any(p.clip.is_transition for p in video_parts)
+        if not can_xfade:
+            filters.append(
+                f"color=c=black:s={project.width}x{project.height}"
+                f":r={fps:.6f}:d={max(_MIN_CANVAS, duration):.6f}[base]"
+            )
         current = "[base]"
+        if can_xfade:
+            current = ""
         for order, piece in enumerate(video_parts):
             if piece.clip.overlay_type == "filter":
                 fname = piece.clip.filter_name
@@ -527,14 +534,14 @@ def build_graph(
                 start, end = piece.offset, piece.offset + piece.duration
                 half = max(0.01, piece.duration / 2.0)
                 mid = start + half
-                sources = [p for p in video_parts if not p.clip.is_transition]
+                sources = transition_sources
                 if len(sources) == 2 and all(p.clip.overlay_type == "none" for p in sources):
                     first, second = sources
                     # xfade exige as duas entradas começando em PTS zero. Os
                     # clipes já foram preparados em [vN], então só removemos o
                     # deslocamento da timeline antes da emenda.
-                    filters.append(f"[v{first.index}]setpts=PTS-STARTPTS[tr_a]")
-                    filters.append(f"[v{second.index}]setpts=PTS-STARTPTS[tr_b]")
+                    filters.append(f"[v{first.index}]setpts=PTS-STARTPTS,fps={fps:.6f},format=yuv420p[tr_a]")
+                    filters.append(f"[v{second.index}]setpts=PTS-STARTPTS,fps={fps:.6f},format=yuv420p[tr_b]")
                     xfade_name = {
                         "fade": "fade",
                         "fadeblack": "fadeblack",
@@ -609,6 +616,11 @@ def build_graph(
                 continue
 
             filters.append(_video_chain(piece, project, fps, interpolate))
+            if can_xfade and piece in transition_sources:
+                # As fontes são consumidas diretamente pelo xfade quando o
+                # marcador chegar; um overlay intermediário deixaria sua saída
+                # sem conexão no filtergraph e faria o FFmpeg abortar.
+                continue
             start, end = piece.offset, piece.offset + piece.duration
             label = f"[o{order}]"
             is_overlay_item = piece.clip.overlay_type in ("image", "text") or piece.clip.is_image
