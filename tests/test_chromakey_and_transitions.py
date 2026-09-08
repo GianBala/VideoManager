@@ -181,6 +181,21 @@ def test_transicao_e_processada_depois_dos_videos() -> None:
     assert [piece.clip.overlay_type for piece in pieces] == ["none", "none", "transition"]
 
 
+def test_transicao_entre_dois_videos_usa_xfade() -> None:
+    media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=8.0)
+    clips = (
+        Clip(media=media, start=0.0, duration=4.0),
+        Clip(media=media, start=4.0, duration=4.0),
+    )
+    transition = Clip(
+        media=MediaRef(path=Path("Transição"), kind=MediaKind.IMAGE, duration=1.0),
+        start=3.5, duration=1.0, overlay_type="transition", transition_name="dissolve",
+    )
+    project = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=clips + (transition,)),))
+    graph = build_graph(project)
+    assert any("xfade=transition=dissolve" in item for item in graph.filters)
+
+
 def test_export_duration_with_hidden_tracks() -> None:
     c1 = Clip(media=MediaRef(path=Path("v1.mp4"), kind=MediaKind.VIDEO, duration=10.0), start=0.0, duration=10.0)
     c2 = Clip(media=MediaRef(path=Path("v2.mp4"), kind=MediaKind.VIDEO, duration=25.0), start=0.0, duration=25.0)
