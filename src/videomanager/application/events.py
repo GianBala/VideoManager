@@ -37,4 +37,3 @@ class DownloadResult:
     path: Path | None
     title: str
     log: tuple[str, ...] = ()
-

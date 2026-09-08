@@ -17,4 +17,3 @@ class FFmpegTools:
     @property
     def ffprobe_str(self) -> str:
         return str(self.ffprobe)
-

@@ -64,4 +64,3 @@ def filmstrip_times(start: float, end: float, count: int) -> tuple[float, ...]:
         return (start,)
     step = (end - start) / count
     return tuple(start + step * (index + 0.5) for index in range(count))
-

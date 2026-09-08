@@ -32,4 +32,3 @@ class Composition:
         if self.audio_only:
             return self.project.audible_duration
         return self.project.export_duration
-

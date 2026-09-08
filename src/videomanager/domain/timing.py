@@ -238,4 +238,3 @@ def has_real_video(media: LocalMedia) -> bool:
     """Se há trilha de vídeo de verdade, e não a capa embutida de um áudio."""
     stream = media.video
     return stream is not None and stream.codec.lower() not in IMAGE_CODECS
-
