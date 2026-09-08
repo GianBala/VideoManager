@@ -95,11 +95,12 @@ Os testes de integração com o `ffmpeg` são os mais demorados. Para uma
 iteração local rápida, deixe esses testes para a CI:
 
 ```bash
-VM_FAST_TESTS=1 ./packaging/build_appimage.sh
+./packaging/build_appimage.sh
 ```
 
-Esse modo ainda executa os testes de domínio, aplicação, interface e
-arquitetura. A suíte completa continua sendo o padrão, sem essa variável.
+Esse é o modo padrão e ainda executa os testes de domínio, aplicação, interface
+e arquitetura. Para executar também as integrações demoradas com `ffmpeg`, use
+`VM_FAST_TESTS=0 ./packaging/build_appimage.sh`.
 
 ### AppImage
 

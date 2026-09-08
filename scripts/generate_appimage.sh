@@ -18,7 +18,7 @@
 #
 # Opções:
 #   --skip-tests        Pula a execução do pytest
-#   VM_FAST_TESTS=1     Executa a suíte local sem integrações demoradas de ffmpeg
+#   VM_FAST_TESTS=0     Inclui as integrações demoradas de ffmpeg na suíte
 #   --skip-deps         Pula atualização/instalação de dependências do pip
 #   --no-bundle-ffmpeg  Não embute o ffmpeg (~290 MB a menos)
 #   --reuse-dist        Reaproveita a compilação prévia em dist/VideoManager
@@ -122,7 +122,7 @@ fi
 if [ "$SKIP_TESTS" = 1 ]; then
     echo "--> Pulando testes automatizados (--skip-tests ativo)."
 else
-    if [ "${VM_FAST_TESTS:-0}" = "1" ]; then
+    if [ "${VM_FAST_TESTS:-1}" = "1" ]; then
         echo "--> Executando testes rápidos (sem integrações de ffmpeg)..."
         TEST_MARKS="not ffmpeg and not network"
     else
