@@ -121,12 +121,15 @@ class TestPreviaDeImagem:
         image = QImage(400, 100, QImage.Format.Format_RGB32)
         preview, drawn = _image_preview(image, QRectF(0, 0, 600, 44))
 
-        # O preenchimento corta as laterais/altura excedente, mas nunca altera
-        # a razão 4:1 da imagem original.
+        # A imagem cabe na área sem alterar a razão 4:1 nem crescer além da
+        # altura útil da trilha.
         assert preview.width() / preview.height() == pytest.approx(4.0)
         assert drawn.width() == preview.width()
         assert drawn.height() == preview.height()
-        assert drawn.top() < 0 or drawn.bottom() > 44
+        assert preview.size().width() == 176
+        assert preview.size().height() == 44
+        assert drawn.left() > 0
+        assert drawn.right() < 600
 
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
