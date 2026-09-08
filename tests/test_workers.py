@@ -13,19 +13,19 @@ acabar — com a janela já fora da tela e nada explicando a espera.
 
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
-from videomanager.core.binaries import FFmpegTools
-from videomanager.workers.engine_worker import is_packaged
-from videomanager.workers.preview_worker import (
-    FilmstripWorker,
-    FrameWorker,
-    KeyframeWorker,
-    WaveformWorker,
-    _Interruption,
-)
-from videomanager.workers.runner import WorkerRunner
-from videomanager.workers.thumbnail_worker import ThumbnailWorker
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.infrastructure.qt.workers.engine_worker import is_packaged
+from videomanager.infrastructure.qt.workers.preview_worker import FilmstripWorker
+from videomanager.infrastructure.qt.workers.preview_worker import FrameWorker
+from videomanager.infrastructure.qt.workers.preview_worker import KeyframeWorker
+from videomanager.infrastructure.qt.workers.preview_worker import WaveformWorker
+from videomanager.infrastructure.qt.workers.preview_worker import _Interruption
+from videomanager.presentation.qt.tasks import WorkerRunner
+from videomanager.infrastructure.qt.workers.thumbnail_worker import ThumbnailWorker
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
 
@@ -125,7 +125,7 @@ class TestAtualizacaoDaEngine:
         # viraria "VideoManager -m pip install …", cujos argumentos o bootloader
         # repassa como sys.argv — e o que acontece é uma **segunda janela** do
         # aplicativo, enquanto a primeira espera dez minutos de prazo.
-        monkeypatch.setattr("videomanager.workers.engine_worker.sys.frozen", True, raising=False)
+        monkeypatch.setattr("videomanager.infrastructure.qt.workers.engine_worker.sys.frozen", True, raising=False)
         assert is_packaged() is True
 
 
@@ -162,7 +162,7 @@ class TestCapaDaMidia:
                 return b"PNG"
 
         monkeypatch.setattr(
-            "videomanager.workers.thumbnail_worker.urlopen", lambda *a, **k: Resposta()
+            "videomanager.infrastructure.qt.workers.thumbnail_worker.urlopen", lambda *a, **k: Resposta()
         )
         recebido: list[bytes] = []
         worker = ThumbnailWorker("https://exemplo/capa.jpg")
@@ -170,3 +170,7 @@ class TestCapaDaMidia:
         worker.run()
 
         assert recebido == [b"PNG"]
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")

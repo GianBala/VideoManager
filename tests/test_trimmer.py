@@ -16,31 +16,27 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.core.binaries import FFmpegTools
-from videomanager.core.converter import (
-    LocalMedia,
-    LocalStream,
-    build_args,
-    output_duration,
-    output_path,
-)
-from videomanager.core.errors import ConversionError
-from videomanager.core.trimmer import (
-    CutMode,
-    Segment,
-    TrimTarget,
-    build_trim_args,
-    describe_trim,
-    format_timecode,
-    frame_index,
-    frame_step,
-    frame_time,
-    keyframe_after,
-    keyframe_at_or_before,
-    nearest_keyframe,
-    parse_timecode,
-    seek_time,
-)
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.domain.media import LocalMedia
+from videomanager.domain.media import LocalStream
+from videomanager.infrastructure.ffmpeg.converter import build_args
+from videomanager.infrastructure.ffmpeg.converter import output_duration
+from videomanager.infrastructure.ffmpeg.converter import output_path
+from videomanager.application.errors import ConversionError
+from videomanager.domain.timing import CutMode
+from videomanager.domain.timing import Segment
+from videomanager.domain.timing import TrimTarget
+from videomanager.infrastructure.ffmpeg.trimmer import build_trim_args
+from videomanager.application.media.trim_description import describe_trim
+from videomanager.domain.timing import format_timecode
+from videomanager.domain.timing import frame_index
+from videomanager.domain.timing import frame_step
+from videomanager.domain.timing import frame_time
+from videomanager.domain.timing import keyframe_after
+from videomanager.domain.timing import keyframe_at_or_before
+from videomanager.domain.timing import nearest_keyframe
+from videomanager.domain.timing import parse_timecode
+from videomanager.domain.timing import seek_time
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
 DEST = Path("/saida/corte.mp4")

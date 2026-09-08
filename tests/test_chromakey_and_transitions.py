@@ -10,18 +10,18 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from videomanager.core.composer import build_graph, simple_trim
-from videomanager.core.project import (
-    Clip,
-    MediaKind,
-    MediaRef,
-    Project,
-    Track,
-    TrackKind,
-)
-from videomanager.core.project_io import load_project, save_project
-from videomanager.ui.fullscreen_preview import FullscreenPreview
-from videomanager.ui.panels.edit_panel import _ClipPropertiesWidget
+from videomanager.infrastructure.ffmpeg.composer import build_graph
+from videomanager.domain.export_policy import simple_trim
+from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaKind
+from videomanager.domain.project import MediaRef
+from videomanager.domain.project import Project
+from videomanager.domain.project import Track
+from videomanager.domain.project import TrackKind
+from videomanager.infrastructure.storage.project_json import load_project
+from videomanager.infrastructure.storage.project_json import save_project
+from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
+from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget
 
 
 @pytest.fixture
@@ -212,3 +212,7 @@ def test_fullscreen_preview_resize_signal(qapp: QApplication) -> None:
     fs.resized.connect(lambda sz: received_sizes.append(sz))
     fs.resize(1280, 720)
     assert fs.size().width() == 1280 or len(received_sizes) >= 0
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")

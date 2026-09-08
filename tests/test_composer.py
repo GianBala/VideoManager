@@ -18,34 +18,31 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.core.binaries import FFmpegTools, decode_threads
-from videomanager.core.composer import (
-    SAMPLE_RATE,
-    Composition,
-    audio_command,
-    audio_only_args,
-    build_graph,
-    can_interpolate,
-    concat_args,
-    describe_export,
-    export_args,
-    frame_command,
-    interpolation_bytes,
-    mux_args,
-    playback_command,
-    segment_video_args,
-    simple_trim,
-)
-from videomanager.core.thumbnail import embed_thumbnail
-from videomanager.core.errors import ConversionError
-from videomanager.core.project import (
-    Clip,
-    MediaKind,
-    MediaRef,
-    Project,
-    Track,
-    TrackKind,
-)
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.infrastructure.system.binaries import decode_threads
+from videomanager.infrastructure.ffmpeg.composer import SAMPLE_RATE
+from videomanager.domain.composition import Composition
+from videomanager.infrastructure.ffmpeg.composer import audio_command
+from videomanager.infrastructure.ffmpeg.composer import audio_only_args
+from videomanager.infrastructure.ffmpeg.composer import build_graph
+from videomanager.domain.export_policy import can_interpolate
+from videomanager.infrastructure.ffmpeg.composer import concat_args
+from videomanager.application.media.export_description import describe_export
+from videomanager.infrastructure.ffmpeg.composer import export_args
+from videomanager.infrastructure.ffmpeg.composer import frame_command
+from videomanager.domain.render_cost import interpolation_bytes
+from videomanager.infrastructure.ffmpeg.composer import mux_args
+from videomanager.infrastructure.ffmpeg.composer import playback_command
+from videomanager.infrastructure.ffmpeg.composer import segment_video_args
+from videomanager.domain.export_policy import simple_trim
+from videomanager.infrastructure.ffmpeg.thumbnail import embed_thumbnail
+from videomanager.application.errors import ConversionError
+from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaKind
+from videomanager.domain.project import MediaRef
+from videomanager.domain.project import Project
+from videomanager.domain.project import Track
+from videomanager.domain.project import TrackKind
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
 DEST = Path("/saida/edicao.mp4")
@@ -787,7 +784,7 @@ class TestVelocidadeEFiltros:
         )
         t_add = Track(kind=TrackKind.ADDITIONAL, name="Adicionais 1", clips=(c_txt,))
         proj = Project(tracks=(t_add, video_track(clip(VIDEO))))
-        graph = build_graph(proj)
+        graph = build_graph(proj, text_assets={c_txt.clip_id: Path("texto.png")})
         filter_str = ";".join(graph.filters)
         # Deve usar escalonamento proporcional ao iw/ih e NÃO escala de imagem base fixa (400:300)
         assert "scale=w='trunc(iw*1.2000/2)*2':h='trunc(ih*1.2000/2)*2'" in filter_str
@@ -796,7 +793,8 @@ class TestVelocidadeEFiltros:
         assert "overlay=x='(0.5000*W-w/2)':y='(0.8000*H-h/2)'" in filter_str
 
     def test_render_text_to_image_com_e_sem_contorno(self) -> None:
-        from videomanager.core.composer import render_text_to_image
+        from videomanager.infrastructure.qt.text import QtTextRasterizer
+        render_text_to_image = QtTextRasterizer().render
         from PySide6.QtGui import QImage
 
         c_sem_contorno = clip(
@@ -975,3 +973,7 @@ class TestVelocidadeEFiltros:
 
 
 
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")

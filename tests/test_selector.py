@@ -15,26 +15,24 @@ import pytest
 import yt_dlp
 from conftest import FIXTURE_NAMES, fixture_formats
 
-from videomanager.core.binaries import FFmpegTools
-from videomanager.core.format_matrix import build_matrix
-from videomanager.core.models import MediaInfo
-from videomanager.core.selector import (
-    AUDIO_CODECS,
-    CONTAINER_AUTO,
-    CONTAINERS,
-    AudioRequest,
-    VideoRequest,
-    audio_quality_warning,
-    build_audio_format_string,
-    build_audio_opts,
-    build_opts,
-    build_outtmpl,
-    build_video_format_string,
-    build_video_opts,
-    describe_request,
-    plan_container,
-)
-from videomanager.core.settings import Settings
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.infrastructure.yt_dlp.formats import build_matrix
+from videomanager.domain.formats import MediaInfo
+from videomanager.domain.selection import AUDIO_CODECS
+from videomanager.domain.selection import CONTAINER_AUTO
+from videomanager.domain.selection import CONTAINERS
+from videomanager.domain.selection import AudioRequest
+from videomanager.domain.selection import VideoRequest
+from videomanager.application.media.download_policy import audio_quality_warning
+from videomanager.infrastructure.yt_dlp.selector import build_audio_format_string
+from videomanager.infrastructure.yt_dlp.selector import build_audio_opts
+from videomanager.infrastructure.yt_dlp.selector import build_opts
+from videomanager.infrastructure.yt_dlp.selector import build_outtmpl
+from videomanager.infrastructure.yt_dlp.selector import build_video_format_string
+from videomanager.infrastructure.yt_dlp.selector import build_video_opts
+from videomanager.application.media.download_policy import describe_request
+from videomanager.application.media.download_policy import plan_container
+from videomanager.infrastructure.storage.settings import Settings
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
 
@@ -379,8 +377,8 @@ class TestOpcoesBase:
 
     def test_parciais_ficam_fora_da_pasta_de_destino(self) -> None:
         caminhos = self._opts()["paths"]
-        assert caminhos["home"] == "/destino"
-        assert caminhos["temp"] == "/temp", "sem isto, arquivos .part sujam a pasta final"
+        assert Path(caminhos["home"]) == Path("/destino")
+        assert Path(caminhos["temp"]) == Path("/temp"), "sem isto, arquivos .part sujam a pasta final"
 
     def test_playlist_nao_e_arrastada_num_video_unico(self) -> None:
         """Uma URL com "&list=" não deve baixar a playlist inteira."""

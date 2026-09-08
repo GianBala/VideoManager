@@ -8,21 +8,23 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QDialog
 
-from videomanager.core.binaries import FFmpegTools
-from videomanager.core.converter import LocalMedia, LocalStream
-from videomanager.core.job import JobKind
-from videomanager.core.project import (
-    Clip,
-    MediaKind,
-    MediaRef,
-    Project,
-    Track,
-    TrackKind,
-    new_project,
-)
-from videomanager.core.settings import Settings
-from videomanager.ui.export_dialog import ExportDialog
-from videomanager.ui.panels.edit_panel import EditPanel
+from videomanager.application.capabilities import FFmpegTools
+from videomanager.domain.media import LocalMedia
+from videomanager.domain.media import LocalStream
+from videomanager.application.jobs.models import JobKind
+from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaKind
+from videomanager.domain.project import MediaRef
+from videomanager.domain.project import Project
+from videomanager.domain.project import Track
+from videomanager.domain.project import TrackKind
+from videomanager.domain.project import new_project
+from videomanager.infrastructure.storage.settings import Settings
+from videomanager.presentation.qt.export_dialog import ExportDialog
+from videomanager.presentation.qt.panels.edit_panel import EditPanel
+from videomanager.bootstrap import build_editor_service
+from videomanager.bootstrap import build_processing_service
+from videomanager.bootstrap import build_desktop_runtime
 
 
 @pytest.fixture
@@ -95,7 +97,7 @@ def test_export_dialog_initialization(
         probed={ref.path: local},
         keyframes=(0.0, 5.0, 10.0),
         ensure_tools=lambda: dummy_tools,
-    )
+     processing=build_processing_service(), runtime=build_desktop_runtime())
 
     assert dialog.windowTitle() != ""
     assert dialog._canvas_box.count() > 1
@@ -121,7 +123,7 @@ def test_export_dialog_toggle_same_folder(
         pool=[ref],
         probed={ref.path: local},
         ensure_tools=lambda: dummy_tools,
-    )
+     processing=build_processing_service(), runtime=build_desktop_runtime())
 
     dialog._same_folder.setChecked(False)
     assert dialog._dest_edit.isEnabled()
@@ -147,7 +149,7 @@ def test_export_dialog_enqueue_fast_cut(
         probed={ref.path: local},
         keyframes=(0.0, 5.0, 10.0),
         ensure_tools=lambda: dummy_tools,
-    )
+     processing=build_processing_service(), runtime=build_desktop_runtime())
 
     dialog._fast.setChecked(True)
     dialog._on_enqueue()
@@ -155,7 +157,7 @@ def test_export_dialog_enqueue_fast_cut(
     assert dialog.result() == QDialog.DialogCode.Accepted
     assert dialog.created_job is not None
     assert dialog.created_job.kind == JobKind.TRIM
-    assert "target" in dialog.created_job.opts
+    assert dialog.created_job.request.target is not None
 
 
 def test_export_dialog_enqueue_composition(
@@ -172,14 +174,14 @@ def test_export_dialog_enqueue_composition(
         pool=[ref],
         probed={ref.path: local},
         ensure_tools=lambda: dummy_tools,
-    )
+     processing=build_processing_service(), runtime=build_desktop_runtime())
 
     dialog._fast.setChecked(False)
     dialog._on_enqueue()
 
     assert dialog.result() == QDialog.DialogCode.Accepted
     assert dialog.created_job is not None
-    assert dialog.created_job.kind == JobKind.TRIM
+    assert dialog.created_job.kind == JobKind.EXPORT
 
 
 def test_export_dialog_custom_filename(
@@ -196,7 +198,7 @@ def test_export_dialog_custom_filename(
         pool=[ref],
         probed={ref.path: local},
         ensure_tools=lambda: dummy_tools,
-    )
+     processing=build_processing_service(), runtime=build_desktop_runtime())
     assert hasattr(dialog, "_filename_edit")
     assert hasattr(dialog, "_ext_label")
     assert dialog._ext_label.text() in (".mp4", ".mkv", ".webm")
@@ -205,7 +207,7 @@ def test_export_dialog_custom_filename(
     dialog._on_enqueue()
     assert dialog.result() == QDialog.DialogCode.Accepted
     assert dialog.created_job is not None
-    dest_path = Path(dialog.created_job.opts["destination"])
+    dest_path = Path(dialog.created_job.request.destination)
     assert "meu_video_personalizado" in dest_path.name
 
 
@@ -218,10 +220,10 @@ def test_edit_panel_top_layout_and_media_list(
 ) -> None:
     ref, local = sample_media
     monkeypatch.setattr(
-        "videomanager.workers.media_worker.probe_file", lambda p, t, **kw: local
+        "videomanager.infrastructure.qt.workers.media_worker.probe_file", lambda p, t, **kw: local
     )
     settings = Settings()
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
 
     try:
         # Verifica os novos componentes de layout estilo CapCut
@@ -260,13 +262,14 @@ def test_export_after_loading_saved_project(
     monkeypatch: pytest.MonkeyPatch,
     wait_until,
 ) -> None:
-    from videomanager.core.project_io import save_project, load_project
+    from videomanager.infrastructure.storage.project_json import save_project
+    from videomanager.infrastructure.storage.project_json import load_project
     ref, local = sample_media
     monkeypatch.setattr(
-        "videomanager.workers.media_worker.probe_file", lambda p, t, **kw: local
+        "videomanager.infrastructure.qt.workers.media_worker.probe_file", lambda p, t, **kw: local
     )
     monkeypatch.setattr(
-        "videomanager.ui.export_dialog.probe_file", lambda p, t: local
+        "videomanager.infrastructure.ffmpeg.catalog.probe_file", lambda p, t: local
     )
     settings = Settings()
     proj = new_project().with_track(TrackKind.VIDEO)
@@ -294,7 +297,7 @@ def test_export_after_loading_saved_project(
     loaded_proj, missing = load_project(proj_file, dummy_tools)
     assert missing == []
 
-    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools)
+    panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
         loaded = panel.open_project(proj_file)
         wait_until(lambda: not panel._project_actions.busy)
@@ -311,12 +314,12 @@ def test_export_after_loading_saved_project(
             keyframes=panel._keyframes,
             ensure_tools=lambda: dummy_tools,
             project_path=panel._project_path,
-        )
+         processing=build_processing_service(), runtime=build_desktop_runtime())
         assert "editado" in dialog._filename_edit.text()
         dialog._on_enqueue()
         assert dialog.result() == QDialog.DialogCode.Accepted
         assert dialog.created_job is not None
-        assert "target" in dialog.created_job.opts
+        assert dialog.created_job.request.target is not None
     finally:
         panel.shutdown()
 
@@ -368,7 +371,7 @@ def test_export_dialog_with_hidden_tracks_ignores_them(
         probed={ref1.path: local1, ref4k.path: local4k},
         keyframes=(0.0, 5.0, 10.0),
         ensure_tools=lambda: dummy_tools,
-    )
+     processing=build_processing_service(), runtime=build_desktop_runtime())
 
     # ExportDialog deve manter apenas a trilha visível (track 0)
     assert len(dialog._project.tracks) == 1
@@ -388,7 +391,7 @@ def test_export_dialog_quality_selector(
     single_clip_project: Project,
     dummy_tools: FFmpegTools,
 ) -> None:
-    from videomanager.core.composer import Composition
+    from videomanager.domain.composition import Composition
 
     ref, local = sample_media
     settings = Settings()
@@ -398,7 +401,7 @@ def test_export_dialog_quality_selector(
         pool=[ref],
         probed={ref.path: local},
         ensure_tools=lambda: dummy_tools,
-    )
+     processing=build_processing_service(), runtime=build_desktop_runtime())
 
     # Verifica presets no combo
     assert dialog._quality_box.count() == 3
@@ -413,7 +416,7 @@ def test_export_dialog_quality_selector(
 
     dialog._on_enqueue()
     assert dialog.created_job is not None
-    target = dialog.created_job.opts["target"]
+    target = dialog.created_job.request.target
     assert isinstance(target, Composition)
     assert target.quality == "high"
     assert settings.default_export_quality == "high"
@@ -442,7 +445,7 @@ def test_export_dialog_fast_cut_strips_metadata(
     single_clip_project: Project,
     dummy_tools: FFmpegTools,
 ) -> None:
-    from videomanager.core.trimmer import TrimTarget
+    from videomanager.domain.timing import TrimTarget
 
     ref, local = sample_media
     settings = Settings()
@@ -453,14 +456,18 @@ def test_export_dialog_fast_cut_strips_metadata(
         probed={ref.path: local},
         keyframes=(0.0, 5.0, 10.0),
         ensure_tools=lambda: dummy_tools,
-    )
+     processing=build_processing_service(), runtime=build_desktop_runtime())
 
     dialog._fast.setChecked(True)
     dialog._on_enqueue()
     assert dialog.created_job is not None
-    target = dialog.created_job.opts["target"]
+    target = dialog.created_job.request.target
     assert isinstance(target, TrimTarget)
     assert target.copy_metadata is False
 
 
 
+
+
+# Estes cenários exercitam adaptadores ou apresentação Qt.
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")

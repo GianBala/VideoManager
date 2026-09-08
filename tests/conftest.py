@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 import sys
 from pathlib import Path
 
@@ -44,25 +43,32 @@ def any_fixture(request) -> tuple[str, dict]:
     return request.param, load_fixture(request.param)
 
 
-@pytest.fixture(scope="session", autouse=True)
-def desktop_app():
+@pytest.fixture(scope="session")
+def desktop_app(tmp_path_factory):
     """A interface usa Qt real; testes offline não consultam a placa de som."""
     from PySide6.QtWidgets import QApplication
-    from videomanager.ui.text_renderer import configure_text_renderer
+    from videomanager.presentation.qt.fonts import ensure_application_fonts
+    from videomanager.infrastructure.storage import settings
+    profile = tmp_path_factory.mktemp("desktop-profile")
+    patch = pytest.MonkeyPatch()
+    patch.setattr(settings, "config_dir", lambda: profile)
     app = QApplication.instance() or QApplication([])
-    configure_text_renderer()
+    ensure_application_fonts()
     yield app
+    patch.undo()
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def isolated_audio(monkeypatch):
-    from videomanager.ui.audio_preview import AudioPreview
+    from videomanager.infrastructure.qt.audio import AudioPreview
     monkeypatch.setattr(AudioPreview, "available", property(lambda self: False))
 
 
 @pytest.fixture
 def wait_until(desktop_app):
     """Espera sinais Qt com prazo, mantendo a fila de eventos em movimento."""
+    import time
+
     def wait(predicate, timeout=5):
         deadline = time.monotonic() + timeout
         while not predicate() and time.monotonic() < deadline:
