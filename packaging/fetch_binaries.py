@@ -5,7 +5,7 @@ funcione no primeiro clique, sem download na primeira execução:
 
     PYTHONPATH=src python packaging/fetch_binaries.py
 
-Reaproveita :mod:`videomanager.core.binaries`, então a fonte e a validação são
+Reaproveita :mod:`videomanager.infrastructure.system.binaries`, então a fonte e a validação são
 exatamente as mesmas que a aplicação usa em tempo de execução — não há uma
 segunda cópia dessa lógica para sair de sincronia.
 """
@@ -19,7 +19,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from videomanager.core import binaries  # noqa: E402
+from videomanager.infrastructure.system import binaries  # noqa: E402
 
 
 def main() -> int:

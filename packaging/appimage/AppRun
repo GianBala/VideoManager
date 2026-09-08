@@ -8,7 +8,7 @@
 #
 # Não exportá-la aqui, porém, **não basta**: o bootloader a define depois deste
 # script, e todo processo filho a herda. Quem desfaz isso é
-# core/binaries.clean_env(), aplicada a todo processo externo que a aplicação
+# infrastructure.system.binaries.clean_env(), aplicada a todo processo externo que a aplicação
 # inicia — sem ela, um ffmpeg ligado dinamicamente carregava a libavcodec do
 # QtMultimedia e perdia libx264, libx265 e libmp3lame em silêncio.
 #

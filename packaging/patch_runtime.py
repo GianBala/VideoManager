@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Garante que o runtime do AppImage funcione universalmente em qualquer distribuição Linux,
-mesmo sem libfuse2 ou fusermount instalados (ex: Ubuntu 22.04+, Debian 12+, Fedora, WSL2, Docker).
+"""Adapta runtimes x86_64 compatíveis para auto-extração, inclusive sem libfuse2 ou fusermount instalados (ex: Ubuntu 22.04+, Debian 12+, Fedora, WSL2, Docker).
 
 O runtime Type 2 clássico falha com 'Cannot mount AppImage, please check your FUSE setup'
 quando FUSE 2 não está disponível no sistema. Este patch ajusta o runtime para executar em
@@ -15,7 +14,7 @@ from pathlib import Path
 
 
 def patch_runtime(path: Path) -> bool:
-    """Modifica o runtime (ou o cabeçalho de um AppImage) para auto-extração universal."""
+    """Modifica o runtime (ou o cabeçalho de um AppImage) para auto-extração."""
     if not path.is_file():
         print(f"Erro: arquivo não encontrado: {path}", file=sys.stderr)
         return False
@@ -73,10 +72,10 @@ def patch_runtime(path: Path) -> bool:
             if tmp_target.exists():
                 tmp_target.unlink(missing_ok=True)
 
-        print(f"--> Patch aplicado com sucesso em {path.name} (auto-extração universal ativa).")
+        print(f"--> Patch aplicado com sucesso em {path.name} (auto-extração ativa).")
         return True
     elif data[jne_idx] == 0xE9 and data[jne_idx + 5] == 0x90:
-        print(f"--> {path.name} já possui o patch de compatibilidade universal.")
+        print(f"--> {path.name} já possui o patch de auto-extração.")
         return True
     else:
         print(f"Aviso: instrução de desvio desconhecida em {path}", file=sys.stderr)
