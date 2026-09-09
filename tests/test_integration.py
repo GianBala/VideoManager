@@ -612,6 +612,7 @@ class TestExportacaoDaEdicao:
         from videomanager.domain.project import TrackKind
         from videomanager.domain.project import media_ref
         from videomanager.infrastructure.ffmpeg.composer import frame_command
+        from videomanager.infrastructure.ffmpeg.composer import playback_command
         from videomanager.infrastructure.ffmpeg.converter import probe_file
 
         sources = []
@@ -767,6 +768,49 @@ class TestExportacaoDaEdicao:
             for actual, wanted in zip(transitioned, expected)
         ) / len(expected)
         assert difference < 25.0
+
+        playback_start = 0.04
+        playback_fps = 24
+        frame_size = 160 * 90 * 3
+        final_index = int((transition.end - playback_start) * playback_fps)
+        frame_count = final_index + 2
+
+        def playback_frames(candidate: Project) -> list[bytes]:
+            command = playback_command(
+                candidate,
+                playback_start,
+                (160, 90),
+                tools,
+                fps=playback_fps,
+            )
+            command = [
+                *command[:-5],
+                "-frames:v",
+                str(frame_count),
+                *command[-5:],
+            ]
+            raw = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+            ).stdout
+            return [
+                raw[index:index + frame_size]
+                for index in range(0, len(raw), frame_size)
+            ]
+
+        played = playback_frames(project)
+        expected_playback = playback_frames(
+            project.without_clip(transition.clip_id)
+        )
+        playback_difference = sum(
+            abs(actual - wanted)
+            for actual, wanted in zip(
+                played[final_index],
+                expected_playback[final_index],
+            )
+        ) / frame_size
+        assert playback_difference < 25.0
 
     def test_transicao_apos_tesoura_e_visivel_em_video_continuo(
         self, tmp_path: Path, tools
