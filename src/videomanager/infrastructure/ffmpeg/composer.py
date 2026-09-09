@@ -892,9 +892,17 @@ def _compose_video_transition(
         f"transition={_xfade_name(context.marker.transition_name)}:"
         f"duration={context.duration:.6f}:offset=0{raw_label}"
     )
+    # Uma janela de prévia pode começar entre dois timestamps do xfade. Se
+    # restar menos de um quadro até o fim, aparar exatamente em ``crop`` não
+    # encontra amostra alguma: o overlay some por um quadro e um Adicional que
+    # estava dentro da transição pisca antes de voltar ao fluxo principal.
+    # Partir do quadro anterior garante cobertura; o ``enable`` abaixo limita
+    # a exibição ao intervalo real e impede que a passagem seja alongada.
+    frame_crop = math.floor(render.crop * fps + 1e-6) / fps
+    covered_duration = render.visible_duration + render.crop - frame_crop
     filters.append(
-        f"{raw_label}trim=start={render.crop:.6f}:"
-        f"duration={render.visible_duration:.6f},setpts=PTS-STARTPTS+"
+        f"{raw_label}trim=start={frame_crop:.6f}:"
+        f"duration={covered_duration:.6f},setpts=PTS-STARTPTS+"
         f"{render.offset:.6f}/TB{visible_label}"
     )
     label = f"[to{number}]"

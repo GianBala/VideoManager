@@ -447,6 +447,47 @@ def test_transicao_entre_partes_da_tesoura_usa_tempos_distintos() -> None:
     assert not any("volume='" in item for item in graph.filters)
 
 
+def test_recorte_de_preview_cobre_o_ultimo_meio_quadro_da_transicao() -> None:
+    fps = 24_000 / 1_001
+    media = MediaRef(Path("video.mp4"), MediaKind.VIDEO, duration=10.0)
+    left = Clip(media, start=0.0, duration=4.0, in_point=1.0)
+    right = Clip(media, start=4.0, duration=4.0, in_point=5.0)
+    marker = Clip(
+        MediaRef(Path("Transição"), MediaKind.IMAGE, duration=1.0),
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="wipeleft",
+        transition_left_id=left.clip_id,
+        transition_right_id=right.clip_id,
+        transition_affects_additionals=True,
+    )
+    image = Clip(
+        MediaRef(Path("logo.png"), MediaKind.IMAGE),
+        start=4.0,
+        duration=2.0,
+        overlay_type="image",
+    )
+    project = Project(
+        tracks=(
+            Track(TrackKind.ADDITIONAL, clips=(image,)),
+            Track(TrackKind.VIDEO, clips=(left, right, marker)),
+        ),
+        fps=fps,
+    )
+    crop = marker.duration - 0.5 / fps
+    frame_crop = int(crop * fps + 1e-6) / fps
+    covered = 0.5 / fps + crop - frame_crop
+
+    graph = build_graph(project, at=marker.end - 0.5 / fps, span=1.0 / fps)
+
+    assert any(
+        f"trim=start={frame_crop:.6f}:duration={covered:.6f}" in item
+        for item in graph.filters
+    )
+    assert any("not(between(t,0.000000,0.020854))" in item for item in graph.filters)
+
+
 def test_marcador_sem_duas_fontes_nao_apaga_a_composicao() -> None:
     media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=12.0)
     clips = tuple(Clip(media=media, start=i * 4.0, duration=4.0) for i in range(3))
