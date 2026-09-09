@@ -97,6 +97,18 @@ compartilhado preserva as mesmas regras de montagem entre prévia e saída.
 - Ajuste comum de fps não implica interpolação de movimento. `minterpolate`
   só entra quando solicitado e elegível.
 
+Nas transições, o compositor lê as alças de mídia ao redor do ponto de saída do
+clipe esquerdo e do ponto de entrada do direito. Sem alça suficiente, mantém o
+quadro limite; a duração visual escolhida não é encurtada silenciosamente. O
+vídeo usa `xfade`. O áudio anexado só usa `acrossfade` de potência constante
+quando os dois arquivos têm amostras reais nas alças necessárias. Sem elas, o
+corte de áudio é preservado e recebe apenas 12 ms de de-click, em vez de ser
+preenchido com silêncio. Mudo do clipe, áudio separado e mudo da trilha são
+resolvidos antes dessas curvas, portanto uma ponta muda nunca reaparece pela
+transição. A prévia monta esse grafo diretamente na resolução visível para não
+processar uma tela
+4K que seria reduzida no fim; a exportação continua na resolução do projeto.
+
 O compositor recebe um mapa de ID de clipe para PNG de texto. Não importa Qt
 nem consulta renderizador global. Veja [prévia e texto](previa.md).
 

@@ -362,6 +362,244 @@ class TestExportacaoDaEdicao:
                 volume_medio(neutro, tools) - 6.0, abs=0.6
             ), f"-6 dB não saiu -6 dB ({canais} canal/canais)"
 
+    @pytest.mark.parametrize("transition_duration", (0.4, 1.0, 2.0))
+    def test_transicao_redimensionada_preserva_duracao_e_progresso(
+        self, tmp_path: Path, tools, transition_duration: float
+    ) -> None:
+        """Executa o grafo real; strings válidas não provam PTS nem duração."""
+        from videomanager.domain.composition import Composition
+        from videomanager.domain.project import Clip
+        from videomanager.domain.project import MediaKind
+        from videomanager.domain.project import MediaRef
+        from videomanager.domain.project import Project
+        from videomanager.domain.project import Track
+        from videomanager.domain.project import TrackKind
+        from videomanager.domain.project import media_ref
+        from videomanager.infrastructure.ffmpeg.converter import Converter
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+
+        sources = []
+        for name, color, tone in (("a", "red", 440), ("b", "blue", 880)):
+            path = tmp_path / f"{name}.mp4"
+            subprocess.run(
+                [
+                    tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y",
+                    "-f", "lavfi", "-i", f"color={color}:s=320x180:r=30:d=5",
+                    "-f", "lavfi", "-i", f"sine=f={tone}:r=48000:d=5",
+                    "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", str(path),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            sources.append(media_ref(probe_file(path, tools)))
+
+        left = Clip(media=sources[0], start=0.0, duration=4.0, in_point=0.5)
+        right = Clip(media=sources[1], start=4.0, duration=4.0, in_point=0.5)
+        marker = Clip(
+            media=MediaRef(
+                Path("Transição_Dissolve"),
+                MediaKind.IMAGE,
+                transition_duration,
+            ),
+            start=4.0 - transition_duration / 2.0,
+            duration=transition_duration,
+            overlay_type="transition",
+            transition_name="dissolve",
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+        )
+        project = Project(
+            tracks=(Track(kind=TrackKind.VIDEO, clips=(left, right, marker)),),
+            width=320,
+            height=180,
+            fps=30.0,
+        )
+        output = tmp_path / "transicao.mp4"
+        Converter(
+            probe_file(sources[0].path, tools),
+            Composition(project, "mp4"),
+            output,
+            tools,
+        ).run()
+
+        container, streams = ffprobe_streams(output, tools)
+        assert float(container["duration"]) == pytest.approx(8.0, abs=0.1)
+        assert stream_of(streams, "audio") is not None
+
+        colors = []
+        for instant in (
+            4.0 - transition_duration / 2.0,
+            4.0,
+            4.0 + transition_duration / 2.0 - 0.01,
+        ):
+            pixel = subprocess.run(
+                [
+                    tools.ffmpeg_str, "-hide_banner", "-v", "error", "-ss",
+                    f"{instant:.2f}", "-i", str(output), "-frames:v", "1",
+                    "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                    "pipe:1",
+                ],
+                capture_output=True,
+                check=True,
+            ).stdout
+            colors.append(tuple(pixel[:3]))
+        assert colors[0][0] > 230 and colors[0][2] < 25
+        assert abs(colors[1][0] - colors[1][2]) < 35
+        assert colors[2][2] > 230 and colors[2][0] < 25
+
+    def test_transicao_curta_sem_alcas_nao_termina_antes_do_ultimo_quadro(
+        self, tmp_path: Path, tools
+    ) -> None:
+        """Reproduz o caso real de 0,2 s a 23,976 fps do ``teste.vmp``."""
+        from videomanager.domain.project import Clip
+        from videomanager.domain.project import MediaKind
+        from videomanager.domain.project import MediaRef
+        from videomanager.domain.project import Project
+        from videomanager.domain.project import Track
+        from videomanager.domain.project import TrackKind
+        from videomanager.domain.project import media_ref
+        from videomanager.infrastructure.ffmpeg.composer import frame_command
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+
+        sources = []
+        for name, color in (("left", "red"), ("right", "blue")):
+            path = tmp_path / f"{name}.mp4"
+            subprocess.run(
+                [
+                    tools.ffmpeg_str,
+                    "-hide_banner",
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"color={color}:s=320x180:r=24000/1001:d=1",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(path),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            sources.append(media_ref(probe_file(path, tools)))
+
+        cut = sources[0].duration or 1.0
+        left = Clip(media=sources[0], start=0.0, duration=cut)
+        right_duration = sources[1].duration or 1.0
+        right = Clip(media=sources[1], start=cut, duration=right_duration)
+        marker = Clip(
+            media=MediaRef(Path("Transição_Slide"), MediaKind.IMAGE, 0.2),
+            start=cut - 0.1,
+            duration=0.2,
+            overlay_type="transition",
+            transition_name="slideright",
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+        )
+        project = Project(
+            tracks=(Track(kind=TrackKind.VIDEO, clips=(left, right, marker)),),
+            width=320,
+            height=180,
+            fps=24_000 / 1_001,
+        )
+
+        # Reproduz também o ciclo relatado na interface: aumenta a transição e
+        # devolve a mesma ponta aos 0,2 s originais antes de pedir a prévia.
+        project = project.resized(marker.clip_id, "fim", cut + 0.5)
+        project = project.resized(marker.clip_id, "fim", cut + 0.1)
+        marker = project.find(marker.clip_id)[1]
+        assert marker.duration == pytest.approx(0.2)
+
+        # Quarto dos cinco quadros da transição. Antes da correção, o ramo sem
+        # alça acabava no terceiro e este instante já mostrava só o clipe azul.
+        instant = marker.start + 3 / project.fps
+        command = frame_command(project, instant, (320, 180), tools)
+        result = subprocess.run(command, capture_output=True, check=True).stdout
+        pixels = tuple(zip(result[0::3], result[1::3], result[2::3]))
+        red = sum(r > 180 and b < 70 for r, _, b in pixels)
+        blue = sum(b > 180 and r < 70 for r, _, b in pixels)
+        assert red > 1_000 and blue > 1_000
+
+    def test_transicao_sem_alcas_preserva_audio_e_remove_apenas_o_estalo(
+        self, tmp_path: Path, tools
+    ) -> None:
+        """Um efeito visual não pode abrir um vale audível no corte."""
+        from array import array
+
+        from videomanager.domain.composition import Composition
+        from videomanager.domain.project import Clip
+        from videomanager.domain.project import MediaKind
+        from videomanager.domain.project import MediaRef
+        from videomanager.domain.project import Project
+        from videomanager.domain.project import Track
+        from videomanager.domain.project import TrackKind
+        from videomanager.domain.project import media_ref
+
+        sources = []
+        for name, color, tone in (("left", "red", 440), ("right", "blue", 880)):
+            path = tmp_path / f"{name}.mp4"
+            subprocess.run(
+                [
+                    tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y",
+                    "-f", "lavfi", "-i", f"color={color}:s=320x180:r=30:d=2",
+                    "-f", "lavfi", "-i", f"sine=f={tone}:r=48000:d=2",
+                    "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", str(path),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            sources.append(media_ref(probe_file(path, tools)))
+
+        cut = sources[0].duration or 2.0
+        left = Clip(sources[0], start=0.0, duration=cut)
+        right = Clip(sources[1], start=cut, duration=sources[1].duration or 2.0)
+        marker = Clip(
+            MediaRef(Path("Transição_Dissolve"), MediaKind.IMAGE, duration=1.0),
+            start=cut - 0.5,
+            duration=1.0,
+            overlay_type="transition",
+            transition_name="dissolve",
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+        )
+        project = Project(
+            tracks=(Track(TrackKind.VIDEO, clips=(left, right, marker)),),
+            width=320,
+            height=180,
+            fps=30.0,
+        )
+        output = tmp_path / "audio_transicao.mp4"
+        Converter(
+            probe_file(sources[0].path, tools),
+            Composition(project, "mp4"),
+            output,
+            tools,
+        ).run()
+
+        def level(start: float, duration: float) -> float:
+            pcm = subprocess.run(
+                [
+                    tools.ffmpeg_str, "-hide_banner", "-v", "error",
+                    "-ss", f"{start:.6f}", "-t", f"{duration:.6f}",
+                    "-i", str(output), "-vn", "-ac", "1", "-ar", "48000",
+                    "-f", "s16le", "pipe:1",
+                ],
+                capture_output=True,
+                check=True,
+            ).stdout
+            samples = array("h")
+            samples.frombytes(pcm)
+            return sum(abs(sample) for sample in samples) / max(1, len(samples))
+
+        baseline = level(0.75, 0.1)
+        around_cut = level(cut - 0.05, 0.1)
+        assert around_cut > baseline * 0.70
+
     def test_bloco_mudo_e_trilha_muda_nao_chegam_ao_arquivo(
         self, tmp_path: Path, tools
     ) -> None:
