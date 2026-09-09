@@ -648,6 +648,411 @@ def test_timeline_track_visibility_toggle_and_menu(qapp: QApplication, dummy_too
         panel.shutdown()
 
 
+def test_transicao_nao_dispara_miniatura_de_referencia_sintetica(
+    qapp: QApplication,
+    dummy_tools: FFmpegTools,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from videomanager.domain.project import Project
+    from videomanager.domain.project import Track
+    from videomanager.domain.project import TrackKind
+
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(),
+    )
+    try:
+        media = MediaRef(
+            Path("/m/video.mp4"),
+            MediaKind.VIDEO,
+            duration=8.0,
+            width=1280,
+            height=720,
+        )
+        left = Clip(media=media, start=0.0, duration=4.0)
+        right = Clip(media=media, start=4.0, duration=4.0, in_point=4.0)
+        marker = Clip(
+            media=MediaRef(Path("Transição_Dissolve"), MediaKind.IMAGE, duration=1.0),
+            start=3.5,
+            duration=1.0,
+            overlay_type="transition",
+            transition_name="dissolve",
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+        )
+        project = Project(
+            tracks=(Track(kind=TrackKind.VIDEO, clips=(left, right, marker)),)
+        )
+        panel._project = project
+        panel._timeline.set_project(project)
+        requested: list[int] = []
+        monkeypatch.setattr(
+            panel,
+            "_request_thumbs",
+            lambda clip, tools: requested.append(clip.clip_id),
+        )
+
+        panel._refresh_backdrop()
+
+        assert set(requested) == {left.clip_id, right.clip_id}
+        assert marker.clip_id not in requested
+    finally:
+        panel.shutdown()
+
+
+def test_redimensionar_transicao_invalida_quadro_da_revisao_anterior(
+    qapp: QApplication,
+    dummy_tools: FFmpegTools,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """O mesmo instante não torna válidas duas composições diferentes."""
+    from videomanager.domain.project import Project
+    from videomanager.domain.project import Track
+    from videomanager.domain.project import TrackKind
+
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(),
+    )
+    try:
+        media = MediaRef(Path("/m/video.mp4"), MediaKind.VIDEO, duration=8.0)
+        left = Clip(media=media, start=0.0, duration=4.0)
+        right = Clip(media=media, start=4.0, duration=4.0, in_point=4.0)
+        marker = Clip(
+            media=MediaRef(Path("Transição_Dissolve"), MediaKind.IMAGE, duration=0.2),
+            start=3.9,
+            duration=0.2,
+            overlay_type="transition",
+            transition_name="dissolve",
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+        )
+        project = Project(
+            tracks=(Track(kind=TrackKind.VIDEO, clips=(left, right, marker)),)
+        )
+        panel._project = project
+        panel._timeline.set_project(project)
+        panel._timeline.set_position(4.0)
+
+        # Simula a prévia da duração maior ainda em processamento quando a
+        # transição volta ao tamanho original.
+        panel._frame_busy = True
+        panel._frame_revision = 7
+        panel._frame_token = 41
+        panel._wanted = 4.0
+        panel._rendered = 4.0
+        panel._project = project.resized(marker.clip_id, "fim", 4.5)
+        panel._project = panel._project.resized(marker.clip_id, "fim", 4.1)
+        panel._request_frame(force=True)
+
+        assert panel._frame_revision == 8
+        assert panel._frame_token != 41
+        assert panel._rendered is None
+
+        started: list[tuple[float | None, int]] = []
+        monkeypatch.setattr(
+            panel,
+            "_start_frame",
+            lambda: started.append((panel._wanted, panel._frame_revision)),
+        )
+        panel._on_frame_done(7)
+        assert started == [(4.0, 8)]
+    finally:
+        panel.shutdown()
+
+
+def test_play_reaproveita_transicao_preparada_sem_abrir_outro_ffmpeg(
+    qapp: QApplication,
+    dummy_tools: FFmpegTools,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from videomanager.domain.project import Project
+    from videomanager.domain.project import Track
+    from videomanager.domain.project import TrackKind
+    from videomanager.infrastructure.qt.workers.signals import PreviewSignals
+
+    runtime = build_desktop_runtime()
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=runtime,
+    )
+
+    class Worker:
+        def __init__(self) -> None:
+            self.signals = PreviewSignals()
+            self.started = False
+            self.cancelled = False
+
+        def start_playback(self) -> None:
+            self.started = True
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    try:
+        media = MediaRef(Path("/m/video.mp4"), MediaKind.VIDEO, duration=8.0)
+        left = Clip(media=media, start=0.0, duration=4.0)
+        right = Clip(media=media, start=4.0, duration=4.0, in_point=4.0)
+        transition = Clip(
+            media=MediaRef(Path("Transição_Dissolve"), MediaKind.IMAGE, duration=1.0),
+            start=3.5,
+            duration=1.0,
+            overlay_type="transition",
+            transition_name="dissolve",
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+        )
+        project = Project(
+            tracks=(Track(kind=TrackKind.VIDEO, clips=(left, right, transition)),)
+        )
+        panel._project = project
+        panel._timeline.set_project(project)
+        panel._timeline.set_position(4.0)
+
+        workers: list[Worker] = []
+
+        def make_worker(*args, **kwargs):
+            assert kwargs["autostart"] is False
+            worker = Worker()
+            workers.append(worker)
+            return worker
+
+        monkeypatch.setattr(runtime, "playback_worker", make_worker)
+        monkeypatch.setattr(panel._runner, "start", lambda *args: None)
+
+        panel._prime_playback()
+        assert len(workers) == 1
+        token = panel._primed_token
+        workers[0].signals.primed.emit(token)
+        assert panel._primed_ready
+
+        panel._playing = True
+        started = panel._start_frames(4.0)
+
+        assert started == (token, True)
+        assert workers[0].started
+        assert not workers[0].cancelled
+        assert len(workers) == 1, "o play não deve abrir um segundo processo"
+    finally:
+        panel._playing = False
+        panel.shutdown()
+
+
+def test_pause_congela_quadro_sem_disparar_renderizacao_redundante(
+    qapp: QApplication,
+    dummy_tools: FFmpegTools,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from videomanager.domain.project import Project
+    from videomanager.domain.project import Track
+    from videomanager.domain.project import TrackKind
+
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(audio_enabled=False),
+    )
+
+    class Playback:
+        cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    try:
+        media = MediaRef(Path("/m/video.mp4"), MediaKind.VIDEO, duration=10.0)
+        project = Project(
+            tracks=(
+                Track(
+                    kind=TrackKind.VIDEO,
+                    clips=(Clip(media=media, start=0.0, duration=10.0),),
+                ),
+            )
+        )
+        panel._project = project
+        panel._timeline.set_project(project)
+        # Simula o intervalo entre sinais: a tela já mostrou 4,24 s, mas o
+        # relógio do áudio atualizou o cursor pela última vez em 4,00 s.
+        panel._timeline.set_position(4.0)
+        panel._shown_frame = 4.24
+        playback = Playback()
+        panel._playing = True
+        panel._playback = playback
+        old_revision = panel._frame_revision
+        old_token = panel._frame_token
+        requested: list[bool] = []
+        primed: list[bool] = []
+        monkeypatch.setattr(
+            panel, "_request_frame", lambda **kwargs: requested.append(True)
+        )
+        monkeypatch.setattr(panel, "_prime_playback", lambda: primed.append(True))
+
+        panel._stop_playback()
+
+        assert playback.cancelled
+        assert not panel._playing
+        assert panel._playback is None
+        assert not requested, "o quadro que já está na tela deve permanecer congelado"
+        assert primed == [True]
+        assert panel._frame_revision == old_revision + 1
+        assert panel._frame_token != old_token
+        assert panel._position == pytest.approx(4.24)
+        assert panel._rendered == pytest.approx(4.24)
+    finally:
+        panel.shutdown()
+
+
+def test_clipe_selecionado_escolhe_corte_da_trilha_exata(
+    qapp: QApplication,
+    dummy_tools: FFmpegTools,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from videomanager.domain.project import Project
+    from videomanager.domain.project import Track
+    from videomanager.domain.project import TrackKind
+
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(),
+    )
+    try:
+        media = MediaRef(Path("/m/igual.mp4"), MediaKind.VIDEO, duration=8.0)
+        upper_left = Clip(media, start=0.0, duration=4.0)
+        upper_right = Clip(media, start=4.0, duration=4.0, in_point=4.0)
+        lower_left = Clip(media, start=0.0, duration=4.0)
+        lower_right = Clip(media, start=4.0, duration=4.0, in_point=4.0)
+        project = Project(
+            tracks=(
+                Track(TrackKind.VIDEO, name="Vídeo superior", clips=(upper_left, upper_right)),
+                Track(TrackKind.VIDEO, name="Vídeo inferior", clips=(lower_left, lower_right)),
+            )
+        )
+        panel._project = project
+        panel._timeline.set_project(project)
+        panel._timeline.select(lower_right.clip_id)
+
+        edit = panel._find_nearest_video_cut(4.0)
+        assert edit is not None
+        track_index, left, right, cut = edit
+        assert track_index == 1
+        assert (left.clip_id, right.clip_id) == (
+            lower_left.clip_id,
+            lower_right.clip_id,
+        )
+        assert cut == pytest.approx(4.0)
+
+        # Confirma o fluxo completo de inserção sem iniciar workers de mídia.
+        monkeypatch.setattr(
+            panel,
+            "_after_edit",
+            lambda **_: panel._timeline.set_project(panel._project),
+        )
+        panel._insert_transition_clip("dissolve")
+        upper_transitions = [clip for clip in panel._project.tracks[0].clips if clip.is_transition]
+        lower_transitions = [clip for clip in panel._project.tracks[1].clips if clip.is_transition]
+        assert not upper_transitions
+        assert len(lower_transitions) == 1
+        assert (
+            lower_transitions[0].transition_left_id,
+            lower_transitions[0].transition_right_id,
+        ) == (lower_left.clip_id, lower_right.clip_id)
+    finally:
+        panel.shutdown()
+
+
+def test_clipe_selecionado_sem_corte_nao_escolhe_outra_trilha(
+    qapp: QApplication,
+    dummy_tools: FFmpegTools,
+) -> None:
+    from videomanager.domain.project import Project
+    from videomanager.domain.project import Track
+    from videomanager.domain.project import TrackKind
+
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(),
+    )
+    try:
+        media = MediaRef(Path("/m/igual.mp4"), MediaKind.VIDEO, duration=8.0)
+        valid_left = Clip(media, start=0.0, duration=4.0)
+        valid_right = Clip(media, start=4.0, duration=4.0, in_point=4.0)
+        isolated = Clip(media, start=0.0, duration=2.0)
+        project = Project(
+            tracks=(
+                Track(TrackKind.VIDEO, clips=(valid_left, valid_right)),
+                Track(TrackKind.VIDEO, clips=(isolated,)),
+            )
+        )
+        panel._project = project
+        panel._timeline.set_project(project)
+        panel._timeline.select(isolated.clip_id)
+
+        assert panel._find_nearest_video_cut(4.0) is None
+    finally:
+        panel.shutdown()
+
+
+def test_sem_clipe_selecionado_mantem_corte_global_mais_proximo(
+    qapp: QApplication,
+    dummy_tools: FFmpegTools,
+) -> None:
+    from videomanager.domain.project import Project
+    from videomanager.domain.project import Track
+    from videomanager.domain.project import TrackKind
+
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(),
+    )
+    try:
+        media = MediaRef(Path("/m/igual.mp4"), MediaKind.VIDEO, duration=12.0)
+        early_left = Clip(media, start=0.0, duration=3.0)
+        early_right = Clip(media, start=3.0, duration=3.0, in_point=3.0)
+        late_left = Clip(media, start=0.0, duration=7.0)
+        late_right = Clip(media, start=7.0, duration=3.0, in_point=7.0)
+        project = Project(
+            tracks=(
+                Track(TrackKind.VIDEO, clips=(early_left, early_right)),
+                Track(TrackKind.VIDEO, clips=(late_left, late_right)),
+            )
+        )
+        panel._project = project
+        panel._timeline.set_project(project)
+        panel._timeline.select(-1)
+
+        edit = panel._find_nearest_video_cut(6.8)
+        assert edit is not None
+        track_index, left, right, cut = edit
+        assert track_index == 1
+        assert (left.clip_id, right.clip_id) == (
+            late_left.clip_id,
+            late_right.clip_id,
+        )
+        assert cut == pytest.approx(7.0)
+    finally:
+        panel.shutdown()
+
+
 def test_video_track_button_positions_and_version(qapp: QApplication) -> None:
     import videomanager
     from videomanager.presentation.qt.panels.timeline import Timeline

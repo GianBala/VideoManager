@@ -37,10 +37,26 @@ embora tamanho, fps e interpolação possam diferir conforme o pedido.
 não acompanha, a produção encontra limite em vez de acumular o vídeo inteiro
 na memória.
 
+Enquanto a prévia está pausada, o controller pode abrir o comando de reprodução
+e manter seu primeiro quadro atrás de uma comporta. O clique em play reutiliza
+esse worker; não monta novamente o grafo nem abre outro processo. O relógio do
+`FramePump` só começa depois que a comporta é liberada. O tempo de abertura do
+ffmpeg, portanto, nunca vira atraso acumulado nem rajada de quadros no início.
+Quadro parado e pré-carga ocupam as duas vagas da pool ao vivo e podem ser
+preparados em paralelo; uma busca ou revisão do projeto cancela a pré-carga cuja
+chave de projeto, instante, tamanho ou fps deixou de corresponder.
+
 `infrastructure/qt/audio.py` recebe PCM do ffmpeg e alimenta `QAudioSink`
 por blocos, com fila limitada e sobra parcial controlada. Quando há dispositivo
 de áudio, sua posição é a referência temporal; a imagem acompanha esse relógio.
 Sem áudio disponível, a interface usa seu caminho de relógio sem dispositivo.
+
+Se o usuário pedir play antes de a pré-carga terminar, o áudio espera o sinal de
+primeiro quadro pronto. No pause, a interface preserva o último quadro realmente
+mostrado e alinha o cursor a seu timestamp antes de preparar a retomada. Ela não
+renderiza novamente a mesma imagem: isso evita tanto o pico de decodificação
+quanto o pequeno retorno causado por reabrir no timestamp anterior do relógio de
+áudio.
 
 O runtime negocia taxa e canais uma vez e os usa tanto no comando do ffmpeg
 quanto na abertura do sink. Os bytes são sempre s16le; não há reinterpretação

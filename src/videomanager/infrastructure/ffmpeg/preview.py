@@ -371,8 +371,19 @@ class FramePump:
         if process and process.poll() is None:
             process.terminate()
 
-    def frames(self) -> Iterator[RawFrame]:
-        """Gera os quadros a partir de ``start``, no ritmo do relógio."""
+    def frames(
+        self,
+        *,
+        gate: threading.Event | None = None,
+        on_primed: Callable[[], None] | None = None,
+    ) -> Iterator[RawFrame]:
+        """Gera quadros no ritmo real, com pré-carga opcional do primeiro.
+
+        O relógio começa quando a reprodução é liberada, não quando o FFmpeg é
+        aberto. Caso contrário, os décimos gastos montando uma transição deixam
+        o fluxo atrasado antes do primeiro quadro e ele dispara vários quadros
+        de uma vez para tentar alcançar o tempo perdido.
+        """
         width, height = self._size
         frame_bytes = width * height * BYTES_PER_PIXEL
 
@@ -389,10 +400,23 @@ class FramePump:
         with self._lock:
             self._process = process
 
-        began = time.monotonic()
-        index = 0
         try:
             assert process.stdout is not None
+            first = process.stdout.read(frame_bytes)
+            if not first or len(first) < frame_bytes:
+                return
+            if on_primed is not None:
+                on_primed()
+            if gate is not None:
+                while not gate.wait(0.05):
+                    if self._stopped:
+                        return
+            if self._stopped:
+                return
+
+            began = time.monotonic()
+            yield RawFrame(first, width, height, self._start)
+            index = 1
             while not self._stopped:
                 # A espera acontece antes da leitura: enquanto dormimos, o cano
                 # enche e o ffmpeg para sozinho.
