@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 from videomanager.domain.constants import IMAGE_CODECS
 from videomanager.domain.constants import MIN_SEGMENT
+from videomanager.domain.constants import MIN_TRANSITION_DURATION
 
 if TYPE_CHECKING:  # pragma: no cover - só para o verificador de tipos
     from videomanager.domain.media import LocalMedia
@@ -272,6 +273,8 @@ class Clip:
         Não basta a mídia ter vídeo: o bloco de "separar áudio" nasce do mesmo
         arquivo e não mostra nada.
         """
+        if self.is_transition:
+            return False
         if self.overlay_type in ("image", "text", "filter"):
             return True
         return bool(self.media and self.media.has_video and not self.audio_only)
@@ -385,6 +388,32 @@ class Track:
 
 
 @dataclass(frozen=True)
+class TransitionContext:
+    """Uma transição resolvida para o corte e os dois clipes que ela une.
+
+    O marcador guardado no ``.vmp`` é apenas a representação editável na linha
+    do tempo. A identidade da transição é o ponto de edição entre ``left`` e
+    ``right``; centralizar e limitar a duração aqui impede prévia, exportação e
+    interface de inventarem regras diferentes.
+    """
+
+    marker: Clip
+    left: Clip
+    right: Clip
+    track_index: int
+    cut: float
+    duration: float
+
+    @property
+    def start(self) -> float:
+        return self.cut - self.duration / 2.0
+
+    @property
+    def end(self) -> float:
+        return self.cut + self.duration / 2.0
+
+
+@dataclass(frozen=True)
 class Project:
     """A edição inteira: trilhas, blocos e o formato da tela."""
 
@@ -397,7 +426,18 @@ class Project:
 
     @property
     def duration(self) -> float:
-        return max((track.duration for track in self.tracks), default=0.0)
+        # Marcadores de transição descrevem um corte existente; não são
+        # conteúdo e nunca podem alongar a edição, nem quando um projeto antigo
+        # traz um marcador inválido fora dos clipes.
+        return max(
+            (
+                clip.end
+                for track in self.tracks
+                for clip in track.clips
+                if not clip.is_transition
+            ),
+            default=0.0,
+        )
 
     @property
     def export_duration(self) -> float:
@@ -495,6 +535,82 @@ class Project:
                     return index, clip
         return None
 
+    def transition_context(self, marker: Clip) -> TransitionContext | None:
+        """Resolve um marcador para um corte válido entre clipes adjacentes.
+
+        Projetos novos carregam os IDs das duas pontas. Para projetos antigos,
+        sem esses campos, o corte encostado mais próximo do centro do marcador
+        é inferido durante a composição. Marcadores órfãos, entre trilhas
+        diferentes, sobre vãos ou sobre clipes não adjacentes não são efeitos
+        válidos e portanto não são resolvidos.
+        """
+        if not marker.is_transition:
+            return None
+
+        candidates: list[tuple[float, int, Clip, Clip]] = []
+        if marker.transition_left_id is not None and marker.transition_right_id is not None:
+            left_found = self.find(marker.transition_left_id)
+            right_found = self.find(marker.transition_right_id)
+            if left_found is None or right_found is None:
+                return None
+            left_index, left = left_found
+            right_index, right = right_found
+            if left_index != right_index:
+                return None
+            track = self.tracks[left_index]
+            if track.kind is not TrackKind.VIDEO:
+                return None
+            ordered = [c for c in track.sorted_clips() if not c.is_transition]
+            try:
+                adjacent = ordered.index(right) == ordered.index(left) + 1
+            except ValueError:
+                return None
+            if not adjacent or abs(left.end - right.start) > 1e-4:
+                return None
+            candidates.append((0.0, left_index, left, right))
+        else:
+            center = marker.start + marker.duration / 2.0
+            for index, track in enumerate(self.tracks):
+                if track.kind is not TrackKind.VIDEO:
+                    continue
+                ordered = [c for c in track.sorted_clips() if not c.is_transition]
+                for left, right in zip(ordered, ordered[1:]):
+                    if abs(left.end - right.start) > 1e-4:
+                        continue
+                    distance = abs(center - left.end)
+                    if distance <= max(0.05, marker.duration / 2.0 + 1e-4):
+                        candidates.append((distance, index, left, right))
+
+        if not candidates:
+            return None
+        _, index, left, right = min(candidates, key=lambda item: item[0])
+        duration = min(marker.duration, left.duration, right.duration)
+        if duration <= 0:
+            return None
+        return TransitionContext(
+            marker=marker,
+            left=left,
+            right=right,
+            track_index=index,
+            cut=left.end,
+            duration=duration,
+        )
+
+    def transition_contexts(self) -> tuple[TransitionContext, ...]:
+        """Transições válidas, sem permitir duas no mesmo ponto de edição."""
+        result: list[TransitionContext] = []
+        occupied: set[tuple[int, int, int]] = set()
+        for marker in (c for c in self.clips if c.is_transition):
+            context = self.transition_context(marker)
+            if context is None:
+                continue
+            key = (context.track_index, context.left.clip_id, context.right.clip_id)
+            if key in occupied:
+                continue
+            occupied.add(key)
+            result.append(context)
+        return tuple(result)
+
     def clip_at(self, track_index: int, seconds: float) -> Clip | None:
         if not 0 <= track_index < len(self.tracks):
             return None
@@ -572,10 +688,30 @@ class Project:
         found = self.find(clip_id)
         if found is None:
             return self
-        index, _ = found
+        index, removed = found
         track = self.tracks[index]
         clips = tuple(c for c in track.clips if c.clip_id != clip_id)
-        return self._replace_track(index, replace(track, clips=clips))
+        project = self._replace_track(index, replace(track, clips=clips))
+        if removed.is_transition:
+            return project
+        # A transição pertence ao corte, não sobrevive sem qualquer uma das
+        # pontas. Um marcador órfão nunca deve se religar por proximidade a
+        # vídeos que não faziam parte da edição original.
+        tracks = tuple(
+            replace(
+                item,
+                clips=tuple(
+                    clip
+                    for clip in item.clips
+                    if not (
+                        clip.is_transition
+                        and clip_id in (clip.transition_left_id, clip.transition_right_id)
+                    )
+                ),
+            )
+            for item in project.tracks
+        )
+        return replace(project, tracks=tracks)
 
     def with_updated_clip(self, clip_id: int, **changes: object) -> Project:
         found = self.find(clip_id)
@@ -591,31 +727,64 @@ class Project:
             )
         )
         updated_project = self._replace_track(index, replace(track, clips=clips))
-        if "start" in changes and clip.is_transition is False:
+        if clip.is_transition:
+            updated_project = updated_project._sync_transition_markers(clip_id)
+        elif {"start", "duration", "in_point", "speed"}.intersection(changes):
             updated_project = updated_project._sync_transition_markers(clip_id)
         return updated_project
 
     def _sync_transition_markers(self, clip_id: int) -> Project:
-        """Move a transition with either clip it connects."""
-        clips_by_id = {c.clip_id: c for c in self.clips}
+        """Mantém marcadores ligados ao corte ou remove os que ficaram órfãos."""
         tracks = []
         changed = False
         for track in self.tracks:
             new_clips = []
             for marker in track.clips:
-                if not marker.is_transition or clip_id not in (marker.transition_left_id, marker.transition_right_id):
+                affected = marker.is_transition and (
+                    marker.clip_id == clip_id
+                    or clip_id in (marker.transition_left_id, marker.transition_right_id)
+                )
+                if not affected:
                     new_clips.append(marker)
                     continue
-                left = clips_by_id.get(marker.transition_left_id)
-                right = clips_by_id.get(marker.transition_right_id)
-                if left is None or right is None:
-                    new_clips.append(marker)
+                context = self.transition_context(marker)
+                if context is None:
+                    # Marcadores legados sem IDs continuam legíveis. Os novos,
+                    # explicitamente ligados, não podem flutuar fora do corte.
+                    if marker.transition_left_id is None or marker.transition_right_id is None:
+                        new_clips.append(marker)
+                    else:
+                        changed = True
                     continue
-                cut = (left.end + right.start) / 2.0
-                new_clips.append(replace(marker, start=max(0.0, cut - marker.duration / 2.0)))
-                changed = True
+                synced = replace(
+                    marker,
+                    # Uma transição usa um mínimo próprio. Empregar aqui os
+                    # 50 ms de um corte comum permitia salvar efeitos com um só
+                    # quadro intermediário, embora a interface anunciasse 0,2 s.
+                    duration=max(
+                        min(
+                            MIN_TRANSITION_DURATION,
+                            context.left.duration,
+                            context.right.duration,
+                        ),
+                        context.duration,
+                    ),
+                )
+                synced = replace(
+                    synced,
+                    start=max(0.0, context.cut - synced.duration / 2.0),
+                )
+                new_clips.append(synced)
+                changed = changed or synced != marker
             tracks.append(replace(track, clips=tuple(sorted(new_clips, key=lambda c: c.start))))
         return replace(self, tracks=tuple(tracks)) if changed else self
+
+    def with_normalized_transitions(self) -> Project:
+        """Normaliza marcadores persistidos por versões com regras divergentes."""
+        project = self
+        for marker in tuple(clip for clip in self.clips if clip.is_transition):
+            project = project._sync_transition_markers(marker.clip_id)
+        return project
 
     def with_track_muted(self, track_index: int, muted: bool) -> Project:
         track = self.tracks[track_index]
@@ -733,6 +902,28 @@ class Project:
         if found is None:
             return self
         index, clip = found
+        if clip.is_transition:
+            context = self.transition_context(clip)
+            if context is None:
+                return self
+            # As duas pontas se movem simetricamente, como nos editores de
+            # referência: a transição continua centrada no ponto de edição.
+            requested = (
+                2.0 * (context.cut - seconds)
+                if edge == "inicio"
+                else 2.0 * (seconds - context.cut)
+            )
+            minimum = min(
+                MIN_TRANSITION_DURATION,
+                context.left.duration,
+                context.right.duration,
+            )
+            duration = min(
+                max(minimum, requested),
+                context.left.duration,
+                context.right.duration,
+            )
+            return self.with_updated_clip(clip_id, duration=duration)
         floor, ceiling = self.tracks[index].free_range(
             (clip.start + clip.end) / 2, ignore=clip_id
         )
@@ -765,6 +956,8 @@ class Project:
         if found is None:
             return self
         index, clip = found
+        if clip.is_transition:
+            return self
         if (
             seconds - clip.start < MIN_SEGMENT
             or clip.end - seconds < MIN_SEGMENT
