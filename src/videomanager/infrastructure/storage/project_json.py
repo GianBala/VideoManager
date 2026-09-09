@@ -372,7 +372,7 @@ def _project_from_dict(
         width=width,
         height=height,
         fps=fps,
-    )
+    ).with_normalized_transitions()
     return project, missing_files
 
 
