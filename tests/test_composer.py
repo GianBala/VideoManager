@@ -475,6 +475,18 @@ class TestComandos:
         )
         assert "r=15.000000" in " ".join(args) or "fps=15.000000" in " ".join(args)
 
+    def test_previa_compoe_direto_na_resolucao_visivel(self) -> None:
+        projeto_4k = projeto(
+            video_track(clip()),
+            width=3840,
+            height=2160,
+        )
+        texto = " ".join(
+            playback_command(projeto_4k, 0.0, (640, 360), TOOLS, fps=30)
+        )
+        assert "color=c=black:s=640x360" in texto
+        assert "color=c=black:s=3840x2160" not in texto
+
     def test_audio_da_previa_sai_em_pcm(self) -> None:
         args = audio_command(projeto(audio_track(clip(ESTEREO))), 0.0, TOOLS)
         assert args is not None
@@ -588,12 +600,14 @@ class TestThreadsDaPrevia:
         args = export_args(self.dois_blocos(), DEST, TOOLS)
         assert "-threads" not in args
 
-    def test_a_reproducao_nao_e_apertada(self) -> None:
-        # O relógio já limita o trabalho dela — decodifica na velocidade em que
-        # consome —, e apertar as threads só arriscaria não acompanhar o
-        # material mais pesado.
+    def test_a_reproducao_limita_todas_as_entradas(self) -> None:
+        # Uma transição abre simultaneamente os dois lados do corte. Deixar
+        # cada decodificador usar todos os núcleos torna a abertura mais lenta
+        # e produz a demora antes do play; o teto ainda é suficiente para a
+        # reprodução em tempo real.
         args = playback_command(self.dois_blocos(), 0.0, (640, 360), TOOLS, fps=30)
-        assert "-threads" not in args
+        assert args.count("-i") == 2
+        assert not self.entradas_sem_limite(args)
 
     def test_o_teto_nunca_passa_do_que_a_maquina_tem(self) -> None:
         assert 1 <= decode_threads() <= min(8, os.cpu_count() or 8)

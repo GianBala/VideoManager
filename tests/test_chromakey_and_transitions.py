@@ -11,7 +11,6 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from videomanager.infrastructure.ffmpeg.composer import build_graph
-from videomanager.infrastructure.ffmpeg.composer import _pieces
 from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
@@ -23,6 +22,8 @@ from videomanager.infrastructure.storage.project_json import load_project
 from videomanager.infrastructure.storage.project_json import save_project
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
 from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget
+from videomanager.presentation.qt.panels.timeline import Timeline
+from videomanager.presentation.qt.theme import DARK
 
 
 @pytest.fixture
@@ -113,6 +114,34 @@ def test_project_io_chromakey_and_transition(tmp_path: Path) -> None:
     assert c2.transition_name == "vignette_pulse"
 
 
+def test_project_io_normaliza_transicao_antiga_abaixo_do_minimo(
+    tmp_path: Path,
+) -> None:
+    media = MediaRef(Path("video.mp4"), MediaKind.VIDEO, duration=8.0)
+    left = Clip(media, start=0.0, duration=4.0)
+    right = Clip(media, start=4.0, duration=4.0, in_point=4.0)
+    marker = Clip(
+        MediaRef(Path("Transição_Wipe"), MediaKind.IMAGE, duration=1.0),
+        start=3.975,
+        duration=0.05,
+        overlay_type="transition",
+        transition_name="wiperight",
+        transition_left_id=left.clip_id,
+        transition_right_id=right.clip_id,
+    )
+    path = tmp_path / "legado.vmp"
+    save_project(
+        Project(tracks=(Track(TrackKind.VIDEO, clips=(left, right, marker)),)),
+        path,
+    )
+
+    loaded, _ = load_project(path)
+    normalized = loaded.find(marker.clip_id)
+    assert normalized is not None
+    assert normalized[1].duration == pytest.approx(0.2)
+    assert normalized[1].start == pytest.approx(3.9)
+
+
 def test_composer_chromakey_filter() -> None:
     media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=10.0, width=1920, height=1080)
     clip_v = Clip(
@@ -134,32 +163,35 @@ def test_composer_chromakey_filter() -> None:
 
 
 def test_composer_transitions_graph() -> None:
-    for tname in ("fade_black", "fade_white", "flash", "vignette_pulse", "inverter", "dissolve_color"):
-        clip_t = Clip(
-            media=MediaRef(path=Path("Transição"), kind=MediaKind.IMAGE, duration=2.0),
-            start=1.0,
-            duration=2.0,
+    media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=12.0)
+    for stored, rendered in (
+        ("fade", "fade"),
+        ("fade_black", "fadeblack"),
+        ("fade_white", "fadewhite"),
+        ("dissolve", "dissolve"),
+        ("wipeleft", "wipeleft"),
+        ("slideright", "slideright"),
+    ):
+        left = Clip(media=media, start=0.0, duration=4.0, in_point=1.0)
+        right = Clip(media=media, start=4.0, duration=4.0, in_point=5.0)
+        marker = Clip(
+            media=MediaRef(path=Path("Transição"), kind=MediaKind.IMAGE, duration=1.0),
+            start=3.5,
+            duration=1.0,
             overlay_type="transition",
-            transition_name=tname,
+            transition_name=stored,
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
         )
-        p = Project(tracks=(Track(kind=TrackKind.ADDITIONAL, clips=(clip_t,), visible=True),))
-        graph = build_graph(p)
-        filters_str = ";".join(graph.filters)
-        if tname == "fade_black":
-            assert "fade=t=in" in filters_str or "color=c=black" in filters_str
-        elif tname == "fade_white":
-            assert "color=white" in filters_str
-        elif tname == "flash":
-            assert "brightness=" in filters_str
-        elif tname == "vignette_pulse":
-            assert "vignette=" in filters_str
-        elif tname == "inverter":
-            assert "negate" in filters_str
-        elif tname == "dissolve_color":
-            assert "colorchannelmixer=" in filters_str
+        graph = build_graph(
+            Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(left, right, marker)),))
+        )
+        assert f"xfade=transition={rendered}:duration=1.000000:offset=0" in ";".join(
+            graph.filters
+        )
 
 
-def test_transicao_e_processada_depois_dos_videos() -> None:
+def test_transicao_e_processada_na_trilha_antes_das_camadas_superiores() -> None:
     video = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=8.0)
     base = Clip(media=video, start=0.0, duration=4.0)
     next_clip = Clip(media=video, start=4.0, duration=4.0)
@@ -169,16 +201,25 @@ def test_transicao_e_processada_depois_dos_videos() -> None:
         duration=1.0,
         overlay_type="transition",
         transition_name="fade_black",
+        transition_left_id=base.clip_id,
+        transition_right_id=next_clip.clip_id,
+    )
+    image = Clip(
+        media=MediaRef(path=Path("logo.png"), kind=MediaKind.IMAGE, duration=2.0),
+        start=3.0,
+        duration=2.0,
+        overlay_type="image",
     )
     project = Project(
         tracks=(
-            Track(kind=TrackKind.VIDEO, clips=(base, next_clip)),
-            Track(kind=TrackKind.ADDITIONAL, clips=(marker,)),
+            Track(kind=TrackKind.ADDITIONAL, clips=(image,)),
+            Track(kind=TrackKind.VIDEO, clips=(base, next_clip, marker)),
         )
     )
-
-    pieces = _pieces(project, 0.0, None)
-    assert [piece.clip.overlay_type for piece in pieces] == ["none", "none", "transition"]
+    filters = build_graph(project).filters
+    xfade_index = next(i for i, item in enumerate(filters) if "xfade=" in item)
+    image_index = next(i for i, item in enumerate(filters) if "[2:v]" in item)
+    assert xfade_index < image_index, "a transição não pode cobrir a camada superior"
 
 
 def test_transicao_entre_dois_videos_usa_xfade() -> None:
@@ -194,11 +235,18 @@ def test_transicao_entre_dois_videos_usa_xfade() -> None:
     project = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=clips + (transition,)),))
     graph = build_graph(project)
     assert any("xfade=transition=dissolve" in item for item in graph.filters)
-    assert any("fps=30.000000,format=yuv420p[tr_a]" in item for item in graph.filters)
-    assert not any("[base]" in item for item in graph.filters)
+    assert any("settb=AVTB" in item and "[tr0a]" in item for item in graph.filters)
+    assert any("[base]" in item for item in graph.filters)
 
     preview = build_graph(project, at=3.2, span=2.0)
-    assert any("offset=0.300000" in item for item in preview.filters)
+    assert any("setpts=PTS-STARTPTS+0.300000/TB[trv0]" in item for item in preview.filters)
+
+    frame = build_graph(project, at=4.0, span=1.0 / 30.0)
+    assert any(
+        "trim=start=0.500000:duration=0.033333" in item
+        for item in frame.filters
+    )
+    assert any("xfade=transition=dissolve:duration=1.000000:offset=0" in item for item in frame.filters)
 
 
 def test_marcador_sem_duas_fontes_nao_apaga_a_composicao() -> None:
@@ -221,6 +269,180 @@ def test_duracao_excessiva_e_limitada_ao_material_do_corte() -> None:
     )
     graph = build_graph(Project(tracks=(Track(kind=TrackKind.VIDEO, clips=clips + (marker,)),)))
     assert any("xfade=transition=fade:duration=2.000000" in item for item in graph.filters)
+
+
+def test_varias_transicoes_sao_resolvidas_pelos_ids_em_sequencia() -> None:
+    media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=20.0)
+    first = Clip(media=media, start=0.0, duration=4.0, in_point=1.0)
+    second = Clip(media=media, start=4.0, duration=4.0, in_point=6.0)
+    third = Clip(media=media, start=8.0, duration=4.0, in_point=11.0)
+    pseudo = MediaRef(path=Path("Transição"), kind=MediaKind.IMAGE, duration=1.0)
+    one = Clip(
+        media=pseudo,
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="wipeleft",
+        transition_left_id=first.clip_id,
+        transition_right_id=second.clip_id,
+    )
+    two = Clip(
+        media=pseudo,
+        start=7.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="slideleft",
+        transition_left_id=second.clip_id,
+        transition_right_id=third.clip_id,
+    )
+    graph = build_graph(
+        Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(first, second, third, one, two)),))
+    )
+    filters = ";".join(graph.filters)
+    assert filters.count("xfade=transition=") == 2
+    assert "xfade=transition=wipeleft" in filters
+    assert "xfade=transition=slideleft" in filters
+
+
+def test_transicao_usa_alcas_e_faz_crossfade_do_audio_anexado() -> None:
+    media = MediaRef(
+        path=Path("video.mp4"),
+        kind=MediaKind.VIDEO,
+        duration=12.0,
+        has_audio=True,
+        channels=2,
+    )
+    left = Clip(media=media, start=0.0, duration=4.0, in_point=2.0)
+    right = Clip(media=media, start=4.0, duration=4.0, in_point=7.0)
+    marker = Clip(
+        media=MediaRef(path=Path("Transição"), kind=MediaKind.IMAGE, duration=1.0),
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="dissolve",
+        transition_left_id=left.clip_id,
+        transition_right_id=right.clip_id,
+    )
+    graph = build_graph(
+        Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(left, right, marker)),))
+    )
+    inputs = " ".join(graph.inputs)
+    filters = ";".join(graph.filters)
+    assert "-ss 5.500000 -i video.mp4" in inputs
+    assert "-ss 6.500000 -i video.mp4" in inputs
+    assert "acrossfade=d=1.000000:c1=qsin:c2=qsin" in filters
+    # O segundo clipe ainda está no relógio local antes do adelay; seu mudo
+    # precisa começar em -0,5 s para cobrir os primeiros 0,5 s disponíveis.
+    assert "volume=0:enable='between(t,3.500000,4.500000)'" in filters
+    assert "volume=0:enable='between(t,-0.500000,0.500000)'" in filters
+
+
+def test_sem_alcas_repete_quadro_mas_audio_faz_fade_sem_silencio_injetado() -> None:
+    left_media = MediaRef(
+        path=Path("left.mp4"),
+        kind=MediaKind.VIDEO,
+        duration=4.0,
+        has_audio=True,
+        channels=2,
+    )
+    right_media = MediaRef(
+        path=Path("right.mp4"),
+        kind=MediaKind.VIDEO,
+        duration=4.0,
+        has_audio=True,
+        channels=2,
+    )
+    left = Clip(media=left_media, start=0.0, duration=4.0)
+    right = Clip(media=right_media, start=4.0, duration=4.0)
+    marker = Clip(
+        media=MediaRef(path=Path("Transição"), kind=MediaKind.IMAGE, duration=1.0),
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="fade",
+        transition_left_id=left.clip_id,
+        transition_right_id=right.clip_id,
+    )
+    filters = ";".join(
+        build_graph(
+            Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(left, right, marker)),))
+        ).filters
+    )
+    assert "tpad=stop_mode=clone:stop_duration=0.500000" in filters
+    assert "tpad=start_mode=clone:start_duration=0.500000" in filters
+    assert "acrossfade=" not in filters
+    assert "apad=pad_dur=" not in filters
+    assert "cos((t-3.988000)/0.012000*PI/2)" in filters
+    assert "sin((t-0.000000)/0.012000*PI/2)" in filters
+
+
+@pytest.mark.parametrize(
+    ("left_muted", "right_muted", "fade_out", "fade_in"),
+    (
+        (False, False, True, True),
+        (False, True, True, False),
+        (True, False, False, True),
+        (True, True, False, False),
+    ),
+)
+def test_transicao_de_audio_respeita_mudo_de_cada_ponta(
+    left_muted: bool,
+    right_muted: bool,
+    fade_out: bool,
+    fade_in: bool,
+) -> None:
+    media = MediaRef(
+        Path("video.mp4"), MediaKind.VIDEO, duration=4.0, has_audio=True, channels=2
+    )
+    left = Clip(media, start=0.0, duration=4.0, muted=left_muted)
+    right = Clip(media, start=4.0, duration=4.0, muted=right_muted)
+    marker = Clip(
+        MediaRef(Path("Transição"), MediaKind.IMAGE, duration=1.0),
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="dissolve",
+        transition_left_id=left.clip_id,
+        transition_right_id=right.clip_id,
+    )
+    graph = build_graph(
+        Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(left, right, marker)),)),
+        want_video=False,
+    )
+    filters = ";".join(graph.filters)
+
+    assert ("cos((t-3.988000)/0.012000*PI/2)" in filters) is fade_out
+    assert ("sin((t-0.000000)/0.012000*PI/2)" in filters) is fade_in
+    assert "acrossfade=" not in filters
+    assert (graph.audio_label is not None) is (not left_muted or not right_muted)
+
+
+def test_marcador_curto_tem_alvo_visual_e_prioridade_de_selecao(
+    qapp: QApplication,
+) -> None:
+    media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=8.0)
+    left = Clip(media=media, start=0.0, duration=4.0)
+    right = Clip(media=media, start=4.0, duration=4.0, in_point=4.0)
+    marker = Clip(
+        media=MediaRef(path=Path("Transição"), kind=MediaKind.IMAGE, duration=0.1),
+        start=3.95,
+        duration=0.1,
+        overlay_type="transition",
+        transition_name="dissolve",
+        transition_left_id=left.clip_id,
+        transition_right_id=right.clip_id,
+    )
+    timeline = Timeline(DARK)
+    timeline.resize(800, 180)
+    timeline.set_project(
+        Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(left, right, marker)),))
+    )
+
+    rect = timeline._clip_rect(0, marker)
+    assert rect.width() >= 36
+    kind, _, clip_id = timeline._hit(rect.center().x(), rect.center().y())
+    assert kind == "corpo"
+    assert clip_id == marker.clip_id
 
 
 def test_export_duration_with_hidden_tracks() -> None:

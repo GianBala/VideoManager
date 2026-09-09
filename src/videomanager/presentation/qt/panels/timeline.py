@@ -65,6 +65,11 @@ FILM_CELL_WIDTH = int((VIDEO_TRACK_HEIGHT - 14) * 16 / 9)
 
 _HANDLE_GRAB = 8
 _HANDLE_WIDTH = 5
+# O marcador é um controle do corte, não uma representação em escala pura.
+# Mesmo uma transição muito curta precisa continuar fácil de selecionar, como
+# o ícone entre clipes do CapCut. A duração real segue sendo dada pela régua;
+# só a área interativa recebe este piso visual.
+_TRANSITION_MIN_WIDTH = 36
 _SNAP_PIXELS = 7
 _MIN_VIEW = 0.4
 
@@ -225,6 +230,7 @@ class Timeline(QWidget):
         self._drag_track = -1
         self._drop_track_target = -1
         self._grab_offset = 0.0
+        self._drag_edge_origin = 0.0
         # Onde o botão foi apertado, e se o arrasto já passou da folga: até lá
         # nada é alterado no projeto (ver :data:`_DRAG_SLACK`).
         self._press_at: QPointF | None = None
@@ -462,6 +468,10 @@ class Timeline(QWidget):
     def _clip_rect(self, index: int, clip: Clip) -> QRectF:
         lane = self._lane_rect(index)
         left, right = self._x_of(clip.start), self._x_of(clip.end)
+        if clip.is_transition and right - left < _TRANSITION_MIN_WIDTH:
+            center = (left + right) / 2.0
+            left = center - _TRANSITION_MIN_WIDTH / 2.0
+            right = center + _TRANSITION_MIN_WIDTH / 2.0
         return QRectF(left, lane.top(), max(3.0, right - left), lane.height())
 
     # ------------------------------------------------------------------
@@ -624,7 +634,10 @@ class Timeline(QWidget):
         painter.setClipRect(lane)
         if not track.visible:
             painter.setOpacity(0.35)
-        for clip in track.clips:
+        # Clipes comuns primeiro, marcador de transição por último. Ele ocupa o
+        # mesmo trecho dos dois vizinhos e precisa permanecer visível e clicável
+        # em cima deles.
+        for clip in sorted(track.clips, key=lambda item: item.is_transition):
             self._paint_clip(painter, index, clip, track)
         painter.restore()
 
@@ -637,7 +650,13 @@ class Timeline(QWidget):
         path.addRoundedRect(rect, 5, 5)
         painter.save()
         painter.setClipPath(path, Qt.ClipOperation.IntersectClip)
-        if track.kind is TrackKind.ADDITIONAL:
+        if clip.is_transition:
+            grad = QLinearGradient(rect.topLeft(), rect.topRight())
+            grad.setColorAt(0.0, QColor("#d97706"))
+            grad.setColorAt(0.5, QColor("#f59e0b"))
+            grad.setColorAt(1.0, QColor("#b45309"))
+            painter.fillRect(rect, grad)
+        elif track.kind is TrackKind.ADDITIONAL:
             if clip.overlay_type == "filter":
                 fname = clip.filter_name
                 if fname == "pb":
@@ -667,12 +686,6 @@ class Timeline(QWidget):
                     painter.fillRect(rect, grad)
                 else:
                     painter.fillRect(rect, QColor(94, 53, 177, 200))
-            elif clip.overlay_type == "transition":
-                grad = QLinearGradient(rect.topLeft(), rect.topRight())
-                grad.setColorAt(0.0, QColor("#d97706"))
-                grad.setColorAt(0.5, QColor("#f59e0b"))
-                grad.setColorAt(1.0, QColor("#b45309"))
-                painter.fillRect(rect, grad)
             elif clip.is_image or clip.overlay_type == "image":
                 painter.fillRect(rect, QColor("#1e1e24"))
             else:
@@ -680,7 +693,9 @@ class Timeline(QWidget):
         else:
             painter.fillRect(rect, self._color("surface"))
 
-        if track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type == "image":
+        if clip.is_transition:
+            pass
+        elif track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type == "image":
             self._paint_thumbs(painter, clip, rect)
         elif track.kind is TrackKind.AUDIO:
             self._paint_wave(painter, clip, rect)
@@ -691,6 +706,8 @@ class Timeline(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         if selected:
             border_pen = QPen(self._color("accent"), 2)
+        elif clip.is_transition:
+            border_pen = QPen(QColor("#fbbf24"), 1)
         elif track.kind is TrackKind.ADDITIONAL:
             if clip.overlay_type == "filter":
                 f_borders = {
@@ -701,8 +718,6 @@ class Timeline(QWidget):
                     "contraste": QColor("#ffb74d"),
                 }
                 border_pen = QPen(f_borders.get(clip.filter_name, QColor(186, 104, 200)), 1)
-            elif clip.overlay_type == "transition":
-                border_pen = QPen(QColor("#fbbf24"), 1)
             elif clip.is_image or clip.overlay_type == "image":
                 border_pen = QPen(QColor("#00bcd4"), 1)
             else:
@@ -880,7 +895,13 @@ class Timeline(QWidget):
                 return "mudo", index, -1
             return "cabecalho", index, -1
 
-        for clip in self._project.tracks[index].clips:
+        # A transição se sobrepõe aos clipes que une. Testá-la primeiro faz o
+        # clique escolher o marcador desenhado por cima, não o vídeo de baixo.
+        ordered = sorted(
+            self._project.tracks[index].clips,
+            key=lambda item: not item.is_transition,
+        )
+        for clip in ordered:
             rect = self._clip_rect(index, clip)
             if abs(x - rect.left()) <= _HANDLE_GRAB:
                 return "inicio", index, clip.clip_id
@@ -928,6 +949,15 @@ class Timeline(QWidget):
             self._drag, self._drag_clip = kind, clip_id
             self._press_at, self._dragging = event.position(), False
             found = self._project.find(clip_id)
+            if found is not None and found[1].is_transition:
+                if kind == "corpo":
+                    # A posição pertence ao corte; arrastar o corpo não pode
+                    # descolar o efeito dos vídeos. O clique ainda seleciona.
+                    self._drag = ""
+                    return
+                self._drag_edge_origin = (
+                    found[1].start if kind == "inicio" else found[1].end
+                )
             if found is not None and kind == "corpo":
                 # Guarda onde no bloco o mouse pegou: sem isso o bloco pula para
                 # ficar com o começo debaixo do ponteiro.
@@ -988,7 +1018,14 @@ class Timeline(QWidget):
             self.clip_moved.emit(clip.clip_id, target, max(0.0, start))
             return
 
-        moment = self._snap(self._time_of(x), clip)
+        if clip.is_transition and self._press_at is not None:
+            # O retângulo pode ser visualmente maior que sua duração. Medir o
+            # deslocamento desde o clique evita o primeiro movimento dar um
+            # salto para o instante correspondente à borda ampliada.
+            delta = (x - self._press_at.x()) * self._seconds_per_pixel()
+            moment = self._drag_edge_origin + delta
+        else:
+            moment = self._snap(self._time_of(x), clip)
         self.clip_resized.emit(clip.clip_id, self._drag, moment)
 
     def _target_reorder_track(self, y: float) -> int:
