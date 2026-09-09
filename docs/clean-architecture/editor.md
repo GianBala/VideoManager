@@ -47,6 +47,15 @@ movem simetricamente em torno do corte; o corpo não pode ser deslocado.
 O domínio impõe 0,2 s como duração mínima da transição, inclusive ao carregar
 projetos antigos, para que a timeline não contorne o limite dos campos da UI.
 
+`transition_affects_additionals` controla o limite de composição do efeito.
+Desligado por padrão, preserva a pilha de trilhas: a passagem ocorre no vídeo e
+filtros, imagens e textos continuam por cima. Ligado, cada lado do `xfade`
+recebe os itens visíveis das trilhas de Adicionais que pertencem àquele lado.
+Um item que termina no corte sai com o clipe esquerdo; um que começa no corte
+entra com o direito; um que atravessa o corte existe nos dois lados e permanece
+contínuo. O campo é persistido no `.vmp` e ausente significa `false` para manter
+compatibilidade com projetos anteriores.
+
 `clip_id` e `track_id` identificam objetos ao longo das transformações;
 `dataclasses.replace` preserva os IDs. Duplicações criam a identidade da
 nova entidade. Seleção e caches não devem depender apenas da posição numa

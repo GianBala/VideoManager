@@ -109,6 +109,24 @@ transição. A prévia monta esse grafo diretamente na resolução visível para
 processar uma tela
 4K que seria reduzida no fim; a exportação continua na resolução do projeto.
 
+Quando o marcador habilita `transition_affects_additionals`, o compositor cria
+duas subcomposições adicionais antes do `xfade`. Elas respeitam visibilidade e
+ordem das trilhas, filtros e transformações de texto/imagem. Itens encerrados no
+corte pertencem ao lado esquerdo, itens iniciados nele pertencem ao direito e
+itens contínuos entram nos dois. Durante o intervalo da passagem, esses mesmos
+itens são excluídos do fluxo principal para não serem desenhados outra vez por
+cima do resultado. A duplicação de entradas só existe nessa opção explícita;
+transições comuns preservam o caminho mais barato.
+
+Um corte criado pela tesoura entre duas partes contínuas da mesma origem exige
+tratamento próprio. Centralizar as duas entradas no mesmo ponto faria o `xfade`
+misturar quadros idênticos e o efeito parecer ausente. O compositor percorre a
+metade anterior no lado esquerdo e a metade posterior no direito, estendendo
+cada uma pela duração da passagem. As extremidades continuam coincidindo com
+o relógio normal, sem salto ao entrar ou sair do efeito. O áudio desse corte
+permanece no fluxo principal, pois cruzar duas cópias sincronizadas da mesma
+onda apenas aumentaria o volume sem criar uma passagem audível.
+
 O compositor recebe um mapa de ID de clipe para PNG de texto. Não importa Qt
 nem consulta renderizador global. Veja [prévia e texto](previa.md).
 

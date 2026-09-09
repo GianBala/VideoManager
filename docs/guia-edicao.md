@@ -117,6 +117,19 @@ essas alças durante a passagem. Sem alça de áudio suficiente, o editor preser
 o corte original e aplica apenas uma curva curta contra estalos; não cria um
 buraco de silêncio para acompanhar o efeito visual.
 
+Também é possível dividir um vídeo com a tesoura e aplicar a transição no
+novo corte. O editor usa momentos diferentes das duas partes para que Fade,
+Dissolve, Wipe e Slide não desapareçam por misturar duas cópias do mesmo quadro.
+O movimento permanece contínuo nas extremidades e o áudio original não é
+duplicado durante essa passagem.
+
+Marque **Afetar itens adicionais** para incluir filtros, imagens e textos no
+efeito. Um item que termina exatamente no corte desaparece com o vídeo da
+esquerda; um que começa ali aparece com o vídeo da direita; um item que continua
+pelos dois lados permanece visível sem piscar. Deixe desmarcado quando títulos,
+logotipos ou filtros devam ficar estáveis acima da transição. A opção também
+fica disponível nas propriedades do marcador e é salva no projeto.
+
 ### Menu de contexto (botão direito)
 
 O conteúdo muda conforme o alvo sob o cursor:
