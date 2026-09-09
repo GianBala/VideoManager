@@ -795,6 +795,7 @@ def _compose_video_piece(
     interpolate: bool,
     order: int | str,
     excluded_ranges: tuple[tuple[float, float], ...] = (),
+    hold_last: bool = False,
 ) -> str:
     """Aplica um bloco visual e devolve o novo rótulo da composição."""
     start, end = piece.offset, piece.offset + piece.duration
@@ -843,9 +844,10 @@ def _compose_video_piece(
         )
     else:
         coordinates = "x=0:y=0"
+    eof = "repeat:repeatlast=1" if hold_last else "pass:repeatlast=0"
     filters.append(
         f"{current}[v{piece.index}]"
-        f"overlay={coordinates}:eof_action=pass:repeatlast=0"
+        f"overlay={coordinates}:eof_action={eof}"
         f":enable='{enable}'{label}"
     )
     return label
@@ -874,6 +876,7 @@ def _compose_video_transition(
             fps,
             interpolate,
             f"tr{number}al{item}",
+            hold_last=True,
         )
     for item, piece in enumerate(render.right_additionals):
         right_label = _compose_video_piece(
@@ -884,6 +887,7 @@ def _compose_video_transition(
             fps,
             interpolate,
             f"tr{number}ar{item}",
+            hold_last=True,
         )
     raw_label = f"[trx{number}]"
     visible_label = f"[trv{number}]"
@@ -907,7 +911,10 @@ def _compose_video_transition(
     )
     label = f"[to{number}]"
     filters.append(
-        f"{current}{visible_label}overlay=x=0:y=0:eof_action=pass:repeatlast=0:"
+        # O resultado do xfade termina no timestamp do último quadro, um passo
+        # antes do fim nominal. Sustentá-lo fecha essa fração final; o enable
+        # abaixo encerra o overlay no corte e impede qualquer congelamento.
+        f"{current}{visible_label}overlay=x=0:y=0:eof_action=repeat:repeatlast=1:"
         f"enable='between(t,{render.offset:.6f},"
         f"{render.offset + render.visible_duration:.6f})'{label}"
     )
