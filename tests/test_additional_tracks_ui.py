@@ -847,6 +847,90 @@ def test_play_reaproveita_transicao_preparada_sem_abrir_outro_ffmpeg(
         panel.shutdown()
 
 
+def test_insercao_persiste_opcao_de_afetar_adicionais(
+    qapp: QApplication,
+    dummy_tools: FFmpegTools,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from videomanager.domain.project import Project
+    from videomanager.domain.project import Track
+    from videomanager.domain.project import TrackKind
+
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(audio_enabled=False),
+    )
+    try:
+        media = MediaRef(Path("/m/video.mp4"), MediaKind.VIDEO, duration=8.0)
+        left = Clip(media, start=0.0, duration=4.0)
+        right = Clip(media, start=4.0, duration=4.0, in_point=4.0)
+        project = Project(
+            tracks=(Track(TrackKind.VIDEO, clips=(left, right)),)
+        )
+        panel._project = project
+        panel._timeline.set_project(project)
+        panel._timeline.select(left.clip_id)
+        panel._timeline.set_position(4.0)
+        panel._trans_affect_additionals.setChecked(True)
+        monkeypatch.setattr(panel, "_request_frame", lambda **kwargs: None)
+
+        panel._insert_transition_clip("dissolve")
+
+        marker = next(clip for clip in panel._project.clips if clip.is_transition)
+        assert marker.transition_affects_additionals is True
+    finally:
+        panel.shutdown()
+
+
+def test_tesoura_cria_corte_que_aceita_transicao(
+    qapp: QApplication,
+    dummy_tools: FFmpegTools,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from videomanager.domain.project import Project
+    from videomanager.domain.project import Track
+    from videomanager.domain.project import TrackKind
+
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(audio_enabled=False),
+    )
+    try:
+        media = MediaRef(Path("/m/continuo.mp4"), MediaKind.VIDEO, duration=8.0)
+        original = Clip(media, start=0.0, duration=8.0)
+        project = Project(
+            tracks=(Track(TrackKind.VIDEO, clips=(original,)),)
+        )
+        panel._project = project
+        panel._timeline.set_project(project)
+        panel._timeline.select(original.clip_id)
+        panel._timeline.set_position(4.0)
+        monkeypatch.setattr(
+            panel,
+            "_after_edit",
+            lambda **_kwargs: panel._timeline.set_project(panel._project),
+        )
+
+        panel._split_here()
+        left, right = panel._project.tracks[0].sorted_clips()
+        panel._insert_transition_clip("dissolve")
+
+        markers = [clip for clip in panel._project.clips if clip.is_transition]
+        assert len(markers) == 1
+        assert (
+            markers[0].transition_left_id,
+            markers[0].transition_right_id,
+        ) == (left.clip_id, right.clip_id)
+    finally:
+        panel.shutdown()
+
+
 def test_pause_congela_quadro_sem_disparar_renderizacao_redundante(
     qapp: QApplication,
     dummy_tools: FFmpegTools,

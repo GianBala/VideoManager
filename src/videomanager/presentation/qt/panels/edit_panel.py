@@ -1095,6 +1095,17 @@ class EditPanel(QWidget):
         dur_row.addWidget(self._trans_dur)
         layout.addLayout(dur_row)
 
+        self._trans_affect_additionals = QCheckBox(
+            strings.EDIT_TRANSITION_AFFECT_ADDITIONALS
+        )
+        self._trans_affect_additionals.setToolTip(
+            strings.EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP
+        )
+        self._trans_affect_additionals.toggled.connect(
+            self._on_transition_affect_additionals_changed
+        )
+        layout.addWidget(self._trans_affect_additionals)
+
         hint = QLabel(strings.EDIT_TRANSITION_TRACK_HINT)
         hint.setWordWrap(True)
         hint.setProperty("role", "dim")
@@ -1136,6 +1147,17 @@ class EditPanel(QWidget):
             self._remember()
             self._apply(self._project.with_updated_clip(clip.clip_id, duration=dur))
 
+    def _on_transition_affect_additionals_changed(self, checked: bool) -> None:
+        clip = self._timeline.selected_clip
+        if not self._syncing and clip is not None and clip.is_transition:
+            self._remember()
+            self._apply(
+                self._project.with_updated_clip(
+                    clip.clip_id,
+                    transition_affects_additionals=checked,
+                )
+            )
+
     def _transition_max_duration(self, marker: Clip) -> float:
         """Maior duração que permanece contida nos dois lados do corte."""
         context = self._project.transition_context(marker)
@@ -1156,6 +1178,9 @@ class EditPanel(QWidget):
                     clip.clip_id,
                     transition_name=self._selected_trans_name,
                     duration=duration,
+                    transition_affects_additionals=(
+                        self._trans_affect_additionals.isChecked()
+                    ),
                 )
             )
         else:
@@ -1242,6 +1267,9 @@ class EditPanel(QWidget):
                 existing.clip_id,
                 transition_name=tname,
                 duration=duration,
+                transition_affects_additionals=(
+                    self._trans_affect_additionals.isChecked()
+                ),
             )
             self._timeline.select(existing.clip_id)
             self._after_edit()
@@ -1254,6 +1282,9 @@ class EditPanel(QWidget):
             transition_name=tname,
             transition_left_id=left.clip_id,
             transition_right_id=right.clip_id,
+            transition_affects_additionals=(
+                self._trans_affect_additionals.isChecked()
+            ),
         )
         # Transições pertencem à sequência de vídeo, no próprio corte. Elas
         # não são overlays de Adicionais: podem ocupar o mesmo intervalo dos
@@ -1320,6 +1351,9 @@ class EditPanel(QWidget):
                 if i < len(self._trans_buttons):
                     self._trans_buttons[i].setChecked(tid == tname)
             self._trans_dur.setValue(clip.duration)
+            self._trans_affect_additionals.setChecked(
+                clip.transition_affects_additionals
+            )
             if hasattr(self, "_apply_trans_btn"):
                 self._apply_trans_btn.setText("✓ Atualizar Transição Selecionada")
                 self._insert_new_trans_btn.setVisible(True)
