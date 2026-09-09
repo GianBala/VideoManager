@@ -731,6 +731,43 @@ class TestExportacaoDaEdicao:
             ).stdout
             assert len(raw) == 160 * 90 * 3
 
+        right_logo = replace(logo, start=1.0, duration=1.0)
+        transition = replace(
+            marker,
+            transition_name="wipeleft",
+            transition_affects_additionals=True,
+        )
+        project = Project(
+            tracks=(
+                Track(TrackKind.ADDITIONAL, clips=(right_logo,)),
+                Track(TrackKind.VIDEO, clips=(left, right, transition)),
+            ),
+            width=160,
+            height=90,
+            fps=30.0,
+        )
+        near_end = transition.end - 0.5 / project.fps
+        transitioned = subprocess.run(
+            frame_command(project, near_end, (160, 90), tools),
+            check=True,
+            capture_output=True,
+        ).stdout
+        expected = subprocess.run(
+            frame_command(
+                project.without_clip(transition.clip_id),
+                near_end,
+                (160, 90),
+                tools,
+            ),
+            check=True,
+            capture_output=True,
+        ).stdout
+        difference = sum(
+            abs(actual - wanted)
+            for actual, wanted in zip(transitioned, expected)
+        ) / len(expected)
+        assert difference < 25.0
+
     def test_transicao_apos_tesoura_e_visivel_em_video_continuo(
         self, tmp_path: Path, tools
     ) -> None:
