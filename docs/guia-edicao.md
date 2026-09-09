@@ -97,6 +97,26 @@ Um clique isolado nunca conta como edição: só a partir de alguns pixels de
 arrasto é que a ação entra na pilha de desfazer — selecionar um bloco sem
 mover nada não empilha um "desfazer" vazio.
 
+### Transições
+
+Uma transição pertence ao corte entre dois blocos de vídeo encostados. Para
+escolher exatamente a trilha quando várias têm cortes no mesmo instante,
+selecione um dos dois blocos dessa trilha antes de inserir o efeito. A transição
+será ligada àquele par. Se nenhum bloco estiver selecionado, o editor usa o
+corte válido mais próximo do cursor, preservando o comportamento automático.
+
+O marcador permanece centralizado no corte. Arrastar uma de suas bordas aumenta
+ou reduz os dois lados simetricamente; o mínimo é 0,2 s e o máximo é limitado
+pela duração dos blocos conectados. Sua largura visual tem um alvo mínimo para
+facilitar a seleção em zoom distante, sem alterar a duração renderizada. Excluir
+ou afastar uma das pontas remove a transição ligada, em vez de associá-la
+silenciosamente a outro corte.
+
+Quando existem amostras de mídia além das bordas cortadas, vídeo e áudio usam
+essas alças durante a passagem. Sem alça de áudio suficiente, o editor preserva
+o corte original e aplica apenas uma curva curta contra estalos; não cria um
+buraco de silêncio para acompanhar o efeito visual.
+
 ### Menu de contexto (botão direito)
 
 O conteúdo muda conforme o alvo sob o cursor:

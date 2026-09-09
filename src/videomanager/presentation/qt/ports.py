@@ -31,7 +31,18 @@ class DesktopRuntimePort(Protocol):
 
     def frame_worker(self, project, seconds, size, tools, token, *, text_assets=None): ...
 
-    def playback_worker(self, project, seconds, size, tools, token, *, fps, text_assets=None): ...
+    def playback_worker(
+        self,
+        project,
+        seconds,
+        size,
+        tools,
+        token,
+        *,
+        fps,
+        text_assets=None,
+        autostart=True,
+    ): ...
 
     def audio_output(self, parent=None): ...
 

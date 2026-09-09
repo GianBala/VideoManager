@@ -24,6 +24,29 @@ percorre vídeo de baixo para cima para construir fundo e sobreposições.
 Texto, filtro e transição têm referência sintética: ela não deve ser sondada
 como arquivo. Uma imagem importada continua tendo um arquivo real.
 
+### Transições pertencem ao corte
+
+Uma transição não é uma camada livre nem um terceiro vídeo. O marcador vive na
+trilha de vídeo e referencia `transition_left_id` e `transition_right_id`, que
+devem ser clipes adjacentes e encostados. `Project.transition_context` é a fonte
+única para resolver o corte, centralizar a duração e impor o limite dado pelas
+duas pontas. Se uma ponta for excluída ou os clipes deixarem de formar aquele
+corte, o marcador ligado é removido; ele nunca se associa por proximidade a
+outra edição.
+
+Na inserção, selecionar um clipe de vídeo restringe os candidatos aos cortes de
+que ele participa, inclusive quando várias trilhas têm cortes no mesmo instante.
+Um clipe selecionado sem vizinho encostado produz aviso, sem cair em outra
+trilha. Sem seleção, permanece o comportamento global: vence o corte mais
+próximo do cursor.
+
+O retângulo desenhado na timeline pode ter uma largura mínima maior que sua
+duração em escala. Essa diferença é intencional: aumenta o alvo de seleção sem
+alterar o intervalo renderizado. Ao arrastar uma borda, as duas extremidades se
+movem simetricamente em torno do corte; o corpo não pode ser deslocado.
+O domínio impõe 0,2 s como duração mínima da transição, inclusive ao carregar
+projetos antigos, para que a timeline não contorne o limite dos campos da UI.
+
 `clip_id` e `track_id` identificam objetos ao longo das transformações;
 `dataclasses.replace` preserva os IDs. Duplicações criam a identidade da
 nova entidade. Seleção e caches não devem depender apenas da posição numa

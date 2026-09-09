@@ -86,11 +86,19 @@ class DesktopRuntime:
         *,
         fps,
         text_assets = None,
+        autostart = True,
     ):
         request = prepare_preview(project, seconds, size, token, fps=fps, text_assets=text_assets)
         command = composer.playback_command(request.project, request.seconds, request.size, tools,
                                             fps=request.fps, text_assets=dict(request.text_assets))
-        return PlaybackWorker(command, request.seconds, request.size, request.token, fps=request.fps)
+        return PlaybackWorker(
+            command,
+            request.seconds,
+            request.size,
+            request.token,
+            fps=request.fps,
+            autostart=autostart,
+        )
 
     def audio_output(self, parent=None):
         return AudioPreview(parent, enabled=self._audio_enabled)

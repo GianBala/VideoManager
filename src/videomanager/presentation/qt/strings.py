@@ -328,6 +328,13 @@ EDIT_EXTRAS_TITLE = "Adicionais"
 EDIT_TAB_TEXT = "Texto"
 EDIT_TAB_FILTERS = "Filtros"
 EDIT_TAB_TRANSITIONS = "Transições"
+EDIT_TRANSITION_NEEDS_CUT = (
+    "Encoste dois clipes de vídeo na mesma trilha para inserir uma transição."
+)
+EDIT_TRANSITION_TRACK_HINT = (
+    "Selecione um dos clipes do corte para escolher exatamente a trilha; "
+    "sem seleção, será usado o corte mais próximo do cursor."
+)
 EDIT_TEXT_PLACEHOLDER = "Digite o texto aqui…"
 EDIT_FONT_FAMILY = "Fonte:"
 EDIT_FONT_SIZE = "Tamanho:"
