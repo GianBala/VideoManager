@@ -306,6 +306,7 @@ def test_transicao_opcionalmente_compoe_imagem_texto_e_filtro_nos_dois_lados() -
     assert "otr0al" in filters, "a imagem deve ser composta antes do filtro"
     assert "otr0ar" in xfade, "texto da direita deve entrar antes do xfade"
     assert "ftr0al" in filters, "o filtro da esquerda deve afetar seu lado composto"
+    assert "eof_action=repeat:repeatlast=1" in filters
     assert "not(between(t,3.500000,4.500000))" in filters
     assert graph.inputs.count("-i") == 8  # 4 normais, 2 da transição e 2 duplicadas
 
@@ -486,6 +487,10 @@ def test_recorte_de_preview_cobre_o_ultimo_meio_quadro_da_transicao() -> None:
         for item in graph.filters
     )
     assert any("not(between(t,0.000000,0.020854))" in item for item in graph.filters)
+    assert any(
+        "eof_action=repeat:repeatlast=1" in item and "[to0]" in item
+        for item in graph.filters
+    )
 
 
 def test_marcador_sem_duas_fontes_nao_apaga_a_composicao() -> None:
