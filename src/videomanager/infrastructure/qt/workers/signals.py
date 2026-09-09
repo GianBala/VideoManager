@@ -63,6 +63,7 @@ class PreviewSignals(QObject):
     """
 
     frame = Signal(int, object)  # token, RawFrame
+    primed = Signal(int)  # token; primeiro quadro de reprodução já está em memória
     strip = Signal(int, int, object)  # token, índice na tira, RawFrame
     waveform = Signal(int, bytes)  # token, PNG
     keyframes = Signal(object)  # tuple[float, ...]

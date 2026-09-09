@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager.domain.geometry import image_base_size
+from videomanager.domain.constants import MIN_TRANSITION_DURATION
 
 from videomanager.domain.preview import fit_size
 
@@ -729,7 +730,7 @@ class _Preview(QLabel):
             self._clip_visible
             and not self._is_playing
             and clip is not None
-            and clip.overlay_type != "filter"
+            and clip.overlay_type not in ("filter", "transition")
             and clip.contains(self._position)
         )
 
@@ -1103,7 +1104,7 @@ class _ClipPropertiesWidget(QWidget):
         dur_row.setSpacing(6)
         dur_row.addWidget(QLabel("Duração:"))
         self._spin_trans_dur = QDoubleSpinBox()
-        self._spin_trans_dur.setRange(0.2, 5.0)
+        self._spin_trans_dur.setRange(MIN_TRANSITION_DURATION, 5.0)
         self._spin_trans_dur.setSingleStep(0.1)
         self._spin_trans_dur.setValue(1.0)
         self._spin_trans_dur.setSuffix(" s")

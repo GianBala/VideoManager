@@ -95,6 +95,7 @@ from videomanager.domain.project import auto_canvas
 from videomanager.domain.project import next_clip_id
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.domain.constants import MIN_SEGMENT
+from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.timing import CutMode
 from videomanager.domain.timing import TrimTarget
 from videomanager.domain.timing import format_span
@@ -256,6 +257,7 @@ class EditPanel(QWidget):
 
     def install_project(self, project, path, references, probed, *, reset=True):
         self._stop_playback()
+        self._cancel_primed_playback()
         self._background.cancel_all()
         self._runner.cancel_all()
         self._frame_token = next(self._tokens)
@@ -347,8 +349,24 @@ class EditPanel(QWidget):
         self._frame_busy = False
         self._wanted: float | None = None
         self._rendered: float | None = None
+        # O instante sozinho não identifica um quadro: duas versões diferentes
+        # da edição podem pedir exatamente o mesmo ponto da linha do tempo. A
+        # revisão impede que o resultado anterior ao redimensionamento de uma
+        # transição seja aceito como se pertencesse ao projeto mais recente.
+        self._frame_revision = 0
         self._playing = False
         self._playback: object | None = None
+        # O worker preparado mantém o primeiro quadro no cano enquanto a
+        # prévia está pausada. Assim o clique em play só abre uma comporta; não
+        # precisa montar naquele momento o grafo mais caro de uma transição.
+        self._primed_playback: object | None = None
+        self._primed_key: tuple[object, ...] | None = None
+        self._primed_token = 0
+        self._primed_ready = False
+        # Quando ainda não houve tempo de preparar o vídeo, o áudio espera o
+        # primeiro quadro. Começar o som durante a abertura do FFmpeg deixaria
+        # a imagem atrasada justamente no caminho de contingência.
+        self._pending_audio: tuple[object, float, object, object] | None = None
         self._fullscreen: FullscreenPreview | None = None
         self._syncing = False
         self._shown_frame = 0.0
@@ -1069,7 +1087,7 @@ class EditPanel(QWidget):
         dur_row = QHBoxLayout()
         dur_row.addWidget(QLabel("Duração:"))
         self._trans_dur = QDoubleSpinBox()
-        self._trans_dur.setRange(0.2, 5.0)
+        self._trans_dur.setRange(MIN_TRANSITION_DURATION, 5.0)
         self._trans_dur.setValue(1.0)
         self._trans_dur.setSingleStep(0.1)
         self._trans_dur.setSuffix(" s")
@@ -1077,7 +1095,7 @@ class EditPanel(QWidget):
         dur_row.addWidget(self._trans_dur)
         layout.addLayout(dur_row)
 
-        hint = QLabel("A transição é posicionada na interseção dos blocos de vídeo mais próximos.")
+        hint = QLabel(strings.EDIT_TRANSITION_TRACK_HINT)
         hint.setWordWrap(True)
         hint.setProperty("role", "dim")
         hint.setStyleSheet("font-size: 11px; color: #94a3b8;")
@@ -1119,19 +1137,14 @@ class EditPanel(QWidget):
             self._apply(self._project.with_updated_clip(clip.clip_id, duration=dur))
 
     def _transition_max_duration(self, marker: Clip) -> float:
-        """Maior sobreposição possível entre os clipes do corte."""
-        found = self._project.find(marker.clip_id)
-        if found is None:
+        """Maior duração que permanece contida nos dois lados do corte."""
+        context = self._project.transition_context(marker)
+        if context is None:
             return marker.duration
-        index, _ = found
-        track = self._project.tracks[index]
-        clips = sorted((c for c in track.clips if not c.is_transition), key=lambda c: c.start)
-        cut = marker.start + marker.duration / 2.0
-        before = max((c for c in clips if c.end <= cut + 1e-6), key=lambda c: c.end, default=None)
-        after = min((c for c in clips if c.start >= cut - 1e-6), key=lambda c: c.start, default=None)
-        if before is None or after is None:
-            return marker.duration
-        return max(0.2, min(5.0, before.duration, after.duration))
+        return max(
+            MIN_TRANSITION_DURATION,
+            min(5.0, context.left.duration, context.right.duration),
+        )
 
     def _handle_apply_or_update_transition(self) -> None:
         clip = self._timeline.selected_clip
@@ -1148,74 +1161,104 @@ class EditPanel(QWidget):
         else:
             self._insert_transition_clip(self._selected_trans_name)
 
-    def _find_nearest_video_cut(self, current_pos: float) -> float | None:
-        cuts: list[float] = []
-        for track in self._project.tracks:
+    def _find_nearest_video_cut(
+        self, current_pos: float
+    ) -> tuple[int, Clip, Clip, float] | None:
+        """Corte do clipe selecionado ou, sem seleção aplicável, o mais próximo.
+
+        A identidade do clipe é o escopo, não o instante. Assim, duas trilhas
+        com cortes perfeitamente alinhados continuam selecionáveis sem depender
+        da ordem interna em que aparecem no projeto.
+        """
+        cuts: list[tuple[int, Clip, Clip, float]] = []
+        for index, track in enumerate(self._project.tracks):
             if track.kind != TrackKind.VIDEO:
                 continue
-            sorted_clips = sorted(track.clips, key=lambda c: c.start)
-            for i in range(len(sorted_clips) - 1):
-                c1 = sorted_clips[i]
-                c2 = sorted_clips[i + 1]
-                c1_end = c1.start + c1.duration
-                if abs(c2.start - c1_end) < 2.0:
-                    cuts.append((c1_end + c2.start) / 2.0)
-                else:
-                    cuts.append(c1_end)
-                    cuts.append(c2.start)
-            for c in sorted_clips:
-                cuts.append(c.start)
-                cuts.append(c.start + c.duration)
+            ordered = sorted(
+                (clip for clip in track.clips if not clip.is_transition),
+                key=lambda clip: clip.start,
+            )
+            for left, right in zip(ordered, ordered[1:]):
+                if abs(left.end - right.start) <= 1e-4:
+                    cuts.append((index, left, right, left.end))
 
         if not cuts:
             return None
-        cuts.sort(key=lambda pt: abs(pt - current_pos))
-        return cuts[0]
+
+        selected = self._timeline.selected_clip
+        if selected is not None and not selected.is_transition:
+            found = self._project.find(selected.clip_id)
+            if found is not None and self._project.tracks[found[0]].kind is TrackKind.VIDEO:
+                selected_cuts = [
+                    cut
+                    for cut in cuts
+                    if selected.clip_id in (cut[1].clip_id, cut[2].clip_id)
+                ]
+                # Uma seleção explícita nunca cai silenciosamente em outra
+                # trilha. Se o clipe não toca um corte, a UI mostra o aviso de
+                # que são necessários dois blocos encostados.
+                if not selected_cuts:
+                    return None
+                cuts = selected_cuts
+        return min(cuts, key=lambda item: abs(item[3] - current_pos))
 
     def _insert_transition_clip(self, trans_name: str | None = None) -> None:
         tname = trans_name or getattr(self, "_selected_trans_name", "fade")
         label = next((lbl for tid, lbl in getattr(self, "_trans_specs", ()) if tid == tname), tname)
         duration = self._trans_dur.value() if hasattr(self, "_trans_dur") else 1.0
 
-        cut = self._find_nearest_video_cut(self._position)
-        if cut is not None:
-            start = max(0.0, cut - duration / 2.0)
-        else:
-            start = max(0.0, self._position - duration / 2.0)
+        edit = self._find_nearest_video_cut(self._position)
+        if edit is None:
+            QMessageBox.information(
+                self,
+                strings.DIALOG_WARNING_TITLE,
+                strings.EDIT_TRANSITION_NEEDS_CUT,
+            )
+            return
+        video_index, left, right, cut = edit
+        duration = min(duration, left.duration, right.duration)
+        start = max(0.0, cut - duration / 2.0)
 
         ref = MediaRef(
             path=Path(f"Transição_{label}"),
             kind=MediaKind.IMAGE,
             duration=duration,
         )
-        left_id = right_id = None
-        for track in self._project.video_tracks:
-            ordered = sorted((c for c in track.clips if not c.is_transition), key=lambda c: c.start)
-            for left, right in zip(ordered, ordered[1:]):
-                if abs(((left.end + right.start) / 2.0) - (cut or self._position)) < 1e-4:
-                    left_id, right_id = left.clip_id, right.clip_id
-                    break
-            if left_id is not None:
-                break
+        # Como nos editores profissionais, um ponto de edição tem no máximo
+        # uma transição. Inserir outra naquele corte substitui seus ajustes.
+        existing = next(
+            (
+                marker
+                for marker in self._project.clips
+                if marker.is_transition
+                and marker.transition_left_id == left.clip_id
+                and marker.transition_right_id == right.clip_id
+            ),
+            None,
+        )
+        if existing is not None:
+            self._remember()
+            self._project = self._project.with_updated_clip(
+                existing.clip_id,
+                transition_name=tname,
+                duration=duration,
+            )
+            self._timeline.select(existing.clip_id)
+            self._after_edit()
+            return
         clip = Clip(
             media=ref,
             start=start,
             duration=duration,
             overlay_type="transition",
             transition_name=tname,
-            transition_left_id=left_id,
-            transition_right_id=right_id,
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
         )
         # Transições pertencem à sequência de vídeo, no próprio corte. Elas
         # não são overlays de Adicionais: podem ocupar o mesmo intervalo dos
         # dois clipes que conectam.
-        video_index = next(
-            (i for i, track in enumerate(self._project.tracks) if track.kind is TrackKind.VIDEO),
-            None,
-        )
-        if video_index is None:
-            self._project = self._project.with_track(TrackKind.VIDEO)
-            video_index = next(i for i, track in enumerate(self._project.tracks) if track.kind is TrackKind.VIDEO)
+        self._remember()
         self._project = self._project.with_clip(video_index, clip)
         self._timeline.select(clip.clip_id)
         self._after_edit()
@@ -2081,7 +2124,7 @@ class EditPanel(QWidget):
             )
             menu.addSeparator()
             self._act(menu, f"{strings.EDIT_SPLIT}  (S)", self._split_here,
-                      enabled=clip.contains(self._position))
+                      enabled=not clip.is_transition and clip.contains(self._position))
             self._act(
                 menu, f"{strings.EDIT_TRIM_LEFT}  (Q)",
                 lambda: self._trim_to_cursor("inicio"),
@@ -2094,7 +2137,12 @@ class EditPanel(QWidget):
                 enabled=self._can_trim(clip, "fim"),
                 tip=strings.EDIT_TRIM_RIGHT_TIP,
             )
-            self._act(menu, f"{strings.EDIT_COPY}  (Ctrl+C)", self._copy_clip)
+            self._act(
+                menu,
+                f"{strings.EDIT_COPY}  (Ctrl+C)",
+                self._copy_clip,
+                enabled=not clip.is_transition,
+            )
             self._act(menu, f"{strings.EDIT_DELETE}  (Del)", self._delete_selected)
             menu.addSeparator()
             if clip.media.has_audio and clip.media.kind is not MediaKind.AUDIO:
@@ -2183,6 +2231,19 @@ class EditPanel(QWidget):
             self._timeline.select(clip_id)
         else:
             self._timeline.set_project(self._project, refit=False)
+
+        # A duração de uma transição pode ser limitada pelas duas pontas do
+        # corte. Recarregar devolve ao campo o valor realmente aceito pelo
+        # domínio, em vez de deixar na tela um número que não será renderizado.
+        if (
+            updated_clip.is_transition
+            and self._properties_widget._clip_id == clip_id
+        ):
+            self._properties_widget.load_clip(
+                updated_clip,
+                self._project.width,
+                self._project.height,
+            )
 
         track_visible = self._project.tracks[track_idx].visible
         self._preview.set_active_clip(
@@ -2354,7 +2415,7 @@ class EditPanel(QWidget):
         Sobrar menos que o mínimo não é aparar, é apagar o bloco por um caminho
         que não diz isso — para apagar existe a lixeira ao lado.
         """
-        if clip is None or not clip.contains(self._position):
+        if clip is None or clip.is_transition or not clip.contains(self._position):
             return False
         if edge == "inicio":
             return (
@@ -2372,7 +2433,7 @@ class EditPanel(QWidget):
 
     def _copy_clip(self) -> None:
         clip = self._timeline.selected_clip
-        if clip is not None:
+        if clip is not None and not clip.is_transition:
             self._clipboard = clip
             self._refresh_controls()
 
@@ -2725,12 +2786,26 @@ class EditPanel(QWidget):
     def _request_frame(self, *, force: bool = False) -> None:
         if self._project.is_empty or self._playing:
             return
+        # Qualquer nova posição ou revisão invalida o fluxo que estava pronto.
+        # Ele é refeito depois que o quadro parado mais recente chegar.
+        self._cancel_primed_playback()
         self._wanted = self._position
         if force:
+            self._frame_revision += 1
             self._rendered = None
+            if self._frame_busy:
+                # O processo em andamento termina normalmente e libera sua
+                # vaga, mas seu quadro já não pode chegar à tela. Trocar o token
+                # aqui fecha a janela entre a edição e o sinal ``done``.
+                self._frame_token = next(self._tokens)
         if self._frame_busy:
             return
         self._start_frame()
+        # Há duas vagas na fila ao vivo justamente para este par: o quadro
+        # parado continua aparecendo assim que pronto, enquanto o fluxo do play
+        # prepara seu primeiro quadro em paralelo. Fazer um depois do outro
+        # deixava uma janela perceptível logo após pausar ou editar.
+        self._prime_playback()
 
     def _start_frame(self) -> None:
         tools = self._ensure_tools()
@@ -2741,6 +2816,7 @@ class EditPanel(QWidget):
             self._loading_label.setText(strings.EDIT_LOADING_FRAME)
             self._preview.setText(strings.EDIT_LOADING_FRAME)
         self._rendered = self._wanted
+        revision = self._frame_revision
         self._frame_token = next(self._tokens)
         size = self._preview_size()
 
@@ -2757,7 +2833,7 @@ class EditPanel(QWidget):
             and track_visible
             and active is not None
             and active.is_additional
-            and active.overlay_type != "filter"
+            and active.overlay_type not in ("filter", "transition")
             and active.contains(self._wanted)
         ):
             proj = self._project.without_clip(active.clip_id)
@@ -2769,15 +2845,24 @@ class EditPanel(QWidget):
             text_assets=self.editor.text_assets(proj),
         )
         worker.signals.frame.connect(self._on_frame)
-        worker.signals.done.connect(self._on_frame_done)
+        worker.signals.done.connect(
+            lambda revision=revision: self._on_frame_done(revision)
+        )
         self._runner.start(worker, worker.signals.done)
 
-    def _on_frame_done(self) -> None:
+    def _on_frame_done(self, revision: int) -> None:
         self._frame_busy = False
-        if hasattr(self, "_loading_label") and (self._wanted is None or self._wanted == self._rendered):
+        current = (
+            revision == self._frame_revision
+            and (self._wanted is None or self._wanted == self._rendered)
+        )
+        if hasattr(self, "_loading_label") and current:
             self._loading_label.setText("")
-        if self._wanted is not None and self._wanted != self._rendered:
+        if self._wanted is not None and not current:
             self._start_frame()
+            self._prime_playback()
+        elif current:
+            self._prime_playback()
 
     def _on_frame(self, token: int, frame: object) -> None:
         if token not in (self._frame_token, self._play_token):
@@ -2862,6 +2947,12 @@ class EditPanel(QWidget):
         start, end = self._timeline.view
         for track in self._project.tracks:
             for clip in track.clips:
+                # O marcador usa uma referência sintética. Agora que vive na
+                # trilha de vídeo, não pode cair no caminho que tenta extrair
+                # miniaturas de cada mídia: isso abria um ffmpeg inútil para
+                # "Transição_..." e disputava a pool justamente ao dar play.
+                if clip.is_transition:
+                    continue
                 if clip.end < start or clip.start > end:
                     continue
                 if not self._strip_is_stale(clip, track.kind):
@@ -3020,7 +3111,9 @@ class EditPanel(QWidget):
         """
         clip = self._timeline.selected_clip
         self._split_button.setEnabled(
-            clip is not None and clip.contains(self._position)
+            clip is not None
+            and not clip.is_transition
+            and clip.contains(self._position)
         )
         self._trim_left_button.setEnabled(self._can_trim(clip, "inicio"))
         self._trim_right_button.setEnabled(self._can_trim(clip, "fim"))
@@ -3157,6 +3250,10 @@ class EditPanel(QWidget):
             seconds = 0.0
             self._timeline.set_position(0.0)
 
+        # Um pedido de quadro parado pode ter terminado na worker thread e seu
+        # sinal ainda estar na fila da interface. Ele não pode cobrir o primeiro
+        # quadro do play quando essa fila for processada.
+        self._frame_token = next(self._tokens)
         self._playing = True
         self._preview.set_playing(True)
         self._refresh_play_button()
@@ -3169,9 +3266,22 @@ class EditPanel(QWidget):
         if tools is None:
             return
         self._live_timer.stop()
-        self._start_frames(seconds)
-        self._runtime.play_audio(self._audio, self._project, seconds, tools,
-                                 text_assets=self.editor.text_assets(self._project))
+        self._pending_audio = None
+        started = self._start_frames(seconds)
+        text_assets = self.editor.text_assets(self._project)
+        if started is None or started[1]:
+            self._runtime.play_audio(
+                self._audio,
+                self._project,
+                seconds,
+                tools,
+                text_assets=text_assets,
+            )
+        else:
+            # O caminho sem pré-carga continua correto: som e relógio só
+            # começam quando a imagem também pode começar, sem salto inicial.
+            self._audio.stop()
+            self._pending_audio = (self._project, seconds, tools, text_assets)
 
     def _restart_stream(self) -> None:
         """Refaz o fluxo com a composição nova, sem sair da reprodução.
@@ -3190,26 +3300,119 @@ class EditPanel(QWidget):
             return
         self._open_stream(position)
 
-    def _start_frames(self, seconds: float) -> None:
+    def _playback_key(
+        self, seconds: float, size: tuple[int, int], fps: int
+    ) -> tuple[object, ...]:
+        return (id(self._project), round(seconds, 9), size, fps)
+
+    def _cancel_primed_playback(self) -> None:
+        worker = self._primed_playback
+        self._primed_playback = None
+        self._primed_key = None
+        self._primed_token = 0
+        self._primed_ready = False
+        if worker is not None:
+            worker.cancel()
+
+    def _prime_playback(self) -> None:
+        """Prepara o primeiro quadro enquanto a interface está pausada."""
+        if self._playing or self._project.is_empty or not self._has_video:
+            return
+        tools = self._ensure_tools()
+        if tools is None:
+            return
+        seconds = self._position
+        size = self._preview_size()
+        fps = preview_fps(self._fps)
+        key = self._playback_key(seconds, size, fps)
+        if self._primed_playback is not None and self._primed_key == key:
+            return
+        self._cancel_primed_playback()
+        token = next(self._tokens)
+        worker = self._runtime.playback_worker(
+            self._project,
+            seconds,
+            size,
+            tools,
+            token,
+            fps=fps,
+            text_assets=self.editor.text_assets(self._project),
+            autostart=False,
+        )
+        worker.signals.frame.connect(self._on_frame)
+        worker.signals.primed.connect(self._on_playback_primed)
+        worker.signals.done.connect(
+            lambda token=token: self._on_playback_worker_done(token)
+        )
+        self._primed_playback = worker
+        self._primed_key = key
+        self._primed_token = token
+        self._primed_ready = False
+        self._runner.start(worker, worker.signals.done)
+
+    def _on_playback_primed(self, token: int) -> None:
+        if token == self._primed_token:
+            self._primed_ready = True
+        if token != self._play_token or not self._playing:
+            return
+        pending = self._pending_audio
+        if pending is None:
+            return
+        self._pending_audio = None
+        project, seconds, tools, text_assets = pending
+        self._runtime.play_audio(
+            self._audio,
+            project,
+            seconds,
+            tools,
+            text_assets=text_assets,
+        )
+
+    def _on_playback_worker_done(self, token: int) -> None:
+        if token == self._primed_token:
+            self._primed_playback = None
+            self._primed_key = None
+            self._primed_token = 0
+            self._primed_ready = False
+        self._on_playback_done(token)
+
+    def _start_frames(self, seconds: float) -> tuple[int, bool] | None:
         tools = self._ensure_tools()
         if tools is None or not self._has_video:
-            return
+            return None
         if self._playback is not None:
             self._playback.cancel()
         self._shown_frame = seconds
-        self._play_token = next(self._tokens)
         size = self._preview_size()
         fps = preview_fps(self._fps)
+        key = self._playback_key(seconds, size, fps)
+        if self._primed_playback is not None and self._primed_key == key:
+            worker = self._primed_playback
+            token = self._primed_token
+            ready = self._primed_ready
+            self._primed_playback = None
+            self._primed_key = None
+            self._primed_token = 0
+            self._primed_ready = False
+            self._play_token = token
+            self._playback = worker
+            worker.start_playback()
+            return token, ready
+
+        self._cancel_primed_playback()
+        self._play_token = next(self._tokens)
         worker = self._runtime.playback_worker(
             self._project, seconds, size, tools, self._play_token, fps=fps,
             text_assets=self.editor.text_assets(self._project),
         )
         worker.signals.frame.connect(self._on_frame)
+        worker.signals.primed.connect(self._on_playback_primed)
         worker.signals.done.connect(
-            lambda token=self._play_token: self._on_playback_done(token)
+            lambda token=self._play_token: self._on_playback_worker_done(token)
         )
         self._runner.start(worker, worker.signals.done)
         self._playback = worker
+        return self._play_token, False
 
     def _loop_playback(self) -> None:
         self._tick.stop()
@@ -3272,8 +3475,14 @@ class EditPanel(QWidget):
             self._stop_playback()
 
     def _stop_playback(self) -> None:
+        # A imagem pode estar alguns quadros à frente da última atualização do
+        # cursor (que chega pelo relógio do áudio a cada 40 ms). Guardar o ponto
+        # visível antes de desmontar os fluxos impede o próximo play de reabrir
+        # num instante anterior e parecer que o vídeo voltou.
+        visible_position = self._shown_frame if self._has_video else self._position
         self._tick.stop()
         self._live_timer.stop()
+        self._pending_audio = None
         self._audio.stop()
         if self._playback is not None:
             self._playback.cancel()
@@ -3282,7 +3491,19 @@ class EditPanel(QWidget):
         if self._playing:
             self._playing = False
             self._play_token = 0
-            self._request_frame(force=True)
+            self._timeline.set_position(visible_position, follow=False)
+            self._update_time_labels()
+            # O último quadro da reprodução já é exatamente o que o usuário
+            # pausou. Renderizá-lo outra vez abria um segundo FFmpeg junto da
+            # pré-carga, criava um pico de CPU e podia substituir a imagem por
+            # um quadro vizinho alguns décimos depois do clique. Mantemos a
+            # imagem congelada, invalidamos respostas estáticas antigas e só
+            # preparamos o próximo play.
+            self._frame_revision += 1
+            self._frame_token = next(self._tokens)
+            self._wanted = None
+            self._rendered = visible_position
+            self._prime_playback()
         self._refresh_play_button()
 
     def _refresh_play_button(self) -> None:
@@ -3463,6 +3684,7 @@ class EditPanel(QWidget):
         até o prazo acabar, sem janela e sem explicação.
         """
         self._stop_playback()
+        self._cancel_primed_playback()
         for clip_id in list(self._strip_workers):
             self._cancel_strip(clip_id)
         self._project_actions.cancel_pending()

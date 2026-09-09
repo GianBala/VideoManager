@@ -8,7 +8,10 @@ o som já saiu ao dobro. Estes testes fixam as duas pontas.
 
 from __future__ import annotations
 
+import io
 import inspect
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -55,6 +58,72 @@ class TestAcoplamentoDaTaxa:
         parametro = inspect.signature(alvo).parameters["fps"]
         assert parametro.default is inspect.Parameter.empty
         assert parametro.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+class TestInicioDaReproducao:
+    def test_carregamento_nao_consume_o_relogio(self, monkeypatch) -> None:
+        """Depois da pré-carga, os quadros continuam espaçados normalmente.
+
+        Antes o relógio começava na abertura do processo. Segurar a prévia por
+        alguns décimos fazia o segundo quadro sair colado ao primeiro para
+        tentar recuperar o atraso, que era a engasgada vista após clicar play.
+        """
+
+        class Processo:
+            def __init__(self) -> None:
+                self.stdout = io.BytesIO(b"abc" + b"def")
+                self.returncode = 0
+                self.terminated = False
+
+            def poll(self):
+                return 0 if self.terminated else None
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def kill(self) -> None:
+                self.terminated = True
+
+            def wait(self, timeout=None):
+                self.terminated = True
+                return 0
+
+        monkeypatch.setattr(
+            "videomanager.infrastructure.ffmpeg.preview.subprocess.Popen",
+            lambda *args, **kwargs: Processo(),
+        )
+        gate = threading.Event()
+        primed = threading.Event()
+        moments: list[float] = []
+        pump = FramePump(["ffmpeg"], 2.0, (1, 1), fps=20)
+
+        def consume() -> None:
+            frames = pump.frames(gate=gate, on_primed=primed.set)
+            for _ in range(2):
+                next(frames)
+                moments.append(time.monotonic())
+            frames.close()
+
+        thread = threading.Thread(target=consume)
+        thread.start()
+        assert primed.wait(0.5)
+        time.sleep(0.12)  # maior que dois passos de 20 fps
+        assert not moments, "nenhum quadro deve escapar antes do play"
+        released = time.monotonic()
+        gate.set()
+        thread.join(1.0)
+
+        assert not thread.is_alive()
+        assert moments[0] - released < 0.03
+        assert moments[1] - moments[0] >= 0.035
+
+    def test_worker_pode_ser_preparado_sem_iniciar(self) -> None:
+        worker = PlaybackWorker(
+            ["ffmpeg"], 0.0, (2, 2), 1, fps=30, autostart=False
+        )
+        assert not worker._gate.is_set()
+        worker.start_playback()
+        assert worker._gate.is_set()
 
 
 class TestTamanho:

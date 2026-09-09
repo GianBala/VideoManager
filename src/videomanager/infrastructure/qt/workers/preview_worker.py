@@ -259,6 +259,7 @@ class PlaybackWorker(QRunnable):
         token: int,
         *,
         fps: int,
+        autostart: bool = True,
     ) -> None:
         super().__init__()
         # A taxa vem de fora e é obrigatória: é a **mesma** com que o comando
@@ -267,15 +268,26 @@ class PlaybackWorker(QRunnable):
         # falhar. Por isso não há valor padrão aqui.
         self._pump = FramePump(command, start, size, fps=fps)
         self._token = token
+        self._gate = threading.Event()
+        if autostart:
+            self._gate.set()
         self.signals = PreviewSignals()
 
+    def start_playback(self) -> None:
+        """Libera um fluxo previamente carregado sem abrir outro processo."""
+        self._gate.set()
+
     def cancel(self) -> None:
+        self._gate.set()
         self._pump.stop()
 
     @Slot()
     def run(self) -> None:
         try:
-            for frame in self._pump.frames():
+            for frame in self._pump.frames(
+                gate=self._gate,
+                on_primed=lambda: emit_safely(self.signals.primed, self._token),
+            ):
                 emit_safely(self.signals.frame, self._token, frame)
         finally:
             emit_safely(self.signals.done)
