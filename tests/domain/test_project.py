@@ -9,6 +9,7 @@ tocar no anterior — que é o que sustenta o desfazer.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -212,6 +213,97 @@ class TestBloco:
         assert clip(VIDEO).gain_label == ""
         assert clip(VIDEO, gain_db=-6.0).gain_label == "-6,0 dB"
         assert clip(VIDEO, muted=True).gain_label == "mudo"
+
+
+class TestTransicao:
+    @staticmethod
+    def projeto(duration: float = 1.0) -> tuple[Project, Clip, Clip, Clip]:
+        left = clip(start=0.0, duration=4.0, in_point=2.0)
+        right = clip(start=4.0, duration=3.0, in_point=8.0)
+        marker = Clip(
+            media=MediaRef(
+                path=Path("Transição_Dissolve"),
+                kind=MediaKind.IMAGE,
+                duration=duration,
+            ),
+            start=4.0 - duration / 2.0,
+            duration=duration,
+            overlay_type="transition",
+            transition_name="dissolve",
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+        )
+        return montado(left, right).with_clip(0, marker), left, right, marker
+
+    def test_resolve_o_par_por_identidade_no_ponto_de_edicao(self) -> None:
+        projeto, left, right, marker = self.projeto()
+        context = projeto.transition_context(marker)
+        assert context is not None
+        assert (context.left, context.right) == (left, right)
+        assert context.cut == pytest.approx(4.0)
+        assert (context.start, context.end) == pytest.approx((3.5, 4.5))
+
+    def test_duracao_e_limitada_e_recentralizada_pelo_dominio(self) -> None:
+        projeto, _, _, marker = self.projeto()
+        alterado = projeto.with_updated_clip(marker.clip_id, duration=10.0)
+        synced = alterado.find(marker.clip_id)
+        assert synced is not None
+        _, updated = synced
+        assert updated.duration == pytest.approx(3.0)
+        assert updated.start == pytest.approx(2.5)
+
+    def test_arrastar_uma_ponta_redimensiona_as_duas_ao_redor_do_corte(self) -> None:
+        projeto, _, _, marker = self.projeto()
+        alterado = projeto.resized(marker.clip_id, "fim", 5.0)
+        found = alterado.find(marker.clip_id)
+        assert found is not None
+        _, updated = found
+        assert updated.duration == pytest.approx(2.0)
+        assert updated.start == pytest.approx(3.0)
+        assert updated.end == pytest.approx(5.0)
+
+    def test_arrastar_transicao_nao_usa_minimo_de_corte_comum(self) -> None:
+        projeto, _, _, marker = self.projeto()
+        alterado = projeto.resized(marker.clip_id, "fim", 4.025)
+        found = alterado.find(marker.clip_id)
+        assert found is not None
+        _, updated = found
+        assert updated.duration == pytest.approx(0.2)
+        assert updated.start == pytest.approx(3.9)
+
+    def test_apagar_uma_ponta_apaga_o_marcador_orfao(self) -> None:
+        projeto, left, _, marker = self.projeto()
+        alterado = projeto.without_clip(left.clip_id)
+        assert alterado.find(marker.clip_id) is None
+
+    def test_separar_as_pontas_remove_a_transicao_do_corte(self) -> None:
+        projeto, _, right, marker = self.projeto()
+        alterado = projeto.moved(right.clip_id, 0, 10.0)
+        assert alterado.find(marker.clip_id) is None
+
+    def test_nao_resolve_transicao_sobre_um_vao(self) -> None:
+        projeto, left, right, marker = self.projeto()
+        track = Track(
+            kind=TrackKind.VIDEO,
+            clips=(left, replace(right, start=5.0), marker),
+        )
+        assert Project(tracks=(track,)).transition_context(marker) is None
+
+    def test_tesoura_nao_divide_um_marcador_de_transicao(self) -> None:
+        projeto, _, _, marker = self.projeto()
+        assert projeto.split(marker.clip_id, marker.start + 0.25) == projeto
+
+    def test_marcador_nao_alonga_a_duracao_do_projeto(self) -> None:
+        projeto, _, _, marker = self.projeto()
+        invalido = replace(marker, start=100.0)
+        track = replace(
+            projeto.tracks[0],
+            clips=tuple(
+                invalido if clip.clip_id == marker.clip_id else clip
+                for clip in projeto.tracks[0].clips
+            ),
+        )
+        assert replace(projeto, tracks=(track,)).duration == pytest.approx(7.0)
 
 
 class TestMover:
