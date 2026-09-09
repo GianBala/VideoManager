@@ -238,6 +238,11 @@ class Clip:
     transition_name: str = ""  # nomes do filtro xfade (fade, dissolve, wipe*, slide*)
     transition_left_id: int | None = None
     transition_right_id: int | None = None
+    # Quando habilitado, filtros, imagens e textos das trilhas de Adicionais
+    # entram nos dois lados compostos pelo efeito. Desligado preserva o modelo
+    # tradicional de trilhas: a transição atua no vídeo e os overlays ficam por
+    # cima dela.
+    transition_affects_additionals: bool = False
     # Configurações de Fundo Verde (Chroma Key)
     chromakey_enabled: bool = False
     chromakey_color: str = "#00FF00"

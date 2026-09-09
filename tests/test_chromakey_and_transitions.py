@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -42,6 +43,7 @@ def test_clip_chromakey_defaults_and_custom() -> None:
     assert clip_def.chromakey_similarity == 0.25
     assert clip_def.chromakey_blend == 0.10
     assert clip_def.transition_name == ""
+    assert clip_def.transition_affects_additionals is False
 
     clip_custom = Clip(
         media=ref,
@@ -53,12 +55,14 @@ def test_clip_chromakey_defaults_and_custom() -> None:
         chromakey_blend=0.15,
         transition_name="fade_black",
         overlay_type="transition",
+        transition_affects_additionals=True,
     )
     assert clip_custom.chromakey_enabled is True
     assert clip_custom.chromakey_color == "#00B140"
     assert clip_custom.chromakey_similarity == 0.35
     assert clip_custom.chromakey_blend == 0.15
     assert clip_custom.transition_name == "fade_black"
+    assert clip_custom.transition_affects_additionals is True
     assert clip_custom.is_additional is True
 
 
@@ -90,6 +94,7 @@ def test_project_io_chromakey_and_transition(tmp_path: Path) -> None:
         duration=1.0,
         overlay_type="transition",
         transition_name="vignette_pulse",
+        transition_affects_additionals=True,
     )
     p = Project(
         tracks=(
@@ -112,6 +117,36 @@ def test_project_io_chromakey_and_transition(tmp_path: Path) -> None:
     c2 = loaded.tracks[1].clips[0]
     assert c2.overlay_type == "transition"
     assert c2.transition_name == "vignette_pulse"
+    assert c2.transition_affects_additionals is True
+
+
+def test_project_io_antigo_mantem_adicionais_fora_da_transicao(
+    tmp_path: Path,
+) -> None:
+    marker = Clip(
+        media=MediaRef(
+            path=Path("Transição_fade"),
+            kind=MediaKind.IMAGE,
+            duration=1.0,
+        ),
+        start=0.0,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="fade",
+        transition_affects_additionals=True,
+    )
+    project_file = tmp_path / "antigo.vmp"
+    save_project(
+        Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(marker,)),)),
+        project_file,
+    )
+    data = json.loads(project_file.read_text(encoding="utf-8"))
+    data["tracks"][0]["clips"][0].pop("transition_affects_additionals")
+    project_file.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded, _missing = load_project(project_file)
+
+    assert loaded.tracks[0].clips[0].transition_affects_additionals is False
 
 
 def test_project_io_normaliza_transicao_antiga_abaixo_do_minimo(
@@ -222,6 +257,129 @@ def test_transicao_e_processada_na_trilha_antes_das_camadas_superiores() -> None
     assert xfade_index < image_index, "a transição não pode cobrir a camada superior"
 
 
+def test_transicao_opcionalmente_compoe_imagem_texto_e_filtro_nos_dois_lados() -> None:
+    video = MediaRef(Path("video.mp4"), MediaKind.VIDEO, duration=10.0)
+    left = Clip(video, start=0.0, duration=4.0, in_point=1.0)
+    right = Clip(video, start=4.0, duration=4.0, in_point=5.0)
+    marker = Clip(
+        MediaRef(Path("Transição"), MediaKind.IMAGE, duration=1.0),
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="dissolve",
+        transition_left_id=left.clip_id,
+        transition_right_id=right.clip_id,
+        transition_affects_additionals=True,
+    )
+    image = Clip(
+        MediaRef(Path("logo.png"), MediaKind.IMAGE, duration=4.0),
+        start=2.0,
+        duration=2.0,
+        overlay_type="image",
+    )
+    text = Clip(
+        MediaRef(Path("Texto"), MediaKind.IMAGE, duration=4.0),
+        start=4.0,
+        duration=2.0,
+        overlay_type="text",
+        text_content="Direita",
+    )
+    effect = Clip(
+        MediaRef(Path("Filtro"), MediaKind.IMAGE, duration=4.0),
+        start=3.0,
+        duration=1.0,
+        overlay_type="filter",
+        filter_name="pb",
+    )
+    project = Project(
+        tracks=(
+            Track(TrackKind.ADDITIONAL, clips=(image, text, effect)),
+            Track(TrackKind.VIDEO, clips=(left, right, marker)),
+        )
+    )
+
+    graph = build_graph(project, text_assets={text.clip_id: Path("texto.png")})
+    xfade = next(item for item in graph.filters if "xfade=" in item)
+    filters = ";".join(graph.filters)
+
+    assert "ftr0al" in xfade, "o lado esquerdo composto deve entrar no xfade"
+    assert "otr0al" in filters, "a imagem deve ser composta antes do filtro"
+    assert "otr0ar" in xfade, "texto da direita deve entrar antes do xfade"
+    assert "ftr0al" in filters, "o filtro da esquerda deve afetar seu lado composto"
+    assert "not(between(t,3.500000,4.500000))" in filters
+    assert graph.inputs.count("-i") == 8  # 4 normais, 2 da transição e 2 duplicadas
+
+
+def test_item_que_atravessa_o_corte_permanece_nos_dois_lados() -> None:
+    video = MediaRef(Path("video.mp4"), MediaKind.VIDEO, duration=10.0)
+    left = Clip(video, start=0.0, duration=4.0, in_point=1.0)
+    right = Clip(video, start=4.0, duration=4.0, in_point=5.0)
+    marker = Clip(
+        MediaRef(Path("Transição"), MediaKind.IMAGE, duration=1.0),
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="wipeleft",
+        transition_left_id=left.clip_id,
+        transition_right_id=right.clip_id,
+        transition_affects_additionals=True,
+    )
+    logo = Clip(
+        MediaRef(Path("logo.png"), MediaKind.IMAGE, duration=4.0),
+        start=2.0,
+        duration=4.0,
+        overlay_type="image",
+    )
+    graph = build_graph(
+        Project(
+            tracks=(
+                Track(TrackKind.ADDITIONAL, clips=(logo,)),
+                Track(TrackKind.VIDEO, clips=(left, right, marker)),
+            )
+        )
+    )
+    xfade = next(item for item in graph.filters if "xfade=" in item)
+    assert "otr0al" in xfade and "otr0ar" in xfade
+
+
+def test_transicao_ignora_adicionais_de_trilha_oculta() -> None:
+    video = MediaRef(Path("video.mp4"), MediaKind.VIDEO, duration=10.0)
+    left = Clip(video, start=0.0, duration=4.0, in_point=1.0)
+    right = Clip(video, start=4.0, duration=4.0, in_point=5.0)
+    marker = Clip(
+        MediaRef(Path("Transição"), MediaKind.IMAGE, duration=1.0),
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="fade",
+        transition_left_id=left.clip_id,
+        transition_right_id=right.clip_id,
+        transition_affects_additionals=True,
+    )
+    hidden_logo = Clip(
+        MediaRef(Path("logo.png"), MediaKind.IMAGE, duration=4.0),
+        start=2.0,
+        duration=4.0,
+        overlay_type="image",
+    )
+    graph = build_graph(
+        Project(
+            tracks=(
+                Track(
+                    TrackKind.ADDITIONAL,
+                    clips=(hidden_logo,),
+                    visible=False,
+                ),
+                Track(TrackKind.VIDEO, clips=(left, right, marker)),
+            )
+        )
+    )
+    xfade = next(item for item in graph.filters if "xfade=" in item)
+
+    assert "[tr0a][tr0b]xfade=" in xfade
+    assert not any("tr0al" in item or "tr0ar" in item for item in graph.filters)
+
+
 def test_transicao_entre_dois_videos_usa_xfade() -> None:
     media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=8.0)
     clips = (
@@ -247,6 +405,46 @@ def test_transicao_entre_dois_videos_usa_xfade() -> None:
         for item in frame.filters
     )
     assert any("xfade=transition=dissolve:duration=1.000000:offset=0" in item for item in frame.filters)
+
+
+def test_transicao_entre_partes_da_tesoura_usa_tempos_distintos() -> None:
+    media = MediaRef(
+        path=Path("continuo.mp4"),
+        kind=MediaKind.VIDEO,
+        duration=8.0,
+        has_audio=True,
+        channels=2,
+    )
+    original = Clip(media=media, start=0.0, duration=8.0)
+    split = Project(
+        tracks=(Track(kind=TrackKind.VIDEO, clips=(original,)),)
+    ).split(original.clip_id, 4.0)
+    left, right = split.tracks[0].sorted_clips()
+    transition = Clip(
+        media=MediaRef(Path("Transição"), MediaKind.IMAGE, duration=1.0),
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="dissolve",
+        transition_left_id=left.clip_id,
+        transition_right_id=right.clip_id,
+    )
+
+    graph = build_graph(split.with_clip(0, transition))
+
+    assert graph.inputs[-8:] == [
+        "-ss", "3.500000", "-i", "continuo.mp4",
+        "-ss", "4.000000", "-i", "continuo.mp4",
+    ]
+    transition_chains = [
+        item
+        for item in graph.filters
+        if "setpts=(PTS-STARTPTS)/0.500000" in item
+    ]
+    assert len(transition_chains) == 2
+    assert all("trim=duration=0.500000" in item for item in transition_chains)
+    assert not any("acrossfade=" in item for item in graph.filters)
+    assert not any("volume='" in item for item in graph.filters)
 
 
 def test_marcador_sem_duas_fontes_nao_apaga_a_composicao() -> None:
@@ -491,6 +689,30 @@ def test_properties_widget_title_truncation_and_close(qapp: QApplication) -> Non
     w.close_requested.connect(lambda: closed.append(True))
     w.close_requested.emit()
     assert len(closed) == 1
+
+
+def test_properties_widget_edita_se_transicao_afeta_adicionais(
+    qapp: QApplication,
+) -> None:
+    transition = Clip(
+        media=MediaRef(Path("Transição"), MediaKind.IMAGE, duration=1.0),
+        start=3.5,
+        duration=1.0,
+        overlay_type="transition",
+        transition_name="dissolve",
+        transition_affects_additionals=True,
+    )
+    widget = _ClipPropertiesWidget()
+    changes: list[tuple[int, dict]] = []
+    widget.property_changed.connect(lambda clip_id, values: changes.append((clip_id, values)))
+    widget.load_clip(transition, 1920, 1080)
+
+    assert widget._chk_trans_additionals.isChecked()
+    widget._chk_trans_additionals.setChecked(False)
+    assert changes[-1] == (
+        transition.clip_id,
+        {"transition_affects_additionals": False},
+    )
 
 
 def test_fullscreen_preview_resize_signal(qapp: QApplication) -> None:

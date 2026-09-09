@@ -586,6 +586,12 @@ EDIT_READ_CANCEL = "Cancelar"
 
 EDIT_SAVING_PROJECT = "Salvando projeto…"
 
+EDIT_TRANSITION_AFFECT_ADDITIONALS = "Afetar itens adicionais"
+EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP = (
+    "Inclui filtros, imagens e textos ativos nos dois lados da transição. "
+    "Desmarcado, esses itens permanecem por cima do efeito."
+)
+
 JOB_STATUS_LABELS = {
     "pending": "Na fila", "running": "Baixando", "processing": "Processando",
     "done": "Concluído", "failed": "Falhou", "cancelled": "Cancelado",
