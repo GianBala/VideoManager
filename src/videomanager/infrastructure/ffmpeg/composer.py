@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
 
 from videomanager.infrastructure.ffmpeg import hardware as hwaccel
@@ -44,6 +45,7 @@ from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import Project
 from videomanager.domain.project import TrackKind
+from videomanager.domain.project import TransitionContext
 from videomanager.infrastructure.ffmpeg.trimmer import encode_audio_args
 from videomanager.domain.timing import format_span
 from videomanager.infrastructure.ffmpeg.trimmer import tail_args
@@ -78,6 +80,12 @@ _MONO_TO_STEREO = "pan=stereo|c0=c0|c1=c0"
 # estourar —, então ali a conversão normal é a correta.
 _TO_STEREO = "aformat=channel_layouts=stereo"
 
+# Quando não existem alças para sobrepor áudio de verdade, uma rampa curta
+# elimina o estalo do corte sem baixar o som durante toda a transição visual.
+# Transições de imagem e áudio são decisões distintas; inventar meio segundo de
+# silêncio para sustentar um efeito de vídeo soa pior que preservar o corte.
+_AUDIO_DECLICK = 0.012
+
 # Duração mínima do fundo. Um projeto vazio ainda precisa de um quadro para
 # mostrar, senão o ffmpeg sai sem escrever nada e a prévia fica sem explicação.
 _MIN_CANVAS = 0.04
@@ -105,6 +113,7 @@ class _Piece:
     seek: float  # onde começar a ler dentro do arquivo
     offset: float  # onde entra na saída, em segundos
     duration: float
+    track_index: int
     track_muted: bool = False
 
 
@@ -124,16 +133,22 @@ def _pieces(
     """
     end = None if span is None else at + span
     visual_tracks = [
-        t for t in project.tracks if t.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL)
+        (index, track)
+        for index, track in enumerate(project.tracks)
+        if track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL)
     ]
     ordered = [
         *reversed(visual_tracks),
-        *project.audio_tracks,
+        *(
+            (index, track)
+            for index, track in enumerate(project.tracks)
+            if track.kind is TrackKind.AUDIO
+        ),
     ]
 
     pieces: list[_Piece] = []
     input_idx = 0
-    for track in ordered:
+    for track_index, track in ordered:
         if not track.visible:
             continue
         if track.muted and track.kind is TrackKind.AUDIO:
@@ -162,14 +177,10 @@ def _pieces(
                     seek=clip.source_time(begin),
                     offset=begin - at,
                     duration=finish - begin,
+                    track_index=track_index,
                     track_muted=track.muted,
                 )
             )
-    # Transições são efeitos sobre a composição visual. Elas precisam ser
-    # processadas depois das fontes de vídeo; quando ficavam antes, o primeiro
-    # ``overlay`` de vídeo cobria o efeito inteiro e a transição parecia não
-    # funcionar.
-    pieces.sort(key=lambda piece: piece.clip.overlay_type == "transition")
     return pieces
 
 
@@ -423,7 +434,18 @@ def _fit_scale(width: int, height: int) -> str:
     return f"scale=w='trunc({largest}/2)*2':h='trunc({tallest}/2)*2'"
 
 
-def _audio_chain(piece: _Piece) -> str:
+def _audio_chain(
+    piece: _Piece,
+    muted_ranges: tuple[tuple[float, float], ...] = (),
+    fades: tuple[tuple[str, float, float], ...] = (),
+) -> str:
+    """Monta o áudio do bloco com envelopes no relógio local da entrada.
+
+    Os intervalos recebidos usam o relógio da saída. Convertê-los pelo
+    ``piece.offset`` é indispensável: o áudio do segundo clipe começa em zero
+    antes do ``adelay``. Aplicar ali o tempo absoluto do projeto fazia o mudo e
+    o fade acontecerem vários segundos depois do corte.
+    """
     clip = piece.clip
     if abs(clip.speed - 1.0) >= 0.01:
         steps = [f"atrim=duration={piece.duration * clip.speed:.6f}", "asetpts=PTS-STARTPTS"]
@@ -436,11 +458,328 @@ def _audio_chain(piece: _Piece) -> str:
     steps.append(
         _MONO_TO_STEREO if clip.media.channels == 1 else _TO_STEREO
     )
+    for start, end in muted_ranges:
+        local_start = start - piece.offset
+        local_end = end - piece.offset
+        if local_end > -1e-6 and local_start < piece.duration + 1e-6:
+            steps.append(
+                f"volume=0:enable='between(t,{local_start:.6f},{local_end:.6f})'"
+            )
+    for kind, start, end in fades:
+        duration = end - start
+        if duration <= 1e-6:
+            continue
+        local_start = start - piece.offset
+        local_end = end - piece.offset
+        if local_end <= -1e-6 or local_start >= piece.duration + 1e-6:
+            continue
+        progress = f"(t-{local_start:.6f})/{duration:.6f}"
+        if kind == "out":
+            gain = (
+                f"if(lte(t,{local_start:.6f}),1,"
+                f"if(gte(t,{local_end:.6f}),0,cos({progress}*PI/2)))"
+            )
+        else:
+            gain = (
+                f"if(lte(t,{local_start:.6f}),0,"
+                f"if(gte(t,{local_end:.6f}),1,sin({progress}*PI/2)))"
+            )
+        # Seno/cosseno dão uma passagem perceptualmente mais uniforme que duas
+        # retas de amplitude. ``eval=frame`` acompanha o relógio continuamente.
+        steps.append(f"volume='{gain}':eval=frame")
     if piece.offset > 0:
         # ``all=1`` aplica o atraso a todos os canais; sem ele, só o primeiro
         # canal é atrasado e o bloco sai com a imagem à frente do som num lado.
         steps.append(f"adelay={int(piece.offset * 1000)}:all=1")
     return f"[{piece.index}:a]" + ",".join(steps) + f"[a{piece.index}]"
+
+
+@dataclass(frozen=True)
+class _TransitionSide:
+    """Trecho de uma fonte necessário para cobrir uma transição centralizada."""
+
+    clip: Clip
+    index: int
+    seek: float
+    source_duration: float
+    prepad: float
+    postpad: float
+    duration: float
+
+
+@dataclass(frozen=True)
+class _TransitionRender:
+    context: TransitionContext
+    left: _TransitionSide
+    right: _TransitionSide
+    crop: float
+    offset: float
+    visible_duration: float
+    audio: bool
+
+
+def _transition_side(clip: Clip, index: int, center: float, duration: float) -> _TransitionSide:
+    """Calcula alças de mídia e o preenchimento necessário numa das pontas."""
+    speed = max(0.01, clip.speed)
+    half_source = duration * speed / 2.0
+    wanted_start = center - half_source
+    wanted_end = center + half_source
+    actual_start = max(0.0, wanted_start)
+    actual_end = wanted_end
+    if clip.media.duration is not None:
+        actual_end = min(actual_end, clip.media.duration)
+    actual_end = max(actual_start, actual_end)
+    return _TransitionSide(
+        clip=clip,
+        index=index,
+        seek=actual_start,
+        source_duration=max(0.001, actual_end - actual_start),
+        prepad=max(0.0, (actual_start - wanted_start) / speed),
+        postpad=max(0.0, (wanted_end - actual_end) / speed),
+        duration=duration,
+    )
+
+
+def _has_audio_handles(context: TransitionContext) -> bool:
+    """Se os dois áudios cobrem a sobreposição sem silêncio inventado.
+
+    Vídeo pode sustentar um quadro quando falta material. Repetir amostras de
+    áudio produziria zumbido; preencher com zero, como antes, abria um buraco no
+    centro. O crossfade integral só é usado quando existem alças reais nos dois
+    lados. Sem elas, o áudio normal recebe fades curtos até/depois do corte.
+    """
+    half = context.duration / 2.0
+    left_media_end = context.left.media.duration
+    if left_media_end is None:
+        return False
+    left_handle = max(0.0, (left_media_end - context.left.out_point) / context.left.speed)
+    right_handle = max(0.0, context.right.in_point / context.right.speed)
+    return left_handle + 1e-6 >= half and right_handle + 1e-6 >= half
+
+
+def _transition_input_args(side: _TransitionSide, fps: float) -> list[str]:
+    if side.clip.media.kind is MediaKind.IMAGE:
+        return [
+            "-loop", "1", "-framerate", f"{fps:.6f}",
+            "-t", f"{side.duration:.6f}", "-i", str(side.clip.media.path),
+        ]
+    return ["-ss", f"{side.seek:.6f}", "-i", str(side.clip.media.path)]
+
+
+def _transition_video_chain(
+    side: _TransitionSide,
+    project: Project,
+    fps: float,
+    label: str,
+) -> list[str]:
+    """Produz uma fonte de tela inteira com duração exata para o ``xfade``."""
+    clip = side.clip
+    speed = max(0.01, clip.speed)
+    steps = [
+        f"trim=duration={side.source_duration:.6f}",
+        f"setpts=(PTS-STARTPTS)/{speed:.6f}",
+        # ``tpad`` só consegue converter segundos em quadros quando estes já
+        # têm duração. Alguns MP4 entregam ``duration=0`` no fim do arquivo;
+        # aplicado antes de ``fps``, o preenchimento não criava quadro algum e
+        # uma transição de 0,2 s a 23,976 fps acabava com apenas 2 ou 3 quadros.
+        f"fps={fps:.6f}",
+        "settb=AVTB",
+    ]
+    if side.prepad > 1e-6:
+        steps.append(f"tpad=start_mode=clone:start_duration={side.prepad:.6f}")
+    if side.postpad > 1e-6:
+        steps.append(f"tpad=stop_mode=clone:stop_duration={side.postpad:.6f}")
+    # Dois quadros sentinela garantem cobertura até o último instante amostrado
+    # da transição. Há duas fronteiras discretas (entrada→fps e tpad→trim), e
+    # cada uma pode arredondar para baixo. O ``trim`` seguinte descarta a sobra
+    # quando a fonte já era longa o bastante.
+    steps.append(f"tpad=stop_mode=clone:stop_duration={2.0 / fps:.6f}")
+    steps.extend(
+        (
+            f"trim=duration={side.duration:.6f}",
+            "setpts=PTS-STARTPTS",
+            # Restabelece a taxa declarada depois de ``tpad``/``setpts``;
+            # ``xfade`` recusa entradas cuja taxa aparece como 1/0.
+            f"fps={fps:.6f}",
+            "settb=AVTB",
+        )
+    )
+
+    sx = getattr(clip, "scale_x", clip.scale)
+    sy = getattr(clip, "scale_y", clip.scale)
+    has_transform = (
+        abs(clip.x - 0.5) >= 0.0001
+        or abs(clip.y - 0.5) >= 0.0001
+        or abs(sx - 1.0) >= 0.001
+        or abs(sy - 1.0) >= 0.001
+        or abs(clip.rotation) >= 0.1
+        or clip.chromakey_enabled
+    )
+    if not has_transform:
+        steps.extend(
+            (
+                _fit_scale(project.width, project.height),
+                f"pad={project.width}:{project.height}:(ow-iw)/2:(oh-ih)/2:color=black",
+                "setsar=1",
+                "format=yuv420p",
+            )
+        )
+        return [f"[{side.index}:v]" + ",".join(steps) + label]
+
+    width, height = fit_size(
+        clip.media.width, clip.media.height, project.width, project.height
+    )
+    target_w = max(2, int(round(width * sx / 2.0) * 2))
+    target_h = max(2, int(round(height * sy / 2.0) * 2))
+    steps.append(f"scale={target_w}:{target_h}")
+    chromakey = _chromakey_filter(clip)
+    if chromakey:
+        steps.append(chromakey)
+    if abs(clip.rotation) >= 0.1:
+        radians = math.radians(clip.rotation)
+        steps.append(
+            f"rotate={radians:.4f}:ow='rotw({radians:.4f})':oh='roth({radians:.4f})':c=none"
+        )
+    steps.append("format=rgba")
+    raw = f"{label[:-1]}_raw]"
+    base = f"{label[:-1]}_base]"
+    return [
+        f"[{side.index}:v]" + ",".join(steps) + raw,
+        f"color=c=black:s={project.width}x{project.height}:r={fps:.6f}:d={side.duration:.6f}{base}",
+        f"{base}{raw}overlay=x='({clip.x:.4f}*W-w/2)':y='({clip.y:.4f}*H-h/2)'"
+        f":eof_action=pass:repeatlast=0,format=yuv420p{label}",
+    ]
+
+
+def _transition_audio_chain(side: _TransitionSide, label: str) -> str:
+    clip = side.clip
+    steps = [
+        f"atrim=duration={side.source_duration:.6f}",
+        "asetpts=PTS-STARTPTS",
+        *_atempo_filters(max(0.01, clip.speed)),
+    ]
+    if abs(clip.gain_db) >= 0.05:
+        steps.append(f"volume={clip.gain_db:.2f}dB")
+    steps.extend(
+        (
+            _AUDIO_BASE,
+            _MONO_TO_STEREO if clip.media.channels == 1 else _TO_STEREO,
+        )
+    )
+    if side.prepad > 1e-6:
+        steps.append(f"adelay={int(round(side.prepad * 1000))}:all=1")
+    if side.postpad > 1e-6:
+        steps.append(f"apad=pad_dur={side.postpad:.6f}")
+    steps.append(f"atrim=duration={side.duration:.6f}")
+    return f"[{side.index}:a]" + ",".join(steps) + label
+
+
+def _xfade_name(name: str) -> str:
+    return {
+        "fade": "fade",
+        "fadeblack": "fadeblack",
+        "fadewhite": "fadewhite",
+        "dissolve": "dissolve",
+        "wipeleft": "wipeleft",
+        "wiperight": "wiperight",
+        "slideleft": "slideleft",
+        "slideright": "slideright",
+        # Nomes antigos permanecem legíveis em projetos já salvos.
+        "fade_black": "fadeblack",
+        "fade_white": "fadewhite",
+    }.get(name, "fade")
+
+
+def _compose_video_piece(
+    filters: list[str],
+    current: str,
+    piece: _Piece,
+    project: Project,
+    fps: float,
+    interpolate: bool,
+    order: int,
+) -> str:
+    """Aplica um bloco visual e devolve o novo rótulo da composição."""
+    if piece.clip.overlay_type == "filter":
+        name = piece.clip.filter_name
+        start, end = piece.offset, piece.offset + piece.duration
+        if name == "pb":
+            expression = f"hue=s=0:enable='between(t,{start:.6f},{end:.6f})'"
+        elif name == "sepia":
+            expression = (
+                f"colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"
+                f":enable='between(t,{start:.6f},{end:.6f})'"
+            )
+        elif name == "vinheta":
+            expression = f"vignette=PI/4:enable='between(t,{start:.6f},{end:.6f})'"
+        elif name == "inverter":
+            expression = f"negate=enable='between(t,{start:.6f},{end:.6f})'"
+        elif name == "contraste":
+            expression = f"eq=contrast=1.5:enable='between(t,{start:.6f},{end:.6f})'"
+        else:
+            expression = f"hue=s=0:enable='between(t,{start:.6f},{end:.6f})'"
+        label = f"[f{order}]"
+        filters.append(f"{current}{expression}{label}")
+        return label
+
+    filters.append(_video_chain(piece, project, fps, interpolate))
+    start, end = piece.offset, piece.offset + piece.duration
+    label = f"[o{order}]"
+    is_overlay_item = piece.clip.overlay_type in ("image", "text") or piece.clip.is_image
+    has_transform = (
+        abs(piece.clip.x - 0.5) >= 0.0001
+        or abs(piece.clip.y - 0.5) >= 0.0001
+        or abs(getattr(piece.clip, "scale_x", piece.clip.scale) - 1.0) >= 0.001
+        or abs(getattr(piece.clip, "scale_y", piece.clip.scale) - 1.0) >= 0.001
+        or abs(piece.clip.rotation) >= 0.1
+        or piece.clip.chromakey_enabled
+    )
+    if is_overlay_item or has_transform:
+        coordinates = (
+            f"x='({piece.clip.x:.4f}*W-w/2)':y='({piece.clip.y:.4f}*H-h/2)'"
+        )
+    else:
+        coordinates = "x=0:y=0"
+    filters.append(
+        f"{current}[v{piece.index}]"
+        f"overlay={coordinates}:eof_action=pass:repeatlast=0"
+        f":enable='between(t,{start:.6f},{end:.6f})'{label}"
+    )
+    return label
+
+
+def _compose_video_transition(
+    filters: list[str],
+    current: str,
+    render: _TransitionRender,
+    project: Project,
+    fps: float,
+    number: int,
+) -> str:
+    context = render.context
+    left_label = f"[tr{number}a]"
+    right_label = f"[tr{number}b]"
+    filters.extend(_transition_video_chain(render.left, project, fps, left_label))
+    filters.extend(_transition_video_chain(render.right, project, fps, right_label))
+    raw_label = f"[trx{number}]"
+    visible_label = f"[trv{number}]"
+    filters.append(
+        f"{left_label}{right_label}xfade="
+        f"transition={_xfade_name(context.marker.transition_name)}:"
+        f"duration={context.duration:.6f}:offset=0{raw_label}"
+    )
+    filters.append(
+        f"{raw_label}trim=start={render.crop:.6f}:"
+        f"duration={render.visible_duration:.6f},setpts=PTS-STARTPTS+"
+        f"{render.offset:.6f}/TB{visible_label}"
+    )
+    label = f"[to{number}]"
+    filters.append(
+        f"{current}{visible_label}overlay=x=0:y=0:eof_action=pass:repeatlast=0:"
+        f"enable='between(t,{render.offset:.6f},"
+        f"{render.offset + render.visible_duration:.6f})'{label}"
+    )
+    return label
 
 
 @dataclass(frozen=True)
@@ -486,182 +825,172 @@ def build_graph(
         # vem de um arquivo com imagem, e pela mídia ele entrava aqui — a
         # composição desenhava o vídeo dele por cima de tudo, no instante em que
         # o som estivesse, e ainda pagava a decodificação.
-        if want_video and piece.clip.has_image:
+        if want_video and piece.clip.has_image and not piece.clip.is_transition:
             video_parts.append(piece)
         if want_audio and piece.clip.has_sound and not piece.track_muted:
             audio_parts.append(piece)
 
+    # A transição é resolvida pelo par de IDs, nunca pela quantidade de vídeos
+    # que por acaso entrou na janela. Isso permite várias transições no projeto
+    # e mantém o mesmo progresso ao renderizar um quadro isolado da prévia.
+    transition_renders: list[_TransitionRender] = []
+    audio_edits: list[tuple[TransitionContext, bool]] = []
+    next_input = max((piece.index for piece in pieces), default=-1) + 1
+    window_end = at + duration
+    for context in project.transition_contexts():
+        marker_found = project.find(context.marker.clip_id)
+        if (
+            marker_found is None
+            or not project.tracks[marker_found[0]].visible
+            or not project.tracks[context.track_index].visible
+        ):
+            continue
+        visible_start = max(at, context.start)
+        visible_end = min(window_end, context.end)
+        if visible_end - visible_start <= 1e-6:
+            continue
+        track = project.tracks[context.track_index]
+        has_video_transition = bool(
+            want_video and context.left.has_image and context.right.has_image
+        )
+        has_audio_at_cut = bool(
+            want_audio
+            and not track.muted
+            and (context.left.has_sound or context.right.has_sound)
+        )
+        has_audio_transition = bool(
+            has_audio_at_cut
+            and context.left.has_sound
+            and context.right.has_sound
+            and _has_audio_handles(context)
+        )
+        if has_audio_at_cut:
+            audio_edits.append((context, has_audio_transition))
+        if not has_video_transition and not has_audio_transition:
+            continue
+        left = _transition_side(
+            context.left, next_input, context.left.out_point, context.duration
+        )
+        right = _transition_side(
+            context.right, next_input + 1, context.right.in_point, context.duration
+        )
+        inputs += _transition_input_args(left, fps)
+        inputs += _transition_input_args(right, fps)
+        transition_renders.append(
+            _TransitionRender(
+                context=context,
+                left=left,
+                right=right,
+                crop=visible_start - context.start,
+                offset=visible_start - at,
+                visible_duration=visible_end - visible_start,
+                audio=has_audio_transition,
+            )
+        )
+        next_input += 2
+
     video_label = None
     if want_video and project.has_video:
-        transition_sources = [p for p in video_parts if not p.clip.is_transition]
-        can_xfade = len(transition_sources) == 2 and all(
-            p.clip.overlay_type == "none" for p in transition_sources
-        ) and any(p.clip.is_transition for p in video_parts)
-        if not can_xfade:
-            filters.append(
-                f"color=c=black:s={project.width}x{project.height}"
-                f":r={fps:.6f}:d={max(_MIN_CANVAS, duration):.6f}[base]"
-            )
+        filters.append(
+            f"color=c=black:s={project.width}x{project.height}"
+            f":r={fps:.6f}:d={max(_MIN_CANVAS, duration):.6f}[base]"
+        )
         current = "[base]"
-        if can_xfade:
-            current = ""
-        for order, piece in enumerate(video_parts):
-            if piece.clip.overlay_type == "filter":
-                fname = piece.clip.filter_name
-                start, end = piece.offset, piece.offset + piece.duration
-                if fname == "pb":
-                    fexpr = f"hue=s=0:enable='between(t,{start:.6f},{end:.6f})'"
-                elif fname == "sepia":
-                    fexpr = (
-                        f"colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"
-                        f":enable='between(t,{start:.6f},{end:.6f})'"
-                    )
-                elif fname == "vinheta":
-                    fexpr = f"vignette=PI/4:enable='between(t,{start:.6f},{end:.6f})'"
-                elif fname == "inverter":
-                    fexpr = f"negate=enable='between(t,{start:.6f},{end:.6f})'"
-                elif fname == "contraste":
-                    fexpr = f"eq=contrast=1.5:enable='between(t,{start:.6f},{end:.6f})'"
-                else:
-                    fexpr = f"hue=s=0:enable='between(t,{start:.6f},{end:.6f})'"
-                label = f"[f{order}]"
-                filters.append(f"{current}{fexpr}{label}")
-                current = label
-                continue
+        visual_layers = [
+            index
+            for index, track in reversed(tuple(enumerate(project.tracks)))
+            if track.visible and track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL)
+        ]
+        order = 0
+        for track_index in visual_layers:
+            for piece in (part for part in video_parts if part.track_index == track_index):
+                current = _compose_video_piece(
+                    filters, current, piece, project, fps, interpolate, order
+                )
+                order += 1
 
-            if piece.clip.overlay_type == "transition":
-                tname = piece.clip.transition_name or "fade_black"
-                start, end = piece.offset, piece.offset + piece.duration
-                half = max(0.01, piece.duration / 2.0)
-                mid = start + half
-                sources = transition_sources
-                if len(sources) == 2 and all(p.clip.overlay_type == "none" for p in sources):
-                    first, second = sources
-                    # A janela da prévia pode conter apenas parte do clipe;
-                    # não reduza a transição por esse recorte temporário.
-                    transition_duration = max(
-                        0.01, min(piece.clip.duration, first.clip.duration, second.clip.duration)
-                    )
-                    # xfade exige as duas entradas começando em PTS zero. Os
-                    # clipes já foram preparados em [vN], então só removemos o
-                    # deslocamento da timeline antes da emenda.
-                    filters.append(f"[v{first.index}]setpts=PTS-STARTPTS,fps={fps:.6f},format=yuv420p[tr_a]")
-                    filters.append(f"[v{second.index}]setpts=PTS-STARTPTS,fps={fps:.6f},format=yuv420p[tr_b]")
-                    xfade_name = {
-                        "fade": "fade",
-                        "fadeblack": "fadeblack",
-                        "fadewhite": "fadewhite",
-                        "dissolve": "dissolve",
-                        "wipeleft": "wipeleft",
-                        "wiperight": "wiperight",
-                        "slideleft": "slideleft",
-                        "slideright": "slideright",
-                        # nomes antigos permanecem legíveis em projetos já salvos
-                        "fade_black": "fadeblack",
-                        "fade_white": "fadewhite",
-                    }.get(tname, "fade")
-                    # ``piece.offset`` é relativo à janela solicitada (na
-                    # prévia ela começa no cursor). Usar ``clip.start`` aqui
-                    # deixava o xfade procurando o corte fora da janela e o
-                    # quadro ficava preto depois de avançar a reprodução.
-                    cut = max(0.0, second.offset - transition_duration / 2.0)
-                    label = f"[t{order}]"
-                    filters.append(
-                        f"[tr_a][tr_b]xfade=transition={xfade_name}:duration={transition_duration:.6f}:offset={cut:.6f},"
-                        f"tpad=stop_mode=clone:stop_duration={transition_duration:.6f}{label}"
-                    )
-                    current = label
+            # A transição é parte desta trilha de vídeo. Aplicá-la antes da
+            # próxima camada preserva títulos, imagens e vídeos superiores.
+            for number, render in enumerate(transition_renders):
+                context = render.context
+                if context.track_index != track_index:
                     continue
-                # Um marcador sem duas fontes elegíveis não pode filtrar a
-                # composição inteira: isso fazia a prévia ficar preta até o
-                # usuário reiniciar a reprodução. Mantemos o quadro atual e
-                # deixamos o marcador pronto para a próxima renderização.
-                if sources:
+                if not context.left.has_image or not context.right.has_image:
                     continue
-                if tname in ("fade", "fadeblack", "fade_black"):
-                    fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black,fade=t=in:st={mid:.6f}:d={half:.6f}:color=black"
-                elif tname in ("fadewhite", "fade_white"):
-                    fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=white,fade=t=in:st={mid:.6f}:d={half:.6f}:color=white"
-                elif tname == "dissolve_color":
-                    fexpr = (
-                        f"colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"
-                        f":enable='between(t,{start:.6f},{end:.6f})'"
-                    )
-                elif tname == "dissolve":
-                    fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black,fade=t=in:st={mid:.6f}:d={half:.6f}:color=black"
-                elif tname in ("wipeleft", "wiperight", "slideleft", "slideright"):
-                    # A composição entre duas fontes será feita pelo xfade na
-                    # etapa de emenda; este fallback mantém projetos antigos
-                    # renderizáveis enquanto não houver duas fontes elegíveis.
-                    fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black"
-                elif tname == "flash":
-                    fexpr = (
-                        f"eq=contrast='if(lt(t,{mid:.6f}),1+3*(t-{start:.6f})/{half:.6f},1+3*({end:.6f}-t)/{half:.6f})'"
-                        f":brightness='if(lt(t,{mid:.6f}),0.6*(t-{start:.6f})/{half:.6f},0.6*({end:.6f}-t)/{half:.6f})'"
-                        f":enable='between(t,{start:.6f},{end:.6f})'"
-                    )
-                elif tname == "vignette_pulse":
-                    fexpr = (
-                        f"vignette='PI/3*(if(lt(t,{mid:.6f}),(t-{start:.6f})/{half:.6f},({end:.6f}-t)/{half:.6f}))'"
-                        f":enable='between(t,{start:.6f},{end:.6f})'"
-                    )
-                elif tname == "inverter":
-                    qtr = max(0.01, half / 2.0)
-                    fexpr = f"negate=enable='between(t,{mid - qtr:.6f},{mid + qtr:.6f})'"
-                elif tname == "dissolve_color":
-                    fexpr = (
-                        f"colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"
-                        f":enable='between(t,{start:.6f},{end:.6f})'"
-                    )
-                else:
-                    fexpr = f"fade=t=out:st={start:.6f}:d={half:.6f}:color=black,fade=t=in:st={mid:.6f}:d={half:.6f}:color=black"
-                label = f"[t{order}]"
-                filters.append(f"{current}{fexpr}{label}")
-                current = label
-                continue
-
-            filters.append(_video_chain(piece, project, fps, interpolate))
-            if can_xfade and piece in transition_sources:
-                # As fontes são consumidas diretamente pelo xfade quando o
-                # marcador chegar; um overlay intermediário deixaria sua saída
-                # sem conexão no filtergraph e faria o FFmpeg abortar.
-                continue
-            start, end = piece.offset, piece.offset + piece.duration
-            label = f"[o{order}]"
-            is_overlay_item = piece.clip.overlay_type in ("image", "text") or piece.clip.is_image
-            has_transform = (
-                abs(piece.clip.x - 0.5) >= 0.0001
-                or abs(piece.clip.y - 0.5) >= 0.0001
-                or abs(getattr(piece.clip, "scale_x", piece.clip.scale) - 1.0) >= 0.001
-                or abs(getattr(piece.clip, "scale_y", piece.clip.scale) - 1.0) >= 0.001
-                or abs(piece.clip.rotation) >= 0.1
-                or piece.clip.chromakey_enabled
-            )
-            if is_overlay_item or has_transform:
-                overlay_coords = f"x='({piece.clip.x:.4f}*W-w/2)':y='({piece.clip.y:.4f}*H-h/2)'"
-            else:
-                overlay_coords = "x=0:y=0"
-            filters.append(
-                f"{current}[v{piece.index}]"
-                # ``repeatlast=0`` impede o último quadro do bloco de ficar
-                # congelado na tela depois que ele acaba; ``eof_action=pass``
-                # deixa o fundo seguir sozinho a partir daí.
-                f"overlay={overlay_coords}:eof_action=pass:repeatlast=0"
-                f":enable='between(t,{start:.6f},{end:.6f})'{label}"
-            )
-            current = label
+                current = _compose_video_transition(
+                    filters, current, render, project, fps, number
+                )
         video_label = current
 
     audio_label = None
-    if want_audio and audio_parts:
+    audio_transition_renders = [render for render in transition_renders if render.audio]
+    if want_audio and (audio_parts or audio_transition_renders):
+        muted_ranges: dict[int, list[tuple[float, float]]] = {}
+        fade_ranges: dict[int, list[tuple[str, float, float]]] = {}
+        for context, crossfade in audio_edits:
+            interval = (
+                context.start - at,
+                context.end - at,
+            )
+            if crossfade:
+                muted_ranges.setdefault(context.left.clip_id, []).append(interval)
+                muted_ranges.setdefault(context.right.clip_id, []).append(interval)
+                continue
+            # Sem alças, preservar o som da linha do tempo é mais correto que
+            # criar uma sobreposição preenchida com silêncio. Só uma rampa de
+            # de-click envolve o corte; se um lado está mudo, apenas o lado
+            # audível recebe seu envelope.
+            if context.left.has_sound:
+                fade_ranges.setdefault(context.left.clip_id, []).append(
+                    (
+                        "out",
+                        max(context.start, context.cut - _AUDIO_DECLICK) - at,
+                        context.cut - at,
+                    )
+                )
+            if context.right.has_sound:
+                fade_ranges.setdefault(context.right.clip_id, []).append(
+                    (
+                        "in",
+                        context.cut - at,
+                        min(context.end, context.cut + _AUDIO_DECLICK) - at,
+                    )
+                )
+
+        labels: list[str] = []
         for piece in audio_parts:
-            filters.append(_audio_chain(piece))
-        labels = "".join(f"[a{piece.index}]" for piece in audio_parts)
-        if len(audio_parts) == 1:
-            audio_label = labels
+            ranges = tuple(muted_ranges.get(piece.clip.clip_id, ()))
+            fades = tuple(fade_ranges.get(piece.clip.clip_id, ()))
+            filters.append(_audio_chain(piece, ranges, fades))
+            labels.append(f"[a{piece.index}]")
+
+        for number, render in enumerate(audio_transition_renders):
+            left_label = f"[tra{number}a]"
+            right_label = f"[tra{number}b]"
+            filters.append(_transition_audio_chain(render.left, left_label))
+            filters.append(_transition_audio_chain(render.right, right_label))
+            raw_label = f"[trax{number}]"
+            output_label = f"[trao{number}]"
+            filters.append(
+                f"{left_label}{right_label}acrossfade=d={render.context.duration:.6f}:"
+                # Curvas de potência constante: duas retas de amplitude perdem
+                # cerca de 3 dB no centro com fontes não correlacionadas.
+                f"c1=qsin:c2=qsin{raw_label}"
+            )
+            delay = int(round(render.offset * 1000))
+            filters.append(
+                f"{raw_label}atrim=start={render.crop:.6f}:"
+                f"duration={render.visible_duration:.6f},asetpts=PTS-STARTPTS,"
+                f"adelay={delay}:all=1{output_label}"
+            )
+            labels.append(output_label)
+
+        joined = "".join(labels)
+        if len(labels) == 1:
+            audio_label = joined
         else:
             filters.append(
-                f"{labels}amix=inputs={len(audio_parts)}:normalize=0"
+                f"{joined}amix=inputs={len(labels)}:normalize=0"
                 # Sem isto o ffmpeg baixa o volume por alguns instantes cada vez
                 # que uma das entradas termina, e a mixagem "respira".
                 ":dropout_transition=0[mix]"
@@ -787,11 +1116,11 @@ def _limited_inputs(inputs: list[str]) -> list[str]:
     ``-threads`` é opção de entrada e vale para a que vem logo depois: pôr uma
     vez só na frente limitaria o primeiro arquivo e deixaria os outros no padrão.
 
-    Vale para o quadro parado da prévia, e não para a exportação nem para a
-    reprodução. Na exportação o que se quer é o arquivo pronto antes, e todo
-    núcleo é bem-vindo. Na reprodução o relógio já limita o trabalho — ela
-    decodifica na velocidade em que consome —, e apertar as threads ali só
-    arriscaria não acompanhar o material mais pesado.
+    Vale para quadro parado e reprodução da prévia, não para exportação. Na
+    exportação o que se quer é o arquivo pronto antes, e todo núcleo é bem-vindo.
+    Na prévia o teto reduz o custo de abrir simultaneamente as duas pontas de
+    uma transição; oito threads por entrada ainda deixam ampla folga para
+    acompanhar a taxa do material.
     """
     limitados: list[str] = []
     for arg in inputs:
@@ -799,6 +1128,52 @@ def _limited_inputs(inputs: list[str]) -> list[str]:
             limitados += decode_thread_args()
         limitados.append(arg)
     return limitados
+
+
+def _preview_project(project: Project, size: tuple[int, int]) -> Project:
+    """Reduz a tela de composição para a resolução realmente exibida.
+
+    A prévia não ganha informação ao montar uma tela 4K para, no último filtro,
+    reduzi-la a poucos pixels do painel. Isso ficava especialmente caro numa
+    transição, porque os dois lados do corte precisam existir ao mesmo tempo.
+    A composição continua sendo a mesma; somente trabalha em uma resolução
+    proporcional, limitada ao tamanho visível. Exportação não passa por aqui.
+
+    Texto é rasterizado antes do compositor e, ao contrário de vídeo e imagem,
+    sua entrada já tem tamanho em pixels. A escala compensatória mantém sua
+    proporção em relação à tela reduzida.
+    """
+    max_width = max(2, int(size[0]))
+    max_height = max(2, int(size[1]))
+    width, height = fit_size(
+        project.width,
+        project.height,
+        min(project.width, max_width),
+        min(project.height, max_height),
+    )
+    width = max(2, int(width) // 2 * 2)
+    height = max(2, int(height) // 2 * 2)
+    if width == project.width and height == project.height:
+        return project
+
+    ratio = min(width / project.width, height / project.height)
+    tracks = tuple(
+        replace(
+            track,
+            clips=tuple(
+                replace(
+                    clip,
+                    scale_x=clip.scale_x * ratio,
+                    scale_y=clip.scale_y * ratio,
+                )
+                if clip.overlay_type == "text"
+                else clip
+                for clip in track.clips
+            ),
+        )
+        for track in project.tracks
+    )
+    return replace(project, tracks=tracks, width=width, height=height)
 
 
 def frame_command(
@@ -818,9 +1193,14 @@ def frame_command(
     crescendo a cada bloco acrescentado.
     """
     width, height = size
+    preview_project = _preview_project(project, size)
     graph = build_graph(
-        project, at=at, span=1.0 / max(1.0, project.fps), want_audio=False
-    , text_assets=text_assets)
+        preview_project,
+        at=at,
+        span=1.0 / max(1.0, project.fps),
+        want_audio=False,
+        text_assets=text_assets,
+    )
     args = [
         tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error",
         *_limited_inputs(graph.inputs),
@@ -849,9 +1229,22 @@ def playback_command(
 ) -> list[str]:
     """Comando que produz o fluxo de quadros da reprodução, a partir de ``at``."""
     width, height = size
-    graph = build_graph(project, at=at, span=None, fps=float(fps), want_audio=False, text_assets=text_assets)
+    preview_project = _preview_project(project, size)
+    graph = build_graph(
+        preview_project,
+        at=at,
+        span=None,
+        fps=float(fps),
+        want_audio=False,
+        text_assets=text_assets,
+    )
     args = [
-        tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", *graph.inputs
+        tools.ffmpeg_str,
+        "-nostdin",
+        "-hide_banner",
+        "-v",
+        "error",
+        *_limited_inputs(graph.inputs),
     ]
     filters = list(graph.filters)
     if graph.video_label:
