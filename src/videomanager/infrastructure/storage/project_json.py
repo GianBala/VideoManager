@@ -136,6 +136,7 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                     "transition_name": clip.transition_name,
                     "transition_left_id": clip.transition_left_id,
                     "transition_right_id": clip.transition_right_id,
+                    "transition_affects_additionals": clip.transition_affects_additionals,
                     "chromakey_enabled": clip.chromakey_enabled,
                     "chromakey_color": clip.chromakey_color,
                     "chromakey_similarity": clip.chromakey_similarity,
@@ -239,7 +240,18 @@ def _validate_project(data: dict[str, object]) -> None:
             for name in ("chromakey_similarity", "chromakey_blend"):
                 if clip.get(name, 0) > 1:
                     fail(name)
-            booleans(clip, ("muted", "detached", "audio_only", "font_bold", "font_italic", "chromakey_enabled"))
+            booleans(
+                clip,
+                (
+                    "muted",
+                    "detached",
+                    "audio_only",
+                    "font_bold",
+                    "font_italic",
+                    "chromakey_enabled",
+                    "transition_affects_additionals",
+                ),
+            )
             strings(clip, ("overlay_type", "text_content", "font_family", "text_color", "stroke_color", "filter_name", "transition_name", "chromakey_color"))
             if clip.get("overlay_type", "none") not in ("none", "image", "text", "filter", "transition"):
                 fail("tipo de sobreposição")
@@ -348,6 +360,9 @@ def _project_from_dict(
                 transition_name=str(c_data.get("transition_name", "")),
                 transition_left_id=(int(c_data["transition_left_id"]) if c_data.get("transition_left_id") is not None else None),
                 transition_right_id=(int(c_data["transition_right_id"]) if c_data.get("transition_right_id") is not None else None),
+                transition_affects_additionals=bool(
+                    c_data.get("transition_affects_additionals", False)
+                ),
                 chromakey_enabled=bool(c_data.get("chromakey_enabled", False)),
                 chromakey_color=str(c_data.get("chromakey_color", "#00FF00")),
                 chromakey_similarity=float(c_data.get("chromakey_similarity", 0.25)),

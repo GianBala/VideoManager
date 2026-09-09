@@ -600,6 +600,208 @@ class TestExportacaoDaEdicao:
         around_cut = level(cut - 0.05, 0.1)
         assert around_cut > baseline * 0.70
 
+    def test_transicao_pode_incluir_imagem_da_trilha_de_adicionais(
+        self, tmp_path: Path, tools
+    ) -> None:
+        """Executa o xfade real com a composição adicional em apenas um lado."""
+        from videomanager.domain.project import Clip
+        from videomanager.domain.project import MediaKind
+        from videomanager.domain.project import MediaRef
+        from videomanager.domain.project import Project
+        from videomanager.domain.project import Track
+        from videomanager.domain.project import TrackKind
+        from videomanager.domain.project import media_ref
+        from videomanager.infrastructure.ffmpeg.composer import frame_command
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+
+        sources = []
+        for name, color in (("left", "red"), ("right", "blue")):
+            path = tmp_path / f"{name}.mp4"
+            subprocess.run(
+                [
+                    tools.ffmpeg_str,
+                    "-hide_banner",
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"color={color}:s=160x90:r=30:d=2",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(path),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            sources.append(media_ref(probe_file(path, tools)))
+
+        logo_path = tmp_path / "logo.ppm"
+        logo_path.write_bytes(b"P6\n160 90\n255\n" + b"\x00\xff\x00" * (160 * 90))
+        left = Clip(sources[0], start=0.0, duration=1.0, in_point=0.5)
+        right = Clip(sources[1], start=1.0, duration=1.0, in_point=0.5)
+        logo = Clip(
+            MediaRef(logo_path, MediaKind.IMAGE, width=160, height=90),
+            start=0.0,
+            duration=1.0,
+            overlay_type="image",
+        )
+        marker = Clip(
+            MediaRef(Path("Transição"), MediaKind.IMAGE, duration=0.6),
+            start=0.7,
+            duration=0.6,
+            overlay_type="transition",
+            transition_name="dissolve",
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+        )
+
+        def center_pixel(affects: bool) -> tuple[float, float, float]:
+            transition = replace(
+                marker,
+                transition_affects_additionals=affects,
+            )
+            project = Project(
+                tracks=(
+                    Track(TrackKind.ADDITIONAL, clips=(logo,)),
+                    Track(TrackKind.VIDEO, clips=(left, right, transition)),
+                ),
+                width=160,
+                height=90,
+                fps=30.0,
+            )
+            raw = subprocess.run(
+                frame_command(project, 1.0, (160, 90), tools),
+                check=True,
+                capture_output=True,
+            ).stdout
+            count = len(raw) // 3
+            return tuple(
+                sum(raw[channel::3]) / count
+                for channel in range(3)
+            )
+
+        unaffected = center_pixel(False)
+        affected = center_pixel(True)
+        assert unaffected[0] > affected[0] + 60  # vermelho só no vídeo esquerdo
+        assert affected[1] > unaffected[1] + 60  # verde pertence ao lado esquerdo
+        assert affected[2] > 60  # o vídeo azul do lado direito também está presente
+
+        filter_clip = Clip(
+            MediaRef(Path("Filtro"), MediaKind.IMAGE, duration=1.0),
+            start=0.0,
+            duration=1.0,
+            overlay_type="filter",
+            filter_name="pb",
+        )
+        text_clip = Clip(
+            MediaRef(Path("Texto"), MediaKind.IMAGE, duration=1.0),
+            start=1.0,
+            duration=1.0,
+            overlay_type="text",
+            text_content="Direita",
+        )
+        for additional, assets in (
+            (filter_clip, None),
+            (text_clip, {text_clip.clip_id: logo_path}),
+        ):
+            transition = replace(marker, transition_affects_additionals=True)
+            project = Project(
+                tracks=(
+                    Track(TrackKind.ADDITIONAL, clips=(additional,)),
+                    Track(TrackKind.VIDEO, clips=(left, right, transition)),
+                ),
+                width=160,
+                height=90,
+                fps=30.0,
+            )
+            raw = subprocess.run(
+                frame_command(
+                    project,
+                    1.0,
+                    (160, 90),
+                    tools,
+                    text_assets=assets,
+                ),
+                check=True,
+                capture_output=True,
+            ).stdout
+            assert len(raw) == 160 * 90 * 3
+
+    def test_transicao_apos_tesoura_e_visivel_em_video_continuo(
+        self, tmp_path: Path, tools
+    ) -> None:
+        """O xfade não pode misturar duas cópias do mesmo instante da origem."""
+        from videomanager.domain.project import Clip
+        from videomanager.domain.project import MediaKind
+        from videomanager.domain.project import MediaRef
+        from videomanager.domain.project import Project
+        from videomanager.domain.project import Track
+        from videomanager.domain.project import TrackKind
+        from videomanager.domain.project import media_ref
+        from videomanager.infrastructure.ffmpeg.composer import frame_command
+        from videomanager.infrastructure.ffmpeg.converter import probe_file
+
+        source = tmp_path / "movimento.mp4"
+        subprocess.run(
+            [
+                tools.ffmpeg_str,
+                "-hide_banner",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=160x90:r=30:d=2",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                str(source),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        media = media_ref(probe_file(source, tools))
+        original = Clip(media, start=0.0, duration=2.0)
+        split = Project(
+            tracks=(Track(TrackKind.VIDEO, clips=(original,)),),
+            width=160,
+            height=90,
+            fps=30.0,
+        ).split(original.clip_id, 1.0)
+        left, right = split.tracks[0].sorted_clips()
+        marker = Clip(
+            MediaRef(Path("Transição"), MediaKind.IMAGE, duration=0.6),
+            start=0.7,
+            duration=0.6,
+            overlay_type="transition",
+            transition_name="dissolve",
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+        )
+
+        plain = subprocess.run(
+            frame_command(split, 1.0, (160, 90), tools),
+            check=True,
+            capture_output=True,
+        ).stdout
+        transitioned = subprocess.run(
+            frame_command(split.with_clip(0, marker), 1.0, (160, 90), tools),
+            check=True,
+            capture_output=True,
+        ).stdout
+
+        difference = sum(
+            abs(before - after)
+            for before, after in zip(plain, transitioned)
+        ) / len(plain)
+        assert difference > 3.0
+
     def test_bloco_mudo_e_trilha_muda_nao_chegam_ao_arquivo(
         self, tmp_path: Path, tools
     ) -> None:

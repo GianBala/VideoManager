@@ -1112,6 +1112,17 @@ class _ClipPropertiesWidget(QWidget):
         dur_row.addWidget(self._spin_trans_dur, 1)
         t_layout.addLayout(dur_row)
 
+        self._chk_trans_additionals = QCheckBox(
+            strings.EDIT_TRANSITION_AFFECT_ADDITIONALS
+        )
+        self._chk_trans_additionals.setToolTip(
+            strings.EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP
+        )
+        self._chk_trans_additionals.toggled.connect(
+            self._on_trans_additionals_toggled
+        )
+        t_layout.addWidget(self._chk_trans_additionals)
+
         self._layout.addWidget(self._transition_group)
         self._layout.addStretch(1)
 
@@ -1193,6 +1204,9 @@ class _ClipPropertiesWidget(QWidget):
                 if idx >= 0:
                     self._combo_trans_type.setCurrentIndex(idx)
                 self._spin_trans_dur.setValue(clip.duration)
+                self._chk_trans_additionals.setChecked(
+                    clip.transition_affects_additionals
+                )
 
             if can_chroma:
                 self._chk_chroma.setChecked(clip.chromakey_enabled)
@@ -1283,6 +1297,14 @@ class _ClipPropertiesWidget(QWidget):
         if self._updating or self._clip_id < 0:
             return
         self.property_changed.emit(self._clip_id, {"duration": val})
+
+    def _on_trans_additionals_toggled(self, checked: bool) -> None:
+        if self._updating or self._clip_id < 0:
+            return
+        self.property_changed.emit(
+            self._clip_id,
+            {"transition_affects_additionals": checked},
+        )
 
     def update_transform_fields(
         self, x: float, y: float, scale_x: float, scale_y: float | None = None, rotation: float = 0.0
