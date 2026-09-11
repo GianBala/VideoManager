@@ -483,6 +483,11 @@ class EditPanel(QWidget):
         self._save_btn.clicked.connect(self.save_project)
         row.addWidget(self._save_btn)
 
+        self._save_as_btn = QPushButton(strings.EDIT_SAVE_AS_BUTTON)
+        self._save_as_btn.setToolTip(f"{strings.ACTION_SAVE_PROJECT_AS} (Ctrl+Shift+S)")
+        self._save_as_btn.clicked.connect(self.save_project_as)
+        row.addWidget(self._save_as_btn)
+
         row.addSpacing(6)
         self._project_label = QLabel("")
         self._project_label.setProperty("role", "dim")
