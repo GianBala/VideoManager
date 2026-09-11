@@ -8,6 +8,8 @@ não tem tamanho.
 
 from __future__ import annotations
 
+import math
+
 DASH = "—"
 
 
@@ -76,3 +78,25 @@ def format_rate(fps: float | None) -> str:
     if fps is None or fps <= 0:
         return DASH
     return _decimal(fps, 2)
+
+
+def format_aspect_ratio(width: int | None, height: int | None) -> str:
+    """Nome da proporção de aspecto (ex.: '16:9', '4:3', '9:16', '1:1', '21:9')."""
+    if not width or not height or width <= 0 or height <= 0:
+        return ""
+    ratio = width / height
+    if abs(ratio - 16 / 9) < 0.04:
+        return "16:9"
+    if abs(ratio - 4 / 3) < 0.04:
+        return "4:3"
+    if abs(ratio - 9 / 16) < 0.04:
+        return "9:16"
+    if abs(ratio - 1.0) < 0.04:
+        return "1:1"
+    if abs(ratio - 21 / 9) < 0.08 or abs(ratio - 64 / 27) < 0.08:
+        return "21:9"
+    g = math.gcd(width, height)
+    rw, rh = width // g, height // g
+    if rw < 100 and rh < 100:
+        return f"{rw}:{rh}"
+    return f"{ratio:.2f}:1"

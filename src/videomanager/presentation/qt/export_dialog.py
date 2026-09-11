@@ -37,7 +37,7 @@ from videomanager.domain.media import LocalMedia
 from videomanager.application import encoding as hwaccel
 from videomanager.domain.estimator import estimate_export_size
 from videomanager.application.errors import VideoManagerError
-from videomanager.application.formatting import format_rate
+from videomanager.application.formatting import format_aspect_ratio, format_rate
 from videomanager.application.formatting import format_size
 from videomanager.application.media.processing import ExportOptions
 from videomanager.application.jobs.models import Job
@@ -57,14 +57,19 @@ from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
 _CANVAS_PRESETS: tuple[tuple[int, int], ...] = (
-    (3840, 2160),  # 4K UHD
-    (2560, 1440),  # 2K QHD
+    (3840, 2160),  # 4K UHD 16:9
+    (2560, 1440),  # 2K QHD 16:9
     (1920, 1080),  # Full HD 16:9
     (1280, 720),   # HD 16:9
-    (854, 480),    # SD
+    (854, 480),    # SD 16:9
     (1080, 1920),  # Vertical Full HD 9:16 (TikTok / Reels / Shorts)
     (720, 1280),   # Vertical HD 9:16
+    (1440, 1080),  # 4:3 Full HD
+    (960, 720),    # 4:3 HD
+    (640, 480),    # 4:3 SD
     (1080, 1080),  # Quadrado 1:1
+    (720, 720),    # Quadrado 1:1
+    (2560, 1080),  # Ultrawide 21:9
 )
 
 _RATE_PRESETS: tuple[float, ...] = (24.0, 25.0, 30.0, 50.0, 60.0)
@@ -137,8 +142,12 @@ class ExportDialog(QDialog):
         self._keyframes = keyframes
         self._ensure_tools = ensure_tools
         self._canvas_choice = initial_canvas
+        self._aspect_choice = (
+            format_aspect_ratio(*initial_canvas) if initial_canvas else None
+        )
         self._rate_choice = initial_rate
         self._project_path = project_path
+        self._syncing = False
 
         self._container_choice: str = self._default_container(self._project)
         self._codec_choice: str | None = None
@@ -212,6 +221,13 @@ class ExportDialog(QDialog):
         self._audio_format_box.setToolTip(strings.EXPORT_AUDIO_FORMAT_TIP)
         self._audio_format_box.currentIndexChanged.connect(self._on_audio_format_changed)
         self._form.addRow(self._audio_format_label, self._audio_format_box)
+
+        # Proporção
+        self._aspect_label = QLabel(strings.EXPORT_ASPECT)
+        self._aspect_box = QComboBox()
+        self._aspect_box.setToolTip(strings.EXPORT_ASPECT_TIP)
+        self._aspect_box.currentIndexChanged.connect(self._on_aspect_changed)
+        self._form.addRow(self._aspect_label, self._aspect_box)
 
         # Resolução / Tela
         self._canvas_label = QLabel(strings.EDIT_CANVAS)
@@ -341,7 +357,28 @@ class ExportDialog(QDialog):
 
     def _sync_presets(self) -> None:
         """Preenche as opções de tela, taxa, container, codec e formato de áudio."""
+        # Opções de proporção
+        self._aspect_box.blockSignals(True)
+        self._aspect_box.clear()
+        aspect_options = [
+            (strings.EXPORT_ASPECT_AUTO, None),
+            ("16:9 (Widescreen)", "16:9"),
+            ("4:3 (Tradicional)", "4:3"),
+            ("9:16 (Vertical / Shorts / Reels)", "9:16"),
+            ("1:1 (Quadrado)", "1:1"),
+            ("21:9 (Ultrawide)", "21:9"),
+        ]
+        for label, val in aspect_options:
+            self._aspect_box.addItem(label, val)
+        idx_a = _index_of(self._aspect_box, self._aspect_choice)
+        self._aspect_box.setCurrentIndex(max(0, idx_a))
+        self._aspect_box.blockSignals(False)
+
         # Opções de tela
+        self._sync_canvas_box()
+
+    def _sync_canvas_box(self) -> None:
+        self._canvas_box.blockSignals(True)
         self._canvas_box.clear()
         options_canvas: list[tuple[str, tuple[int, int] | None]] = [
             (strings.EDIT_CANVAS_AUTO, None)
@@ -353,18 +390,33 @@ class ExportDialog(QDialog):
             if ref.has_video and ref.width and ref.height
         ]
         ordered = sorted(sizes, key=lambda s: -s[0] * s[1])
-        for w, h in [*ordered, *_CANVAS_PRESETS]:
+        all_candidates = [*ordered, *_CANVAS_PRESETS]
+        if self._aspect_choice:
+            filtered = [
+                (w, h)
+                for (w, h) in all_candidates
+                if format_aspect_ratio(w, h) == self._aspect_choice
+            ]
+        else:
+            filtered = all_candidates
+
+        for w, h in filtered:
             if (w, h) in seen:
                 continue
             seen.add((w, h))
-            options_canvas.append(
-                (strings.EDIT_CANVAS_SIZE.format(width=w, height=h), (w, h))
+            aspect = format_aspect_ratio(w, h)
+            label = (
+                f"{aspect} · {w} × {h}"
+                if aspect and not self._aspect_choice
+                else strings.EDIT_CANVAS_SIZE.format(width=w, height=h)
             )
+            options_canvas.append((label, (w, h)))
         for label, val in options_canvas:
             self._canvas_box.addItem(label, val)
 
         idx_c = _index_of(self._canvas_box, self._canvas_choice)
         self._canvas_box.setCurrentIndex(max(0, idx_c))
+        self._canvas_box.blockSignals(False)
 
         # Opções de taxa
         self._rate_box.clear()
@@ -443,6 +495,7 @@ class ExportDialog(QDialog):
             self._container_label, self._container_box,
             self._video_codec_label, self._video_codec_box,
             self._quality_label, self._quality_box,
+            self._aspect_label, self._aspect_box,
             self._canvas_label, self._canvas_box,
             self._rate_label, self._rate_box,
             self._advanced_widget,
@@ -470,11 +523,46 @@ class ExportDialog(QDialog):
         fps = self._rate_choice or material.fps
         return replace(self._project, width=w, height=h, fps=fps)
 
+    def _on_aspect_changed(self, index: int) -> None:
+        if self._syncing or index < 0:
+            return
+        self._aspect_choice = self._aspect_box.itemData(index)
+        if self._aspect_choice is None:
+            self._canvas_choice = None
+        else:
+            cur_aspect = (
+                format_aspect_ratio(*self._canvas_choice)
+                if self._canvas_choice
+                else None
+            )
+            if cur_aspect != self._aspect_choice:
+                for w, h in _CANVAS_PRESETS:
+                    if format_aspect_ratio(w, h) == self._aspect_choice:
+                        self._canvas_choice = (w, h)
+                        break
+        self.chosen_canvas = self._canvas_choice
+        self._sync_canvas_box()
+        self._update_plan()
+
     def _on_canvas_changed(self, index: int) -> None:
-        if index < 0:
+        if self._syncing or index < 0:
             return
         self._canvas_choice = self._canvas_box.itemData(index)
         self.chosen_canvas = self._canvas_choice
+        if self._canvas_choice is not None:
+            new_aspect = format_aspect_ratio(*self._canvas_choice)
+            if new_aspect != self._aspect_choice:
+                self._aspect_choice = new_aspect
+                idx_a = _index_of(self._aspect_box, self._aspect_choice)
+                self._aspect_box.blockSignals(True)
+                self._aspect_box.setCurrentIndex(max(0, idx_a))
+                self._aspect_box.blockSignals(False)
+        else:
+            if self._aspect_choice is not None:
+                self._aspect_choice = None
+                self._aspect_box.blockSignals(True)
+                self._aspect_box.setCurrentIndex(0)
+                self._aspect_box.blockSignals(False)
         self._update_plan()
 
     def _on_rate_changed(self, index: int) -> None:
@@ -599,13 +687,22 @@ class ExportDialog(QDialog):
         if not can_interp and self._interpolate.isChecked():
             self._interpolate.setChecked(False)
 
-        # Atualiza o texto do item "Automática" em tela e taxa
-        self._canvas_box.setItemText(
-            0,
-            f"{strings.EDIT_CANVAS_AUTO}  ("
-            + strings.EDIT_CANVAS_SIZE.format(width=proj.width, height=proj.height)
-            + ")",
-        )
+        # Atualiza o texto do item "Automática" em proporção, tela e taxa
+        if self._aspect_box.count() > 0 and self._aspect_box.itemData(0) is None:
+            proj_aspect = format_aspect_ratio(proj.width, proj.height)
+            self._aspect_box.setItemText(
+                0,
+                f"{strings.EXPORT_ASPECT_AUTO}  ({proj_aspect})"
+                if proj_aspect
+                else strings.EXPORT_ASPECT_AUTO,
+            )
+        if self._canvas_box.count() > 0 and self._canvas_box.itemData(0) is None:
+            self._canvas_box.setItemText(
+                0,
+                f"{strings.EDIT_CANVAS_AUTO}  ("
+                + strings.EDIT_CANVAS_SIZE.format(width=proj.width, height=proj.height)
+                + ")",
+            )
         self._rate_box.setItemText(
             0,
             f"{strings.EDIT_CANVAS_RATE_AUTO}  ("

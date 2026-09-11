@@ -81,7 +81,7 @@ from videomanager.application.capabilities import FFmpegTools
 from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.media import LocalMedia
 from videomanager.application.editor.service import EditorService
-from videomanager.application.formatting import format_rate
+from videomanager.application.formatting import format_aspect_ratio, format_rate
 from videomanager.domain.preview import fit_size
 from videomanager.domain.preview import preview_fps
 from videomanager.domain.project import IMAGE_DURATION
@@ -339,6 +339,7 @@ class EditPanel(QWidget):
         # projeto, porque é preferência de saída e não parte da montagem — ver
         # :meth:`_sync_canvas`.
         self._canvas_choice: tuple[int, int] | None = None
+        self._aspect_choice: str | None = None
         self._rate_choice: float | None = None
 
         self._tokens = itertools.count(1)
@@ -495,6 +496,30 @@ class EditPanel(QWidget):
         self._update_project_label()
 
         row.addStretch(1)
+
+        aspect_label = QLabel(strings.EDIT_CANVAS_ASPECT)
+        aspect_label.setProperty("role", "dim")
+        row.addWidget(aspect_label)
+
+        self._aspect_box = QComboBox()
+        self._aspect_box.setToolTip(strings.EDIT_CANVAS_ASPECT_TIP)
+        self._aspect_box.currentIndexChanged.connect(self._on_aspect_choice)
+        row.addWidget(self._aspect_box)
+
+        canvas_label = QLabel(strings.EDIT_CANVAS)
+        canvas_label.setProperty("role", "dim")
+        row.addWidget(canvas_label)
+
+        self._canvas_box = QComboBox()
+        self._canvas_box.setToolTip(strings.EDIT_CANVAS_TIP)
+        self._canvas_box.currentIndexChanged.connect(self._on_canvas_choice)
+        row.addWidget(self._canvas_box)
+
+        self._rate_box = QComboBox()
+        self._rate_box.setToolTip(strings.EDIT_CANVAS_RATE_TIP)
+        self._rate_box.currentIndexChanged.connect(self._on_rate_choice)
+
+        row.addSpacing(6)
 
         self._collapse = QPushButton(strings.EDIT_COLLAPSE)
         self._collapse.setToolTip(strings.EDIT_COLLAPSE_TIP)
@@ -2692,10 +2717,43 @@ class EditPanel(QWidget):
             return
         self._project = replace(self._project, width=width, height=height, fps=fps)
 
+    def _aspect_options(self) -> list[tuple[str, str | None]]:
+        return [
+            (strings.EDIT_CANVAS_ASPECT_AUTO, None),
+            ("16:9", "16:9"),
+            ("4:3", "4:3"),
+            ("9:16", "9:16"),
+            ("1:1", "1:1"),
+            ("21:9", "21:9"),
+        ]
+
+    def _on_aspect_choice(self, index: int) -> None:
+        if self._syncing or index < 0:
+            return
+        self._aspect_choice = self._aspect_box.itemData(index)
+        if self._aspect_choice is None:
+            self._canvas_choice = None
+        else:
+            cur_aspect = (
+                format_aspect_ratio(*self._canvas_choice)
+                if self._canvas_choice
+                else None
+            )
+            if cur_aspect != self._aspect_choice:
+                for w, h in _CANVAS_PRESETS:
+                    if format_aspect_ratio(w, h) == self._aspect_choice:
+                        self._canvas_choice = (w, h)
+                        break
+        self._after_edit()
+
     def _on_canvas_choice(self, index: int) -> None:
         if self._syncing or index < 0:
             return
         self._canvas_choice = self._canvas_box.itemData(index)
+        if self._canvas_choice is not None:
+            self._aspect_choice = format_aspect_ratio(*self._canvas_choice)
+        else:
+            self._aspect_choice = None
         self._after_edit()
 
     def _on_rate_choice(self, index: int) -> None:
@@ -2718,14 +2776,27 @@ class EditPanel(QWidget):
             if ref.has_video and ref.width and ref.height
         ]
         ordered = sorted(sizes, key=lambda size: -size[0] * size[1])
-        for width, height in [*ordered, *_CANVAS_PRESETS]:
+        all_candidates = [*ordered, *_CANVAS_PRESETS]
+        if self._aspect_choice:
+            filtered = [
+                (w, h)
+                for (w, h) in all_candidates
+                if format_aspect_ratio(w, h) == self._aspect_choice
+            ]
+        else:
+            filtered = all_candidates
+
+        for width, height in filtered:
             if (width, height) in seen:
                 continue
             seen.add((width, height))
-            options.append(
-                (strings.EDIT_CANVAS_SIZE.format(width=width, height=height),
-                 (width, height))
+            aspect = format_aspect_ratio(width, height)
+            label = (
+                f"{aspect} · {width} × {height}"
+                if aspect and not self._aspect_choice
+                else strings.EDIT_CANVAS_SIZE.format(width=width, height=height)
             )
+            options.append((label, (width, height)))
         return options
 
     def _rate_options(self) -> list[tuple[str, object]]:
@@ -2745,6 +2816,16 @@ class EditPanel(QWidget):
         """
         self._syncing = True
         try:
+            aspect_opts = self._aspect_options()
+            if [self._aspect_box.itemData(i) for i in range(self._aspect_box.count())] != [
+                data for _, data in aspect_opts
+            ]:
+                self._aspect_box.clear()
+                for label, data in aspect_opts:
+                    self._aspect_box.addItem(label, data)
+            idx_a = _index_of(self._aspect_box, self._aspect_choice)
+            self._aspect_box.setCurrentIndex(max(0, idx_a))
+
             for box, options, choice in (
                 (self._canvas_box, self._canvas_options(), self._canvas_choice),
                 (self._rate_box, self._rate_options(), self._rate_choice),
@@ -2773,6 +2854,13 @@ class EditPanel(QWidget):
 
         # O que a escolha automática produziu fica à vista mesmo sem abrir a
         # lista: sem isso, "Automática" não diz em que tela a edição está.
+        proj_aspect = format_aspect_ratio(self._project.width, self._project.height)
+        self._aspect_box.setItemText(
+            0,
+            f"{strings.EDIT_CANVAS_ASPECT_AUTO}  ({proj_aspect})"
+            if proj_aspect
+            else strings.EDIT_CANVAS_ASPECT_AUTO,
+        )
         self._canvas_box.setItemText(
             0,
             f"{strings.EDIT_CANVAS_AUTO}  ("
