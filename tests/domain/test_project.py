@@ -768,3 +768,23 @@ class TestOrdemDasTrilhas:
         canvas = auto_canvas(p)
         assert (canvas.width, canvas.height) == (1920, 1080)
         assert canvas.fps == 30.0
+
+    def test_auto_canvas_imagem_em_trilha_adicional_nao_redefine_canvas_ao_excluir_video(self) -> None:
+        c_video = clip(VIDEO, start=0.0, duration=10.0)
+        foto_overlay = MediaRef(
+            path=Path("/m/overlay.png"), kind=MediaKind.IMAGE, width=1552, height=608
+        )
+        c_foto = clip(foto_overlay, start=0.0, duration=5.0)
+
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(c_video,)),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_foto,)),
+            )
+        )
+        canvas = auto_canvas(p)
+        assert (canvas.width, canvas.height) == (1920, 1080)
+
+        sem_video = p.without_clip(c_video.clip_id)
+        canvas_sem_video = auto_canvas(sem_video)
+        assert (canvas_sem_video.width, canvas_sem_video.height) == (1920, 1080)
