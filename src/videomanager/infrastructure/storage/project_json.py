@@ -15,6 +15,7 @@ from pathlib import Path
 
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.errors import ProjectError
+from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
@@ -141,6 +142,20 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                     "chromakey_color": clip.chromakey_color,
                     "chromakey_similarity": clip.chromakey_similarity,
                     "chromakey_blend": clip.chromakey_blend,
+                    "opacity": clip.opacity,
+                    "keyframes": [
+                        {
+                            "time_offset": kf.time_offset,
+                            "x": kf.x,
+                            "y": kf.y,
+                            "scale_x": kf.scale_x,
+                            "scale_y": kf.scale_y,
+                            "rotation": kf.rotation,
+                            "opacity": kf.opacity,
+                            "easing": kf.easing,
+                        }
+                        for kf in clip.keyframes
+                    ],
                     "media": _media_to_dict(clip.media, base_dir),
                 }
             )
@@ -237,9 +252,29 @@ def _validate_project(data: dict[str, object]) -> None:
             number(clip, "font_size", positive=True, integer=True)
             for name in ("gain_db", "x", "y", "rotation"):
                 number(clip, name)
+            if "opacity" in clip:
+                number(clip, "opacity", minimum=0)
+                if clip["opacity"] > 1:
+                    fail("opacity")
             for name in ("chromakey_similarity", "chromakey_blend"):
-                if clip.get(name, 0) > 1:
+                if clip.get(name, 0) > 1 or clip.get(name, 0) < 0:
                     fail(name)
+            if "keyframes" in clip:
+                if not isinstance(clip["keyframes"], list):
+                    fail("quadros-chave")
+                for kf in clip["keyframes"]:
+                    if not isinstance(kf, dict):
+                        fail("quadro-chave")
+                    number(kf, "time_offset", minimum=0)
+                    for kf_num in ("x", "y", "rotation"):
+                        number(kf, kf_num)
+                    for kf_pos in ("scale_x", "scale_y"):
+                        number(kf, kf_pos, positive=True)
+                    if "opacity" in kf:
+                        number(kf, "opacity", minimum=0)
+                        if kf["opacity"] > 1:
+                            fail("opacidade do quadro-chave")
+                    strings(kf, ("easing",))
             booleans(
                 clip,
                 (
@@ -331,6 +366,24 @@ def _project_from_dict(
             if overlay_type not in ("text", "filter", "transition") and missing is not None and missing not in missing_files:
                 missing_files.append(missing)
 
+            keyframes_raw = c_data.get("keyframes", [])
+            clip_kfs: list[Keyframe] = []
+            if isinstance(keyframes_raw, list):
+                for kf_d in keyframes_raw:
+                    if isinstance(kf_d, dict):
+                        clip_kfs.append(
+                            Keyframe(
+                                time_offset=float(kf_d.get("time_offset", 0.0)),
+                                x=float(kf_d.get("x", 0.5)),
+                                y=float(kf_d.get("y", 0.5)),
+                                scale_x=float(kf_d.get("scale_x", 1.0)),
+                                scale_y=float(kf_d.get("scale_y", 1.0)),
+                                rotation=float(kf_d.get("rotation", 0.0)),
+                                opacity=float(kf_d.get("opacity", 1.0)),
+                                easing=str(kf_d.get("easing", "linear")),
+                            )
+                        )
+
             clip = Clip(
                 media=media,
                 start=float(c_data.get("start", 0.0)),
@@ -347,6 +400,8 @@ def _project_from_dict(
                 scale_x=float(c_data.get("scale_x", c_data.get("scale", 1.0))),
                 scale_y=float(c_data.get("scale_y", c_data.get("scale", 1.0))),
                 rotation=float(c_data.get("rotation", 0.0)),
+                opacity=float(c_data.get("opacity", 1.0)),
+                keyframes=tuple(clip_kfs),
                 overlay_type=str(c_data.get("overlay_type", "none")),
                 text_content=str(c_data.get("text_content", "")),
                 font_family=str(c_data.get("font_family", "Sans Serif")),
