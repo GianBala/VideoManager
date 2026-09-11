@@ -209,3 +209,59 @@ def test_save_load_additional_track_and_speed(tmp_path: Path) -> None:
     assert loaded_clip.stroke_color == "#123456"
     assert loaded_clip.stroke_width == 5
     assert loaded_clip.filter_name == "pb"
+
+
+def test_save_and_load_keyframes(tmp_path: Path) -> None:
+    from videomanager.domain.keyframe import Keyframe
+
+    media_file = tmp_path / "video.mp4"
+    media_file.write_bytes(b"")
+    media = MediaRef(path=media_file, kind=MediaKind.VIDEO, duration=10.0)
+
+    kf1 = Keyframe(
+        time_offset=0.0,
+        x=0.5,
+        y=1.2,
+        scale_x=1.0,
+        scale_y=1.0,
+        rotation=0.0,
+        opacity=0.0,
+        easing="ease_out",
+    )
+    kf2 = Keyframe(
+        time_offset=1.5,
+        x=0.5,
+        y=0.5,
+        scale_x=1.5,
+        scale_y=1.5,
+        rotation=360.0,
+        opacity=0.8,
+        easing="linear",
+    )
+
+    clip = Clip(
+        media=media,
+        start=0.0,
+        duration=5.0,
+        opacity=0.8,
+        keyframes=(kf1, kf2),
+    )
+    track = Track(kind=TrackKind.VIDEO, clips=(clip,))
+    proj = Project(tracks=(track,))
+
+    proj_file = tmp_path / "keyframes.vmp"
+    save_project(proj, proj_file)
+
+    loaded, _ = load_project(proj_file)
+    loaded_clip = loaded.tracks[0].clips[0]
+
+    assert loaded_clip.opacity == 0.8
+    assert len(loaded_clip.keyframes) == 2
+    assert loaded_clip.keyframes[0].time_offset == 0.0
+    assert loaded_clip.keyframes[0].y == 1.2
+    assert loaded_clip.keyframes[0].opacity == 0.0
+    assert loaded_clip.keyframes[0].easing == "ease_out"
+    assert loaded_clip.keyframes[1].time_offset == 1.5
+    assert loaded_clip.keyframes[1].scale_x == 1.5
+    assert loaded_clip.keyframes[1].rotation == 360.0
+    assert loaded_clip.keyframes[1].opacity == 0.8

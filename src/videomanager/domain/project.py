@@ -34,6 +34,9 @@ from typing import TYPE_CHECKING
 from videomanager.domain.constants import IMAGE_CODECS
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
+from videomanager.domain.keyframe import ClipTransform
+from videomanager.domain.keyframe import Keyframe
+from videomanager.domain.keyframe import interpolate_keyframes
 
 if TYPE_CHECKING:  # pragma: no cover - só para o verificador de tipos
     from videomanager.domain.media import LocalMedia
@@ -248,6 +251,10 @@ class Clip:
     chromakey_color: str = "#00FF00"
     chromakey_similarity: float = 0.25
     chromakey_blend: float = 0.10
+    # Opacidade do bloco (1.0 = 100% opaco, 0.0 = transparente)
+    opacity: float = 1.0
+    # Sequência de quadros-chave para animação de transformações
+    keyframes: tuple[Keyframe, ...] = ()
     # Identidade estável, preservada por ``dataclasses.replace``: é por ela que
     # a seleção, o cache de miniaturas e o desfazer reconhecem o mesmo bloco
     # depois de qualquer alteração.
@@ -258,6 +265,13 @@ class Clip:
         if self.scale != 1.0 and self.scale_x == 1.0 and self.scale_y == 1.0:
             object.__setattr__(self, "scale_x", self.scale)
             object.__setattr__(self, "scale_y", self.scale)
+        object.__setattr__(self, "opacity", max(0.0, min(1.0, float(self.opacity))))
+        if self.keyframes and not isinstance(self.keyframes, tuple):
+            object.__setattr__(
+                self,
+                "keyframes",
+                tuple(sorted(self.keyframes, key=lambda k: k.time_offset)),
+            )
 
     @property
     def end(self) -> float:
@@ -324,6 +338,54 @@ class Clip:
         if abs(self.speed - 1.0) < 0.05:
             return ""
         return f"{self.speed:.1f}x".replace(".", ",")
+
+    @property
+    def has_keyframes(self) -> bool:
+        """Indica se este bloco possui animação definida por quadros-chave."""
+        return bool(self.keyframes)
+
+    @property
+    def base_transform(self) -> ClipTransform:
+        """Transformação estática base do clipe."""
+        return ClipTransform(
+            x=self.x,
+            y=self.y,
+            scale_x=getattr(self, "scale_x", self.scale),
+            scale_y=getattr(self, "scale_y", self.scale),
+            rotation=self.rotation,
+            opacity=self.opacity,
+        )
+
+    def transform_at(self, time_offset: float) -> ClipTransform:
+        """Calcula o estado da transformação no tempo relativo informado."""
+        return interpolate_keyframes(self.keyframes, time_offset, self.base_transform)
+
+    def with_keyframe(self, keyframe: Keyframe) -> Clip:
+        """Adiciona ou atualiza um keyframe mantendo a lista ordenada por time_offset."""
+        clamped_time = max(0.0, min(self.duration, keyframe.time_offset))
+        adjusted = replace(keyframe, time_offset=clamped_time)
+        filtered = [
+            k for k in self.keyframes if abs(k.time_offset - clamped_time) >= 1e-4
+        ]
+        filtered.append(adjusted)
+        filtered.sort(key=lambda k: k.time_offset)
+        return replace(self, keyframes=tuple(filtered))
+
+    def without_keyframe(self, time_offset: float, tolerance: float = 1e-4) -> Clip:
+        """Remove o keyframe presente no instante indicado, caso exista."""
+        filtered = tuple(
+            k for k in self.keyframes if abs(k.time_offset - time_offset) >= tolerance
+        )
+        return replace(self, keyframes=filtered)
+
+    def nearest_keyframe(
+        self, time_offset: float, tolerance: float = 1e-4
+    ) -> Keyframe | None:
+        """Retorna o keyframe mais próximo dentro da tolerância, ou None."""
+        for k in self.keyframes:
+            if abs(k.time_offset - time_offset) <= tolerance:
+                return k
+        return None
 
 
 @dataclass(frozen=True)
@@ -969,13 +1031,21 @@ class Project:
         ):
             return self
 
-        left = replace(clip, duration=seconds - clip.start)
+        split_offset = seconds - clip.start
+        left_kfs = tuple(k for k in clip.keyframes if k.time_offset <= split_offset)
+        right_kfs = tuple(
+            replace(k, time_offset=max(0.0, k.time_offset - split_offset))
+            for k in clip.keyframes
+            if k.time_offset >= split_offset
+        )
+        left = replace(clip, duration=split_offset, keyframes=left_kfs)
         right = replace(
             clip,
             start=seconds,
             duration=clip.end - seconds,
             in_point=clip.source_time(seconds),
             clip_id=next_clip_id(),
+            keyframes=right_kfs,
         )
         track = self.tracks[index]
         clips = tuple(
