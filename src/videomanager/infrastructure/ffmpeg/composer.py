@@ -40,6 +40,7 @@ from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
+from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.preview import fit_size
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
@@ -288,8 +289,89 @@ def _chromakey_filter(clip: Clip) -> str | None:
     return f"chromakey=color={col}:similarity={sim:.4f}:blend={blend:.4f}"
 
 
+def _clip_stream_origin(piece: _Piece) -> float:
+    """Calcula a origem temporal do clipe no fluxo (PTS=0), considerando o seek."""
+    clip = piece.clip
+    speed = max(0.001, clip.speed)
+    elapsed = max(0.0, (piece.seek - clip.in_point) / speed)
+    return piece.offset - elapsed
+
+
+def _keyframe_expr(
+    keyframes: tuple[Keyframe, ...],
+    prop_name: str,
+    clip_offset: float,
+    fallback: float,
+    time_var: str = "t",
+    is_angle: bool = False,
+) -> str:
+    """Gera uma expressão matemática do FFmpeg para interpolação contínua em função do tempo."""
+    if not keyframes:
+        return f"{fallback:.4f}"
+    sorted_kfs = sorted(keyframes, key=lambda k: k.time_offset)
+    if len(sorted_kfs) == 1:
+        v0 = getattr(sorted_kfs[0], prop_name)
+        return f"{v0:.4f}"
+    if all(
+        abs(getattr(k, prop_name) - getattr(sorted_kfs[0], prop_name)) < 1e-6
+        for k in sorted_kfs
+    ):
+        return f"{getattr(sorted_kfs[0], prop_name):.4f}"
+
+    segments: list[tuple[float, str]] = []
+    t0 = clip_offset + sorted_kfs[0].time_offset
+    v0 = getattr(sorted_kfs[0], prop_name)
+    segments.append((t0, f"{v0:.4f}"))
+
+    for i in range(len(sorted_kfs) - 1):
+        k_start = sorted_kfs[i]
+        k_end = sorted_kfs[i + 1]
+        t_start = clip_offset + k_start.time_offset
+        t_end = clip_offset + k_end.time_offset
+        dt = max(1e-5, t_end - t_start)
+        val_start = getattr(k_start, prop_name)
+        val_end = getattr(k_end, prop_name)
+
+        if is_angle and abs(val_end - val_start) < 359.9:
+            val_diff = (val_end - val_start) % 360.0
+            if val_diff > 180.0:
+                val_diff -= 360.0
+        else:
+            val_diff = val_end - val_start
+
+        if abs(val_diff) < 1e-6:
+            seg_expr = f"{val_start:.4f}"
+        else:
+            tau = f"(({time_var}-{t_start:.6f})/{dt:.6f})"
+            easing = k_start.easing
+            if easing == "ease_in":
+                factor = f"({tau}*{tau})"
+            elif easing == "ease_out":
+                factor = f"((2-{tau})*{tau})"
+            elif easing == "ease_in_out":
+                factor = f"if(lt({tau},0.5),2*{tau}*{tau},1-2*(1-{tau})*(1-{tau}))"
+            elif easing == "hold":
+                factor = "0"
+            else:
+                factor = tau
+            seg_expr = f"({val_start:.4f}+({val_diff:.4f})*{factor})"
+
+        segments.append((t_end, seg_expr))
+
+    v_last = getattr(sorted_kfs[-1], prop_name)
+    expr = f"{v_last:.4f}"
+    for t_thresh, seg_content in reversed(segments):
+        expr = f"if(lt({time_var},{t_thresh:.6f}),{seg_content},{expr})"
+
+    return expr
+
+
 def _video_chain(
-    piece: _Piece, project: Project, fps: float, interpolate: bool = False
+    piece: _Piece,
+    project: Project,
+    fps: float,
+    interpolate: bool = False,
+    canonical_size: tuple[int, int] | None = None,
 ) -> str:
     """Ajusta um bloco ao formato da tela e o coloca no instante certo."""
     clip = piece.clip
@@ -301,15 +383,58 @@ def _video_chain(
         else:
             steps.append("setpts=PTS-STARTPTS")
         steps.append(f"fps={fps:.6f}")
+        steps.append("format=rgba")
         sx = getattr(clip, "scale_x", clip.scale)
         sy = getattr(clip, "scale_y", clip.scale)
-        if clip.overlay_type == "text":
+        origin = _clip_stream_origin(piece)
+        has_anim_scale = clip.has_keyframes and (
+            any(
+                abs(k.scale_x - sx) > 0.01 or abs(k.scale_y - sy) > 0.01
+                for k in clip.keyframes
+            )
+            or any(
+                abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x) > 0.01
+                or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y) > 0.01
+                for i in range(len(clip.keyframes) - 1)
+            )
+        )
+        if has_anim_scale:
+            expr_sx = _keyframe_expr(clip.keyframes, "scale_x", origin, sx, time_var="t")
+            expr_sy = _keyframe_expr(clip.keyframes, "scale_y", origin, sy, time_var="t")
+            if clip.overlay_type == "text":
+                steps.append(
+                    f"scale=w='max(2,trunc(iw*({expr_sx})/2)*2)':h='max(2,trunc(ih*({expr_sy})/2)*2)':eval=frame"
+                )
+            else:
+                canon_w, canon_h = canonical_size or (project.width, project.height)
+                canon_base_w, canon_base_h = image_base_size(
+                    clip.media.width if clip.media else None,
+                    clip.media.height if clip.media else None,
+                    canon_w,
+                    canon_h,
+                )
+                ratio_w = project.width / max(1, canon_w)
+                ratio_h = project.height / max(1, canon_h)
+                base_w = max(2, int(round(canon_base_w * ratio_w / 2.0) * 2))
+                base_h = max(2, int(round(canon_base_h * ratio_h / 2.0) * 2))
+                steps.append(
+                    f"scale=w='max(2,trunc({base_w}*({expr_sx})/2)*2)':h='max(2,trunc({base_h}*({expr_sy})/2)*2)':eval=frame"
+                )
+        elif clip.overlay_type == "text":
             if abs(sx - 1.0) >= 0.01 or abs(sy - 1.0) >= 0.01:
                 steps.append(f"scale=w='trunc(iw*{sx:.4f}/2)*2':h='trunc(ih*{sy:.4f}/2)*2'")
         elif clip.overlay_type == "image" or clip.is_image:
-            base_w, base_h = image_base_size(
-                clip.media.width, clip.media.height, project.width, project.height
+            canon_w, canon_h = canonical_size or (project.width, project.height)
+            canon_base_w, canon_base_h = image_base_size(
+                clip.media.width if clip.media else None,
+                clip.media.height if clip.media else None,
+                canon_w,
+                canon_h,
             )
+            ratio_w = project.width / max(1, canon_w)
+            ratio_h = project.height / max(1, canon_h)
+            base_w = max(2, int(round(canon_base_w * ratio_w / 2.0) * 2))
+            base_h = max(2, int(round(canon_base_h * ratio_h / 2.0) * 2))
             target_w = max(2, int(round(base_w * sx / 2.0) * 2))
             target_h = max(2, int(round(base_h * sy / 2.0) * 2))
             steps.append(f"scale={target_w}:{target_h}")
@@ -319,9 +444,72 @@ def _video_chain(
             ck = _chromakey_filter(clip)
             if ck:
                 steps.append(ck)
-        if abs(clip.rotation) >= 0.1:
+
+        has_anim_rotation = clip.has_keyframes and (
+            any(abs(k.rotation - clip.rotation) > 0.01 for k in clip.keyframes)
+            or any(
+                abs(clip.keyframes[i].rotation - clip.keyframes[i + 1].rotation) > 0.01
+                for i in range(len(clip.keyframes) - 1)
+            )
+        )
+        max_diag: int | None = None
+        if clip.has_keyframes:
+            all_k_sx = [getattr(clip, "scale_x", clip.scale)] + [k.scale_x for k in clip.keyframes]
+            all_k_sy = [getattr(clip, "scale_y", clip.scale)] + [k.scale_y for k in clip.keyframes]
+            max_k_sx = max(all_k_sx)
+            max_k_sy = max(all_k_sy)
+            if clip.overlay_type == "text":
+                tw = project.width
+                th = project.height
+                max_diag = max(2, int(math.ceil(math.hypot(tw * max_k_sx, th * max_k_sy))) // 2 * 2)
+            else:
+                canon_w, canon_h = canonical_size or (project.width, project.height)
+                canon_base_w, canon_base_h = image_base_size(
+                    clip.media.width if clip.media else None,
+                    clip.media.height if clip.media else None,
+                    canon_w,
+                    canon_h,
+                )
+                ratio_w = project.width / max(1, canon_w)
+                ratio_h = project.height / max(1, canon_h)
+                base_w = max(2, int(round(canon_base_w * ratio_w / 2.0) * 2))
+                base_h = max(2, int(round(canon_base_h * ratio_h / 2.0) * 2))
+                max_diag = max(2, int(math.ceil(math.hypot(base_w * max_k_sx, base_h * max_k_sy))) // 2 * 2)
+
+        if has_anim_rotation:
+            expr_rot = _keyframe_expr(
+                clip.keyframes, "rotation", origin, clip.rotation, time_var="t", is_angle=True
+            )
+            if max_diag is not None:
+                steps.append(f"rotate=a='({expr_rot})*PI/180':ow='max(hypot(iw,ih),{max_diag})':oh='max(hypot(iw,ih),{max_diag})':c=black@0")
+            else:
+                steps.append(f"rotate=a='({expr_rot})*PI/180':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=black@0")
+        elif abs(clip.rotation) >= 0.1:
             rad = math.radians(clip.rotation)
-            steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=none")
+            if max_diag is not None:
+                steps.append(f"rotate={rad:.4f}:ow='max(rotw({rad:.4f}),{max_diag})':oh='max(roth({rad:.4f}),{max_diag})':c=black@0")
+            else:
+                steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=black@0")
+
+        if clip.has_keyframes:
+            has_anim_opacity = any(
+                abs(k.opacity - clip.opacity) > 0.01 for k in clip.keyframes
+            ) or any(
+                abs(clip.keyframes[i].opacity - clip.keyframes[i + 1].opacity) > 0.01
+                for i in range(len(clip.keyframes) - 1)
+            )
+            if has_anim_opacity:
+                expr_op = _keyframe_expr(
+                    clip.keyframes, "opacity", origin, clip.opacity, time_var="T"
+                )
+                steps.append("format=rgba")
+                steps.append(
+                    f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({expr_op})'"
+                )
+            elif clip.opacity < 0.99:
+                steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
+        elif clip.opacity < 0.99:
+            steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
         steps.append("format=rgba")
         return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
 
@@ -342,29 +530,100 @@ def _video_chain(
 
     sx = getattr(clip, "scale_x", clip.scale)
     sy = getattr(clip, "scale_y", clip.scale)
+    has_keyframes = clip.has_keyframes
+    origin = _clip_stream_origin(piece)
+    has_anim_scale = has_keyframes and (
+        any(
+            abs(k.scale_x - sx) > 0.01 or abs(k.scale_y - sy) > 0.01
+            for k in clip.keyframes
+        )
+        or any(
+            abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x) > 0.01
+            or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y) > 0.01
+            for i in range(len(clip.keyframes) - 1)
+        )
+    )
+    has_anim_rotation = has_keyframes and (
+        any(abs(k.rotation - clip.rotation) > 0.01 for k in clip.keyframes)
+        or any(
+            abs(clip.keyframes[i].rotation - clip.keyframes[i + 1].rotation) > 0.01
+            for i in range(len(clip.keyframes) - 1)
+        )
+    )
     has_transform = (
-        abs(clip.x - 0.5) >= 0.0001
+        has_keyframes
+        or abs(clip.x - 0.5) >= 0.0001
         or abs(clip.y - 0.5) >= 0.0001
         or abs(sx - 1.0) >= 0.001
         or abs(sy - 1.0) >= 0.001
         or abs(clip.rotation) >= 0.1
         or clip.chromakey_enabled
+        or clip.opacity < 0.99
     )
     if has_transform:
         steps.append(_rate_chain(piece, fps, interpolate))
+        steps.append("format=rgba")
         mw = clip.media.width if clip.media else None
         mh = clip.media.height if clip.media else None
         base_w, base_h = fit_size(mw, mh, project.width, project.height)
-        target_w = max(2, int(round(base_w * sx / 2.0) * 2))
-        target_h = max(2, int(round(base_h * sy / 2.0) * 2))
-        steps.append(f"scale={target_w}:{target_h}")
+        if has_anim_scale:
+            expr_sx = _keyframe_expr(clip.keyframes, "scale_x", origin, sx, time_var="t")
+            expr_sy = _keyframe_expr(clip.keyframes, "scale_y", origin, sy, time_var="t")
+            steps.append(
+                f"scale=w='max(2,trunc({base_w}*({expr_sx})/2)*2)':h='max(2,trunc({base_h}*({expr_sy})/2)*2)':eval=frame"
+            )
+        else:
+            target_w = max(2, int(round(base_w * sx / 2.0) * 2))
+            target_h = max(2, int(round(base_h * sy / 2.0) * 2))
+            steps.append(f"scale={target_w}:{target_h}")
+
         if clip.chromakey_enabled:
             ck = _chromakey_filter(clip)
             if ck:
                 steps.append(ck)
-        if abs(clip.rotation) >= 0.1:
+
+        max_diag: int | None = None
+        if clip.has_keyframes:
+            all_k_sx = [getattr(clip, "scale_x", clip.scale)] + [k.scale_x for k in clip.keyframes]
+            all_k_sy = [getattr(clip, "scale_y", clip.scale)] + [k.scale_y for k in clip.keyframes]
+            max_k_sx = max(all_k_sx)
+            max_k_sy = max(all_k_sy)
+            max_diag = max(2, int(math.ceil(math.hypot(base_w * max_k_sx, base_h * max_k_sy))) // 2 * 2)
+
+        if has_anim_rotation:
+            expr_rot = _keyframe_expr(
+                clip.keyframes, "rotation", origin, clip.rotation, time_var="t", is_angle=True
+            )
+            if max_diag is not None:
+                steps.append(f"rotate=a='({expr_rot})*PI/180':ow='max(hypot(iw,ih),{max_diag})':oh='max(hypot(iw,ih),{max_diag})':c=black@0")
+            else:
+                steps.append(f"rotate=a='({expr_rot})*PI/180':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=black@0")
+        elif abs(clip.rotation) >= 0.1:
             rad = math.radians(clip.rotation)
-            steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=none")
+            if max_diag is not None:
+                steps.append(f"rotate={rad:.4f}:ow='max(rotw({rad:.4f}),{max_diag})':oh='max(roth({rad:.4f}),{max_diag})':c=black@0")
+            else:
+                steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=black@0")
+
+        if clip.has_keyframes:
+            has_anim_opacity = any(
+                abs(k.opacity - clip.opacity) > 0.01 for k in clip.keyframes
+            ) or any(
+                abs(clip.keyframes[i].opacity - clip.keyframes[i + 1].opacity) > 0.01
+                for i in range(len(clip.keyframes) - 1)
+            )
+            if has_anim_opacity:
+                expr_op = _keyframe_expr(
+                    clip.keyframes, "opacity", origin, clip.opacity, time_var="T"
+                )
+                steps.append("format=rgba")
+                steps.append(
+                    f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({expr_op})'"
+                )
+            elif clip.opacity < 0.99:
+                steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
+        elif clip.opacity < 0.99:
+            steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
         steps.append("format=rgba")
         steps.append("setsar=1")
         return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
@@ -733,8 +992,9 @@ def _transition_video_chain(
         steps.append(chromakey)
     if abs(clip.rotation) >= 0.1:
         radians = math.radians(clip.rotation)
+        steps.append("format=rgba")
         steps.append(
-            f"rotate={radians:.4f}:ow='rotw({radians:.4f})':oh='roth({radians:.4f})':c=none"
+            f"rotate={radians:.4f}:ow='rotw({radians:.4f})':oh='roth({radians:.4f})':c=black@0"
         )
     steps.append("format=rgba")
     raw = f"{label[:-1]}_raw]"
@@ -796,6 +1056,7 @@ def _compose_video_piece(
     order: int | str,
     excluded_ranges: tuple[tuple[float, float], ...] = (),
     hold_last: bool = False,
+    canonical_size: tuple[int, int] | None = None,
 ) -> str:
     """Aplica um bloco visual e devolve o novo rótulo da composição."""
     start, end = piece.offset, piece.offset + piece.duration
@@ -827,18 +1088,25 @@ def _compose_video_piece(
         filters.append(f"{current}{expression}{label}")
         return label
 
-    filters.append(_video_chain(piece, project, fps, interpolate))
+    filters.append(_video_chain(piece, project, fps, interpolate, canonical_size=canonical_size))
     label = f"[o{order}]"
     is_overlay_item = piece.clip.overlay_type in ("image", "text") or piece.clip.is_image
     has_transform = (
-        abs(piece.clip.x - 0.5) >= 0.0001
+        piece.clip.has_keyframes
+        or abs(piece.clip.x - 0.5) >= 0.0001
         or abs(piece.clip.y - 0.5) >= 0.0001
         or abs(getattr(piece.clip, "scale_x", piece.clip.scale) - 1.0) >= 0.001
         or abs(getattr(piece.clip, "scale_y", piece.clip.scale) - 1.0) >= 0.001
         or abs(piece.clip.rotation) >= 0.1
         or piece.clip.chromakey_enabled
+        or piece.clip.opacity < 0.99
     )
-    if is_overlay_item or has_transform:
+    if piece.clip.has_keyframes:
+        origin = _clip_stream_origin(piece)
+        expr_x = _keyframe_expr(piece.clip.keyframes, "x", origin, piece.clip.x)
+        expr_y = _keyframe_expr(piece.clip.keyframes, "y", origin, piece.clip.y)
+        coordinates = f"x='({expr_x})*W-w/2':y='({expr_y})*H-h/2'"
+    elif is_overlay_item or has_transform:
         coordinates = (
             f"x='({piece.clip.x:.4f}*W-w/2)':y='({piece.clip.y:.4f}*H-h/2)'"
         )
@@ -861,6 +1129,7 @@ def _compose_video_transition(
     fps: float,
     number: int,
     interpolate: bool,
+    canonical_size: tuple[int, int] | None = None,
 ) -> str:
     context = render.context
     left_label = f"[tr{number}a]"
@@ -877,6 +1146,7 @@ def _compose_video_transition(
             interpolate,
             f"tr{number}al{item}",
             hold_last=True,
+            canonical_size=canonical_size,
         )
     for item, piece in enumerate(render.right_additionals):
         right_label = _compose_video_piece(
@@ -888,6 +1158,7 @@ def _compose_video_transition(
             interpolate,
             f"tr{number}ar{item}",
             hold_last=True,
+            canonical_size=canonical_size,
         )
     raw_label = f"[trx{number}]"
     visible_label = f"[trv{number}]"
@@ -941,6 +1212,7 @@ def build_graph(
     want_audio: bool = True,
     interpolate: bool = False,
     text_assets: dict[int, Path] | None = None,
+    canonical_size: tuple[int, int] | None = None,
 ) -> Graph:
     """Traduz o projeto num grafo de filtros do ffmpeg.
 
@@ -1084,6 +1356,7 @@ def build_graph(
                 if interval not in ranges:
                     ranges.append(interval)
         order = 0
+        canon_size = canonical_size or (project.width, project.height)
         for track_index in visual_layers:
             for piece in (part for part in video_parts if part.track_index == track_index):
                 current = _compose_video_piece(
@@ -1095,6 +1368,7 @@ def build_graph(
                     interpolate,
                     order,
                     tuple(additional_exclusions.get(piece.clip.clip_id, ())),
+                    canonical_size=canon_size,
                 )
                 order += 1
 
@@ -1116,6 +1390,7 @@ def build_graph(
                     fps,
                     number,
                     interpolate,
+                    canonical_size=canon_size,
                 )
         video_label = current
 
@@ -1397,6 +1672,7 @@ def frame_command(
         span=1.0 / max(1.0, project.fps),
         want_audio=False,
         text_assets=text_assets,
+        canonical_size=(project.width, project.height),
     )
     args = [
         tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error",
@@ -1434,6 +1710,7 @@ def playback_command(
         fps=float(fps),
         want_audio=False,
         text_assets=text_assets,
+        canonical_size=(project.width, project.height),
     )
     args = [
         tools.ffmpeg_str,

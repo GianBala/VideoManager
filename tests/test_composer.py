@@ -899,9 +899,9 @@ class TestVelocidadeEFiltros:
         filters_str = ";".join(graph.filters)
         # Deve ter scale para 960x540 (1920*0.5 x 1080*0.5)
         assert "scale=960:540" in filters_str
-        # Deve ter rotate com c=none e format=rgba
+        # Deve ter rotate com c=black@0 e format=rgba
         assert "rotate=0.5236" in filters_str
-        assert "c=none" in filters_str
+        assert "c=black@0" in filters_str
         assert "format=rgba" in filters_str
         # Deve ter coordenadas de overlay calculadas
         assert "overlay=x='(0.2500*W-w/2)':y='(0.3000*H-h/2)'" in filters_str
@@ -985,8 +985,113 @@ class TestVelocidadeEFiltros:
         comp = Composition(p)
         assert comp.output_duration == 5.0
 
+    def test_keyframe_overlay_expression(self) -> None:
+        from videomanager.domain.keyframe import Keyframe
 
+        kf1 = Keyframe(time_offset=0.0, x=0.5, y=1.2, opacity=0.0, easing="ease_out")
+        kf2 = Keyframe(time_offset=1.0, x=0.5, y=0.5, opacity=1.0, easing="linear")
+        c_anim = clip(FOTO, start=0.0, duration=5.0, keyframes=(kf1, kf2))
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(clip(VIDEO, start=0.0, duration=5.0),)),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_anim,)),
+            )
+        )
+        graph = build_graph(p)
+        filters_str = ";".join(graph.filters)
+        assert "overlay=" in filters_str
+        assert "if(lt(t," in filters_str
+        assert "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a=" in filters_str
+        assert "if(lt(T," in filters_str
 
+        # Opacidade estática sem animação deve usar colorchannelmixer
+        c_static = clip(FOTO, start=0.0, duration=5.0, opacity=0.5)
+        p_static = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(clip(VIDEO, start=0.0, duration=5.0),)),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_static,)),
+            )
+        )
+        graph_static = build_graph(p_static)
+        filters_static = ";".join(graph_static.filters)
+        assert "colorchannelmixer=aa=0.5000" in filters_static
+
+    def test_imagem_sobreposicao_escala_proporcional_na_previa(self) -> None:
+        foto_pequena = MediaRef(path=Path("/m/pequena.png"), kind=MediaKind.IMAGE, width=400, height=300)
+        c_img = clip(foto_pequena, start=0.0, duration=5.0, overlay_type="image")
+        proj = Project(
+            width=1920,
+            height=1080,
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(clip(VIDEO, start=0.0, duration=5.0),)),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_img,)),
+            ),
+        )
+        graph_export = build_graph(proj)
+        export_filters = ";".join(graph_export.filters)
+        assert "scale=400:300" in export_filters
+
+        cmd_preview = frame_command(proj, 1.0, (960, 540), TOOLS)
+        cmd_str = " ".join(cmd_preview)
+        assert "scale=200:150" in cmd_str
+
+    def test_keyframe_rotation_and_scale_expressions(self) -> None:
+        from videomanager.domain.keyframe import Keyframe
+
+        kf1 = Keyframe(time_offset=0.0, scale_x=0.2, scale_y=0.2, rotation=0.0, opacity=0.0)
+        kf2 = Keyframe(time_offset=1.0, scale_x=1.0, scale_y=1.0, rotation=360.0, opacity=1.0)
+        c_anim = clip(FOTO, start=0.0, duration=5.0, keyframes=(kf1, kf2))
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(clip(VIDEO, start=0.0, duration=5.0),)),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_anim,)),
+            )
+        )
+        graph = build_graph(p)
+        filters_str = ";".join(graph.filters)
+        assert "scale=w='max(2,trunc(" in filters_str
+        assert "eval=frame" in filters_str
+        assert "rotate=a='(" in filters_str
+        assert "hypot(iw,ih)" in filters_str
+        assert "*PI/180" in filters_str
+
+    def test_playback_command_keyframe_stream_origin_on_seek(self) -> None:
+        from videomanager.domain.keyframe import Keyframe
+
+        kf1 = Keyframe(time_offset=0.0, x=0.2, y=0.2, rotation=0.0)
+        kf2 = Keyframe(time_offset=1.0, x=0.8, y=0.8, rotation=180.0)
+        c_anim = clip(FOTO, start=0.0, duration=5.0, keyframes=(kf1, kf2))
+        p = Project(
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(clip(VIDEO, start=0.0, duration=5.0),)),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_anim,)),
+            )
+        )
+        # Starting playback at at=2.0 (after clip start 0.0)
+        cmd = playback_command(p, at=2.0, size=(640, 360), tools=TOOLS, fps=30)
+        cmd_str = " ".join(cmd)
+        # Stream origin is at 0.0 - 2.0 = -2.0, so time expressions reference -2.000000
+        assert "-2.000000" in cmd_str
+
+    def test_keyframe_scale_and_rotate_ow_max_diag(self) -> None:
+        from videomanager.domain.keyframe import Keyframe
+
+        kf1 = Keyframe(time_offset=0.0, scale_x=0.5, scale_y=0.5, rotation=0.0)
+        kf2 = Keyframe(time_offset=1.0, scale_x=1.5, scale_y=1.5, rotation=180.0)
+        c_anim = clip(FOTO, start=0.0, duration=5.0, keyframes=(kf1, kf2))
+        p = Project(
+            width=1920,
+            height=1080,
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(clip(VIDEO, start=0.0, duration=5.0),)),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_anim,)),
+            ),
+        )
+        graph = build_graph(p)
+        filters_str = ";".join(graph.filters)
+        # Bounding box of rotate filter must use max(hypot(iw,ih), <max_diag>)
+        # so scaling up during rotation does not crop the image.
+        assert "max(hypot(iw,ih)," in filters_str
 
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
