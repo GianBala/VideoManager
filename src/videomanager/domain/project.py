@@ -1128,7 +1128,7 @@ def auto_canvas(project: Project) -> Project:
             for track in project.additional_tracks
             if track.visible
             for clip in track.clips
-            if clip.has_image and clip.media
+            if clip.has_image and clip.media and clip.media.kind is MediaKind.VIDEO
         ]
     videos = [c for c in visible if c.media.kind is MediaKind.VIDEO] or visible
     sized = [c.media for c in videos if c.media.width and c.media.height]
