@@ -409,6 +409,18 @@ EDIT_GAIN_DETACHED = (
 
 # tela do projeto
 EDIT_CANVAS = "Tela:"
+EDIT_CANVAS_ASPECT = "Proporção:"
+EDIT_CANVAS_ASPECT_AUTO = "Automática"
+EDIT_CANVAS_ASPECT_TIP = (
+    "Fixa a proporção da tela de edição e da prévia (ex.: 16:9, 4:3, 9:16, 1:1, 21:9).\n"
+    "Os blocos são encaixados proporcionalmente sem deformação."
+)
+EDIT_CANVAS_SIZE_FORMATTED = "{aspect} · {width} × {height}"
+EXPORT_ASPECT = "Proporção:"
+EXPORT_ASPECT_AUTO = "Original do projeto"
+EXPORT_ASPECT_TIP = (
+    "Proporção de aspecto do vídeo final exportado (16:9 widescreen, 4:3 tradicional, 9:16 vertical, etc.)."
+)
 EDIT_CANVAS_RATE = "Taxa:"
 EDIT_CANVAS_AUTO = "Automática · segue o material"
 EDIT_CANVAS_RATE_AUTO = "Automática"
