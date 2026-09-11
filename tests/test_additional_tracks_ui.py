@@ -11,13 +11,18 @@ import pytest
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QMouseEvent, QPixmap
 from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QMessageBox
 
 from videomanager.application.capabilities import FFmpegTools
-from videomanager.domain.project import Clip
-from videomanager.domain.project import MediaKind
-from videomanager.domain.project import MediaRef
+from videomanager.domain.project import (
+    Clip,
+    MediaKind,
+    MediaRef,
+    Project,
+    Track,
+    TrackKind,
+)
 from videomanager.infrastructure.storage.settings import Settings
 from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
@@ -1842,14 +1847,452 @@ def test_calibri_and_rapier_zero_fonts_availability(qapp: QApplication) -> None:
     assert img_calibri.is_file() and img_calibri.stat().st_size > 0
 
 
+def test_preview_video_drag_immediate_feedback(qapp: QApplication) -> None:
+    preview = _Preview()
+    preview.resize(800, 600)
+    canvas_pixmap = QPixmap(800, 600)
+    canvas_pixmap.fill(Qt.GlobalColor.blue)
+    preview.set_frame_pixmap(canvas_pixmap)
+
+    ref = MediaRef(
+        path=Path("/tmp/sample_video.mp4"),
+        kind=MediaKind.VIDEO,
+        duration=10.0,
+        width=1920,
+        height=1080,
+    )
+    clip = Clip(
+        media=ref,
+        start=0.0,
+        duration=10.0,
+        x=0.5,
+        y=0.5,
+        scale=1.0,
+        rotation=0.0,
+    )
+    preview.set_active_clip(clip, 1920, 1080)
+    preview.set_position(2.0)
+
+    geom = preview._clip_geometry(clip)
+    assert geom is not None
+    cx, cy, w, h = geom
+
+    # 1. Pressiona o botão do mouse sobre o clipe de vídeo para iniciar arraste
+    press_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(cx, cy),
+        QPointF(cx, cy),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mousePressEvent(press_event)
+
+    assert preview._drag_mode == "move"
+    assert preview._drag_video_pixmap is not None
+    assert not preview._drag_video_pixmap.isNull()
+    assert preview._drag_base_pixmap is not None
+    assert not preview._drag_base_pixmap.isNull()
+
+    # 2. Move o mouse arrastando o clipe
+    move_event = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(cx + 60, cy + 40),
+        QPointF(cx + 60, cy + 40),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_event)
+    assert preview._active_clip is not None
+    assert abs(preview._active_clip.x - 0.5) > 0.01
+
+    # Renderiza para garantir que paintEvent executa desenhando o clipe sem exceções
+    preview.repaint()
+
+    # 3. Solta o botão do mouse
+    release_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonRelease,
+        QPointF(cx + 60, cy + 40),
+        QPointF(cx + 60, cy + 40),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseReleaseEvent(release_event)
+
+    assert preview._drag_mode is None
+    # Permanece com os pixmaps de arraste até o novo frame do compositor chegar
+    assert preview._drag_video_pixmap is not None
+    assert preview._drag_base_pixmap is not None
+
+    # 4. Chegada do novo quadro renderizado
+    new_frame_pixmap = QPixmap(800, 600)
+    new_frame_pixmap.fill(Qt.GlobalColor.darkGreen)
+    preview.set_frame_pixmap(new_frame_pixmap)
+
+    # Agora os buffers de arraste são limpos
+    assert preview._drag_video_pixmap is None
+    assert preview._drag_base_pixmap is None
+
+
+def test_preview_video_drag_does_not_drag_or_teleport_overlays(
+    qapp: QApplication, dummy_tools: FFmpegTools, tmp_path: Path
+) -> None:
+    """Garante que arrastar um vídeo no preview não arrasta nem teleporta sobreposições."""
+    img_path = tmp_path / "overlay.png"
+    pix = QPixmap(100, 100)
+    pix.fill(Qt.GlobalColor.cyan)
+    pix.save(str(img_path))
+
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(),
+    )
+    panel.resize(1280, 720)
+    panel.show()
+
+    # Cria projeto com trilha adicional (imagem) e trilha de vídeo
+    media_vid = MediaRef(Path("/dummy/video.mp4"), kind=MediaKind.VIDEO, duration=10.0, width=1920, height=1080)
+    media_img = MediaRef(img_path, kind=MediaKind.IMAGE, duration=5.0, width=100, height=100)
+    clip_vid = Clip(media=media_vid, start=0.0, duration=10.0, clip_id=1, x=0.5, y=0.5)
+    clip_img = Clip(media=media_img, start=0.0, duration=5.0, clip_id=2, x=0.2, y=0.2, overlay_type="image")
+
+    track_add = Track(TrackKind.ADDITIONAL, clips=(clip_img,), name="Adicionais")
+    track_vid = Track(TrackKind.VIDEO, clips=(clip_vid,), name="Vídeo")
+    project = Project(tracks=(track_add, track_vid), width=1920, height=1080, fps=30)
+    panel._apply(project)
+    panel._seek_to(1.0)
+
+    # Verifica que _update_preview_overlay_clips identificou a imagem da trilha de adicionais
+    assert len(panel._preview._overlay_clips) == 1
+    assert panel._preview._overlay_clips[0].clip_id == 2
+
+    # Seleciona o clipe de vídeo para arrastar
+    panel._timeline.select(1)
+    assert panel._preview._active_clip is not None
+    assert panel._preview._active_clip.clip_id == 1
+
+    # Simula quadro renderizado no preview
+    frame_pix = QPixmap(800, 600)
+    frame_pix.fill(Qt.GlobalColor.blue)
+    panel._preview.set_frame_pixmap(frame_pix)
+
+    geom_vid = panel._preview._clip_geometry(clip_vid)
+    assert geom_vid is not None
+    cx_vid, cy_vid, _, _ = geom_vid
+
+    # Inicia arraste do vídeo
+    press_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(cx_vid, cy_vid),
+        QPointF(cx_vid, cy_vid),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    panel._preview.mousePressEvent(press_event)
+    assert panel._preview._drag_mode == "move"
+    assert panel._preview._drag_clip_id == 1
+
+    # Move o vídeo
+    move_event = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(cx_vid + 50, cy_vid + 30),
+        QPointF(cx_vid + 50, cy_vid + 30),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    panel._preview.mouseMoveEvent(move_event)
+
+    # Durante o arraste, o clipe de overlay permanece com suas coordenadas intactas
+    assert len(panel._preview._overlay_clips) == 1
+    assert panel._preview._overlay_clips[0].clip_id == 2
+    assert panel._preview._overlay_clips[0].x == 0.2
+    assert panel._preview._overlay_clips[0].y == 0.2
+
+    # Renderiza para garantir integridade do paintEvent
+    panel._preview.repaint()
+
+    # Solta o mouse
+    release_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonRelease,
+        QPointF(cx_vid + 50, cy_vid + 30),
+        QPointF(cx_vid + 50, cy_vid + 30),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    panel._preview.mouseReleaseEvent(release_event)
+    assert panel._preview._drag_mode is None
+
+    # O clipe de imagem continua em x=0.2, y=0.2 sem ter sido arrastado ou teleportado
+    found_img = panel._project.find(2)
+    assert found_img is not None
+    assert found_img[1].x == 0.2
+    assert found_img[1].y == 0.2
+
+    # Clicar sobre o clipe de sobreposição deve selecioná-lo na timeline
+    geom_img = panel._preview._clip_geometry(clip_img)
+    assert geom_img is not None
+    cx_img, cy_img, _, _ = geom_img
+    click_img_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(cx_img, cy_img),
+        QPointF(cx_img, cy_img),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    panel._preview.mousePressEvent(click_img_event)
+    assert panel._timeline.selected == 2
 
 
 
+def test_edit_panel_save_as_button(dummy_tools: FFmpegTools) -> None:
+    from videomanager.infrastructure.storage.settings import Settings
+    from videomanager.bootstrap import build_editor_service, build_processing_service, build_desktop_runtime
+    from videomanager.presentation.qt.panels.edit_panel import EditPanel
+    from videomanager.presentation.qt import strings
+
+    panel = EditPanel(
+        settings=Settings(),
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(),
+    )
+    assert hasattr(panel, "_save_as_btn")
+    assert panel._save_as_btn.text() == strings.EDIT_SAVE_AS_BUTTON
+
+    # Testa acionamento do botão chamando save_project_as
+    saved_as_called = False
+
+    def mock_save_as() -> bool:
+        nonlocal saved_as_called
+        saved_as_called = True
+        return True
+
+    panel.save_project_as = mock_save_as
+    panel._save_as_btn.click()
+    assert saved_as_called
 
 
+def test_preview_drag_resize_animated_clip() -> None:
+    from dataclasses import replace
+    from videomanager.domain.keyframe import create_preset_keyframes
+    from videomanager.domain.project import Clip, MediaKind, MediaRef
+    from videomanager.presentation.qt.panels.edit_widgets import _Preview
+
+    media = MediaRef(
+        path=Path("/tmp/fake_anim.webp"),
+        kind=MediaKind.IMAGE,
+        duration=None,
+        width=800,
+        height=600,
+        fps=25.0,
+        has_audio=False,
+        channels=None,
+    )
+    clip = Clip(
+        clip_id=10,
+        start=0.0,
+        duration=5.0,
+        media=media,
+        x=0.5,
+        y=0.5,
+        scale=1.0,
+        scale_x=1.0,
+        scale_y=1.0,
+        rotation=0.0,
+        opacity=1.0,
+        keyframes=(),
+    )
+    # Adiciona animação preset slide_up
+    kfs = create_preset_keyframes("slide_up", clip.base_transform, duration=0.6)
+    clip = replace(clip, keyframes=kfs)
+
+    preview = _Preview()
+    preview.resize(960, 540)
+    preview.set_active_clip(clip, 1920, 1080)
+    preview.set_position(0.3)
+
+    geom_before = preview._clip_geometry(clip)
+    assert geom_before is not None
+    cx, cy, w, h = geom_before
+
+    br_pos = QPointF(cx + w / 2, cy + h / 2)
+    press_ev = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        br_pos,
+        br_pos,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mousePressEvent(press_ev)
+    assert preview._drag_mode == "scale_br"
+
+    # Arrasta para ampliar
+    move_pos = QPointF(cx + w / 2 + 80, cy + h / 2 + 80)
+    move_ev = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        move_pos,
+        move_pos,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_ev)
+
+    # Verifica que a geometria ativa e os keyframes aumentaram juntos
+    geom_after = preview._clip_geometry(preview._active_clip)
+    assert geom_after is not None
+    assert geom_after[2] > w
+    assert geom_after[3] > h
+    assert len(preview._active_clip.keyframes) == 2
+    assert preview._active_clip.keyframes[0].scale_x == preview._active_clip.keyframes[1].scale_x
+    assert preview._active_clip.keyframes[0].scale_x > 1.0
 
 
+def test_clip_properties_widget_animated_clip_sync() -> None:
+    from dataclasses import replace
+    from videomanager.domain.keyframe import create_preset_keyframes
+    from videomanager.domain.project import Clip, MediaKind, MediaRef
+    from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget
 
+    media = MediaRef(
+        path=Path("/tmp/fake_prop_sync.webp"),
+        kind=MediaKind.IMAGE,
+        duration=None,
+        width=1200,
+        height=800,
+        fps=25.0,
+        has_audio=False,
+        channels=None,
+    )
+    clip = Clip(
+        clip_id=11,
+        start=0.0,
+        duration=5.0,
+        media=media,
+        x=0.5,
+        y=0.5,
+        scale=1.0,
+        scale_x=1.0,
+        scale_y=1.0,
+        rotation=0.0,
+        opacity=1.0,
+        keyframes=(),
+    )
+    kfs = create_preset_keyframes("slide_up", clip.base_transform, duration=0.6)
+    clip = replace(clip, keyframes=kfs)
+
+    widget = _ClipPropertiesWidget()
+    widget.load_clip(clip, 1920, 1080)
+    assert widget._spin_w.value() == 1200
+    assert widget._spin_h.value() == 800
+
+    # Move o cursor para o meio da animação
+    widget.set_playhead_position(0.3)
+    assert widget._spin_w.value() == 1200
+    assert widget._spin_h.value() == 800
+
+    # Altera a largura para 600
+    changes_emitted: list[dict] = []
+    widget.property_changed.connect(lambda cid, ch: changes_emitted.append(ch))
+    widget._spin_w.setValue(600)
+
+    assert changes_emitted
+    last_ch = changes_emitted[-1]
+    assert "keyframes" in last_ch
+    new_kfs = last_ch["keyframes"]
+    # A escala uniforme deve ter sido aplicada a todos os keyframes
+    assert abs(new_kfs[0].scale_x - 0.5) < 0.02
+    assert abs(new_kfs[1].scale_x - 0.5) < 0.02
+
+
+def test_preview_scale_handle_with_rotated_keyframe(qapp: QApplication) -> None:
+    from videomanager.domain.keyframe import Keyframe
+
+    # Clip with rotation 0 at base, but keyframe has rotation 180 (like in projeto.vmp)
+    kf1 = Keyframe(time_offset=0.0, x=0.5, y=0.5, scale_x=0.7, scale_y=0.7, rotation=0.0)
+    kf2 = Keyframe(time_offset=1.0, x=0.5, y=0.5, scale_x=0.7, scale_y=0.7, rotation=180.0)
+    kf3 = Keyframe(time_offset=2.0, x=0.5, y=0.5, scale_x=0.9, scale_y=0.9, rotation=180.0)
+
+    clip = Clip(
+        clip_id=10,
+        start=0.0,
+        duration=5.0,
+        x=0.5,
+        y=0.5,
+        scale_x=0.7,
+        scale_y=0.7,
+        rotation=0.0,
+        overlay_type="image",
+        media=MediaRef(
+            path=Path("/tmp/fake.png"),
+            kind=MediaKind.IMAGE,
+            duration=None,
+            width=800,
+            height=600,
+            fps=30.0,
+            has_audio=False,
+        ),
+        keyframes=(kf1, kf2, kf3),
+    )
+
+    preview = _Preview()
+    preview.resize(960, 540)
+    preview.set_active_clip(clip, 1920, 1080)
+    # Position at 1.5s where rotation is 180 degrees
+    preview.set_position(1.5)
+
+    geom = preview._clip_geometry(clip)
+    assert geom is not None
+    cx, cy, w, h = geom
+
+    # At 180 degrees rotation, the local BR corner (w/2, h/2) is visually at (cx - w/2, cy - h/2)
+    # in screen coordinates
+    rad = math.radians(180.0)
+    screen_br_x = cx + (w / 2.0) * math.cos(rad) - (h / 2.0) * math.sin(rad)
+    screen_br_y = cy + (w / 2.0) * math.sin(rad) + (h / 2.0) * math.cos(rad)
+
+    br_pos = QPointF(screen_br_x, screen_br_y)
+    press_ev = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        br_pos,
+        br_pos,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mousePressEvent(press_ev)
+    assert preview._drag_mode == "scale_br"
+
+    # Opposite corner should be around (cx + w/2, cy + h/2), distance should be hypot(w, h), NOT ~0
+    opp_dist = math.hypot(preview._drag_opp_x - screen_br_x, preview._drag_opp_y - screen_br_y)
+    assert opp_dist > math.hypot(w, h) * 0.9
+
+    # Drag outward to expand
+    move_pos = QPointF(screen_br_x - 50, screen_br_y - 50)
+    move_ev = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        move_pos,
+        move_pos,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_ev)
+
+    # Scale must have increased, not collapsed
+    assert preview._active_clip.keyframes[0].scale_x > 0.7
+    assert preview._active_clip.keyframes[1].scale_x > 0.7
 
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
