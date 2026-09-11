@@ -605,6 +605,25 @@ EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP = (
     "Desmarcado, esses itens permanecem por cima do efeito."
 )
 
+# Quadros-chave (Keyframes) e Animações
+EDIT_KEYFRAME_TITLE = "Animação / Quadros-chave"
+EDIT_KEYFRAME_PREV = "Quadro-chave anterior"
+EDIT_KEYFRAME_NEXT = "Próximo quadro-chave"
+EDIT_KEYFRAME_ADD = "Adicionar quadro-chave no instante atual"
+EDIT_KEYFRAME_REMOVE = "Remover quadro-chave deste instante"
+EDIT_KEYFRAME_TOGGLE = "Alternar quadro-chave no cursor"
+EDIT_KEYFRAME_EASING = "Interpolação:"
+EDIT_OPACITY = "Opacidade:"
+EDIT_ANIMATION_PRESETS = "Animações Rápidas"
+EDIT_PRESET_SLIDE_UP = "Deslizar de Baixo (Slide Up)"
+EDIT_PRESET_SLIDE_DOWN = "Deslizar de Cima (Slide Down)"
+EDIT_PRESET_SLIDE_LEFT = "Deslizar da Direita (Slide Left)"
+EDIT_PRESET_SLIDE_RIGHT = "Deslizar da Esquerda (Slide Right)"
+EDIT_PRESET_FADE_IN = "Surgir com Fade (Fade In)"
+EDIT_PRESET_ZOOM_IN = "Surgir com Zoom (Pop In)"
+EDIT_PRESET_SPIN_IN = "Girar e Entrar (Spin In)"
+EDIT_PRESET_CLEAR = "Remover Animações"
+
 JOB_STATUS_LABELS = {
     "pending": "Na fila", "running": "Baixando", "processing": "Processando",
     "done": "Concluído", "failed": "Falhou", "cancelled": "Cancelado",
