@@ -39,6 +39,7 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QPixmap,
+    QPolygonF,
     QRadialGradient,
     QWheelEvent,
 )
@@ -733,6 +734,37 @@ class Timeline(QWidget):
                 painter.drawRoundedRect(
                     QRectF(x, rect.top(), _HANDLE_WIDTH, rect.height()), 2, 2
                 )
+        self._paint_keyframe_markers(painter, clip, rect)
+
+    def _paint_keyframe_markers(
+        self, painter: QPainter, clip: Clip, rect: QRectF
+    ) -> None:
+        """Desenha pequenos diamantes na timeline para cada quadro-chave do clipe."""
+        if not clip.has_keyframes:
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        cy = rect.bottom() - 10.0
+        for kf in clip.keyframes:
+            kf_time = clip.start + kf.time_offset
+            cx = self._x_of(kf_time)
+            if cx < rect.left() - 4.0 or cx > rect.right() + 4.0:
+                continue
+            is_active = abs(self._position - kf_time) < 0.05
+            poly = QPolygonF([
+                QPointF(cx, cy - 4.5),
+                QPointF(cx + 4.5, cy),
+                QPointF(cx, cy + 4.5),
+                QPointF(cx - 4.5, cy),
+            ])
+            if is_active:
+                painter.setBrush(QColor("#38bdf8"))
+                painter.setPen(QPen(QColor("#ffffff"), 1.2))
+            else:
+                painter.setBrush(QColor("#fbbf24"))
+                painter.setPen(QPen(QColor("#18181b"), 1.0))
+            painter.drawPolygon(poly)
+        painter.restore()
 
     def _source_rect(self, clip: Clip, rect: QRectF, begin: float, end: float) -> QRectF:
         """Onde um trecho de origem cai dentro do bloco, em pixels."""
@@ -1078,6 +1110,8 @@ class Timeline(QWidget):
             for clip in track.clips:
                 if clip.clip_id != moving.clip_id:
                     targets += [clip.start, clip.end]
+                for kf in clip.keyframes:
+                    targets.append(clip.start + kf.time_offset)
         return targets
 
     def _snap(self, moment: float, moving: Clip) -> float:

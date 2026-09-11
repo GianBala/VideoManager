@@ -163,8 +163,11 @@ _TIMELINE_MIN_HEIGHT = 150
 # Telas oferecidas além das que o próprio material traz. São os formatos que os
 # aparelhos e os sites esperam — não uma tabela de tudo que existe.
 _CANVAS_PRESETS = (
-    (3840, 2160), (2560, 1440), (1920, 1080), (1280, 720), (854, 480),
-    (1080, 1920), (720, 1280), (1080, 1080),
+    (3840, 2160), (2560, 1440), (1920, 1080), (1280, 720), (854, 480),  # 16:9
+    (1080, 1920), (720, 1280),  # 9:16
+    (1440, 1080), (960, 720), (640, 480),  # 4:3
+    (1080, 1080), (720, 720),  # 1:1
+    (2560, 1080),  # 21:9
 )
 _RATE_PRESETS = (24.0, 25.0, 30.0, 50.0, 60.0)
 
@@ -632,6 +635,7 @@ class EditPanel(QWidget):
         self._properties_widget = _ClipPropertiesWidget()
         self._properties_widget.property_changed.connect(self._on_properties_changed)
         self._properties_widget.close_requested.connect(self._close_properties_tab)
+        self._properties_widget.seek_requested.connect(self._seek_to)
         layout.addWidget(self._extras_tabs, 1)
 
         return box
@@ -1327,6 +1331,7 @@ class EditPanel(QWidget):
     def _sync_extras_controls(self, clip: Clip | None) -> None:
         if hasattr(self, "_properties_widget") and self._extras_tabs.indexOf(self._properties_widget) >= 0:
             if clip is not None:
+                self._properties_widget.set_playhead_position(self._position)
                 self._properties_widget.load_clip(clip, self._project.width, self._project.height)
             if self._extras_tabs.currentWidget() is self._properties_widget:
                 return
@@ -1420,6 +1425,7 @@ class EditPanel(QWidget):
         self._preview.overlay_transformed.connect(self._on_overlay_transformed)
         self._preview.overlay_transform_finished.connect(self._on_overlay_transform_finished)
         self._preview.clicked_outside.connect(lambda: self._timeline.select(-1))
+        self._preview.clip_selected.connect(lambda cid: self._timeline.select(cid))
         frame_layout.addWidget(self._preview)
 
         column.addWidget(self._preview_frame, 1)
@@ -2266,6 +2272,7 @@ class EditPanel(QWidget):
         if self._extras_tabs.indexOf(self._properties_widget) < 0:
             self._extras_tabs.addTab(self._properties_widget, strings.EDIT_TAB_PROPERTIES)
             self._update_extras_tab_close_buttons()
+        self._properties_widget.set_playhead_position(self._position)
         self._properties_widget.load_clip(clip, self._project.width, self._project.height)
         self._extras_tabs.setCurrentWidget(self._properties_widget)
         sizes = self._top_splitter.sizes()
@@ -2314,6 +2321,7 @@ class EditPanel(QWidget):
             updated_clip, self._project.width, self._project.height, visible=track_visible
         )
         self._preview.update()
+        self._update_preview_overlay_clips()
 
         # Atualiza a renderização de vídeo no preview em tempo real
         self._request_frame(force=True)
@@ -2386,11 +2394,13 @@ class EditPanel(QWidget):
         self._project = self._project.moved(clip_id, track_index, start)
         self._timeline.set_project(self._project)
         self._update_project_label()
+        self._update_preview_overlay_clips()
 
     def _on_clip_resized(self, clip_id: int, edge: str, seconds: float) -> None:
         self._project = self._project.resized(clip_id, edge, seconds)
         self._timeline.set_project(self._project)
         self._update_project_label()
+        self._update_preview_overlay_clips()
 
     def _on_edit_finished(self) -> None:
         self._after_edit()
@@ -2636,9 +2646,24 @@ class EditPanel(QWidget):
         active = self._preview._active_clip
         sx = getattr(active, "scale_x", scale) if active else scale
         sy = getattr(active, "scale_y", scale) if active else scale
-        self._project = self._project.with_updated_clip(
-            clip_id, x=x, y=y, scale=scale, scale_x=sx, scale_y=sy, rotation=rotation
-        )
+        if active is not None and active.has_keyframes:
+            self._project = self._project.with_updated_clip(
+                clip_id,
+                keyframes=active.keyframes,
+                x=x,
+                y=y,
+                scale=scale,
+                scale_x=sx,
+                scale_y=sy,
+                rotation=rotation,
+            )
+            self._preview.set_active_clip(
+                active, self._project.width, self._project.height
+            )
+        else:
+            self._project = self._project.with_updated_clip(
+                clip_id, x=x, y=y, scale=scale, scale_x=sx, scale_y=sy, rotation=rotation
+            )
         if (
             hasattr(self, "_properties_widget")
             and self._extras_tabs.indexOf(self._properties_widget) >= 0
@@ -2675,6 +2700,7 @@ class EditPanel(QWidget):
         if clip is None:
             self._clip_label.setText(strings.EDIT_CLIP_NONE)
             self._preview.set_active_clip(None, self._project.width, self._project.height)
+            self._update_preview_overlay_clips()
             return
 
         found = self._project.find(clip.clip_id) if clip is not None else None
@@ -2692,6 +2718,22 @@ class EditPanel(QWidget):
         if abs(clip.speed - 1.0) >= 0.01:
             info = f"{info} · {clip.speed:.1f}x"
         self._clip_label.setText(info)
+        self._update_preview_overlay_clips()
+
+    def _update_preview_overlay_clips(self) -> None:
+        if self._on_fullscreen or self._playing:
+            self._preview.set_overlay_clips(())
+            return
+        clips = tuple(
+            c
+            for t in self._project.tracks
+            if t.visible and t.kind is TrackKind.ADDITIONAL
+            for c in t.clips
+            if (c.overlay_type in ("image", "text") or c.is_image)
+            and c.contains(self._position)
+            and not c.chromakey_enabled
+        )
+        self._preview.set_overlay_clips(clips)
 
     # ------------------------------------------------------------------
     # Tela do projeto
@@ -2947,23 +2989,19 @@ class EditPanel(QWidget):
         self._frame_token = next(self._tokens)
         size = self._preview_size()
 
-        active = self._timeline.selected_clip
-        track_visible = True
-        if active is not None:
-            found = self._project.find(active.clip_id)
-            if found is not None:
-                track_idx, _ = found
-                track_visible = self._project.tracks[track_idx].visible
-
-        if (
-            not self._on_fullscreen
-            and track_visible
-            and active is not None
-            and active.is_additional
-            and active.overlay_type not in ("filter", "transition")
-            and active.contains(self._wanted)
-        ):
-            proj = self._project.without_clip(active.clip_id)
+        if not self._on_fullscreen and not self._playing:
+            additional_ids = [
+                c.clip_id
+                for t in self._project.tracks
+                if t.visible and t.kind is TrackKind.ADDITIONAL
+                for c in t.clips
+                if (c.overlay_type in ("image", "text") or c.is_image)
+                and c.contains(self._wanted)
+                and not c.chromakey_enabled
+            ]
+            proj = self._project
+            for cid in additional_ids:
+                proj = proj.without_clip(cid)
         else:
             proj = self._project
 
@@ -3010,6 +3048,7 @@ class EditPanel(QWidget):
             self._fullscreen.set_frame(pixmap)
             return
         self._preview.set_frame_pixmap(pixmap)
+        self._update_preview_overlay_clips()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -3300,6 +3339,9 @@ class EditPanel(QWidget):
             strings.EDIT_FRAME_NUMBER.format(index=frame_index(self._position, self._fps))
         )
         self._preview.set_position(self._position)
+        self._update_preview_overlay_clips()
+        if hasattr(self, "_properties_widget"):
+            self._properties_widget.set_playhead_position(self._position)
         self._sync_fullscreen()
 
     def _lock_readouts(self) -> None:
@@ -3620,17 +3662,24 @@ class EditPanel(QWidget):
             self._play_token = 0
             self._timeline.set_position(visible_position, follow=False)
             self._update_time_labels()
-            # O último quadro da reprodução já é exatamente o que o usuário
-            # pausou. Renderizá-lo outra vez abria um segundo FFmpeg junto da
-            # pré-carga, criava um pico de CPU e podia substituir a imagem por
-            # um quadro vizinho alguns décimos depois do clique. Mantemos a
-            # imagem congelada, invalidamos respostas estáticas antigas e só
-            # preparamos o próximo play.
+            has_overlays = any(
+                t.visible and t.kind is TrackKind.ADDITIONAL and any(
+                    (c.overlay_type in ("image", "text") or c.is_image)
+                    and c.contains(visible_position)
+                    and not c.chromakey_enabled
+                    for c in t.clips
+                )
+                for t in self._project.tracks
+            )
             self._frame_revision += 1
             self._frame_token = next(self._tokens)
-            self._wanted = None
-            self._rendered = visible_position
-            self._prime_playback()
+            if has_overlays:
+                self._rendered = None
+                self._request_frame(force=True)
+            else:
+                self._wanted = None
+                self._rendered = visible_position
+                self._prime_playback()
         self._refresh_play_button()
 
     def _refresh_play_button(self) -> None:
@@ -3912,6 +3961,7 @@ class EditPanel(QWidget):
             if loaded
             else ""
         )
+        self._refresh_canvas_controls()
         self._lock_readouts()
         self._update_time_labels()
         self._sync_scrollbar()
