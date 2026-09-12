@@ -2295,5 +2295,80 @@ def test_preview_scale_handle_with_rotated_keyframe(qapp: QApplication) -> None:
     assert preview._active_clip.keyframes[1].scale_x > 0.7
 
 
+def test_filter_clip_preserved_in_paused_frame_preview(
+    qapp: QApplication, dummy_tools: FFmpegTools, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings()
+    panel = EditPanel(
+        settings=settings,
+        ensure_tools=lambda: dummy_tools,
+        editor=build_editor_service(),
+        processing=build_processing_service(),
+        runtime=build_desktop_runtime(),
+    )
+    try:
+        ref_v = MediaRef(
+            path=Path("/tmp/video.mp4"),
+            kind=MediaKind.VIDEO,
+            duration=10.0,
+            width=1920,
+            height=1080,
+        )
+        c_video = Clip(media=ref_v, start=0.0, duration=10.0)
+        t_video = Track(kind=TrackKind.VIDEO, clips=(c_video,))
+
+        ref_f = MediaRef(path=Path("Filtro_PB"), kind=MediaKind.IMAGE, duration=5.0)
+        c_filter = Clip(
+            media=ref_f,
+            start=1.0,
+            duration=5.0,
+            overlay_type="filter",
+            filter_name="pb",
+        )
+        t_filter = Track(kind=TrackKind.ADDITIONAL, clips=(c_filter,))
+
+        panel._project = Project(tracks=(t_filter, t_video), width=1920, height=1080, fps=30.0)
+        panel._sync_canvas()
+
+        captured_project = None
+        orig_frame_worker = panel._runtime.frame_worker
+
+        def mock_frame_worker(proj, seconds, size, tools, token, **kwargs):
+            nonlocal captured_project
+            captured_project = proj
+            return orig_frame_worker(proj, seconds, size, tools, token, **kwargs)
+
+        monkeypatch.setattr(panel._runtime, "frame_worker", mock_frame_worker)
+
+        panel._playing = False
+        panel._wanted = 2.0
+        panel._start_frame()
+
+        assert captured_project is not None
+        filter_clips = [
+            c for t in captured_project.tracks for c in t.clips if c.overlay_type == "filter"
+        ]
+        assert len(filter_clips) == 1
+        assert filter_clips[0].filter_name == "pb"
+
+        panel._timeline.set_position(2.0)
+        panel._update_preview_overlay_clips()
+        assert not any(c.overlay_type == "filter" for c in panel._preview._overlay_clips)
+
+        # Mover a agulha/guia da trilha via _on_scrub com vídeo pausado
+        panel._frame_busy = False
+        captured_project = None
+        panel._timeline.set_position(3.5)
+        panel._on_scrub(3.5)
+        assert captured_project is not None
+        filter_clips_scrub = [
+            c for t in captured_project.tracks for c in t.clips if c.overlay_type == "filter"
+        ]
+        assert len(filter_clips_scrub) == 1
+        assert filter_clips_scrub[0].filter_name == "pb"
+    finally:
+        panel.shutdown()
+
+
 # Estes cenários exercitam adaptadores ou apresentação Qt.
 pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")

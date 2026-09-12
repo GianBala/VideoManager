@@ -2729,7 +2729,8 @@ class EditPanel(QWidget):
             for t in self._project.tracks
             if t.visible and t.kind is TrackKind.ADDITIONAL
             for c in t.clips
-            if (c.overlay_type in ("image", "text") or c.is_image)
+            if c.overlay_type != "filter"
+            and (c.overlay_type in ("image", "text") or c.is_image)
             and c.contains(self._position)
             and not c.chromakey_enabled
         )
@@ -2995,7 +2996,8 @@ class EditPanel(QWidget):
                 for t in self._project.tracks
                 if t.visible and t.kind is TrackKind.ADDITIONAL
                 for c in t.clips
-                if (c.overlay_type in ("image", "text") or c.is_image)
+                if c.overlay_type != "filter"
+                and (c.overlay_type in ("image", "text") or c.is_image)
                 and c.contains(self._wanted)
                 and not c.chromakey_enabled
             ]
@@ -3664,7 +3666,8 @@ class EditPanel(QWidget):
             self._update_time_labels()
             has_overlays = any(
                 t.visible and t.kind is TrackKind.ADDITIONAL and any(
-                    (c.overlay_type in ("image", "text") or c.is_image)
+                    c.overlay_type != "filter"
+                    and (c.overlay_type in ("image", "text") or c.is_image)
                     and c.contains(visible_position)
                     and not c.chromakey_enabled
                     for c in t.clips
