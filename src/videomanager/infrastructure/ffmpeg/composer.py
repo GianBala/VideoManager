@@ -854,31 +854,17 @@ def _transition_side(
     index: int,
     center: float,
     duration: float,
-    *,
-    continuous_side: str | None = None,
 ) -> _TransitionSide:
     """Calcula alças de mídia e o preenchimento necessário numa das pontas.
 
-    Num corte contínuo criado pela tesoura, duas janelas centralizadas seriam
-    exatamente iguais e o efeito desapareceria. Nesse caso, o lado esquerdo
-    percorre a metade anterior e o direito a metade posterior, ambos estendidos
-    pela duração da passagem. O primeiro e o último quadro ainda coincidem com
-    a linha do tempo, portanto não há salto nas bordas da transição.
+    Mantém a velocidade real do clipe e o sincronismo temporal com a linha do
+    tempo tanto em mídias distintas quanto em cortes contínuos da mesma origem.
     """
     speed = max(0.01, clip.speed)
     half_source = duration * speed / 2.0
-    if continuous_side == "left":
-        wanted_start = center - half_source
-        wanted_end = center
-        playback_speed = speed / 2.0
-    elif continuous_side == "right":
-        wanted_start = center
-        wanted_end = center + half_source
-        playback_speed = speed / 2.0
-    else:
-        wanted_start = center - half_source
-        wanted_end = center + half_source
-        playback_speed = speed
+    wanted_start = center - half_source
+    wanted_end = center + half_source
+    playback_speed = speed
     actual_start = max(0.0, wanted_start)
     actual_end = wanted_end
     if clip.media.duration is not None:
@@ -1292,14 +1278,12 @@ def build_graph(
             next_input,
             context.left.out_point,
             context.duration,
-            continuous_side="left" if continuous_source_cut else None,
         )
         right = _transition_side(
             context.right,
             next_input + 1,
             context.right.in_point,
             context.duration,
-            continuous_side="right" if continuous_source_cut else None,
         )
         inputs += _transition_input_args(left, fps)
         inputs += _transition_input_args(right, fps)

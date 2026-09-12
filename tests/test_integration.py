@@ -812,10 +812,10 @@ class TestExportacaoDaEdicao:
         ) / frame_size
         assert playback_difference < 25.0
 
-    def test_transicao_apos_tesoura_e_visivel_em_video_continuo(
+    def test_transicao_apos_tesoura_mantem_sincronismo_temporal_dos_quadros(
         self, tmp_path: Path, tools
     ) -> None:
-        """O xfade não pode misturar duas cópias do mesmo instante da origem."""
+        """Transições mantêm alinhamento exato de quadros na linha do tempo."""
         from videomanager.domain.project import Clip
         from videomanager.domain.project import MediaKind
         from videomanager.domain.project import MediaRef
@@ -861,27 +861,76 @@ class TestExportacaoDaEdicao:
             start=0.7,
             duration=0.6,
             overlay_type="transition",
-            transition_name="dissolve",
+            transition_name="wipeleft",
             transition_left_id=left.clip_id,
             transition_right_id=right.clip_id,
+            transition_affects_additionals=True,
         )
-
-        plain = subprocess.run(
-            frame_command(split, 1.0, (160, 90), tools),
+        pb_filter = Clip(
+            MediaRef(Path("PB"), MediaKind.IMAGE, duration=1.0),
+            start=1.0,
+            duration=1.0,
+            overlay_type="filter",
+            filter_name="pb",
+        )
+        project = Project(
+            tracks=(
+                Track(TrackKind.ADDITIONAL, clips=(pb_filter,)),
+                Track(TrackKind.VIDEO, clips=(left, right, marker)),
+            ),
+            width=160,
+            height=90,
+            fps=30.0,
+        )
+        # Quadro exatamente no corte (1.0 s, metade da transição wipeleft)
+        frame_wiped = subprocess.run(
+            frame_command(project, 1.0, (160, 90), tools),
             check=True,
             capture_output=True,
         ).stdout
-        transitioned = subprocess.run(
-            frame_command(split.with_clip(0, marker), 1.0, (160, 90), tools),
+        assert len(frame_wiped) == 160 * 90 * 3
+
+        # Lado esquerdo tem cor; lado direito é monocromático
+        left_color_diff = sum(
+            abs(frame_wiped[(y * 160 + x) * 3] - frame_wiped[(y * 160 + x) * 3 + 1])
+            for y in range(90)
+            for x in range(10, 40)
+        ) / (90 * 30)
+        right_color_diff = sum(
+            abs(frame_wiped[(y * 160 + x) * 3] - frame_wiped[(y * 160 + x) * 3 + 1])
+            for y in range(90)
+            for x in range(120, 150)
+        ) / (90 * 30)
+        assert left_color_diff > 50.0
+        assert right_color_diff < 1.0
+
+        # O lado direito sincronizado coincide com o quadro real de 1.0 s em PB
+        ref_pb = subprocess.run(
+            [
+                tools.ffmpeg_str,
+                "-ss",
+                "1.0",
+                "-i",
+                str(source),
+                "-vf",
+                "format=gray,format=rgb24",
+                "-frames:v",
+                "1",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "pipe:1",
+            ],
             check=True,
             capture_output=True,
         ).stdout
-
-        difference = sum(
-            abs(before - after)
-            for before, after in zip(plain, transitioned)
-        ) / len(plain)
-        assert difference > 3.0
+        right_sync_diff = sum(
+            abs(frame_wiped[(y * 160 + x) * 3] - ref_pb[(y * 160 + x) * 3])
+            for y in range(90)
+            for x in range(100, 150)
+        ) / (90 * 50)
+        assert right_sync_diff < 2.0
 
     def test_bloco_mudo_e_trilha_muda_nao_chegam_ao_arquivo(
         self, tmp_path: Path, tools
