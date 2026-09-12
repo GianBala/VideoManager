@@ -17,6 +17,7 @@ from PySide6.QtGui import (
     QFont,
     QFontDatabase,
     QFontMetrics,
+    QImage,
     QKeyEvent,
     QMouseEvent,
     QPaintEvent,
@@ -25,6 +26,7 @@ from PySide6.QtGui import (
     QPalette,
     QPen,
     QPixmap,
+    QRadialGradient,
 )
 
 from PySide6.QtWidgets import (
@@ -58,6 +60,7 @@ from videomanager.domain.preview import fit_size
 
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import create_preset_keyframes
+from videomanager.presentation.qt.fonts import ensure_application_fonts
 from videomanager.domain.project import MAX_GAIN_DB
 from videomanager.domain.project import MIN_GAIN_DB
 from videomanager.domain.project import Clip
@@ -190,6 +193,7 @@ class _Preview(QLabel):
     """Tela da prévia: mantém o quadro centralizado, o fundo preto e suporte a transformações."""
 
     double_clicked = Signal()
+    play_toggle_requested = Signal()
     overlay_transformed = Signal(int, float, float, float, float)
     overlay_transform_finished = Signal(int)
     clicked_outside = Signal()
@@ -229,6 +233,8 @@ class _Preview(QLabel):
         self._drag_h0: float = 1.0
         self._clip_pixmaps: dict[Path, QPixmap] = {}
         self._text_pixmaps: dict[tuple, QPixmap] = {}
+        self._clip_filters: dict[int, tuple[str, ...]] = {}
+        self._filtered_pixmaps: dict[tuple, QPixmap] = {}
         self._is_playing: bool = False
         self._clip_visible: bool = True
         self._snap_enabled: bool = True
@@ -249,12 +255,79 @@ class _Preview(QLabel):
 
     def set_playing(self, playing: bool) -> None:
         if playing:
+            self._drag_mode = None
+            self._drag_clip_id = -1
             self._drag_video_pixmap = None
             self._drag_base_pixmap = None
+            self._snap_guide_x = None
+            self._snap_guide_y = None
+            self._snap_guide_rot = None
         self._is_playing = playing
         self.update()
 
-    def _get_clip_pixmap(self, clip: Clip) -> QPixmap | None:
+    def _apply_filters_to_pixmap(
+        self, pix: QPixmap, filter_names: tuple[str, ...]
+    ) -> QPixmap:
+        if not filter_names or pix.isNull():
+            return pix
+        img = pix.toImage().convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+        for fname in filter_names:
+            if fname == "pb":
+                gray = img.convertToFormat(QImage.Format.Format_Grayscale8)
+                res = gray.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+                if img.hasAlphaChannel():
+                    p = QPainter(res)
+                    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+                    p.drawImage(0, 0, img)
+                    p.end()
+                img = res
+            elif fname == "sepia":
+                gray = img.convertToFormat(QImage.Format.Format_Grayscale8)
+                res = gray.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+                p = QPainter(res)
+                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Multiply)
+                p.fillRect(res.rect(), QColor(255, 220, 180))
+                if img.hasAlphaChannel():
+                    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+                    p.drawImage(0, 0, img)
+                p.end()
+                img = res
+            elif fname == "inverter":
+                res = img.copy()
+                res.invertPixels(QImage.InvertMode.InvertRgb)
+                img = res
+            elif fname == "contraste":
+                res = img.copy()
+                p = QPainter(res)
+                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Overlay)
+                p.drawImage(0, 0, img)
+                if img.hasAlphaChannel():
+                    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+                    p.drawImage(0, 0, img)
+                p.end()
+                img = res
+            elif fname == "vinheta":
+                res = img.copy()
+                center = QPointF(res.width() / 2.0, res.height() / 2.0)
+                radius = math.hypot(res.width() / 2.0, res.height() / 2.0)
+                grad = QRadialGradient(center, radius)
+                grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+                grad.setColorAt(0.5, QColor(0, 0, 0, 40))
+                grad.setColorAt(1.0, QColor(0, 0, 0, 180))
+                p = QPainter(res)
+                p.fillRect(res.rect(), grad)
+                if img.hasAlphaChannel():
+                    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+                    p.drawImage(0, 0, img)
+                p.end()
+                img = res
+        return QPixmap.fromImage(img)
+
+    def _get_clip_pixmap(
+        self, clip: Clip, filters: tuple[str, ...] = ()
+    ) -> QPixmap | None:
+        base_pix: QPixmap | None = None
+        cache_id = None
         if clip.overlay_type == "text":
             key = (
                 clip.clip_id,
@@ -269,24 +342,48 @@ class _Preview(QLabel):
             )
             pix = self._text_pixmaps.get(key)
             if pix is not None and not pix.isNull():
-                return pix
-            try:
-                txt_path = self._rasterizer.render(clip)
-                pix = QPixmap(str(txt_path))
+                base_pix = pix
+            else:
+                try:
+                    if len(self._text_pixmaps) > 60:
+                        self._text_pixmaps.clear()
+                    txt_path = self._rasterizer.render(clip)
+                    pix = QPixmap(str(txt_path))
+                    if not pix.isNull():
+                        self._text_pixmaps[key] = pix
+                    base_pix = pix
+                except Exception:
+                    base_pix = None
+            cache_id = key
+        elif clip.media is not None and clip.media.path:
+            path = clip.media.path
+            pix = self._clip_pixmaps.get(path)
+            if pix is None and path.exists():
+                pix = QPixmap(str(path))
                 if not pix.isNull():
-                    self._text_pixmaps[key] = pix
-                return pix
-            except Exception:
-                return None
-        if clip.media is None or not clip.media.path:
+                    self._clip_pixmaps[path] = pix
+            base_pix = pix
+            cache_id = path
+        else:
             return None
-        path = clip.media.path
-        pix = self._clip_pixmaps.get(path)
-        if pix is None and path.exists():
-            pix = QPixmap(str(path))
-            if not pix.isNull():
-                self._clip_pixmaps[path] = pix
-        return pix
+
+        if base_pix is None or base_pix.isNull():
+            return None
+
+        if not filters:
+            return base_pix
+
+        filter_key = (cache_id, filters)
+        filtered = self._filtered_pixmaps.get(filter_key)
+        if filtered is not None and not filtered.isNull():
+            return filtered
+
+        if len(self._filtered_pixmaps) > 60:
+            self._filtered_pixmaps.clear()
+
+        applied = self._apply_filters_to_pixmap(base_pix, filters)
+        self._filtered_pixmaps[filter_key] = applied
+        return applied
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(480, self.minimumHeight())
@@ -312,14 +409,20 @@ class _Preview(QLabel):
         self._drag_video_pixmap = None
         self._drag_base_pixmap = None
         self._overlay_clips = ()
+        self._clip_filters = {}
         self._snap_guide_x = None
         self._snap_guide_y = None
         self._snap_guide_rot = None
         self.setText(strings.EDIT_EMPTY)
         self.update()
 
-    def set_overlay_clips(self, clips: Sequence[Clip]) -> None:
+    def set_overlay_clips(
+        self,
+        clips: Sequence[Clip],
+        clip_filters: dict[int, tuple[str, ...]] | None = None,
+    ) -> None:
         self._overlay_clips = tuple(clips)
+        self._clip_filters = dict(clip_filters) if clip_filters else {}
         self.update()
 
     def setPixmap(self, pixmap: QPixmap) -> None:  # noqa: N802
@@ -368,8 +471,6 @@ class _Preview(QLabel):
         sy = max(0.05, transform.scale_y)
 
         if clip.overlay_type == "text":
-            from videomanager.presentation.qt.fonts import ensure_application_fonts
-
             ensure_application_fonts()
             font = QFont(clip.font_family or "Sans Serif", clip.font_size or 36)
             font.setBold(clip.font_bold)
@@ -401,7 +502,7 @@ class _Preview(QLabel):
             h = max(20.0, base_h * preview_scale * sy)
             return (cx, cy, w, h)
 
-        if clip.media is not None and clip.media.has_video:
+        if clip.has_image and not clip.audio_only and clip.media is not None:
             mw = clip.media.width or self._proj_w
             mh = clip.media.height or self._proj_h
             base_w, base_h = fit_size(mw, mh, self._proj_w, self._proj_h)
@@ -462,13 +563,17 @@ class _Preview(QLabel):
         return None, geom
 
     def _hit_test(self, pos: QPoint) -> tuple[str | None, tuple[float, float, float, float] | None]:
-        if not self._clip_visible or self._active_clip is None:
+        if not self._clip_visible or self._active_clip is None or self._is_playing:
             return None, None
         return self._hit_test_clip(self._active_clip, pos)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         pos = event.position().toPoint()
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._is_playing:
+                self.play_toggle_requested.emit()
+                event.accept()
+                return
             if self._active_clip is not None:
                 mode, geom = self._hit_test(pos)
                 if mode and geom:
@@ -502,7 +607,7 @@ class _Preview(QLabel):
                     self._drag_init_dist = max(10.0, math.hypot(pos.x() - cx, pos.y() - cy))
                     self._drag_init_angle = math.degrees(math.atan2(pos.y() - cy, pos.x() - cx))
 
-                    # Captura visual imediata para feedback a 60 fps ao arrastar clipe de vídeo
+                    # Captura visual imediata para feedback a 60 fps ao arrastar clipe visual
                     is_video_clip = (
                         self._active_clip.media is not None
                         and self._active_clip.media.has_video
@@ -912,6 +1017,8 @@ class _Preview(QLabel):
             self._clip_visible
             and not self._is_playing
             and clip is not None
+            and clip.has_image
+            and not clip.audio_only
             and clip.overlay_type not in ("filter", "transition")
             and clip.contains(self._position)
         )
@@ -922,6 +1029,7 @@ class _Preview(QLabel):
             and clip.media is not None
             and clip.media.has_video
             and not clip.is_image
+            and not clip.audio_only
             and clip.overlay_type not in ("text", "filter", "transition")
         ):
             if (
@@ -984,7 +1092,8 @@ class _Preview(QLabel):
                 painter.rotate(transform.rotation)
 
                 if draw_clip.overlay_type in ("image", "text") or draw_clip.is_image:
-                    img_pix = self._get_clip_pixmap(draw_clip)
+                    filters = self._clip_filters.get(draw_clip.clip_id, ())
+                    img_pix = self._get_clip_pixmap(draw_clip, filters=filters)
                     if img_pix and not img_pix.isNull():
                         painter.save()
                         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -1007,7 +1116,7 @@ class _Preview(QLabel):
                         painter.restore()
                 painter.restore()
 
-        # 4. Máscara de delimitação e atenuação (dimming) fora da região efetiva do vídeo
+        # 5. Máscara de delimitação e atenuação (dimming) fora da região efetiva do vídeo
         outside_path = QPainterPath()
         outside_path.addRect(QRectF(self.rect()))
         target_path = QPainterPath()
@@ -1456,6 +1565,17 @@ class _ClipPropertiesWidget(QWidget):
 
         self._layout.addWidget(self._transition_group)
         self._layout.addStretch(1)
+
+    def clear(self) -> None:
+        self._clip_id = -1
+        self._clip = None
+        self._title_lbl.setText("Propriedades")
+        self._title_lbl.setToolTip("")
+        self._lbl_clip_type.setText(strings.EDIT_CLIP_NONE)
+        self._transform_group.setVisible(False)
+        self._animation_group.setVisible(False)
+        self._chromakey_group.setVisible(False)
+        self._transition_group.setVisible(False)
 
     def load_clip(self, clip: Clip, proj_w: int, proj_h: int) -> None:
         self._updating = True
@@ -1933,6 +2053,11 @@ class _ClipPropertiesWidget(QWidget):
             self.property_changed.emit(self._clip_id, {"keyframes": updated_clip.keyframes, **changes})
             self._refresh_keyframe_controls()
         else:
+            updated_dict = {
+                k: v for k, v in changes.items() if hasattr(self._clip, k)
+            }
+            if updated_dict:
+                self._clip = replace(self._clip, **updated_dict)
             self.property_changed.emit(self._clip_id, changes)
 
     def update_transform_fields(
