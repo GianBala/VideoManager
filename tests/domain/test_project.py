@@ -788,3 +788,31 @@ class TestOrdemDasTrilhas:
         sem_video = p.without_clip(c_video.clip_id)
         canvas_sem_video = auto_canvas(sem_video)
         assert (canvas_sem_video.width, canvas_sem_video.height) == (1920, 1080)
+
+    def test_clip_is_image_apenas_para_imagem_real(self) -> None:
+        ref_img = MediaRef(path=Path("/m/foto.png"), kind=MediaKind.IMAGE)
+        c_img = clip(ref_img)
+        assert c_img.is_image is True
+
+        c_img_overlay = clip(ref_img, overlay_type="image")
+        assert c_img_overlay.is_image is True
+
+        ref_pseudo = MediaRef(path=Path("Filtro_PB"), kind=MediaKind.IMAGE, duration=5.0)
+        c_filter = clip(ref_pseudo, overlay_type="filter", filter_name="pb")
+        assert c_filter.is_image is False
+
+        ref_txt = MediaRef(path=Path("Texto_1"), kind=MediaKind.IMAGE, duration=5.0)
+        c_text = clip(ref_txt, overlay_type="text", text_content="Teste")
+        assert c_text.is_image is False
+
+        ref_trans = MediaRef(path=Path("Trans_1"), kind=MediaKind.IMAGE, duration=1.0)
+        c_trans = clip(ref_trans, overlay_type="transition", transition_name="fade")
+        assert c_trans.is_image is False
+
+    def test_trim_clip_filtro_permite_expansao(self) -> None:
+        ref_f = MediaRef(path=Path("Filtro_PB"), kind=MediaKind.IMAGE, duration=5.0)
+        c_filter = clip(ref_f, start=2.0, duration=5.0, overlay_type="filter", filter_name="pb")
+        p = Project(tracks=(Track(kind=TrackKind.ADDITIONAL, clips=(c_filter,)),))
+        # Deve permitir esticar além dos 5s originais
+        esticado = p.resized(c_filter.clip_id, "fim", 15.0)
+        assert esticado.clips[0].duration == 13.0

@@ -314,7 +314,11 @@ class Clip:
 
     @property
     def is_image(self) -> bool:
-        return self.media is not None and self.media.kind is MediaKind.IMAGE
+        return (
+            self.overlay_type in ("none", "image")
+            and self.media is not None
+            and self.media.kind is MediaKind.IMAGE
+        )
 
     def contains(self, seconds: float) -> bool:
         return self.start <= seconds < self.end
@@ -998,7 +1002,11 @@ class Project:
         if edge == "inicio":
             # Uma imagem não tem começo de arquivo para respeitar; um vídeo não
             # pode ser puxado para antes do primeiro quadro que ele tem.
-            limit = clip.start - clip.in_point if not clip.is_image else floor
+            limit = (
+                clip.start - clip.in_point
+                if not (clip.is_image or clip.is_additional)
+                else floor
+            )
             value = min(max(max(floor, limit), seconds), clip.end - MIN_SEGMENT)
             return self.with_updated_clip(
                 clip_id,
@@ -1009,7 +1017,7 @@ class Project:
 
         available = (
             float("inf")
-            if clip.is_image
+            if (clip.is_image or clip.is_additional)
             else max(0.0, (clip.media.duration or 0.0) - clip.in_point)
         )
         value = min(
