@@ -408,7 +408,7 @@ def test_transicao_entre_dois_videos_usa_xfade() -> None:
     assert any("xfade=transition=dissolve:duration=1.000000:offset=0" in item for item in frame.filters)
 
 
-def test_transicao_entre_partes_da_tesoura_usa_tempos_distintos() -> None:
+def test_transicao_entre_partes_da_tesoura_mantem_sincronismo_temporal() -> None:
     media = MediaRef(
         path=Path("continuo.mp4"),
         kind=MediaKind.VIDEO,
@@ -435,15 +435,15 @@ def test_transicao_entre_partes_da_tesoura_usa_tempos_distintos() -> None:
 
     assert graph.inputs[-8:] == [
         "-ss", "3.500000", "-i", "continuo.mp4",
-        "-ss", "4.000000", "-i", "continuo.mp4",
+        "-ss", "3.500000", "-i", "continuo.mp4",
     ]
     transition_chains = [
         item
         for item in graph.filters
-        if "setpts=(PTS-STARTPTS)/0.500000" in item
+        if "setpts=(PTS-STARTPTS)/1.000000" in item
     ]
     assert len(transition_chains) == 2
-    assert all("trim=duration=0.500000" in item for item in transition_chains)
+    assert all("trim=duration=1.000000" in item for item in transition_chains)
     assert not any("acrossfade=" in item for item in graph.filters)
     assert not any("volume='" in item for item in graph.filters)
 
