@@ -4,6 +4,7 @@ from videomanager.domain.keyframe import (
     create_preset_keyframes,
     evaluate_easing,
     interpolate_keyframes,
+    resolve_segment_easing,
 )
 
 
@@ -152,3 +153,23 @@ def test_create_preset_spin_in():
     assert kfs[1].rotation == 0.0
     assert kfs[1].scale_x == 1.0
     assert kfs[1].opacity == 1.0
+
+
+def test_resolve_segment_easing():
+    assert resolve_segment_easing("linear", "linear") == "linear"
+    assert resolve_segment_easing("linear", "ease_in_out") == "ease_in_out"
+    assert resolve_segment_easing("ease_out", "linear") == "ease_out"
+    assert resolve_segment_easing("ease_out", "ease_in") == "ease_in_out"
+    assert resolve_segment_easing("hold", "linear") == "hold"
+    assert resolve_segment_easing("linear", "hold") == "hold"
+
+
+def test_interpolate_keyframes_destination_easing():
+    k0 = Keyframe(time_offset=0.0, x=0.0, easing="linear")
+    k1 = Keyframe(time_offset=2.0, x=1.0, easing="ease_in_out")
+    fallback = ClipTransform()
+
+    # Midpoint at raw_t = 0.25 (time_offset = 0.5)
+    # ease_in_out at 0.25 is 2 * 0.25^2 = 0.125
+    res = interpolate_keyframes((k0, k1), 0.5, fallback)
+    assert abs(res.x - 0.125) < 1e-4

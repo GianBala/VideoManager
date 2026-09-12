@@ -17,7 +17,8 @@ from videomanager.domain.project import (
 from videomanager.infrastructure.storage.settings import Settings
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
-from videomanager.presentation.qt.panels.edit_widgets import _Preview
+from videomanager.domain.keyframe import Keyframe
+from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget, _Preview
 from videomanager.presentation.qt.panels.timeline import Timeline
 from videomanager.presentation.qt.theme import DARK
 from videomanager.bootstrap import (
@@ -392,3 +393,292 @@ def test_filter_transformations_in_preview() -> None:
     assert not contrast.isNull()
     vignette = preview._apply_filters_to_pixmap(pix, ("vinheta",))
     assert not vignette.isNull()
+
+
+def test_preview_drag_with_keyframes_only_modifies_current_keyframe() -> None:
+    """Verifica que arrastar um clipe com keyframes altera apenas o keyframe da agulha atual."""
+    preview = _Preview()
+    preview.resize(800, 600)
+
+    # Cria clipe com 2 keyframes em t=0s e t=5s, ambos inicialmente em (0.2, 0.2)
+    kf0 = Keyframe(time_offset=0.0, x=0.2, y=0.2, scale_x=0.5, scale_y=0.5)
+    kf1 = Keyframe(time_offset=5.0, x=0.2, y=0.2, scale_x=0.5, scale_y=0.5)
+    media = MediaRef(Path("test.png"), MediaKind.IMAGE, duration=10.0, width=100, height=100)
+    clip = Clip(media=media, start=0.0, duration=10.0, overlay_type="image", keyframes=(kf0, kf1))
+
+    preview.set_active_clip(clip, 800, 600)
+    # Posiciona a agulha exatamente no segundo keyframe (t=5.0s)
+    preview.set_position(5.0)
+
+    geom = preview._clip_geometry(clip)
+    assert geom is not None
+    cx, cy, w, h = geom
+
+    # Inicia arrasto com botão esquerdo sobre o clipe
+    p_pt = QPointF(cx, cy)
+    press_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        p_pt,
+        p_pt,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mousePressEvent(press_event)
+    assert preview._drag_mode == "move"
+
+    # Move o cursor 200px para a direita e 100px para baixo
+    m_pt = QPointF(cx + 200, cy + 100)
+    move_event = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        m_pt,
+        m_pt,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_event)
+
+    # Finaliza arrasto
+    release_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonRelease,
+        m_pt,
+        m_pt,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseReleaseEvent(release_event)
+
+    updated_clip = preview._active_clip
+    assert updated_clip is not None
+    assert len(updated_clip.keyframes) == 2
+
+    kfs = updated_clip.keyframes
+    # O primeiro keyframe (em t=0s) DEVE PERMANECER INTACTO em (0.2, 0.2)
+    assert abs(kfs[0].time_offset - 0.0) < 1e-4
+    assert abs(kfs[0].x - 0.2) < 1e-4
+    assert abs(kfs[0].y - 0.2) < 1e-4
+
+    # O segundo keyframe (em t=5s) foi atualizado com o novo centro
+    assert abs(kfs[1].time_offset - 5.0) < 1e-4
+    assert kfs[1].x > 0.3
+    assert kfs[1].y > 0.3
+
+    # Interpolação no ponto médio (t=2.5s) calcula a posição suave entre os dois keyframes
+    mid_t = updated_clip.transform_at(2.5)
+    assert kfs[0].x < mid_t.x < kfs[1].x
+    assert kfs[0].y < mid_t.y < kfs[1].y
+
+
+def test_properties_widget_with_keyframes_only_modifies_current_keyframe() -> None:
+    """Verifica que alterar campos no painel de propriedades altera apenas o keyframe da agulha."""
+    widget = _ClipPropertiesWidget()
+    kf0 = Keyframe(time_offset=0.0, x=0.2, y=0.2, scale_x=0.5, scale_y=0.5)
+    kf1 = Keyframe(time_offset=5.0, x=0.2, y=0.2, scale_x=0.5, scale_y=0.5)
+    media = MediaRef(Path("test.png"), MediaKind.IMAGE, duration=10.0, width=100, height=100)
+    clip = Clip(media=media, start=0.0, duration=10.0, overlay_type="image", keyframes=(kf0, kf1))
+
+    widget.load_clip(clip, 800, 600)
+    widget.set_playhead_position(5.0)
+
+    # Altera x para 0.8
+    widget._emit_property_change({"x": 0.8})
+
+    updated = widget._clip
+    assert updated is not None
+    assert len(updated.keyframes) == 2
+
+    # Keyframe em t=0s deve manter x=0.2
+    assert abs(updated.keyframes[0].x - 0.2) < 1e-4
+    # Keyframe em t=5s deve ter x=0.8
+    assert abs(updated.keyframes[1].x - 0.8) < 1e-4
+
+    # Altera escala no keyframe 5s
+    widget._emit_property_change({"scale_x": 1.2, "scale_y": 1.2})
+    # Keyframe em t=0s deve manter escala 0.5
+    assert abs(widget._clip.keyframes[0].scale_x - 0.5) < 1e-4
+    # Keyframe em t=5s deve ter escala 1.2
+    assert abs(widget._clip.keyframes[1].scale_x - 1.2) < 1e-4
+
+
+def test_properties_widget_auto_keyframe_at_new_time() -> None:
+    """Ao alterar propriedades em um instante sem keyframe, cria um novo keyframe sem afetar os existentes."""
+    widget = _ClipPropertiesWidget()
+    kf0 = Keyframe(time_offset=0.0, x=0.2, y=0.2, rotation=0.0)
+    kf1 = Keyframe(time_offset=5.0, x=0.8, y=0.8, rotation=0.0)
+    media = MediaRef(Path("test.png"), MediaKind.IMAGE, duration=10.0, width=100, height=100)
+    clip = Clip(media=media, start=0.0, duration=10.0, overlay_type="image", keyframes=(kf0, kf1))
+
+    widget.load_clip(clip, 800, 600)
+    # Posiciona a agulha em t=2.5s (onde não há keyframe)
+    widget.set_playhead_position(2.5)
+
+    widget._emit_property_change({"rotation": 45.0})
+
+    updated = widget._clip
+    assert len(updated.keyframes) == 3
+    # Keyframe intermediário criado em t=2.5s
+    assert abs(updated.keyframes[1].time_offset - 2.5) < 1e-4
+    assert abs(updated.keyframes[1].rotation - 45.0) < 1e-4
+    # Posição interpolada herdada em t=2.5s (~0.5)
+    assert abs(updated.keyframes[1].x - 0.5) < 1e-2
+
+    # Keyframes de 0s e 5s inalterados
+    assert abs(updated.keyframes[0].x - 0.2) < 1e-4
+    assert abs(updated.keyframes[2].x - 0.8) < 1e-4
+
+
+def test_properties_widget_auto_keyframe_position_at_new_time() -> None:
+    """Ao alterar X ou Y em um instante sem keyframe, cria um novo keyframe sem afetar os existentes."""
+    widget = _ClipPropertiesWidget()
+    kf0 = Keyframe(time_offset=0.0, x=0.2, y=0.2)
+    kf1 = Keyframe(time_offset=5.0, x=0.2, y=0.2)
+    media = MediaRef(Path("test.png"), MediaKind.IMAGE, duration=10.0, width=100, height=100)
+    clip = Clip(media=media, start=0.0, duration=10.0, overlay_type="image", keyframes=(kf0, kf1))
+
+    widget.load_clip(clip, 800, 600)
+    widget.set_playhead_position(2.5)
+
+    widget._emit_property_change({"x": 0.75})
+
+    updated = widget._clip
+    assert updated is not None
+    assert len(updated.keyframes) == 3
+    assert abs(updated.keyframes[1].time_offset - 2.5) < 1e-4
+    assert abs(updated.keyframes[1].x - 0.75) < 1e-4
+    assert abs(updated.keyframes[0].x - 0.2) < 1e-4
+    assert abs(updated.keyframes[2].x - 0.2) < 1e-4
+
+
+def test_preview_drag_auto_keyframe_at_new_time() -> None:
+    """Ao arrastar a posição no preview em instante sem keyframe, cria novo keyframe mantendo os outros intactos."""
+    preview = _Preview()
+    preview.resize(800, 600)
+
+    kf0 = Keyframe(time_offset=0.0, x=0.2, y=0.2)
+    kf1 = Keyframe(time_offset=5.0, x=0.2, y=0.2)
+    media = MediaRef(Path("test.png"), MediaKind.IMAGE, duration=10.0, width=100, height=100)
+    clip = Clip(media=media, start=0.0, duration=10.0, overlay_type="image", keyframes=(kf0, kf1))
+
+    preview.set_active_clip(clip, 800, 600)
+    preview.set_position(2.5)
+
+    geom = preview._clip_geometry(clip)
+    assert geom is not None
+    cx, cy, w, h = geom
+
+    p_pt = QPointF(cx, cy)
+    press_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        p_pt,
+        p_pt,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mousePressEvent(press_event)
+    assert preview._drag_mode == "move"
+
+    m_pt = QPointF(cx + 150, cy + 100)
+    move_event = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        m_pt,
+        m_pt,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_event)
+
+    release_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonRelease,
+        m_pt,
+        m_pt,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseReleaseEvent(release_event)
+
+    updated_clip = preview._active_clip
+    assert updated_clip is not None
+    assert len(updated_clip.keyframes) == 3
+
+    kfs = updated_clip.keyframes
+    assert abs(kfs[0].time_offset - 0.0) < 1e-4
+    assert abs(kfs[0].x - 0.2) < 1e-4
+
+    assert abs(kfs[1].time_offset - 2.5) < 1e-4
+    assert kfs[1].x > 0.3
+    assert kfs[1].y > 0.3
+
+    assert abs(kfs[2].time_offset - 5.0) < 1e-4
+    assert abs(kfs[2].x - 0.2) < 1e-4
+
+
+def test_preview_rotate_auto_keyframe_at_new_time() -> None:
+    """Ao rotacionar pela alça no preview em instante sem keyframe, cria novo keyframe mantendo os outros intactos."""
+    preview = _Preview()
+    preview.resize(800, 600)
+
+    kf0 = Keyframe(time_offset=0.0, x=0.5, y=0.5, rotation=0.0)
+    kf1 = Keyframe(time_offset=5.0, x=0.5, y=0.5, rotation=0.0)
+    media = MediaRef(Path("test.png"), MediaKind.IMAGE, duration=10.0, width=100, height=100)
+    clip = Clip(media=media, start=0.0, duration=10.0, overlay_type="image", keyframes=(kf0, kf1))
+
+    preview.set_active_clip(clip, 800, 600)
+    preview.set_position(2.5)
+
+    geom = preview._clip_geometry(clip)
+    assert geom is not None
+    cx, cy, w, h = geom
+
+    # Alça de rotação fica no topo: cy - h/2 - 24
+    rot_pt = QPointF(cx, cy - h / 2.0 - 24.0)
+    press_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        rot_pt,
+        rot_pt,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mousePressEvent(press_event)
+    assert preview._drag_mode == "rotate"
+
+    # Move para o lado direito para girar em torno de 90 graus
+    m_pt = QPointF(cx + 80, cy)
+    move_event = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        m_pt,
+        m_pt,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseMoveEvent(move_event)
+
+    release_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonRelease,
+        m_pt,
+        m_pt,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    preview.mouseReleaseEvent(release_event)
+
+    updated_clip = preview._active_clip
+    assert updated_clip is not None
+    assert len(updated_clip.keyframes) == 3
+
+    kfs = updated_clip.keyframes
+    assert abs(kfs[0].time_offset - 0.0) < 1e-4
+    assert abs(kfs[0].rotation - 0.0) < 1e-4
+
+    assert abs(kfs[1].time_offset - 2.5) < 1e-4
+    assert kfs[1].rotation > 10.0
+
+    assert abs(kfs[2].time_offset - 5.0) < 1e-4
+    assert abs(kfs[2].rotation - 0.0) < 1e-4

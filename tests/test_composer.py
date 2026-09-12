@@ -784,7 +784,7 @@ class TestVelocidadeEFiltros:
         filter_str = ";".join(graph.filters)
         assert "scale=" in filter_str
         assert "rotate=" in filter_str
-        assert "overlay=x='(0.3000*W-w/2)':y='(0.4000*H-h/2)'" in filter_str
+        assert "overlay=x='round((0.300000)*W-w/2)':y='round((0.400000)*H-h/2)'" in filter_str
 
     def test_texto_sobreposicao_escala_proporcional(self) -> None:
         c_txt = clip(
@@ -804,7 +804,7 @@ class TestVelocidadeEFiltros:
         assert "scale=w='trunc(iw*1.2000/2)*2':h='trunc(ih*1.2000/2)*2'" in filter_str
         assert "scale=400:300" not in filter_str
         assert "scale=480:360" not in filter_str
-        assert "overlay=x='(0.5000*W-w/2)':y='(0.8000*H-h/2)'" in filter_str
+        assert "overlay=x='round((0.500000)*W-w/2)':y='round((0.800000)*H-h/2)'" in filter_str
 
     def test_render_text_to_image_com_e_sem_contorno(self) -> None:
         from videomanager.infrastructure.qt.text import QtTextRasterizer
@@ -904,7 +904,7 @@ class TestVelocidadeEFiltros:
         assert "c=black@0" in filters_str
         assert "format=rgba" in filters_str
         # Deve ter coordenadas de overlay calculadas
-        assert "overlay=x='(0.2500*W-w/2)':y='(0.3000*H-h/2)'" in filters_str
+        assert "overlay=x='round((0.250000)*W-w/2)':y='round((0.300000)*H-h/2)'" in filters_str
 
     def test_simple_trim_recusa_video_com_transformacao(self) -> None:
         c1 = clip(VIDEO, start=0.0, duration=5.0, scale=0.8)
@@ -1092,6 +1092,28 @@ class TestVelocidadeEFiltros:
         # Bounding box of rotate filter must use max(hypot(iw,ih), <max_diag>)
         # so scaling up during rotation does not crop the image.
         assert "max(hypot(iw,ih)," in filters_str
+
+    def test_overlay_uses_format_auto_and_destination_easing(self) -> None:
+        from videomanager.domain.keyframe import Keyframe
+
+        kf1 = Keyframe(time_offset=0.0, x=0.2, easing="linear")
+        kf2 = Keyframe(time_offset=2.0, x=0.8, easing="ease_in_out")
+        c_anim = clip(FOTO, start=0.0, duration=5.0, keyframes=(kf1, kf2))
+        p = Project(
+            width=1920,
+            height=1080,
+            tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(clip(VIDEO, start=0.0, duration=5.0),)),
+                Track(kind=TrackKind.ADDITIONAL, clips=(c_anim,)),
+            ),
+        )
+        graph = build_graph(p)
+        filters_str = ";".join(graph.filters)
+        # Overlay must specify format=auto to preserve RGBA chroma fidelity and prevent jitter
+        assert "format=auto" in filters_str
+        # Keyframe expression must incorporate ease_in_out formula even when set on destination keyframe
+        assert "lt(" in filters_str
+
 
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
