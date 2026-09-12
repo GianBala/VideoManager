@@ -80,6 +80,25 @@ def evaluate_easing(progress: float, easing: str) -> float:
     return t  # linear por padrão
 
 
+def resolve_segment_easing(start_easing: str, end_easing: str) -> str:
+    """Resolve a curva de interpolação entre dois quadros-chave consecutivos.
+
+    Se o usuário configurou uma curva no quadro de destino (ao chegar ao ponto),
+    ela prevalece sobre o padrão linear do quadro de partida. Se ambos definirem
+    curvas não-lineares complementares (ease_out e ease_in), a combinação resulta
+    em ease_in_out.
+    """
+    if start_easing == "hold" or end_easing == "hold":
+        return "hold"
+    if end_easing != "linear" and start_easing != "linear":
+        if (start_easing == "ease_out" and end_easing == "ease_in") or "ease_in_out" in (start_easing, end_easing):
+            return "ease_in_out"
+        return end_easing
+    if end_easing != "linear":
+        return end_easing
+    return start_easing
+
+
 def _interpolate_scalar(
     v0: float, v1: float, factor: float, is_angle: bool = False
 ) -> float:
@@ -103,8 +122,8 @@ def interpolate_keyframes(
     - Se houver apenas um keyframe ou o tempo for anterior ao primeiro,
       devolve os valores do primeiro keyframe.
     - Se o tempo for posterior ao último keyframe, devolve os valores do último.
-    - Entre dois keyframes consecutivos, calcula a interpolação com a curva do
-      primeiro keyframe.
+    - Entre dois keyframes consecutivos, calcula a interpolação com a curva
+      resolvida entre os dois quadros-chave.
     """
     if not keyframes:
         return fallback
@@ -124,7 +143,8 @@ def interpolate_keyframes(
             if dt < 1e-6:
                 return k0.transform
             raw_t = (time_offset - k0.time_offset) / dt
-            factor = evaluate_easing(raw_t, k0.easing)
+            easing = resolve_segment_easing(k0.easing, k1.easing)
+            factor = evaluate_easing(raw_t, easing)
 
             return ClipTransform(
                 x=_interpolate_scalar(k0.x, k1.x, factor),
