@@ -215,7 +215,7 @@ class FullscreenPreview(QWidget):
         if area.width() <= 0 or area.height() <= 0:
             return
         pixmap = self._master
-        if pixmap.width() != area.width() and pixmap.height() != area.height():
+        if pixmap.size() != area:
             pixmap = pixmap.scaled(
                 area,
                 Qt.AspectRatioMode.KeepAspectRatio,

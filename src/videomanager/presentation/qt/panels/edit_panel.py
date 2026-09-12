@@ -66,6 +66,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QScrollBar,
@@ -73,6 +74,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QTabWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -380,6 +382,7 @@ class EditPanel(QWidget):
         self._gain_session = -1
         self._speed_session = -1
         self._overlay_drag_session = -1
+        self._properties_session = -1
         self._pool_thumbnails: dict[Path, QIcon] = {}
         self._selected_filter_name = "pb"
         self._project_path: Path | None = None
@@ -401,6 +404,11 @@ class EditPanel(QWidget):
         self._prefs_timer.setSingleShot(True)
         self._prefs_timer.setInterval(_PREFS_SAVE_MS)
         self._prefs_timer.timeout.connect(self._save_audio_prefs)
+
+        self._properties_session_timer = QTimer(self)
+        self._properties_session_timer.setSingleShot(True)
+        self._properties_session_timer.setInterval(400)
+        self._properties_session_timer.timeout.connect(self._end_properties_session)
 
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
@@ -1333,6 +1341,11 @@ class EditPanel(QWidget):
             if clip is not None:
                 self._properties_widget.set_playhead_position(self._position)
                 self._properties_widget.load_clip(clip, self._project.width, self._project.height)
+            elif (
+                self._properties_widget._clip_id >= 0
+                and self._project.find(self._properties_widget._clip_id) is None
+            ):
+                self._properties_widget.clear()
             if self._extras_tabs.currentWidget() is self._properties_widget:
                 return
 
@@ -1422,6 +1435,7 @@ class EditPanel(QWidget):
         self._preview = _Preview(rasterizer=self.editor.rasterizer)
         self._preview.set_snap_enabled(self._settings.preview_snap)
         self._preview.double_clicked.connect(self._toggle_fullscreen)
+        self._preview.play_toggle_requested.connect(self._toggle_play)
         self._preview.overlay_transformed.connect(self._on_overlay_transformed)
         self._preview.overlay_transform_finished.connect(self._on_overlay_transform_finished)
         self._preview.clicked_outside.connect(lambda: self._timeline.select(-1))
@@ -1797,6 +1811,7 @@ class EditPanel(QWidget):
             ("Q", lambda: self._trim_to_cursor("inicio")),
             ("W", lambda: self._trim_to_cursor("fim")),
             ("Del", self._delete_selected),
+            ("Backspace", self._delete_selected),
             ("Ctrl+C", self._copy_clip),
             ("Ctrl+V", self._paste_clip),
             (",", lambda: self._step_frame(-1)),
@@ -1828,7 +1843,8 @@ class EditPanel(QWidget):
         # atalhos daqui — o espaço abre a lista de mídias, as letras entram no
         # timecode.
         if isinstance(
-            QApplication.focusWidget(), (QLineEdit, QDoubleSpinBox, QComboBox)
+            QApplication.focusWidget(),
+            (QLineEdit, QAbstractSpinBox, QComboBox, QTextEdit, QPlainTextEdit),
         ):
             return
         if self._on_fullscreen:
@@ -2282,13 +2298,19 @@ class EditPanel(QWidget):
             sizes[2] = max(200, sizes[2] - diff)
             self._top_splitter.setSizes(sizes)
 
+    def _end_properties_session(self) -> None:
+        self._properties_session = -1
+
     def _on_properties_changed(self, clip_id: int, changes: dict) -> None:
         if self._syncing:
             return
         found = self._project.find(clip_id) if clip_id >= 0 else None
         if found is None:
             return
-        self._remember()
+        if self._properties_session != clip_id:
+            self._remember()
+            self._properties_session = clip_id
+        self._properties_session_timer.start()
         self._project = self._project.with_updated_clip(clip_id, **changes)
         found_after = self._project.find(clip_id)
         if not found_after:
@@ -2387,6 +2409,7 @@ class EditPanel(QWidget):
             # saindo é a composição de antes: o grafo do ffmpeg foi montado na
             # hora em que o fluxo abriu (ver :meth:`_restart_stream`).
             self._live_timer.start()
+        self._update_preview_overlay_clips()
         self._update_project_label()
         self.changed.emit()
 
@@ -2521,13 +2544,18 @@ class EditPanel(QWidget):
         )
         index = self._free_track(pasted)
         if index is None:
-            # Pelo bloco, não pela mídia dele: um bloco de "separar áudio" vem
-            # de um arquivo com imagem, e pela mídia a cópia de um som ia parar
-            # numa trilha de vídeo, recolando o vídeo inteiro.
-            kind = TrackKind.VIDEO if pasted.has_image else TrackKind.AUDIO
+            kind = (
+                TrackKind.ADDITIONAL
+                if pasted.is_additional
+                else TrackKind.VIDEO
+                if pasted.is_transition or pasted.has_image
+                else TrackKind.AUDIO
+            )
             project = self._project.with_track(kind)
-            index = 0 if kind is TrackKind.VIDEO else len(project.tracks) - 1
             self._project = project
+            index = self._free_track(pasted)
+            if index is None:
+                index = len(project.tracks) - 1
         self._project = self._project.with_clip(index, pasted)
         self._timeline.select(pasted.clip_id)
         self._after_edit()
@@ -2724,17 +2752,61 @@ class EditPanel(QWidget):
         if self._on_fullscreen or self._playing:
             self._preview.set_overlay_clips(())
             return
-        clips = tuple(
-            c
+        visual_tracks = [
+            t
             for t in self._project.tracks
             if t.visible and t.kind is TrackKind.ADDITIONAL
+        ]
+        clips = tuple(
+            c
+            for t in reversed(visual_tracks)
             for c in t.clips
             if c.overlay_type != "filter"
+            and not c.is_transition
+            and not c.audio_only
             and (c.overlay_type in ("image", "text") or c.is_image)
             and c.contains(self._position)
             and not c.chromakey_enabled
         )
-        self._preview.set_overlay_clips(clips)
+        clip_filters: dict[int, tuple[str, ...]] = {}
+        for c in clips:
+            track_idx = None
+            for idx, t in enumerate(self._project.tracks):
+                if any(cl.clip_id == c.clip_id for cl in t.clips):
+                    track_idx = idx
+                    break
+            if track_idx is not None:
+                filters: list[str] = []
+                for t_idx in range(track_idx, -1, -1):
+                    t = self._project.tracks[t_idx]
+                    if not t.visible:
+                        continue
+                    for fc in t.clips:
+                        if fc.overlay_type == "filter" and fc.contains(self._position):
+                            filters.append(fc.filter_name)
+                if filters:
+                    clip_filters[c.clip_id] = tuple(filters)
+
+        active = self._preview._active_clip
+        if active is not None and active.clip_id not in clip_filters:
+            track_idx = None
+            for idx, t in enumerate(self._project.tracks):
+                if any(cl.clip_id == active.clip_id for cl in t.clips):
+                    track_idx = idx
+                    break
+            if track_idx is not None:
+                filters = []
+                for t_idx in range(track_idx, -1, -1):
+                    t = self._project.tracks[t_idx]
+                    if not t.visible:
+                        continue
+                    for fc in t.clips:
+                        if fc.overlay_type == "filter" and fc.contains(self._position):
+                            filters.append(fc.filter_name)
+                if filters:
+                    clip_filters[active.clip_id] = tuple(filters)
+
+        self._preview.set_overlay_clips(clips, clip_filters)
 
     # ------------------------------------------------------------------
     # Tela do projeto

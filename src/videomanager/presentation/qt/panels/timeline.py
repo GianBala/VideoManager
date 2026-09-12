@@ -267,6 +267,8 @@ class Timeline(QWidget):
         # Imagens de blocos que não existem mais saem da memória junto com eles.
         alive = {clip.clip_id for clip in project.clips}
         self._strips = {k: v for k, v in self._strips.items() if k in alive}
+        if self._selected >= 0 and self._selected not in alive:
+            self.select(-1)
         # Piso, e não altura fixa: com muitas trilhas é ele que faz a área de
         # rolagem rolar, e com poucas o widget se estica até o fim da área — o
         # que mantém o vazio abaixo das trilhas clicável.
@@ -935,9 +937,13 @@ class Timeline(QWidget):
         )
         for clip in ordered:
             rect = self._clip_rect(index, clip)
-            if abs(x - rect.left()) <= _HANDLE_GRAB:
+            d_left = abs(x - rect.left())
+            d_right = abs(x - rect.right())
+            if d_left <= _HANDLE_GRAB and d_right <= _HANDLE_GRAB:
+                return ("inicio" if d_left <= d_right else "fim"), index, clip.clip_id
+            if d_left <= _HANDLE_GRAB:
                 return "inicio", index, clip.clip_id
-            if abs(x - rect.right()) <= _HANDLE_GRAB:
+            if d_right <= _HANDLE_GRAB:
                 return "fim", index, clip.clip_id
             if rect.left() <= x <= rect.right():
                 return "corpo", index, clip.clip_id
@@ -975,6 +981,8 @@ class Timeline(QWidget):
             return
         if clip_id >= 0:
             self.select(clip_id)
+        else:
+            self.select(-1)
         if kind in ("inicio", "fim", "corpo"):
             # O aviso de que uma edição começou fica para o primeiro movimento
             # que passe da folga: um clique de seleção não é uma edição.
@@ -1016,7 +1024,7 @@ class Timeline(QWidget):
                 else Qt.CursorShape.OpenHandCursor
                 if kind in ("corpo", "cabecalho")
                 else Qt.CursorShape.PointingHandCursor
-                if kind == "mudo"
+                if kind in ("mudo", "olho")
                 else Qt.CursorShape.ArrowCursor
             )
             return
