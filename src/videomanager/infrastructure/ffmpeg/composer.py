@@ -40,7 +40,7 @@ from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
-from videomanager.domain.keyframe import Keyframe
+from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import fit_size
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
@@ -307,21 +307,21 @@ def _keyframe_expr(
 ) -> str:
     """Gera uma expressão matemática do FFmpeg para interpolação contínua em função do tempo."""
     if not keyframes:
-        return f"{fallback:.4f}"
+        return f"{fallback:.6f}"
     sorted_kfs = sorted(keyframes, key=lambda k: k.time_offset)
     if len(sorted_kfs) == 1:
         v0 = getattr(sorted_kfs[0], prop_name)
-        return f"{v0:.4f}"
+        return f"{v0:.6f}"
     if all(
         abs(getattr(k, prop_name) - getattr(sorted_kfs[0], prop_name)) < 1e-6
         for k in sorted_kfs
     ):
-        return f"{getattr(sorted_kfs[0], prop_name):.4f}"
+        return f"{getattr(sorted_kfs[0], prop_name):.6f}"
 
     segments: list[tuple[float, str]] = []
     t0 = clip_offset + sorted_kfs[0].time_offset
     v0 = getattr(sorted_kfs[0], prop_name)
-    segments.append((t0, f"{v0:.4f}"))
+    segments.append((t0, f"{v0:.6f}"))
 
     for i in range(len(sorted_kfs) - 1):
         k_start = sorted_kfs[i]
@@ -340,10 +340,10 @@ def _keyframe_expr(
             val_diff = val_end - val_start
 
         if abs(val_diff) < 1e-6:
-            seg_expr = f"{val_start:.4f}"
+            seg_expr = f"{val_start:.6f}"
         else:
             tau = f"(({time_var}-{t_start:.6f})/{dt:.6f})"
-            easing = k_start.easing
+            easing = resolve_segment_easing(k_start.easing, k_end.easing)
             if easing == "ease_in":
                 factor = f"({tau}*{tau})"
             elif easing == "ease_out":
@@ -354,12 +354,12 @@ def _keyframe_expr(
                 factor = "0"
             else:
                 factor = tau
-            seg_expr = f"({val_start:.4f}+({val_diff:.4f})*{factor})"
+            seg_expr = f"({val_start:.6f}+({val_diff:.6f})*{factor})"
 
         segments.append((t_end, seg_expr))
 
     v_last = getattr(sorted_kfs[-1], prop_name)
-    expr = f"{v_last:.4f}"
+    expr = f"{v_last:.6f}"
     for t_thresh, seg_content in reversed(segments):
         expr = f"if(lt({time_var},{t_thresh:.6f}),{seg_content},{expr})"
 
@@ -481,15 +481,23 @@ def _video_chain(
                 clip.keyframes, "rotation", origin, clip.rotation, time_var="t", is_angle=True
             )
             if max_diag is not None:
-                steps.append(f"rotate=a='({expr_rot})*PI/180':ow='max(hypot(iw,ih),{max_diag})':oh='max(hypot(iw,ih),{max_diag})':c=black@0")
+                steps.append(
+                    f"rotate=a='({expr_rot})*PI/180':ow='2*ceil(max(hypot(iw,ih),{max_diag})/2)':oh='2*ceil(max(hypot(iw,ih),{max_diag})/2)':c=black@0"
+                )
             else:
-                steps.append(f"rotate=a='({expr_rot})*PI/180':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=black@0")
+                steps.append(
+                    f"rotate=a='({expr_rot})*PI/180':ow='2*ceil(hypot(iw,ih)/2)':oh='2*ceil(hypot(iw,ih)/2)':c=black@0"
+                )
         elif abs(clip.rotation) >= 0.1:
             rad = math.radians(clip.rotation)
             if max_diag is not None:
-                steps.append(f"rotate={rad:.4f}:ow='max(rotw({rad:.4f}),{max_diag})':oh='max(roth({rad:.4f}),{max_diag})':c=black@0")
+                steps.append(
+                    f"rotate={rad:.4f}:ow='2*ceil(max(rotw({rad:.4f}),{max_diag})/2)':oh='2*ceil(max(roth({rad:.4f}),{max_diag})/2)':c=black@0"
+                )
             else:
-                steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=black@0")
+                steps.append(
+                    f"rotate={rad:.4f}:ow='2*ceil(rotw({rad:.4f})/2)':oh='2*ceil(roth({rad:.4f})/2)':c=black@0"
+                )
 
         if clip.has_keyframes:
             has_anim_opacity = any(
@@ -595,15 +603,23 @@ def _video_chain(
                 clip.keyframes, "rotation", origin, clip.rotation, time_var="t", is_angle=True
             )
             if max_diag is not None:
-                steps.append(f"rotate=a='({expr_rot})*PI/180':ow='max(hypot(iw,ih),{max_diag})':oh='max(hypot(iw,ih),{max_diag})':c=black@0")
+                steps.append(
+                    f"rotate=a='({expr_rot})*PI/180':ow='2*ceil(max(hypot(iw,ih),{max_diag})/2)':oh='2*ceil(max(hypot(iw,ih),{max_diag})/2)':c=black@0"
+                )
             else:
-                steps.append(f"rotate=a='({expr_rot})*PI/180':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=black@0")
+                steps.append(
+                    f"rotate=a='({expr_rot})*PI/180':ow='2*ceil(hypot(iw,ih)/2)':oh='2*ceil(hypot(iw,ih)/2)':c=black@0"
+                )
         elif abs(clip.rotation) >= 0.1:
             rad = math.radians(clip.rotation)
             if max_diag is not None:
-                steps.append(f"rotate={rad:.4f}:ow='max(rotw({rad:.4f}),{max_diag})':oh='max(roth({rad:.4f}),{max_diag})':c=black@0")
+                steps.append(
+                    f"rotate={rad:.4f}:ow='2*ceil(max(rotw({rad:.4f}),{max_diag})/2)':oh='2*ceil(max(roth({rad:.4f}),{max_diag})/2)':c=black@0"
+                )
             else:
-                steps.append(f"rotate={rad:.4f}:ow='rotw({rad:.4f})':oh='roth({rad:.4f})':c=black@0")
+                steps.append(
+                    f"rotate={rad:.4f}:ow='2*ceil(rotw({rad:.4f})/2)':oh='2*ceil(roth({rad:.4f})/2)':c=black@0"
+                )
 
         if clip.has_keyframes:
             has_anim_opacity = any(
@@ -988,7 +1004,7 @@ def _transition_video_chain(
     return [
         f"[{side.index}:v]" + ",".join(steps) + raw,
         f"color=c=black:s={project.width}x{project.height}:r={fps:.6f}:d={side.duration:.6f}{base}",
-        f"{base}{raw}overlay=x='({clip.x:.4f}*W-w/2)':y='({clip.y:.4f}*H-h/2)'"
+        f"{base}{raw}overlay=x='round(({clip.x:.6f})*W-w/2)':y='round(({clip.y:.6f})*H-h/2)'"
         f":eof_action=pass:repeatlast=0,format=yuv420p{label}",
     ]
 
@@ -1091,17 +1107,17 @@ def _compose_video_piece(
         origin = _clip_stream_origin(piece)
         expr_x = _keyframe_expr(piece.clip.keyframes, "x", origin, piece.clip.x)
         expr_y = _keyframe_expr(piece.clip.keyframes, "y", origin, piece.clip.y)
-        coordinates = f"x='({expr_x})*W-w/2':y='({expr_y})*H-h/2'"
+        coordinates = f"x='round(({expr_x})*W-w/2)':y='round(({expr_y})*H-h/2)'"
     elif is_overlay_item or has_transform:
         coordinates = (
-            f"x='({piece.clip.x:.4f}*W-w/2)':y='({piece.clip.y:.4f}*H-h/2)'"
+            f"x='round(({piece.clip.x:.6f})*W-w/2)':y='round(({piece.clip.y:.6f})*H-h/2)'"
         )
     else:
         coordinates = "x=0:y=0"
     eof = "repeat:repeatlast=1" if hold_last else "pass:repeatlast=0"
     filters.append(
         f"{current}[v{piece.index}]"
-        f"overlay={coordinates}:eof_action={eof}"
+        f"overlay={coordinates}:eof_action={eof}:format=auto"
         f":enable='{enable}'{label}"
     )
     return label
@@ -1171,7 +1187,7 @@ def _compose_video_transition(
         # O resultado do xfade termina no timestamp do último quadro, um passo
         # antes do fim nominal. Sustentá-lo fecha essa fração final; o enable
         # abaixo encerra o overlay no corte e impede qualquer congelamento.
-        f"{current}{visible_label}overlay=x=0:y=0:eof_action=repeat:repeatlast=1:"
+        f"{current}{visible_label}overlay=x=0:y=0:eof_action=repeat:repeatlast=1:format=auto:"
         f"enable='between(t,{render.offset:.6f},"
         f"{render.offset + render.visible_duration:.6f})'{label}"
     )

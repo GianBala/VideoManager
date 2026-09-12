@@ -58,6 +58,7 @@ from videomanager.domain.constants import MIN_TRANSITION_DURATION
 
 from videomanager.domain.preview import fit_size
 
+from videomanager.domain.keyframe import ClipTransform
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import create_preset_keyframes
 from videomanager.presentation.qt.fonts import ensure_application_fonts
@@ -459,12 +460,102 @@ class _Preview(QLabel):
         y = (self.height() - target_h) // 2
         return QRect(x, y, target_w, target_h)
 
+    def _image_overlay_geometry(
+        self, clip: Clip, transform: ClipTransform, vrect: QRect
+    ) -> tuple[float, float, float, float]:
+        """Repete a grade de pixels usada pelo ``overlay`` do FFmpeg.
+
+        O quadro pausado desenha Adicionais no Qt para que possam ser movidos
+        sem esperar uma nova renderização. Durante o play, porém, o FFmpeg os
+        compõe sobre um canvas YUV 4:2:0: largura, altura e coordenadas do
+        ``overlay`` acabam alinhadas em blocos de dois pixels. Desenhar aqui
+        com os valores fracionários fazia a imagem saltar um ou dois pixels
+        assim que a reprodução assumia a tela.
+        """
+        if self._pixmap is not None and not self._pixmap.isNull():
+            output_w, output_h = self._pixmap.width(), self._pixmap.height()
+        else:
+            output_w, output_h = self._proj_w, self._proj_h
+
+        # É a mesma redução de canvas de ``composer._preview_project``. Para
+        # telas pequenas o compositor trabalha no tamanho original e só amplia
+        # o resultado no último filtro, por isso não basta usar ``vrect``.
+        compose_w, compose_h = fit_size(
+            self._proj_w,
+            self._proj_h,
+            min(self._proj_w, output_w),
+            min(self._proj_h, output_h),
+        )
+        media_w = clip.media.width if clip.media is not None else None
+        media_h = clip.media.height if clip.media is not None else None
+        canonical_w, canonical_h = image_base_size(
+            media_w, media_h, self._proj_w, self._proj_h
+        )
+        base_w = max(
+            2,
+            int(round(canonical_w * compose_w / self._proj_w / 2.0) * 2),
+        )
+        base_h = max(
+            2,
+            int(round(canonical_h * compose_h / self._proj_h / 2.0) * 2),
+        )
+
+        base_sx = max(0.05, clip.scale_x)
+        base_sy = max(0.05, clip.scale_y)
+        animated_scale = clip.has_keyframes and (
+            any(
+                abs(k.scale_x - base_sx) > 0.01
+                or abs(k.scale_y - base_sy) > 0.01
+                for k in clip.keyframes
+            )
+            or any(
+                abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x)
+                > 0.01
+                or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y)
+                > 0.01
+                for i in range(len(clip.keyframes) - 1)
+            )
+        )
+        if animated_scale:
+            # O filtro com ``eval=frame`` usa ``trunc``; o caminho estático usa
+            # ``round`` ao montar o comando.
+            item_w = max(2, int(base_w * max(0.05, transform.scale_x) / 2.0) * 2)
+            item_h = max(2, int(base_h * max(0.05, transform.scale_y) / 2.0) * 2)
+        else:
+            item_w = max(
+                2,
+                int(round(base_w * max(0.05, transform.scale_x) / 2.0) * 2),
+            )
+            item_h = max(
+                2,
+                int(round(base_h * max(0.05, transform.scale_y) / 2.0) * 2),
+            )
+
+        # O filtro overlay do FFmpeg avalia a expressão com round(), correspondendo a
+        # round-half-away-from-zero em C (math.floor(v + 0.5) para valores não negativos).
+        x = float(f"{transform.x:.6f}")
+        y = float(f"{transform.y:.6f}")
+        raw_left = x * compose_w - item_w / 2.0
+        raw_top = y * compose_h - item_h / 2.0
+        left = math.floor(raw_left + 0.5) if raw_left >= 0 else math.ceil(raw_left - 0.5)
+        top = math.floor(raw_top + 0.5) if raw_top >= 0 else math.ceil(raw_top - 0.5)
+        scale_x = vrect.width() / max(1.0, float(compose_w))
+        scale_y = vrect.height() / max(1.0, float(compose_h))
+        return (
+            vrect.x() + (left + item_w / 2.0) * scale_x,
+            vrect.y() + (top + item_h / 2.0) * scale_y,
+            item_w * scale_x,
+            item_h * scale_y,
+        )
+
     def _clip_geometry(self, clip: Clip) -> tuple[float, float, float, float] | None:
         vrect = self._video_rect()
         if vrect.width() <= 0 or vrect.height() <= 0:
             return None
         t_offset = max(0.0, self._position - clip.start)
         transform = clip.transform_at(t_offset)
+        if clip.overlay_type == "image" or clip.is_image:
+            return self._image_overlay_geometry(clip, transform, vrect)
         cx = vrect.x() + transform.x * vrect.width()
         cy = vrect.y() + transform.y * vrect.height()
         sx = max(0.05, transform.scale_x)
@@ -488,18 +579,6 @@ class _Preview(QLabel):
             preview_scale = vrect.width() / max(1.0, float(self._proj_w))
             w = max(20.0, full_w * preview_scale * sx)
             h = max(20.0, full_h * preview_scale * sy)
-            return (cx, cy, w, h)
-
-        if clip.overlay_type == "image" or clip.is_image:
-            if clip.media is not None:
-                base_w, base_h = image_base_size(
-                    clip.media.width, clip.media.height, self._proj_w, self._proj_h
-                )
-            else:
-                base_w, base_h = (400, 300)
-            preview_scale = vrect.width() / max(1.0, float(self._proj_w))
-            w = max(20.0, base_w * preview_scale * sx)
-            h = max(20.0, base_h * preview_scale * sy)
             return (cx, cy, w, h)
 
         if clip.has_image and not clip.audio_only and clip.media is not None:
@@ -526,7 +605,6 @@ class _Preview(QLabel):
         geom = self._clip_geometry(clip)
         if geom is None:
             return None, None
-
         t_offset = max(0.0, self._position - clip.start)
         transform = clip.transform_at(t_offset)
         cx, cy, w, h = geom
@@ -602,6 +680,7 @@ class _Preview(QLabel):
                     self._drag_init_scale_x = transform.scale_x
                     self._drag_init_scale_y = transform.scale_y
                     self._drag_init_rot = transform.rotation
+                    self._drag_init_opacity = transform.opacity
                     self._drag_init_time_offset = t_offset
                     self._drag_init_keyframes = self._active_clip.keyframes if self._active_clip.has_keyframes else ()
                     self._drag_init_dist = max(10.0, math.hypot(pos.x() - cx, pos.y() - cy))
@@ -886,47 +965,84 @@ class _Preview(QLabel):
 
             if self._active_clip.has_keyframes and getattr(self, "_drag_init_keyframes", None):
                 init_kfs = self._drag_init_keyframes
-                if self._drag_mode.startswith("scale_"):
-                    dx_norm = new_x - self._drag_init_x
-                    dy_norm = new_y - self._drag_init_y
-                    first_k = init_kfs[0]
-                    uniform_scale = all(
-                        abs(k.scale_x - first_k.scale_x) < 0.005 and abs(k.scale_y - first_k.scale_y) < 0.005
-                        for k in init_kfs
+                t_offset = getattr(
+                    self,
+                    "_drag_init_time_offset",
+                    max(0.0, min(self._active_clip.duration, self._position - self._active_clip.start)),
+                )
+                nearest = None
+                for k in init_kfs:
+                    if abs(k.time_offset - t_offset) <= 0.08:
+                        nearest = k
+                        break
+
+                if nearest is not None:
+                    target_time = nearest.time_offset
+                    target_easing = nearest.easing
+                    target_opacity = nearest.opacity
+
+                    target_kf = Keyframe(
+                        time_offset=target_time,
+                        x=new_x,
+                        y=new_y,
+                        scale_x=new_scale_x,
+                        scale_y=new_scale_y,
+                        rotation=new_rot,
+                        opacity=target_opacity,
+                        easing=target_easing,
                     )
-                    ratio_x = new_scale_x / max(0.001, getattr(self, "_drag_init_scale_x", self._drag_init_scale))
-                    ratio_y = new_scale_y / max(0.001, getattr(self, "_drag_init_scale_y", self._drag_init_scale))
-                    if uniform_scale:
-                        new_kfs = tuple(
-                            replace(k, x=k.x + dx_norm, y=k.y + dy_norm, scale_x=new_scale_x, scale_y=new_scale_y)
-                            for k in init_kfs
-                        )
-                    else:
-                        new_kfs = tuple(
-                            replace(
-                                k,
-                                x=k.x + dx_norm,
-                                y=k.y + dy_norm,
-                                scale_x=max(0.05, min(10.0, k.scale_x * ratio_x)),
-                                scale_y=max(0.05, min(10.0, k.scale_y * ratio_y)),
-                            )
-                            for k in init_kfs
-                        )
-                elif self._drag_mode == "move":
-                    dx_norm = new_x - self._drag_init_x
-                    dy_norm = new_y - self._drag_init_y
                     new_kfs = tuple(
-                        replace(k, x=k.x + dx_norm, y=k.y + dy_norm)
-                        for k in init_kfs
-                    )
-                elif self._drag_mode == "rotate":
-                    delta_rot = new_rot - self._drag_init_rot
-                    new_kfs = tuple(
-                        replace(k, rotation=(k.rotation + delta_rot) % 360.0)
-                        for k in init_kfs
+                        sorted(
+                            [k for k in init_kfs if abs(k.time_offset - target_time) >= 1e-4] + [target_kf],
+                            key=lambda k: k.time_offset,
+                        )
                     )
                 else:
-                    new_kfs = init_kfs
+                    if self._drag_mode.startswith("scale_"):
+                        dx_norm = new_x - self._drag_init_x
+                        dy_norm = new_y - self._drag_init_y
+                        first_k = init_kfs[0]
+                        uniform_scale = all(
+                            abs(k.scale_x - first_k.scale_x) < 0.005 and abs(k.scale_y - first_k.scale_y) < 0.005
+                            for k in init_kfs
+                        )
+                        ratio_x = new_scale_x / max(0.001, getattr(self, "_drag_init_scale_x", self._drag_init_scale))
+                        ratio_y = new_scale_y / max(0.001, getattr(self, "_drag_init_scale_y", self._drag_init_scale))
+                        if uniform_scale:
+                            new_kfs = tuple(
+                                replace(k, x=k.x + dx_norm, y=k.y + dy_norm, scale_x=new_scale_x, scale_y=new_scale_y)
+                                for k in init_kfs
+                            )
+                        else:
+                            new_kfs = tuple(
+                                replace(
+                                    k,
+                                    x=k.x + dx_norm,
+                                    y=k.y + dy_norm,
+                                    scale_x=max(0.05, min(10.0, k.scale_x * ratio_x)),
+                                    scale_y=max(0.05, min(10.0, k.scale_y * ratio_y)),
+                                )
+                                for k in init_kfs
+                            )
+                    else:
+                        target_time = t_offset
+                        target_opacity = getattr(self, "_drag_init_opacity", 1.0)
+                        target_kf = Keyframe(
+                            time_offset=target_time,
+                            x=new_x,
+                            y=new_y,
+                            scale_x=new_scale_x,
+                            scale_y=new_scale_y,
+                            rotation=new_rot,
+                            opacity=target_opacity,
+                            easing="linear",
+                        )
+                        new_kfs = tuple(
+                            sorted(
+                                [k for k in init_kfs if abs(k.time_offset - target_time) >= 1e-4] + [target_kf],
+                                key=lambda k: k.time_offset,
+                            )
+                        )
 
                 self._active_clip = replace(
                     self._active_clip,
@@ -974,6 +1090,7 @@ class _Preview(QLabel):
             clip_id = self._drag_clip_id
             self._drag_mode = None
             self._drag_clip_id = -1
+            self._drag_init_keyframes = None
             self.overlay_transform_finished.emit(clip_id)
             self.update()
             event.accept()
@@ -1080,7 +1197,13 @@ class _Preview(QLabel):
                     if (has_active and clip.clip_id == ov_clip.clip_id)
                     else ov_clip
                 )
-                geom = self._clip_geometry(draw_clip)
+                if draw_clip.overlay_type == "image" or draw_clip.is_image:
+                    vrect = self._video_rect()
+                    t_offset = max(0.0, self._position - draw_clip.start)
+                    transform = draw_clip.transform_at(t_offset)
+                    geom = self._image_overlay_geometry(draw_clip, transform, vrect)
+                else:
+                    geom = self._clip_geometry(draw_clip)
                 if not geom:
                     continue
                 t_offset = max(0.0, self._position - draw_clip.start)
@@ -1097,7 +1220,11 @@ class _Preview(QLabel):
                     if img_pix and not img_pix.isNull():
                         painter.save()
                         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-                        painter.drawPixmap(QRectF(-w / 2, -h / 2, w, h).toRect(), img_pix)
+                        painter.drawPixmap(
+                            QRectF(-w / 2.0, -h / 2.0, w, h),
+                            img_pix,
+                            QRectF(img_pix.rect()),
+                        )
                         painter.restore()
                     elif draw_clip.overlay_type == "text":
                         painter.save()
@@ -1149,10 +1276,14 @@ class _Preview(QLabel):
 
         # 6. Alças de controle e Bounding Box no topo de tudo
         if has_active:
-            geom = self._clip_geometry(clip)
+            t_offset = max(0.0, self._position - clip.start)
+            transform = clip.transform_at(t_offset)
+            if clip.overlay_type == "image" or clip.is_image:
+                vrect = self._video_rect()
+                geom = self._image_overlay_geometry(clip, transform, vrect)
+            else:
+                geom = self._clip_geometry(clip)
             if geom:
-                t_offset = max(0.0, self._position - clip.start)
-                transform = clip.transform_at(t_offset)
                 cx, cy, w, h = geom
                 painter.save()
                 painter.translate(cx, cy)
@@ -1976,66 +2107,75 @@ class _ClipPropertiesWidget(QWidget):
             new_sx = float(changes.get("scale_x", cur_t.scale_x))
             new_sy = float(changes.get("scale_y", cur_t.scale_y))
             new_rot = float(changes.get("rotation", cur_t.rotation))
-            new_op = float(changes.get("opacity", cur_t.opacity))
 
             is_scale_change = "scale" in changes or "scale_x" in changes or "scale_y" in changes
-            is_pos_change = "x" in changes or "y" in changes
 
-            uniform_scale = False
-            if is_scale_change and len(self._clip.keyframes) > 1:
+            if is_scale_change and not nearest:
                 first_k = self._clip.keyframes[0]
-                uniform_scale = all(
+                uniform_scale = len(self._clip.keyframes) > 1 and all(
                     abs(k.scale_x - first_k.scale_x) < 0.005 and abs(k.scale_y - first_k.scale_y) < 0.005
                     for k in self._clip.keyframes
                 )
-
-            if is_scale_change and (uniform_scale or not nearest):
-                factor_x = new_sx / max(0.001, cur_t.scale_x)
-                factor_y = new_sy / max(0.001, cur_t.scale_y)
-                dx_norm = new_x - cur_t.x
-                dy_norm = new_y - cur_t.y
-                new_kfs = tuple(
-                    replace(
-                        k,
-                        x=k.x + dx_norm,
-                        y=k.y + dy_norm,
-                        scale_x=new_sx if uniform_scale else max(0.05, min(10.0, k.scale_x * factor_x)),
-                        scale_y=new_sy if uniform_scale else max(0.05, min(10.0, k.scale_y * factor_y)),
+                if uniform_scale or len(self._clip.keyframes) > 1:
+                    factor_x = new_sx / max(0.001, cur_t.scale_x)
+                    factor_y = new_sy / max(0.001, cur_t.scale_y)
+                    dx_norm = new_x - cur_t.x
+                    dy_norm = new_y - cur_t.y
+                    new_kfs = tuple(
+                        replace(
+                            k,
+                            x=k.x + dx_norm,
+                            y=k.y + dy_norm,
+                            scale_x=new_sx if uniform_scale else max(0.05, min(10.0, k.scale_x * factor_x)),
+                            scale_y=new_sy if uniform_scale else max(0.05, min(10.0, k.scale_y * factor_y)),
+                        )
+                        for k in self._clip.keyframes
                     )
-                    for k in self._clip.keyframes
-                )
-                updated_clip = replace(
-                    self._clip,
-                    keyframes=new_kfs,
-                    scale=changes.get("scale", (new_sx + new_sy) / 2.0),
-                    scale_x=new_sx,
-                    scale_y=new_sy,
-                    x=new_x,
-                    y=new_y,
-                )
-            elif is_pos_change and not nearest:
-                dx_norm = new_x - cur_t.x
-                dy_norm = new_y - cur_t.y
-                new_kfs = tuple(
-                    replace(k, x=k.x + dx_norm, y=k.y + dy_norm)
-                    for k in self._clip.keyframes
-                )
-                updated_clip = replace(
-                    self._clip,
-                    keyframes=new_kfs,
-                    x=new_x,
-                    y=new_y,
-                )
+                    updated_clip = replace(
+                        self._clip,
+                        keyframes=new_kfs,
+                        scale=changes.get("scale", (new_sx + new_sy) / 2.0),
+                        scale_x=new_sx,
+                        scale_y=new_sy,
+                        x=new_x,
+                        y=new_y,
+                    )
+                else:
+                    target_time = t_offset
+                    easing = self._combo_easing.currentData() or "linear"
+                    new_kf = Keyframe(
+                        time_offset=target_time,
+                        x=new_x,
+                        y=new_y,
+                        scale_x=new_sx,
+                        scale_y=new_sy,
+                        rotation=new_rot,
+                        opacity=float(changes.get("opacity", cur_t.opacity)),
+                        easing=easing,
+                    )
+                    updated_clip = self._clip.with_keyframe(new_kf)
+                    updated_clip = replace(
+                        updated_clip,
+                        scale=changes.get("scale", (new_sx + new_sy) / 2.0),
+                        scale_x=new_sx,
+                        scale_y=new_sy,
+                        x=new_x,
+                        y=new_y,
+                        rotation=new_rot,
+                    )
             else:
-                easing = nearest.easing if nearest else (self._combo_easing.currentData() or "linear")
+                target_time = nearest.time_offset if nearest is not None else t_offset
+                easing = nearest.easing if nearest is not None else (self._combo_easing.currentData() or "linear")
+                base_kf = nearest.transform if nearest is not None else cur_t
+
                 new_kf = Keyframe(
-                    time_offset=t_offset,
-                    x=new_x,
-                    y=new_y,
-                    scale_x=new_sx,
-                    scale_y=new_sy,
-                    rotation=new_rot,
-                    opacity=new_op,
+                    time_offset=target_time,
+                    x=float(changes.get("x", base_kf.x)),
+                    y=float(changes.get("y", base_kf.y)),
+                    scale_x=float(changes.get("scale_x", base_kf.scale_x)),
+                    scale_y=float(changes.get("scale_y", base_kf.scale_y)),
+                    rotation=float(changes.get("rotation", base_kf.rotation)),
+                    opacity=float(changes.get("opacity", base_kf.opacity)),
                     easing=easing,
                 )
                 updated_clip = self._clip.with_keyframe(new_kf)
