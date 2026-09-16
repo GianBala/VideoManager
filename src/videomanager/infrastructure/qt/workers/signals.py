@@ -62,6 +62,8 @@ class PreviewSignals(QObject):
     do atual e apareceria na tela como um salto para trás.
     """
 
+    failed = Signal(int, str)  # token, diagnóstico seguro e traduzido
+    cancelled = Signal(int)
     frame = Signal(int, object)  # token, RawFrame
     primed = Signal(int)  # token; primeiro quadro de reprodução já está em memória
     strip = Signal(int, int, object)  # token, índice na tira, RawFrame

@@ -174,3 +174,37 @@ class TestCapaDaMidia:
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
 pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+@pytest.mark.usefixtures('desktop_app')
+def test_falha_de_frame_tem_diagnostico_e_cancelamento_nao_e_erro(monkeypatch):
+    from videomanager.application.errors import VideoManagerError
+    def fail(*args, **kwargs):
+        raise VideoManagerError('Não foi possível ler uma mídia da prévia.')
+    monkeypatch.setattr('videomanager.infrastructure.qt.workers.preview_worker.frame_from_command', fail)
+    worker = FrameWorker(['ffmpeg'], (2, 2), 0, 42)
+    failures, done, cancelled = [], [], []
+    worker.signals.failed.connect(lambda token, msg: failures.append((token, msg)))
+    worker.signals.done.connect(lambda: done.append(True))
+    worker.signals.cancelled.connect(cancelled.append)
+    worker.run()
+    assert failures == [(42, 'Não foi possível ler uma mídia da prévia.')]
+    assert len(done) == 1
+    worker.cancel()
+    worker.run()
+    assert len(failures) == 1
+    assert cancelled == [42]
+    assert len(done) == 2
+
+
+def test_worker_concluido_libera_processo_e_buffers(monkeypatch):
+    from types import SimpleNamespace
+    from videomanager.domain.preview import RawFrame
+    process = SimpleNamespace(stdout=b'buffer retido', poll=lambda: 0)
+    def render(*args, register, **kwargs):
+        register(process)
+        return RawFrame(bytes(12), 2, 2)
+    monkeypatch.setattr('videomanager.infrastructure.qt.workers.preview_worker.frame_from_command', render)
+    worker = FrameWorker(['ffmpeg'], (2, 2), 0, 1)
+    worker.run()
+    assert worker._guard._process is None

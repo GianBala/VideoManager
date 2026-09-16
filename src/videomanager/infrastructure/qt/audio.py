@@ -346,6 +346,8 @@ class AudioPreview(QObject):
         self._feed.stop()
         self._stopping.set()
         if self._sink is not None:
+            if self._device is not None:
+                self._origin = self.position
             self._sink.stop()
             self._sink.deleteLater()
             self._sink = None

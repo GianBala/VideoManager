@@ -17,7 +17,7 @@ from .audio import AudioPreview
 from .workers.queue import JobQueue
 from .workers.media_worker import MediaWorker
 from .workers.function_worker import FunctionWorker
-from .workers.preview_worker import FrameWorker, PlaybackWorker, FilmstripWorker, WaveformWorker, KeyframeWorker
+from .workers.preview_worker import FrameWorker, PlaybackWorker, FilmstripWorker, WaveformWorker, KeyframeWorker, InteractionWorker
 from .workers.engine_worker import FFmpegSetupWorker, EngineUpdateWorker, is_packaged
 from .workers.hwaccel_worker import HardwareProbeWorker
 from .workers.probe_worker import ProbeWorker
@@ -75,6 +75,9 @@ class DesktopRuntime:
         command = composer.frame_command(request.project, request.seconds, request.size, tools,
                                          text_assets=dict(request.text_assets))
         return FrameWorker(command, request.size, request.seconds, request.token)
+
+    def interaction_worker(self, plan, size, tools, token, *, text_assets=None):
+        return InteractionWorker(composer.interaction_commands(plan, size, tools, text_assets=text_assets), token)
 
     def playback_worker(
         self,

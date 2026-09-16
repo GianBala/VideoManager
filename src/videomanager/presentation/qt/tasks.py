@@ -12,6 +12,7 @@ Guardar a referência até o worker sinalizar conclusão resolve de forma explí
 from __future__ import annotations
 
 from typing import Any
+from weakref import ref
 
 from PySide6.QtCore import QRunnable, QThreadPool, SignalInstance
 
@@ -31,8 +32,11 @@ class WorkerRunner:
         vazamento silencioso: nada quebra, a memória só não é liberada.
         """
         self._alive.add(worker)
+        reference = ref(worker)
         for signal in done_signals:
-            signal.connect(lambda *_, ref=worker: self._alive.discard(ref))
+            # A coleção mantém o worker vivo; o callback não deve formar um
+            # ciclo worker → sinais → callback → worker depois da conclusão.
+            signal.connect(lambda *_, reference=reference: self._alive.discard(reference()))
         self._pool.start(worker)
 
     def cancel_all(self) -> None:

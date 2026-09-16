@@ -18,6 +18,7 @@ from PySide6.QtCore import QRunnable, Slot
 
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.errors import VideoManagerError
+from videomanager.application.media.preview import PreviewFrameInbox
 from dataclasses import replace
 
 from videomanager.infrastructure.ffmpeg.preview import FramePump
@@ -65,6 +66,11 @@ class _Interruption:
         if process is not None and process.poll() is None:
             process.terminate()
 
+    def release(self) -> None:
+        """Libera também os buffers que Popen.communicate guarda internamente."""
+        with self._lock:
+            self._process = None
+
 
 class FrameWorker(QRunnable):
     """Um quadro da composição, para a tela de prévia.
@@ -96,13 +102,20 @@ class FrameWorker(QRunnable):
     def run(self) -> None:
         try:
             frame = frame_from_command(
-                self._command, self._size, register=self._guard.register
+                self._command, self._size, register=self._guard.register, strict=True
             )
-            if frame is not None:
+            if frame is not None and not self._guard.cancelled:
                 emit_safely(
                     self.signals.frame, self._token, replace(frame, seconds=self._seconds)
                 )
+        except (VideoManagerError, OSError, subprocess.SubprocessError) as exc:
+            if not self._guard.cancelled:
+                message = str(exc) if isinstance(exc, VideoManagerError) else "Não foi possível atualizar a prévia."
+                emit_safely(self.signals.failed, self._token, message)
         finally:
+            self._guard.release()
+            if self._guard.cancelled:
+                emit_safely(self.signals.cancelled, self._token)
             emit_safely(self.signals.done)
 
 
@@ -159,6 +172,7 @@ class FilmstripWorker(QRunnable):
                         return
                     emit_safely(self.signals.strip, self._token, index, frame)
         finally:
+            self._guard.release()
             emit_safely(self.signals.done)
 
 
@@ -206,6 +220,7 @@ class WaveformWorker(QRunnable):
             if png:
                 emit_safely(self.signals.waveform, self._token, png)
         finally:
+            self._guard.release()
             emit_safely(self.signals.done)
 
 
@@ -240,6 +255,7 @@ class KeyframeWorker(QRunnable):
             # deixar a escolha do ponto com o próprio ffmpeg.
             emit_safely(self.signals.keyframes, ())
         finally:
+            self._guard.release()
             emit_safely(self.signals.done)
 
 
@@ -258,7 +274,7 @@ class PlaybackWorker(QRunnable):
         size: tuple[int, int],
         token: int,
         *,
-        fps: int,
+        fps: float,
         autostart: bool = True,
     ) -> None:
         super().__init__()
@@ -267,6 +283,8 @@ class PlaybackWorker(QRunnable):
         # entregue noutro — e a reprodução sai em velocidade errada sem nada
         # falhar. Por isso não há valor padrão aqui.
         self._pump = FramePump(command, start, size, fps=fps)
+        self._inbox = PreviewFrameInbox()
+        self._cancelled = False
         self._token = token
         self._gate = threading.Event()
         if autostart:
@@ -278,6 +296,7 @@ class PlaybackWorker(QRunnable):
         self._gate.set()
 
     def cancel(self) -> None:
+        self._cancelled = True
         self._gate.set()
         self._pump.stop()
 
@@ -288,11 +307,49 @@ class PlaybackWorker(QRunnable):
                 gate=self._gate,
                 on_primed=lambda: emit_safely(self.signals.primed, self._token),
             ):
-                emit_safely(self.signals.frame, self._token, frame)
+                if not self._cancelled and self._inbox.publish(frame):
+                    emit_safely(self.signals.frame, self._token, self._inbox)
+        except (VideoManagerError, OSError, subprocess.SubprocessError) as exc:
+            if not self._cancelled:
+                message = str(exc) if isinstance(exc, VideoManagerError) else "A reprodução da prévia foi interrompida por uma falha."
+                emit_safely(self.signals.failed, self._token, message)
         finally:
+            if self._cancelled:
+                emit_safely(self.signals.cancelled, self._token)
             emit_safely(self.signals.done)
 
 __all__ = [
     'FFmpegTools',
     'VideoManagerError',
 ]
+
+
+class InteractionWorker(QRunnable):
+    """Prepara três imagens uma vez; os movimentos seguintes não abrem processos."""
+    def __init__(self, commands, token):
+        super().__init__()
+        self._commands, self._token = commands, token
+        self._guard = _Interruption()
+        self.signals = PreviewSignals()
+
+    def cancel(self):
+        self._guard.cancel()
+
+    @Slot()
+    def run(self):
+        from videomanager.infrastructure.ffmpeg.preview import _run
+        try:
+            images = []
+            for command in self._commands:
+                if self._guard.cancelled:
+                    return
+                images.append(_run(command, 30, self._guard.register, strict=True))
+                self._guard.release()
+            if not self._guard.cancelled:
+                emit_safely(self.signals.frame, self._token, tuple(images))
+        except (VideoManagerError, OSError, subprocess.SubprocessError):
+            # A composição normal continua disponível se a preparação falhar.
+            pass
+        finally:
+            self._guard.release()
+            emit_safely(self.signals.done)
