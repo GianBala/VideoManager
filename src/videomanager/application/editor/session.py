@@ -24,6 +24,37 @@ class EditorSession:
         self._future: list[Project] = []
         self._generation = 0
         self._revision = 0
+        self._edit: tuple[Project, tuple[Project, ...], tuple[Project, ...]] | None = None
+
+    @property
+    def editing(self) -> bool:
+        return self._edit is not None
+
+    @property
+    def edit_origin(self) -> Project:
+        return self._edit[0] if self._edit else self.project
+
+    def begin_edit(self) -> None:
+        self.commit_edit()
+        self._edit = (self.project, self.history, self.future)
+
+    def commit_edit(self) -> None:
+        if self._edit is None:
+            return
+        original, history, future = self._edit
+        self._edit = None
+        if self.project == original:
+            self._history[:] = history
+            self._future[:] = future
+
+    def cancel_edit(self) -> None:
+        if self._edit is None:
+            return
+        original, history, future = self._edit
+        self._edit = None
+        self.replace_current(original)
+        self._history[:] = history
+        self._future[:] = future
 
     @property
     def project(self) -> Project:
@@ -55,6 +86,12 @@ class EditorSession:
         # A igualdade de conteúdo ignora IDs; seleção e histórico precisam
         # receber também um documento igual com identidades diferentes.
         if project is not self._project:
+            if self._edit is not None:
+                original, history, _ = self._edit
+                # Reconstituir a pilha a partir do início impede uma entrada
+                # por atualização e preserva o limite de 60 transações.
+                self._history[:] = (*history, original)[-60:]
+                self._future.clear()
             self._project = project
             self._revision += 1
 
@@ -70,6 +107,7 @@ class EditorSession:
         return True
 
     def reset(self, project: Project, path: Path | None = None) -> None:
+        self._edit = None
         self._generation += 1
         self._revision += 1
         self._project = project
@@ -79,11 +117,13 @@ class EditorSession:
         self.mark_saved()
 
     def remember(self) -> None:
+        self.commit_edit()
         self._history.append(self.project)
         del self._history[:-60]
         self._future.clear()
 
     def undo(self) -> bool:
+        self.commit_edit()
         if not self._history:
             return False
         self._future.append(self.project)
@@ -91,6 +131,7 @@ class EditorSession:
         return True
 
     def redo(self) -> bool:
+        self.commit_edit()
         if not self._future:
             return False
         self._history.append(self.project)

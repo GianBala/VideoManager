@@ -117,3 +117,34 @@ def test_identidades_novas_sao_instaladas_e_preservadas_no_historico():
     assert session.project is before.project
     assert session.redo()
     assert session.project is project
+
+
+def test_transacao_sem_alteracao_preserva_redo_e_nao_consume_historico():
+    session = EditorSession()
+    original = session.project
+    session.remember()
+    session.replace_current(replace(original, width=640))
+    session.undo()
+    future = session.future
+    session.begin_edit()
+    session.replace_current(replace(original, width=720))
+    session.replace_current(original)
+    session.commit_edit()
+    assert session.history == ()
+    assert session.future == future
+
+
+def test_transacao_agrupa_atualizacoes_e_cancelamento_restaura_tudo():
+    session = EditorSession()
+    original = session.project
+    session.begin_edit()
+    for width in (640, 720, 800):
+        session.replace_current(replace(original, width=width))
+    session.commit_edit()
+    assert len(session.history) == 1
+    assert session.undo() and session.project is original
+    session.begin_edit()
+    session.replace_current(replace(original, width=900))
+    assert not session.future
+    session.cancel_edit()
+    assert session.project is original and session.future[0].width == 800
