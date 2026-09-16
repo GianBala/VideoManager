@@ -214,8 +214,8 @@ class TestTiraDeMiniaturas:
         tempos = self.tempos(0.0, 24.0, 12)
         passo = tempos[1] - tempos[0]
         comando = _strip_command(Path("/m/v.mp4"), tempos, (160, 90), TOOLS)
-        filtro = comando[comando.index("-vf") + 1]
-        assert filtro.startswith(f"fps={1.0 / passo:.9f}")
+        filtro = comando[comando.index("-filter_complex") + 1]
+        assert filtro.startswith(f"[0:v]fps={1.0 / passo:.9f}")
 
     def test_arredonda_para_cima_como_o_ss_faz(self) -> None:
         # O padrão do filtro é "near", e com ele a tira inteira saía meio passo
@@ -225,7 +225,7 @@ class TestTiraDeMiniaturas:
         comando = _strip_command(
             Path("/m/v.mp4"), self.tempos(0.0, 12.0, 12), (160, 90), TOOLS
         )
-        assert "round=up" in comando[comando.index("-vf") + 1]
+        assert "round=up" in comando[comando.index("-filter_complex") + 1]
 
     def test_escala_depois_de_escolher_os_quadros(self) -> None:
         # Escalar antes seria escalar todo quadro decodificado para jogar fora a
@@ -233,7 +233,7 @@ class TestTiraDeMiniaturas:
         comando = _strip_command(
             Path("/m/v.mp4"), self.tempos(0.0, 12.0, 12), (160, 90), TOOLS
         )
-        filtro = comando[comando.index("-vf") + 1]
+        filtro = comando[comando.index("-filter_complex") + 1]
         assert filtro.index("fps=") < filtro.index("scale=160:90")
 
     def test_pede_exatamente_a_quantidade_de_miniaturas(self) -> None:
