@@ -25,7 +25,7 @@ from videomanager.domain.project import TrackKind
 from videomanager.domain.project import next_clip_id
 from videomanager.domain.project import reserve_project_ids
 
-PROJECT_VERSION = 1
+PROJECT_VERSION = 2
 
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
@@ -57,6 +57,8 @@ def _dict_to_media(data: dict[str, object], base_dir: Path | None) -> tuple[Medi
     resolved_path = raw_path
     missing: Path | None = None
     is_pseudo = str(raw_path).startswith(("Texto_", "Filtro_", "Transição_"))
+    if not is_pseudo and not raw_path.is_absolute() and base_dir is not None:
+        resolved_path = (base_dir / raw_path).resolve()
 
     if not is_pseudo and not resolved_path.exists():
         # Tenta pelo caminho relativo se disponível
@@ -175,6 +177,8 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
         "width": project.width,
         "height": project.height,
         "fps": project.fps,
+        "text_reference_width": project.text_reference_width,
+        "text_reference_height": project.text_reference_height,
         "tracks": tracks_data,
     }
 
@@ -214,7 +218,7 @@ def _validate_project(data: dict[str, object]) -> None:
     version = data.get("version", 1)
     if type(version) is not int or not 1 <= version <= PROJECT_VERSION:
         raise ProjectError(f"Versão de projeto {version} não é suportada por esta versão do aplicativo.")
-    for name in ("width", "height", "fps"):
+    for name in ("width", "height", "fps", "text_reference_width", "text_reference_height"):
         number(data, name, positive=True, integer=name != "fps")
     tracks = data.get("tracks", [])
     if not isinstance(tracks, list):
@@ -247,8 +251,13 @@ def _validate_project(data: dict[str, object]) -> None:
                 fail("duração do clipe")
             for name in ("duration", "speed", "scale", "scale_x", "scale_y"):
                 number(clip, name, positive=True)
-            for name in ("start", "in_point", "stroke_width", "chromakey_similarity", "chromakey_blend"):
+            for name in ("start", "stroke_width", "chromakey_similarity", "chromakey_blend"):
                 number(clip, name, minimum=0, integer=name == "stroke_width")
+            media_data = clip.get("media")
+            static = (isinstance(media_data, dict) and media_data.get("kind") == "IMAGE") or clip.get("overlay_type") in ("text", "filter")
+            # Versões anteriores geravam entrada negativa ao estender um
+            # adicional. Recuperar só fontes estáticas, sem aceitar NaN/inf.
+            number(clip, "in_point", minimum=None if static else 0)
             number(clip, "font_size", positive=True, integer=True)
             for name in ("gain_db", "x", "y", "rotation"):
                 number(clip, name)
@@ -265,7 +274,7 @@ def _validate_project(data: dict[str, object]) -> None:
                 for kf in clip["keyframes"]:
                     if not isinstance(kf, dict):
                         fail("quadro-chave")
-                    number(kf, "time_offset", minimum=0)
+                    number(kf, "time_offset", minimum=0 if data.get("version", 1) == 1 else None)
                     for kf_num in ("x", "y", "rotation"):
                         number(kf, kf_num)
                     for kf_pos in ("scale_x", "scale_y"):
@@ -388,7 +397,8 @@ def _project_from_dict(
                 media=media,
                 start=float(c_data.get("start", 0.0)),
                 duration=float(c_data.get("duration", 0.0)),
-                in_point=float(c_data.get("in_point", 0.0)),
+                in_point=(0.0 if media.kind is MediaKind.IMAGE or overlay_type in ("text", "filter")
+                          else float(c_data.get("in_point", 0.0))),
                 gain_db=float(c_data.get("gain_db", 0.0)),
                 muted=bool(c_data.get("muted", False)),
                 detached=bool(c_data.get("detached", False)),
@@ -442,6 +452,8 @@ def _project_from_dict(
         width=width,
         height=height,
         fps=fps,
+        text_reference_width=int(data.get("text_reference_width", width)),
+        text_reference_height=int(data.get("text_reference_height", height)),
     ).with_normalized_transitions()
     return project, missing_files
 
@@ -453,6 +465,7 @@ def save_project(project: Project, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = project_to_dict(project, base_dir=path.parent)
         text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
+        _backup_v1(path)
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
                                          prefix=f".{path.name}-", suffix=".tmp", delete=False) as handle:
             tmp_path = Path(handle.name)
@@ -469,6 +482,37 @@ def save_project(project: Project, path: Path) -> None:
             except OSError:
                 # Uma falha de limpeza não pode esconder o erro de gravação.
                 pass
+
+
+def _backup_v1(path: Path) -> None:
+    """Preserva o original antes da primeira migração, sem sobrescrever cópias."""
+    if not path.is_file():
+        return
+    original = path.read_bytes()
+    try:
+        old = json.loads(original)
+    except (ValueError, UnicodeDecodeError):
+        return
+    if not isinstance(old, dict) or old.get('version', 1) != 1:
+        return
+    number = 0
+    while True:
+        suffix = '' if number == 0 else f'.{number}'
+        backup = path.with_name(path.name + '.v1.bak' + suffix)
+        try:
+            handle = backup.open('xb')
+        except FileExistsError:
+            number += 1
+            continue
+        try:
+            with handle:
+                handle.write(original)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError:
+            backup.unlink(missing_ok=True)
+            raise
+        return
 
 
 def load_project(path: Path, tools: FFmpegTools | None = None) -> tuple[Project, list[Path]]:
