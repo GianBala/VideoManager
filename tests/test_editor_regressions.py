@@ -679,6 +679,53 @@ def test_gesto_continuo_apresenta_snapshot_com_indicacao_de_atualizacao(panel, m
     assert len(shown) == 2 and not panel._loading_label.text()
 
 
+def test_arrastar_agulha_apresenta_quadros_intermediarios_sem_piscar_aviso(panel, monkeypatch):
+    """Arrastar a agulha mostra o que já ficou pronto, e não só quando a mão para.
+
+    Exigir que o instante do quadro fosse o último pedido descartava todos os
+    quadros do gesto — a prévia ficava parada com o aviso de atualização aceso
+    do começo ao fim do arrasto.
+    """
+    from videomanager.application.media.preview import PreviewResultKey
+    from videomanager.domain.preview import RawFrame
+    _clock_project(panel)
+    panel._playing = False
+    panel._frame_revision = 1
+    monkeypatch.setattr(panel, '_preview_size', lambda: (2, 2))
+    shown = []
+    monkeypatch.setattr(panel, '_show_frame', shown.append)
+
+    # A agulha já avançou para 2,0 quando o quadro pedido para 1,0 fica pronto.
+    panel._wanted = 2.0
+    panel._frame_token = 91
+    panel._frame_key = PreviewResultKey(90, panel._generation, 1, 1.0, (2, 2), 30)
+    panel._on_frame(90, RawFrame(bytes(12), 2, 2, 1.0))
+    assert len(shown) == 1, 'quadro intermediário do arrasto foi descartado'
+    assert panel._preview._position == 1.0, 'o quadro deve entrar com o próprio instante'
+    assert not panel._loading_label.text(), 'aviso não pode piscar a cada quadro do gesto'
+
+    # Chegando o quadro da posição pedida, o aviso é encerrado de vez.
+    panel._frame_key = PreviewResultKey(91, panel._generation, 1, 2.0, (2, 2), 30)
+    panel._on_frame(91, RawFrame(bytes(12), 2, 2, 2.0))
+    assert len(shown) == 2
+    assert not panel._loading_label.text()
+    assert not panel._loading_timer.isActive()
+
+
+def test_aviso_de_atualizacao_aparece_quando_a_previa_realmente_para(panel, monkeypatch):
+    """O aviso continua existindo: some do gesto, não da espera de verdade."""
+    _clock_project(panel)
+    panel._playing = False
+    monkeypatch.setattr(panel, '_start_frame', lambda: None)
+    panel._frame_busy = False
+    panel._timeline.set_position(3.0)
+    panel._request_frame()
+    assert not panel._loading_label.text(), 'não anuncia antes da espera'
+    assert panel._loading_timer.isActive()
+    panel._loading_timer.timeout.emit()  # o prazo venceu sem quadro
+    assert panel._loading_label.text()
+
+
 @pytest.mark.parametrize('width', [1280, 1440])
 def test_editor_estreito_permite_alcancar_controles_e_status(panel, desktop_app, width):
     from PySide6.QtCore import QPoint
