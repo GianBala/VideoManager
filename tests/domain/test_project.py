@@ -319,8 +319,8 @@ class TestMover:
         projeto = montado(clip(start=0.0, duration=5.0), clip(start=20.0, duration=5.0))
         segundo = projeto.tracks[0].clips[1]
         movido = projeto.moved(segundo.clip_id, 0, 2.0)
-        assert movido.tracks[0].clips[1].start == pytest.approx(5.0), (
-            "encosta no vizinho em vez de passar por cima"
+        assert movido.tracks[0].clips[1].start == pytest.approx(20.0), (
+            "D04: troca sem sobrepor nem eliminar o vão de 15 segundos"
         )
 
     def test_nao_vai_para_antes_do_zero(self) -> None:
@@ -816,3 +816,112 @@ class TestOrdemDasTrilhas:
         # Deve permitir esticar além dos 5s originais
         esticado = p.resized(c_filter.clip_id, "fim", 15.0)
         assert esticado.clips[0].duration == 13.0
+
+
+def test_foto_inicial_esta_em_trilha_compativel():
+    project = new_project(FOTO)
+    index, photo = project.find(project.clips[0].clip_id)
+    assert accepts(project.tracks[index].kind, photo)
+
+
+@pytest.mark.parametrize('overlay', ['none', 'text', 'filter'])
+def test_estender_estatico_a_esquerda_nao_cria_origem_negativa(overlay):
+    item = clip(FOTO, start=5, duration=2, overlay_type=overlay)
+    project = Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(item,)),))
+    resized = project.resized(item.clip_id, 'inicio', 1).find(item.clip_id)[1]
+    assert resized.start == 1 and resized.end == 7
+    assert resized.in_point == 0
+
+
+@pytest.mark.parametrize('sound', [False, True])
+def test_mjpeg_em_avi_e_video(sound):
+    streams = (LocalStream(0, 'video', 'mjpeg', width=320, height=240, fps=25),)
+    if sound:
+        streams += (LocalStream(1, 'audio', 'pcm_s16le'),)
+    local = LocalMedia(Path('/m/camera.avi'), 5, 'avi', 100, streams)
+    reference = media_ref(local)
+    assert reference.kind is MediaKind.VIDEO
+    assert reference.duration == 5 and reference.has_audio == sound
+
+
+@pytest.mark.parametrize('fmt,codec', [('image2', 'mjpeg'), ('png_pipe', 'png'), ('webp_pipe', 'webp')])
+def test_formatos_estaticos_continuam_imagens(fmt, codec):
+    local = LocalMedia(Path('/m/foto'), None, fmt, 100, (LocalStream(0, 'video', codec),))
+    assert media_ref(local).kind is MediaKind.IMAGE
+
+
+@pytest.mark.parametrize('rotation,size', [(90, (480, 640)), (-90, (480, 640)), (180, (640, 480))])
+def test_orientacao_define_geometria_visual(rotation, size):
+    local = LocalMedia(Path('/m/rot.mp4'), 2, 'mp4', 100,
+                       (LocalStream(0, 'video', 'h264', width=640, height=480, rotation=rotation),))
+    reference = media_ref(local)
+    assert (reference.width, reference.height) == size
+    assert (local.video.width, local.video.height) == (640, 480)
+
+
+@pytest.mark.parametrize('speed', [.5, 2, 3])
+def test_aparar_velocidade_mapeia_origem_e_limite(speed):
+    item = clip(VIDEO, start=5, duration=6, in_point=6, speed=speed)
+    project = montado(item)
+    left = project.resized(item.clip_id, 'inicio', 6).find(item.clip_id)[1]
+    assert left.in_point == pytest.approx(6 + speed)
+    extended = project.resized(item.clip_id, 'fim', 1000).find(item.clip_id)[1]
+    assert extended.out_point == pytest.approx(VIDEO.duration)
+    assert extended.duration == pytest.approx((VIDEO.duration-6)/speed)
+
+
+def test_destacar_audio_preserva_intervalo_em_velocidade_alterada():
+    item = clip(VIDEO, start=3, duration=5, in_point=2, speed=2)
+    result = montado(item).detached_audio(item.clip_id)
+    detached = next(c for c in result.clips if c.audio_only)
+    assert detached.speed == 2 and detached.source_time(6) == item.source_time(6)
+    assert detached.out_point == item.out_point
+
+
+def test_marcador_nao_limita_vao_livre():
+    item = clip(start=0, duration=5)
+    marker = clip(FOTO, start=4, duration=2, overlay_type='transition')
+    assert Track(TrackKind.VIDEO, clips=(item, marker)).free_range(2, ignore=item.clip_id) == (0, float('inf'))
+
+
+def test_dividir_video_mantem_transicao_na_metade_adjacente():
+    left, right = clip(start=0, duration=6), clip(start=6, duration=6, in_point=6)
+    marker = clip(FOTO, start=5, duration=2, overlay_type='transition',
+                  transition_left_id=left.clip_id, transition_right_id=right.clip_id)
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(left, right, marker)),))
+    divided = project.split(left.clip_id, 3)
+    retained = divided.find(marker.clip_id)[1]
+    context = divided.transition_context(retained)
+    assert context is not None and context.left.start == 3 and context.cut == 6
+
+
+def test_swap_preserva_vao_intervalo_total_e_inverte_sem_perda():
+    media = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, duration=30)
+    first = Clip(media, 1, 2)
+    second = Clip(media, 5, 4)
+    third = Clip(media, 10, 2)
+    p = Project(tracks=(Track(TrackKind.VIDEO, clips=(first, second, third)),))
+    swapped = p._swapped(0, first, 6)
+    a, b = swapped.find(second.clip_id)[1], swapped.find(first.clip_id)[1]
+    assert (a.start, b.start, b.end) == (1, 7, 9)
+    assert b.start - a.end == 2
+    assert swapped.find(third.clip_id)[1] == third
+    restored = swapped._swapped(0, b, 1)
+    assert restored == p
+
+
+def test_slideshow_e_explicito_e_nao_usa_logo_para_mudar_video():
+    from videomanager.domain.project import slideshow_canvas
+    photo = MediaRef(Path('/m/foto.jpg'), MediaKind.IMAGE, width=3000, height=4000)
+    p = new_project(photo)
+    assert (p.width, p.height) == (1920, 1080)
+    assert slideshow_canvas(p) == (1440, 1920)
+    mixed = p.with_clip(1, Clip(MediaRef(Path('/m/video.mp4'), MediaKind.VIDEO, width=1920, height=1080), 0, 3))
+    assert slideshow_canvas(mixed) is None
+
+
+def test_escala_global_proporcional_respeita_limites_da_curva_inteira():
+    from videomanager.domain.keyframe import Keyframe
+    item = clip(duration=4, keyframes=(Keyframe(0), Keyframe(3, scale_x=10, scale_y=5)))
+    changed = item.with_edited_transform(0, {'scale_x': 2, 'scale_y': 2}, fps=30, whole_animation=True)
+    assert changed.keyframes == item.keyframes

@@ -33,7 +33,7 @@ class ClipTransform:
 
 @dataclass(frozen=True)
 class Keyframe:
-    """Estado de transformação em um instante relativo do bloco (em segundos)."""
+    """Ponto da curva em segundos locais; negativos sustentam trechos recortados."""
 
     time_offset: float
     x: float = 0.5
@@ -45,8 +45,6 @@ class Keyframe:
     easing: str = "linear"
 
     def __post_init__(self) -> None:
-        if self.time_offset < 0:
-            object.__setattr__(self, "time_offset", 0.0)
         if self.easing not in SUPPORTED_EASINGS:
             object.__setattr__(self, "easing", "linear")
         clamped_opacity = max(0.0, min(1.0, float(self.opacity)))
@@ -180,7 +178,10 @@ def create_preset_keyframes(
     - fade_in: surge de opacidade 0.0 para a opacidade alvo com linear.
     - zoom_in: surge com escala 0.05 e opacidade 0.0 para a escala alvo com ease_out.
     """
-    dur = max(0.1, duration)
+    if duration <= 0:
+        return (Keyframe(0, x=target.x, y=target.y, scale_x=target.scale_x,
+                         scale_y=target.scale_y, rotation=target.rotation, opacity=target.opacity),)
+    dur = duration
     if preset_name == "slide_up":
         k0 = Keyframe(
             time_offset=0.0,

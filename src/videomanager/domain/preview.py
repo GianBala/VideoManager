@@ -1,14 +1,15 @@
 """Quadros e geometria da prévia, sem decodificação nem objetos Qt."""
 from dataclasses import dataclass
+import math
 
 MAX_PREVIEW_FPS = 60
 
 
-def preview_fps(project_fps: float | None) -> int:
+def preview_fps(project_fps: float | None) -> float:
     """Taxa da reprodução de prévia para um projeto."""
-    if not project_fps or project_fps <= 0:
+    if not project_fps or not math.isfinite(project_fps) or project_fps <= 0:
         return 30
-    return max(1, min(MAX_PREVIEW_FPS, round(project_fps)))
+    return max(1, min(MAX_PREVIEW_FPS, project_fps))
 
 
 BYTES_PER_PIXEL = 3  # rgb24

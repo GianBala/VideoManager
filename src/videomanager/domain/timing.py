@@ -1,11 +1,11 @@
 """Tempos, segmentos e escolhas de recorte sem execução de mídia."""
 from __future__ import annotations
 import bisect
+import math
 import re
 from dataclasses import dataclass
 from enum import Enum
 from videomanager.domain.media import LocalMedia
-from videomanager.domain.constants import IMAGE_CODECS
 from videomanager.domain.constants import MIN_SEGMENT
 
 class CutMode(Enum):
@@ -13,6 +13,20 @@ class CutMode(Enum):
 
     FAST = "rapido"  # -c copy: instantâneo, começa no keyframe anterior
     EXACT = "exato"  # recodifica: começa no quadro marcado
+
+
+def source_time(seconds: float, start: float, in_point: float, speed: float) -> float:
+    """Converte tempo da timeline para tempo físico da origem."""
+    return in_point + (seconds - start) * speed
+
+
+def timeline_time(source: float, start: float, in_point: float, speed: float) -> float:
+    """Inversa da conversão para navegar índices da mídia na timeline."""
+    return start + (source - in_point) / speed
+
+
+def available_duration(duration: float, in_point: float, speed: float) -> float:
+    return max(0.0, duration - in_point) / speed
 
 
 _SECONDS = re.compile(r"^\d{1,2}(?:[.,]\d{1,6})?$")
@@ -94,6 +108,11 @@ def frame_time(index: int, fps: float | None) -> float:
     if not fps or fps <= 0:
         return 0.0
     return max(0, index) / fps
+
+
+def last_frame_time(duration: float, fps: float) -> float:
+    """Último quadro exibível no intervalo semiaberto [0, duração)."""
+    return max(0, math.ceil(duration * fps - 1e-8) - 1) / fps
 
 
 def frame_step(fps: float | None) -> float:
@@ -237,4 +256,4 @@ def nearest_keyframe(times: tuple[float, ...], seconds: float) -> float | None:
 def has_real_video(media: LocalMedia) -> bool:
     """Se há trilha de vídeo de verdade, e não a capa embutida de um áudio."""
     stream = media.video
-    return stream is not None and stream.codec.lower() not in IMAGE_CODECS
+    return stream is not None and not media.is_image and not media.video_is_cover
