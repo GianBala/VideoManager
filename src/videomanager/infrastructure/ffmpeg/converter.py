@@ -28,6 +28,7 @@ from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
+from videomanager.infrastructure.ffmpeg.command_assets import filter_script
 from videomanager.infrastructure.storage.outputs import FileOutputStore
 from videomanager.application.ports.output import OutputLease
 
@@ -168,6 +169,8 @@ def probe_file(path: Path, tools: FFmpegTools, *, control: ProcessControl | None
                 sample_rate=_int(raw.get("sample_rate")),
                 channels=_int(raw.get("channels")),
                 language=(raw.get("tags") or {}).get("language"),
+                rotation=_display_rotation(raw),
+                attached_picture=bool((raw.get('disposition') or {}).get('attached_pic')),
             )
         )
 
@@ -178,6 +181,19 @@ def probe_file(path: Path, tools: FFmpegTools, *, control: ProcessControl | None
         size=_int(container.get("size")),
         streams=tuple(streams),
     )
+
+
+def _display_rotation(raw: dict) -> float:
+    """FFmpeg aplica autorotate; os metadados só orientam a geometria da UI."""
+    import math
+    value = next((item.get('rotation') for item in raw.get('side_data_list', [])
+                  if isinstance(item, dict) and item.get('rotation') is not None),
+                 (raw.get('tags') or {}).get('rotate', 0))
+    try:
+        angle = float(value)
+    except (ValueError, TypeError, OverflowError):
+        return 0.0
+    return angle if math.isfinite(angle) else 0.0
 
 
 def _int(value: object) -> int | None:
@@ -551,6 +567,10 @@ class Converter:
     def _run_serial(self, render_target: Path) -> Path:
         args = build_args(self._media, self._target, render_target, self._tools,
                           text_assets=self._text_assets)
+        with filter_script(args, render_target.parent) as prepared:
+            return self._execute_serial(prepared, render_target)
+
+    def _execute_serial(self, args: list[str], render_target: Path) -> Path:
         self._postprocess.check()
         kwargs = subprocess_kwargs()
         kwargs["stdout"] = subprocess.PIPE
