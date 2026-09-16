@@ -1,3 +1,6 @@
+import pytest
+from pathlib import Path
+from videomanager.domain.project import Clip, MediaRef, MediaKind
 from videomanager.domain.keyframe import (
     ClipTransform,
     Keyframe,
@@ -114,9 +117,9 @@ def test_clip_keyframe_methods():
     assert len(track_split.clips) == 2
     left_clip, right_clip = track_split.clips
 
-    assert len(left_clip.keyframes) == 1
-    assert left_clip.keyframes[0].time_offset == 1.0
-    assert abs(right_clip.keyframes[0].time_offset - 1.0) < 1e-4
+    assert len(left_clip.keyframes) == 2  # suporte futuro preserva interpolação
+    assert left_clip.visible_keyframes[0].time_offset == 1.0
+    assert abs(right_clip.visible_keyframes[0].time_offset - 1.0) < 1e-4
 
 
 def test_rotation_interpolation_full_spin():
@@ -173,3 +176,41 @@ def test_interpolate_keyframes_destination_easing():
     # ease_in_out at 0.25 is 2 * 0.25^2 = 0.125
     res = interpolate_keyframes((k0, k1), 0.5, fallback)
     assert abs(res.x - 0.125) < 1e-4
+
+
+@pytest.mark.parametrize('easing', ['linear', 'ease_in', 'ease_out', 'ease_in_out', 'hold'])
+def test_recortes_preservam_funcao_original_em_grade_densa(easing):
+    from dataclasses import asdict
+    from videomanager.domain.project import Project, Track, TrackKind
+    media = MediaRef(Path('/video.mp4'), MediaKind.VIDEO, duration=30)
+    item = Clip(media, start=2, duration=10, keyframes=(
+        Keyframe(0, x=0, y=.1, scale_x=.2, scale_y=.8, rotation=0, opacity=.1, easing=easing),
+        Keyframe(10, x=1, y=.9, scale_x=2, scale_y=1, rotation=720, opacity=.9, easing=easing)))
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(item,)),))
+    divided = project.split(item.clip_id, 7)
+    left, right = divided.tracks[0].sorted_clips()
+    trimmed = project.resized(item.clip_id, 'inicio', 5).find(item.clip_id)[1]
+    for i in range(101):
+        t = i / 10
+        half = left if t < 5 else right
+        assert asdict(half.transform_at(t - (half.start-item.start))) == pytest.approx(asdict(item.transform_at(t)), abs=1e-9)
+        if t >= 3:
+            assert asdict(trimmed.transform_at(t-3)) == pytest.approx(asdict(item.transform_at(t)), abs=1e-9)
+    if easing == 'ease_in':
+        assert right.transform_at(2.5).x == pytest.approx(.5625)
+
+
+def test_edicao_local_preserva_outros_pontos_e_global_alcanca_suportes():
+    from videomanager.domain.project import Clip
+    clip = Clip(None, 0, 2, overlay_type='text', keyframes=(
+        Keyframe(-1, x=.2, scale_x=1), Keyframe(3, x=.6, scale_x=2)))
+    local = clip.with_edited_transform(1, {'scale_x': 3, 'opacity': .4}, fps=30)
+    assert local.keyframes[0] == clip.keyframes[0]
+    assert local.keyframes[-1] == clip.keyframes[-1]
+    assert local.transform_at(1).scale_x == 3
+    assert local.transform_at(1).opacity == .4
+    whole = clip.with_edited_transform(1, {'x': .6, 'scale_x': 3}, fps=30, whole_animation=True)
+    assert len(whole.keyframes) == 2
+    assert whole.keyframes[0].x == pytest.approx(.4)
+    assert whole.keyframes[-1].x == pytest.approx(.8)
+    assert [k.scale_x for k in whole.keyframes] == [2, 4]

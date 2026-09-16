@@ -25,18 +25,19 @@ depois as de áudio. Na composição isso se inverte — a trilha de vídeo mais
 from __future__ import annotations
 
 import threading
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from videomanager.domain.constants import IMAGE_CODECS
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.keyframe import ClipTransform
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import interpolate_keyframes
+from videomanager.domain.timing import source_time, available_duration, frame_index, last_frame_time
 
 if TYPE_CHECKING:  # pragma: no cover - só para o verificador de tipos
     from videomanager.domain.media import LocalMedia
@@ -169,18 +170,20 @@ def media_ref(local: LocalMedia) -> MediaRef:
     para importar o compositor sem fechar um ciclo.
     """
     video = local.video
-    is_image = (
-        video is not None
-        and video.codec.lower() in IMAGE_CODECS
-        and not local.has_audio
-    )
+    is_image = local.is_image
     if is_image:
         kind = MediaKind.IMAGE
-    elif video is not None and video.codec.lower() not in IMAGE_CODECS:
+    elif video is not None and not local.video_is_cover:
         kind = MediaKind.VIDEO
     else:
         kind = MediaKind.AUDIO
 
+    width = display_width(video.width, video.sar) if video else None
+    height = video.height if video else None
+    if video and width and height and video.rotation:
+        radians = math.radians(video.rotation)
+        c, s = abs(math.cos(radians)), abs(math.sin(radians))
+        width, height = round(width * c + height * s), round(width * s + height * c)
     return MediaRef(
         path=local.path,
         kind=kind,
@@ -189,8 +192,8 @@ def media_ref(local: LocalMedia) -> MediaRef:
         # guarda 720×480 para aparecer em 16:9, e é a forma exibida que decide o
         # formato da tela do projeto. Guardar a largura crua fazia a edição
         # nascer com a proporção errada e a imagem achatada.
-        width=display_width(video.width, video.sar) if video else None,
-        height=video.height if video else None,
+        width=width,
+        height=height,
         fps=video.fps if video else None,
         has_audio=local.has_audio,
         channels=local.audio.channels if local.audio else None,
@@ -325,7 +328,7 @@ class Clip:
 
     def source_time(self, seconds: float) -> float:
         """Instante dentro do arquivo que corresponde a um instante da edição."""
-        return self.in_point + max(0.0, (seconds - self.start) * self.speed)
+        return source_time(max(seconds, self.start), self.start, self.in_point, self.speed)
 
     @property
     def gain_label(self) -> str:
@@ -364,12 +367,62 @@ class Clip:
         """Calcula o estado da transformação no tempo relativo informado."""
         return interpolate_keyframes(self.keyframes, time_offset, self.base_transform)
 
+    @property
+    def visible_keyframes(self) -> tuple[Keyframe, ...]:
+        """Pontos editáveis; suportes fora da janela preservam a curva original."""
+        return tuple(k for k in self.keyframes if 0 <= k.time_offset <= self.duration)
+
+    def with_edited_transform(self, offset: float, changes: dict, *, fps: float,
+                              whole_animation: bool = False) -> Clip:
+        """Edita uma pose ou transforma a curva inteira por comando explícito."""
+        names = ("x", "y", "scale_x", "scale_y", "rotation", "opacity")
+        offset = max(0, min(last_frame_time(self.duration, fps), offset))
+        current = self.transform_at(offset)
+        target = replace(current, **{k: v for k, v in changes.items() if k in names})
+        if not self.keyframes:
+            return replace(self, scale=(target.scale_x + target.scale_y) / 2, **{k: getattr(target, k) for k in names})
+        if whole_animation:
+            dx, dy = target.x - current.x, target.y - current.y
+            rotation = target.rotation - current.rotation
+            opacity = max(-min(k.opacity for k in self.keyframes),
+                          min(1 - max(k.opacity for k in self.keyframes), target.opacity - current.opacity))
+            factors = {}
+            for axis in ("scale_x", "scale_y"):
+                factor = getattr(target, axis) / max(.000001, getattr(current, axis))
+                minimum = min(getattr(k, axis) for k in self.keyframes)
+                maximum = max(getattr(k, axis) for k in self.keyframes)
+                factors[axis] = max(.05 / max(minimum, .000001), min(10 / maximum, factor))
+            requested_x = target.scale_x / max(.000001, current.scale_x)
+            requested_y = target.scale_y / max(.000001, current.scale_y)
+            if abs(requested_x - requested_y) < 1e-9:
+                # Um redimensionamento proporcional precisa de um único fator,
+                # inclusive quando um ponto distante já está no limite da escala.
+                values = [value for k in self.keyframes for value in (k.scale_x, k.scale_y)]
+                factor = max(.05 / max(min(values), .000001), min(10 / max(values), requested_x))
+                factors = {'scale_x': factor, 'scale_y': factor}
+            points = tuple(replace(k, x=k.x + dx, y=k.y + dy,
+                                   rotation=k.rotation + rotation, opacity=k.opacity + opacity,
+                                   scale_x=k.scale_x * factors["scale_x"],
+                                   scale_y=k.scale_y * factors["scale_y"]) for k in self.keyframes)
+            updated = replace(self, keyframes=points)
+        else:
+            frame = frame_index(self.start + offset, fps)
+            nearest = min((k for k in self.visible_keyframes
+                           if frame_index(self.start + k.time_offset, fps) == frame),
+                          key=lambda k: abs(k.time_offset - offset), default=None)
+            point = Keyframe(nearest.time_offset if nearest else offset,
+                             **{k: getattr(target, k) for k in names},
+                             easing=nearest.easing if nearest else "linear")
+            updated = self.with_keyframe(point)
+        pose = updated.transform_at(offset)
+        return replace(updated, scale=(pose.scale_x + pose.scale_y) / 2, **{k: getattr(pose, k) for k in names})
+
     def with_keyframe(self, keyframe: Keyframe) -> Clip:
         """Adiciona ou atualiza um keyframe mantendo a lista ordenada por time_offset."""
         clamped_time = max(0.0, min(self.duration, keyframe.time_offset))
         adjusted = replace(keyframe, time_offset=clamped_time)
         filtered = [
-            k for k in self.keyframes if abs(k.time_offset - clamped_time) >= 1e-4
+            k for k in self.keyframes if k not in self.visible_keyframes or abs(k.time_offset - clamped_time) >= 1e-9
         ]
         filtered.append(adjusted)
         filtered.sort(key=lambda k: k.time_offset)
@@ -378,7 +431,7 @@ class Clip:
     def without_keyframe(self, time_offset: float, tolerance: float = 1e-4) -> Clip:
         """Remove o keyframe presente no instante indicado, caso exista."""
         filtered = tuple(
-            k for k in self.keyframes if abs(k.time_offset - time_offset) >= tolerance
+            k for k in self.keyframes if k not in self.visible_keyframes or abs(k.time_offset - time_offset) >= tolerance
         )
         return replace(self, keyframes=filtered)
 
@@ -386,7 +439,7 @@ class Clip:
         self, time_offset: float, tolerance: float = 1e-4
     ) -> Keyframe | None:
         """Retorna o keyframe mais próximo dentro da tolerância, ou None."""
-        for k in self.keyframes:
+        for k in self.visible_keyframes:
             if abs(k.time_offset - time_offset) <= tolerance:
                 return k
         return None
@@ -446,7 +499,7 @@ class Track:
         floor = 0.0
         ceiling = float("inf")
         for clip in self.clips:
-            if clip.clip_id == ignore:
+            if clip.clip_id == ignore or clip.is_transition:
                 continue
             if clip.end <= seconds:
                 floor = max(floor, clip.end)
@@ -492,6 +545,38 @@ class Project:
     width: int = DEFAULT_WIDTH
     height: int = DEFAULT_HEIGHT
     fps: float = DEFAULT_FPS
+    text_reference_width: int | None = None
+    text_reference_height: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.text_reference_width is None:
+            object.__setattr__(self, "text_reference_width", self.width)
+        if self.text_reference_height is None:
+            object.__setattr__(self, "text_reference_height", self.height)
+
+    @property
+    def text_ratio(self) -> float:
+        return min(self.width / self.text_reference_width, self.height / self.text_reference_height)
+
+    def with_output_canvas(self, width: int, height: int, fps: float | None = None) -> Project:
+        has_text = any(c.overlay_type == "text" for c in self.clips)
+        return replace(self, width=width, height=height, fps=self.fps if fps is None else fps,
+                       text_reference_width=self.text_reference_width if has_text else width,
+                       text_reference_height=self.text_reference_height if has_text else height)
+
+    def for_render(self, width: int | None = None, height: int | None = None) -> Project:
+        """Deriva pixels de saída sem modificar fonte, contorno ou curva de edição."""
+        width, height = width or self.width, height or self.height
+        ratio = min(width / self.text_reference_width, height / self.text_reference_height)
+        if ratio == 1 and (width, height) == (self.width, self.height):
+            return self
+        tracks = tuple(replace(t, clips=tuple(
+            replace(c, scale=1.0, scale_x=c.scale_x * ratio, scale_y=c.scale_y * ratio,
+                    keyframes=tuple(replace(k, scale_x=k.scale_x * ratio, scale_y=k.scale_y * ratio)
+                                    for k in c.keyframes)) if c.overlay_type == "text" else c
+            for c in t.clips)) for t in self.tracks)
+        return replace(self, tracks=tracks, width=width, height=height,
+                       text_reference_width=width, text_reference_height=height)
 
     # -- leitura ---------------------------------------------------------
 
@@ -888,6 +973,8 @@ class Project:
             return self
 
         start = max(0.0, start)
+        if origin == track_index and start == clip.start:
+            return self
         if origin == track_index:
             swapped = self._swapped(track_index, clip, start)
             if swapped is not None:
@@ -921,8 +1008,8 @@ class Project:
         que o vizinho encosta no zero antes de o meio dele alcançar o vizinho, e
         aí nenhum arrasto reordenava mais nada.
 
-        Os dois ficam dentro do espaço que já ocupavam juntos, encostados no
-        começo dele. Como esse espaço nunca cresce, a troca não tem como
+        Os dois ficam dentro do espaço que já ocupavam juntos, preservando o
+        vão entre eles. Como esse espaço nunca cresce, a troca não tem como
         esbarrar num terceiro bloco — e por isso não precisa de exceção.
 
         Os dois lados são exatamente complementares: o ponto que dispara a troca
@@ -963,9 +1050,20 @@ class Project:
             (moving, partner) if moving.start > partner.start else (partner, moving)
         )
         base = min(moving.start, partner.start)
-        return self.with_updated_clip(first.clip_id, start=base).with_updated_clip(
-            second.clip_id, start=base + first.duration
-        )
+        earlier, later = sorted((moving, partner), key=lambda c: c.start)
+        gap = max(0.0, later.start - earlier.end)
+        positions = {first.clip_id: base, second.clip_id: base + first.duration + gap}
+        track = self.tracks[track_index]
+        clips = []
+        for clip in track.clips:
+            if clip.clip_id in positions:
+                clip = replace(clip, start=positions[clip.clip_id])
+            elif (clip.is_transition and
+                  {clip.transition_left_id, clip.transition_right_id} == {first.clip_id, second.clip_id}):
+                clip = replace(clip, transition_left_id=first.clip_id, transition_right_id=second.clip_id)
+            clips.append(clip)
+        result = self._replace_track(track_index, replace(track, clips=tuple(sorted(clips, key=lambda c: c.start))))
+        return result._sync_transition_markers(first.clip_id)._sync_transition_markers(second.clip_id)
 
     def resized(self, clip_id: int, edge: str, seconds: float) -> Project:
         """Arrasta uma das pontas do bloco, respeitando a mídia e os vizinhos."""
@@ -1003,7 +1101,7 @@ class Project:
             # Uma imagem não tem começo de arquivo para respeitar; um vídeo não
             # pode ser puxado para antes do primeiro quadro que ele tem.
             limit = (
-                clip.start - clip.in_point
+                clip.start - clip.in_point / clip.speed
                 if not (clip.is_image or clip.is_additional)
                 else floor
             )
@@ -1012,13 +1110,14 @@ class Project:
                 clip_id,
                 start=value,
                 duration=clip.end - value,
-                in_point=clip.in_point + (value - clip.start),
+                in_point=0.0 if clip.is_additional else source_time(value, clip.start, clip.in_point, clip.speed),
+                keyframes=tuple(replace(k, time_offset=k.time_offset - (value-clip.start)) for k in clip.keyframes),
             )
 
         available = (
             float("inf")
             if (clip.is_image or clip.is_additional)
-            else max(0.0, (clip.media.duration or 0.0) - clip.in_point)
+            else available_duration(clip.media.duration or 0.0, clip.in_point, clip.speed)
         )
         value = min(
             max(seconds, clip.start + MIN_SEGMENT), min(ceiling, clip.start + available)
@@ -1040,18 +1139,19 @@ class Project:
             return self
 
         split_offset = seconds - clip.start
-        left_kfs = tuple(k for k in clip.keyframes if k.time_offset <= split_offset)
+        # A janela é a duração do clipe; suportes exteriores continuam na
+        # curva para não reiniciar a fase de easings nem aproximar rotações.
+        left_kfs = clip.keyframes
         right_kfs = tuple(
-            replace(k, time_offset=max(0.0, k.time_offset - split_offset))
+            replace(k, time_offset=k.time_offset - split_offset)
             for k in clip.keyframes
-            if k.time_offset >= split_offset
         )
         left = replace(clip, duration=split_offset, keyframes=left_kfs)
         right = replace(
             clip,
             start=seconds,
             duration=clip.end - seconds,
-            in_point=clip.source_time(seconds),
+            in_point=0.0 if clip.is_additional else clip.source_time(seconds),
             clip_id=next_clip_id(),
             keyframes=right_kfs,
         )
@@ -1062,7 +1162,12 @@ class Project:
                 key=lambda c: c.start,
             )
         )
-        return self._replace_track(index, replace(track, clips=(*clips, right))).tidy()
+        result = self._replace_track(index, replace(track, clips=(*clips, right)))
+        result = replace(result, tracks=tuple(replace(t, clips=tuple(
+            replace(c, transition_left_id=right.clip_id)
+            if c.is_transition and c.transition_left_id == clip_id else c
+            for c in t.clips)) for t in result.tracks))
+        return result.tidy().with_normalized_transitions()
 
     def detached_audio(self, clip_id: int) -> Project:
         """Separa o som de um bloco de vídeo numa trilha de áudio própria.
@@ -1090,6 +1195,7 @@ class Project:
             duration=clip.duration,
             in_point=clip.in_point,
             gain_db=clip.gain_db,
+            speed=clip.speed,
             audio_only=True,
         )
         return project.with_clip(target, detached)
@@ -1164,7 +1270,11 @@ def new_project(media: MediaRef | None = None) -> Project:
         return project
 
     clip = Clip(media=media, start=0.0, duration=media.natural_duration)
-    index = 0 if media.has_video else 1
+    if media.kind is MediaKind.IMAGE:
+        project = project.with_track(TrackKind.ADDITIONAL)
+        index = 0
+    else:
+        index = 0 if media.has_video else 1
     # A tela sai da mesma regra que vale do segundo arquivo em diante, e não de
     # uma conta própria do começo: duas contas para a mesma decisão acabam
     # discordando, e nenhum leitor saberia qual delas manda.
@@ -1211,15 +1321,26 @@ def auto_canvas(project: Project) -> Project:
     videos = [c for c in visible if c.media.kind is MediaKind.VIDEO] or visible
     sized = [c.media for c in videos if c.media.width and c.media.height]
     if not sized:
-        return replace(
-            project, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, fps=DEFAULT_FPS
-        )
+        return project.with_output_canvas(DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_FPS)
 
     biggest = max(sized, key=lambda media: (media.width or 0) * (media.height or 0))
     rates = [media.fps for media in sized if media.fps]
-    return replace(
-        project,
+    return project.with_output_canvas(
         width=_even(biggest.width or DEFAULT_WIDTH),
         height=_even(biggest.height or DEFAULT_HEIGHT),
         fps=min(max(rates), MAX_AUTO_FPS) if rates else DEFAULT_FPS,
     )
+
+
+def slideshow_canvas(project: Project) -> tuple[int, int] | None:
+    """Sugere o formato pela maior foto, somente quando não há vídeo visível."""
+    clips = project.visible_video_clips
+    if any(c.media and c.media.kind is MediaKind.VIDEO for c in clips):
+        return None
+    photos = [c.media for c in clips if c.is_image and c.media and c.media.width and c.media.height
+              and c.overlay_type not in ('text', 'filter', 'transition')]
+    if not photos:
+        return None
+    biggest = max(photos, key=lambda m: m.width * m.height)
+    ratio = min(1, 1920 / max(biggest.width, biggest.height))
+    return _even(round(biggest.width * ratio)), _even(round(biggest.height * ratio))

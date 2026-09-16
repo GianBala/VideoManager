@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from videomanager.domain.constants import IMAGE_CODECS
 
 _AUDIO_EXTENSIONS = {
     "mp3": "mp3",
@@ -39,6 +40,8 @@ class LocalStream:
     sample_rate: int | None = None
     channels: int | None = None
     language: str | None = None
+    rotation: float = 0.0
+    attached_picture: bool = False
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,21 @@ class LocalMedia:
     @property
     def has_audio(self) -> bool:
         return self.audio is not None
+
+    @property
+    def is_image(self) -> bool:
+        """Codec de imagem em contêiner estático; MJPEG em AVI é temporal."""
+        formats = set(self.format_name.lower().split(','))
+        static = any(name in ('image2', 'image2pipe') or name.endswith('_pipe') for name in formats)
+        return bool(self.video and self.video.codec.lower() in IMAGE_CODECS and static and not self.has_audio)
+
+    @property
+    def video_is_cover(self) -> bool:
+        """Mantém descritores antigos de arquivos de áudio sem disposition."""
+        return bool(self.video and (self.video.attached_picture or (
+            self.has_audio and self.video.codec.lower() in IMAGE_CODECS
+            and self.path.suffix.lower().lstrip('.') in {'mp3', 'flac', 'm4a', 'ogg', 'opus', 'wav', 'aac'}
+        )))
 
 
 @dataclass(frozen=True)
