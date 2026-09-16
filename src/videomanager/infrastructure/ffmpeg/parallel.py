@@ -44,6 +44,7 @@ from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
+from videomanager.infrastructure.ffmpeg.command_assets import filter_script
 from videomanager.infrastructure.storage.outputs import FileOutputStore
 from videomanager.application.ports.output import OutputLease
 
@@ -293,6 +294,11 @@ class ParallelExport:
             self._fail(str(exc))
             return
 
+        with filter_script(args, destino.parent) as prepared:
+            self._render_command(index, prepared)
+
+    def _render_command(self, index: int, args: list[str]) -> None:
+        _, span = self._bounds[index]
         kwargs = subprocess_kwargs()
         kwargs["stdout"] = subprocess.PIPE
         kwargs["stderr"] = subprocess.PIPE
@@ -355,6 +361,10 @@ class ParallelExport:
         ffmpeg preso ocupava para sempre a **única** vaga da fila local
         (``_LOCAL_JOBS = 1``), travando toda conversão seguinte da sessão.
         """
+        with filter_script(args) as prepared:
+            self._step_command(prepared, what, timeout=timeout)
+
+    def _step_command(self, args: list[str], what: str, *, timeout: int) -> None:
         self._check_cancelled()
         try:
             proc = subprocess.Popen(args, **subprocess_kwargs())

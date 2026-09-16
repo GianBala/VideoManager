@@ -355,3 +355,23 @@ class TestProporcaoDoPixel:
         # O framerate usa barra; a proporção do pixel, dois-pontos. Aceitar as
         # duas formas aqui esconderia um campo lido do lugar errado.
         assert _ratio("30/1") is None
+
+
+def test_script_longo_e_exclusivo_e_limpo_em_sucesso_e_falha(tmp_path):
+    from videomanager.infrastructure.ffmpeg.command_assets import filter_script
+    graph = 'null;' * 1000
+    args = ['ffmpeg', '-filter_complex', graph, 'saida.mp4']
+    foreign = tmp_path / 'outro.filter_script'
+    foreign.write_text('preservar')
+    with filter_script(args, tmp_path) as first:
+        first_path = Path(first[first.index('-filter_complex_script') + 1])
+        assert first_path.read_text() == graph
+        with pytest.raises(RuntimeError):
+            with filter_script(args, tmp_path) as second:
+                second_path = Path(second[second.index('-filter_complex_script') + 1])
+                assert second_path != first_path and second_path.exists()
+                raise RuntimeError('falha simulada')
+        assert not second_path.exists() and first_path.exists()
+    assert not first_path.exists()
+    assert foreign.read_text() == 'preservar'
+    assert args[1:3] == ['-filter_complex', graph]
