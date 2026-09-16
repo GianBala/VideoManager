@@ -171,6 +171,26 @@ def test_textos_de_versoes_distintas_sao_imutaveis():
     assert render_text_to_image(replace(clip, clip_id=next_clip_id())) == first
 
 
+def test_botao_atualizar_texto_preserva_texto_vazio(panel):
+    """O botão precisa concordar com a digitação ao vivo sobre texto vazio.
+
+    A digitação ao vivo (_on_text_input_changed) já aceita texto vazio de
+    verdade, para casar com o rasterizador — inventar "Texto" aqui fazia a
+    caixa da prévia divergir do que a exportação desenha. O botão "Atualizar
+    texto" tinha ficado para trás com um `.strip() or "Texto"` residual: apagar
+    o campo e clicar no botão reescrevia por cima o texto vazio que o usuário
+    acabara de confirmar.
+    """
+    clip = Clip(MediaRef(Path('Texto_x'), MediaKind.IMAGE), 0.0, 2.0,
+               overlay_type='text', text_content='ola')
+    project = replace(panel._project, tracks=(Track(TrackKind.ADDITIONAL, clips=(clip,)),))
+    panel.install_project(project, None, [], {})
+    panel._timeline.select(clip.clip_id)
+    panel._text_input.setText('')
+    panel._update_selected_text_clip()
+    assert panel._project.find(clip.clip_id)[1].text_content == ''
+
+
 def test_importacao_nao_bloqueia_eventos_e_pode_ser_cancelada(panel, monkeypatch, wait_until):
     import threading
     from PySide6.QtCore import QTimer
@@ -323,6 +343,30 @@ def test_velocidade_que_nao_cabe_nao_trunca_origem(panel):
     panel._on_speed(.5)
     assert panel._project.find(item.clip_id)[1] == item
     assert not panel._session.history
+
+
+def test_velocidade_rejeitada_repetida_avisa_uma_vez_por_sessao(panel, monkeypatch):
+    """Arrastar o spinbox de velocidade dispara valueChanged a cada passo.
+
+    Sem agrupar por sessão (a mesma ideia já usada para ganho/digitação), cada
+    passo rejeitado reabria o QMessageBox modal — "descer a velocidade até não
+    caber" virava uma enxurrada de diálogos em vez de um aviso só.
+    """
+    avisos = []
+    monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: avisos.append(1))
+    media = MediaRef(Path('/m/video.mp4'), MediaKind.VIDEO, duration=20)
+    item, neighbor = Clip(media, 0, 5), Clip(media, 5, 5)
+    project = replace(panel._project, tracks=(Track(TrackKind.VIDEO, clips=(item, neighbor)),))
+    panel.install_project(project, None, [], {})
+    panel._timeline.select(item.clip_id)
+
+    for _ in range(6):
+        panel._on_speed(.5)
+    assert len(avisos) == 1, f'esperava 1 aviso para 6 rejeições seguidas, veio {len(avisos)}'
+
+    panel._end_speed_session()
+    panel._on_speed(.5)
+    assert len(avisos) == 2, 'uma nova sessão de ajuste deve poder avisar de novo'
 
 
 def test_tesoura_com_selecao_fora_do_cursor_nao_corta_outro(panel):

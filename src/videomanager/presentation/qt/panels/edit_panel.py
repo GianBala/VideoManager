@@ -410,6 +410,7 @@ class EditPanel(QWidget):
         self._collapsed = False
         self._gain_session = -1
         self._speed_session = -1
+        self._speed_warned = False
         self._overlay_drag_session = -1
         self._interaction_context = None
         self._interaction_worker = None
@@ -1068,7 +1069,7 @@ class EditPanel(QWidget):
         clip = self._timeline.selected_clip
         if clip is None or clip.overlay_type != "text":
             return
-        text = self._text_input.text().strip() or "Texto"
+        text = self._text_input.text()
         family = self._font_selector.current_family()
         size = self._font_size_spin.value()
         bold = self._bold_btn.isChecked()
@@ -1092,7 +1093,7 @@ class EditPanel(QWidget):
         )
 
     def _insert_text_clip(self) -> None:
-        text = self._text_input.text().strip() or "Texto"
+        text = self._text_input.text()
         font_family = self._font_selector.current_family()
         font_size = self._font_size_spin.value()
         bold = self._bold_btn.isChecked()
@@ -2720,6 +2721,7 @@ class EditPanel(QWidget):
         clip = self._timeline.selected_clip
         if clip is None:
             return
+        self._speed_warned = False
         popup = _SpeedPopup(clip.speed, parent=self)
         def apply_speed(value):
             self._on_speed(value)
@@ -2753,8 +2755,15 @@ class EditPanel(QWidget):
         target_duration = source_span / max(0.1, value)
         new_duration = max(MIN_SEGMENT, target_duration)
         if clip.start + new_duration > ceiling + 1e-9:
-            QMessageBox.warning(self, strings.DIALOG_WARNING_TITLE, strings.EDIT_SPEED_COLLISION)
+            # Um arrasto contínuo no spinbox dispara valueChanged a cada passo:
+            # sem essa marca, cada passo rejeitado reabria o aviso modal, e
+            # "descer a velocidade até não caber mais" virava uma enxurrada de
+            # diálogos em vez de um aviso só por tentativa.
+            if not self._speed_warned:
+                self._speed_warned = True
+                QMessageBox.warning(self, strings.DIALOG_WARNING_TITLE, strings.EDIT_SPEED_COLLISION)
             return
+        self._speed_warned = False
         if self._speed_session != clip.clip_id:
             self._remember()
             self._speed_session = clip.clip_id
@@ -2767,6 +2776,7 @@ class EditPanel(QWidget):
 
     def _end_speed_session(self) -> None:
         self._speed_session = -1
+        self._speed_warned = False
 
     def _on_overlay_transformed(
         self, clip_id: int, x: float, y: float, scale: float, rotation: float
