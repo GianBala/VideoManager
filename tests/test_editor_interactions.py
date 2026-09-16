@@ -295,106 +295,6 @@ def test_dispatch_ignores_shortcuts_in_spinboxes_and_text_edits(
         panel.shutdown()
 
 
-def test_additional_image_overlay_receives_active_filter_in_preview(
-    tmp_path: Path,
-    dummy_tools: FFmpegTools,
-) -> None:
-    """Verifica que imagens de trilhas adicionais recebem filtros ativos da timeline no preview."""
-    test_img = tmp_path / "red.png"
-    img = QPixmap(50, 50)
-    img.fill(Qt.GlobalColor.red)
-    img.save(str(test_img))
-
-    panel = EditPanel(
-        settings=Settings(),
-        ensure_tools=lambda: dummy_tools,
-        editor=build_editor_service(),
-        processing=build_processing_service(),
-        runtime=build_desktop_runtime(),
-    )
-    try:
-        ref_img = MediaRef(path=test_img, kind=MediaKind.IMAGE, duration=10.0, width=50, height=50)
-        c_image = Clip(media=ref_img, start=0.0, duration=10.0, overlay_type="image")
-        t_image = Track(kind=TrackKind.ADDITIONAL, clips=(c_image,))
-
-        ref_f = MediaRef(path=Path("Filtro_PB"), kind=MediaKind.IMAGE, duration=5.0)
-        c_filter = Clip(
-            media=ref_f,
-            start=1.0,
-            duration=5.0,
-            overlay_type="filter",
-            filter_name="pb",
-        )
-        t_filter = Track(kind=TrackKind.ADDITIONAL, clips=(c_filter,))
-
-        ref_v = MediaRef(
-            path=Path("video.mp4"),
-            kind=MediaKind.VIDEO,
-            duration=10.0,
-            width=1920,
-            height=1080,
-        )
-        c_video = Clip(media=ref_v, start=0.0, duration=10.0)
-        t_video = Track(kind=TrackKind.VIDEO, clips=(c_video,))
-
-        # Track 0: Filtro, Track 1: Imagem, Track 2: Vídeo
-        project = Project(tracks=(t_filter, t_image, t_video), width=1920, height=1080, fps=30.0)
-        panel._apply(project)
-
-        # Na posição 2.0s, o filtro "pb" está ativo sobre a imagem
-        panel._timeline.set_position(2.0)
-        panel._update_preview_overlay_clips()
-
-        assert c_image.clip_id in panel._preview._clip_filters
-        assert panel._preview._clip_filters[c_image.clip_id] == ("pb",)
-
-        # Obtém o pixmap do preview e verifica se o filtro foi aplicado (escala de cinza: R == G == B)
-        pix = panel._preview._get_clip_pixmap(c_image, filters=panel._preview._clip_filters[c_image.clip_id])
-        assert pix is not None and not pix.isNull()
-        col = pix.toImage().pixelColor(25, 25)
-        assert col.red() == col.green() == col.blue()
-
-        # Na posição 7.0s, o filtro acabou: a imagem volta a não ter filtro
-        panel._timeline.set_position(7.0)
-        panel._update_preview_overlay_clips()
-        assert c_image.clip_id not in panel._preview._clip_filters
-
-        pix_raw = panel._preview._get_clip_pixmap(c_image, filters=())
-        assert pix_raw is not None
-        col_raw = pix_raw.toImage().pixelColor(25, 25)
-        assert col_raw.red() > 200 and col_raw.green() == 0 and col_raw.blue() == 0
-    finally:
-        panel.shutdown()
-
-
-def test_filter_transformations_in_preview() -> None:
-    """Verifica que as funções de filtro do preview geram imagens válidas com os efeitos corretos."""
-    preview = _Preview()
-    pix = QPixmap(20, 20)
-    pix.fill(Qt.GlobalColor.red)
-
-    # Inverter
-    inv = preview._apply_filters_to_pixmap(pix, ("inverter",))
-    c_inv = inv.toImage().pixelColor(10, 10)
-    assert c_inv.red() == 0 and c_inv.green() == 255 and c_inv.blue() == 255
-
-    # PB
-    pb = preview._apply_filters_to_pixmap(pix, ("pb",))
-    c_pb = pb.toImage().pixelColor(10, 10)
-    assert c_pb.red() == c_pb.green() == c_pb.blue()
-
-    # Sepia
-    sepia = preview._apply_filters_to_pixmap(pix, ("sepia",))
-    c_sepia = sepia.toImage().pixelColor(10, 10)
-    assert c_sepia.red() > c_sepia.green() > c_sepia.blue()
-
-    # Contraste e Vinheta não devem quebrar
-    contrast = preview._apply_filters_to_pixmap(pix, ("contraste",))
-    assert not contrast.isNull()
-    vignette = preview._apply_filters_to_pixmap(pix, ("vinheta",))
-    assert not vignette.isNull()
-
-
 def test_preview_drag_with_keyframes_only_modifies_current_keyframe() -> None:
     """Verifica que arrastar um clipe com keyframes altera apenas o keyframe da agulha atual."""
     preview = _Preview()
@@ -682,3 +582,150 @@ def test_preview_rotate_auto_keyframe_at_new_time() -> None:
 
     assert abs(kfs[2].time_offset - 5.0) < 1e-4
     assert abs(kfs[2].rotation - 0.0) < 1e-4
+
+
+def test_primeiro_keyframe_captura_opacidade_recente():
+    widget = _ClipPropertiesWidget()
+    clip = Clip(None, 0, overlay_type="text", text_content="Teste", duration=2)
+    widget.load_clip(clip, 1920, 1080)
+    widget._spin_opacity.setValue(40)
+    widget._on_toggle_keyframe()
+    assert widget._clip.keyframes[0].opacity == pytest.approx(.4)
+
+
+@pytest.mark.parametrize("fps", [24, 30, 60, 30000 / 1001])
+def test_pontos_adjacentes_sao_editados_e_navegados_individualmente(fps):
+    widget = _ClipPropertiesWidget()
+    clip = Clip(None, 0, overlay_type="text", text_content="Teste", duration=2)
+    clip = clip.with_keyframe(Keyframe(0, x=.2)).with_keyframe(Keyframe(1/fps, x=.8))
+    widget.load_clip(clip, 1920, 1080, fps=fps)
+    positions = []
+    widget.seek_requested.connect(positions.append)
+    widget._on_next_keyframe()
+    assert positions == [pytest.approx(1/fps)]
+    widget._on_toggle_keyframe()
+    assert [k.time_offset for k in widget._clip.keyframes] == [pytest.approx(1/fps)]
+
+
+@pytest.mark.parametrize("frames", [1, 2, 6])
+def test_preset_conclui_no_ultimo_frame_visivel(frames):
+    widget = _ClipPropertiesWidget()
+    clip = Clip(None, 0, overlay_type="text", text_content="Teste", duration=frames/30)
+    widget.load_clip(clip, 1920, 1080, fps=30)
+    widget._combo_presets.setCurrentIndex(widget._combo_presets.findData("fade_in"))
+    assert widget._clip.keyframes[-1].time_offset <= (frames-1)/30 + 1e-8
+    assert widget._clip.transform_at((frames-1)/30).opacity == 1
+
+
+def test_escala_preserva_proporcao_preexistente_e_limites():
+    widget = _ClipPropertiesWidget()
+    clip = Clip(None, 0, duration=2, overlay_type="image", scale_x=2, scale_y=1)
+    widget.load_clip(clip, 1920, 1080)
+    widget._chk_lock_ratio.setChecked(True)
+    widget._spin_scale.setValue(3)
+    assert widget._clip.scale_x == pytest.approx(4)
+    assert widget._clip.scale_y == pytest.approx(2)
+    widget._spin_scale.setValue(10)
+    assert widget._clip.scale_x == pytest.approx(10)
+    assert widget._clip.scale_y == pytest.approx(5)
+    assert widget._spin_scale.value() == pytest.approx(7.5)
+
+
+def test_dimensoes_exibidas_respeitam_escala_aceita():
+    widget = _ClipPropertiesWidget()
+    clip = Clip(None, 0, duration=2, overlay_type="image")
+    widget.load_clip(clip, 1920, 1080)
+    widget._chk_lock_ratio.setChecked(False)
+    widget._spin_w.setValue(1)
+    assert widget._spin_w.value() == round(widget._base_w * widget._clip.scale_x)
+    assert widget._last_w == widget._spin_w.value()
+    widget._spin_h.setValue(1)
+    assert widget._spin_h.value() == round(widget._base_h * widget._clip.scale_y)
+
+
+def test_ancora_ao_selecionar_usa_pose_interpolada():
+    widget = _ClipPropertiesWidget()
+    clip = Clip(None, 0, duration=2, overlay_type="image", keyframes=(
+        Keyframe(0, x=.2, scale_x=1), Keyframe(2, x=.8, scale_x=3)))
+    widget.set_playhead_position(1)
+    widget.load_clip(clip, 1920, 1080)
+    assert widget._last_x == pytest.approx(.5)
+    assert widget._last_w == round(widget._base_w * 2)
+
+
+def test_atualizar_clipe_durante_gesto_preserva_guia():
+    from dataclasses import replace
+    preview = _Preview()
+    clip = Clip(None, 0, duration=2, overlay_type="image")
+    preview.set_active_clip(clip, 1920, 1080)
+    preview._drag_mode = "move"
+    preview._drag_clip_id = clip.clip_id
+    preview._snap_guide_x = 100
+    preview.set_active_clip(replace(clip, x=.6), 1920, 1080)
+    assert preview._snap_guide_x == 100
+
+
+@pytest.mark.parametrize('mod, action', [
+    (Qt.KeyboardModifier.NoModifier, 'vertical'),
+    (Qt.KeyboardModifier.ShiftModifier, 'horizontal'),
+    (Qt.KeyboardModifier.ControlModifier, 'zoom'),
+    (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier, 'zoom'),
+])
+@pytest.mark.parametrize('touchpad', [False, True])
+def test_scroll_executa_apenas_acao_aprovada(mod, action, touchpad):
+    from PySide6.QtGui import QWheelEvent
+    timeline = Timeline(DARK)
+    timeline.resize(900, 350)
+    timeline.set_project(Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(
+        Clip(None, 0, 60, overlay_type='text', text_content='Teste'),)),)))
+    timeline.set_view(10, 20)
+    view = timeline.view
+    vertical = []
+    timeline.vertical_scroll_requested.connect(vertical.append)
+    event = QWheelEvent(QPointF(450, 40), QPointF(450, 40),
+                        QPoint(0, 40) if touchpad else QPoint(),
+                        QPoint() if touchpad else QPoint(0, 120),
+                        Qt.MouseButton.NoButton, mod, Qt.ScrollPhase.ScrollUpdate, False)
+    timeline.wheelEvent(event)
+    assert event.isAccepted()
+    if action == 'vertical':
+        assert vertical and timeline.view == view
+    elif action == 'horizontal':
+        assert not vertical
+        assert timeline.view[0] < view[0]
+        assert timeline.view_span == pytest.approx(view[1] - view[0])
+    else:
+        assert not vertical
+        assert timeline.view_span < view[1] - view[0]
+
+
+def test_filtro_nao_oferece_transformacao_inexistente():
+    widget = _ClipPropertiesWidget()
+    widget.load_clip(Clip(None, 0, 3, overlay_type='filter', filter_name='pb'), 1920, 1080)
+    assert widget._transform_group.isHidden()
+    assert widget._animation_group.isHidden()
+
+
+def test_seek_fullscreen_emite_fim_uma_vez_apos_arrasto():
+    from videomanager.presentation.qt.fullscreen_preview import _SeekBar
+    bar = _SeekBar(Qt.Orientation.Horizontal)
+    bar.resize(400, 30)
+    bar.setRange(0, 4000)
+    positions, released = [], []
+    bar.sliderMoved.connect(positions.append)
+    bar.sliderReleased.connect(lambda: released.append(True))
+    for event_type, x, button, buttons in [
+        (QMouseEvent.Type.MouseButtonPress, 100, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton),
+        (QMouseEvent.Type.MouseMove, 200, Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton),
+        (QMouseEvent.Type.MouseButtonRelease, 300, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton),
+    ]:
+        event = QMouseEvent(event_type, QPointF(x, 10), QPointF(x, 10), button, buttons, Qt.KeyboardModifier.NoModifier)
+        if event_type == QMouseEvent.Type.MouseButtonPress:
+            bar.mousePressEvent(event)
+            assert bar.isSliderDown()
+        elif event_type == QMouseEvent.Type.MouseMove:
+            bar.mouseMoveEvent(event)
+        else:
+            bar.mouseReleaseEvent(event)
+    assert positions == [1000, 2000, 3000]
+    assert released == [True] and not bar.isSliderDown()

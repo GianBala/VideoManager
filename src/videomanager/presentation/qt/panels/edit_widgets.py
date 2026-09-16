@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 
 from PySide6.QtGui import (
     QColor,
@@ -17,7 +17,6 @@ from PySide6.QtGui import (
     QFont,
     QFontDatabase,
     QFontMetrics,
-    QImage,
     QKeyEvent,
     QMouseEvent,
     QPaintEvent,
@@ -26,7 +25,6 @@ from PySide6.QtGui import (
     QPalette,
     QPen,
     QPixmap,
-    QRadialGradient,
 )
 
 from PySide6.QtWidgets import (
@@ -54,6 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager.domain.geometry import image_base_size
+from videomanager.domain.timing import frame_index, last_frame_time
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 
 from videomanager.domain.preview import fit_size
@@ -197,6 +196,7 @@ class _Preview(QLabel):
     play_toggle_requested = Signal()
     overlay_transformed = Signal(int, float, float, float, float)
     overlay_transform_finished = Signal(int)
+    overlay_transform_cancelled = Signal(int)
     clicked_outside = Signal()
     clip_selected = Signal(int)
 
@@ -211,14 +211,22 @@ class _Preview(QLabel):
         self.setText(strings.EDIT_EMPTY)
         self.setProperty("role", "dim")
         self._pixmap: QPixmap | None = None
+        self._interaction_layers: tuple[QPixmap, ...] | None = None
+        self._interaction_visible = False
 
         self._active_clip: Clip | None = None
         self._overlay_clips: tuple[Clip, ...] = ()
+        self._selectable_clips: tuple[Clip, ...] | None = None
+        self._text_ratio = 1.0
+        self._whole_animation = False
+        self._drag_init_time_offset = 0.0
         self._proj_w: int = 1920
         self._proj_h: int = 1080
+        self._fps = 30.0
         self._position: float = 0.0
         self._drag_mode: str | None = None
         self._drag_clip_id: int = -1
+        self._drag_original_clip: Clip | None = None
         self._drag_start_pos = QPoint()
         self._drag_init_x: float = 0.5
         self._drag_init_y: float = 0.5
@@ -226,24 +234,20 @@ class _Preview(QLabel):
         self._drag_init_rot: float = 0.0
         self._drag_init_dist: float = 1.0
         self._drag_init_angle: float = 0.0
+        self._drag_last_angle: float = 0.0
+        self._drag_rotation_delta: float = 0.0
         self._drag_opp_x: float = 0.0
         self._drag_opp_y: float = 0.0
         self._drag_sx: float = 1.0
         self._drag_sy: float = 1.0
         self._drag_w0: float = 1.0
         self._drag_h0: float = 1.0
-        self._clip_pixmaps: dict[Path, QPixmap] = {}
-        self._text_pixmaps: dict[tuple, QPixmap] = {}
-        self._clip_filters: dict[int, tuple[str, ...]] = {}
-        self._filtered_pixmaps: dict[tuple, QPixmap] = {}
         self._is_playing: bool = False
         self._clip_visible: bool = True
         self._snap_enabled: bool = True
         self._snap_guide_x: float | None = None
         self._snap_guide_y: float | None = None
         self._snap_guide_rot: float | None = None
-        self._drag_video_pixmap: QPixmap | None = None
-        self._drag_base_pixmap: QPixmap | None = None
         self.setMouseTracking(True)
 
     def set_snap_enabled(self, enabled: bool) -> None:
@@ -256,135 +260,14 @@ class _Preview(QLabel):
 
     def set_playing(self, playing: bool) -> None:
         if playing:
+            self._interaction_visible = False
             self._drag_mode = None
             self._drag_clip_id = -1
-            self._drag_video_pixmap = None
-            self._drag_base_pixmap = None
             self._snap_guide_x = None
             self._snap_guide_y = None
             self._snap_guide_rot = None
         self._is_playing = playing
         self.update()
-
-    def _apply_filters_to_pixmap(
-        self, pix: QPixmap, filter_names: tuple[str, ...]
-    ) -> QPixmap:
-        if not filter_names or pix.isNull():
-            return pix
-        img = pix.toImage().convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
-        for fname in filter_names:
-            if fname == "pb":
-                gray = img.convertToFormat(QImage.Format.Format_Grayscale8)
-                res = gray.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
-                if img.hasAlphaChannel():
-                    p = QPainter(res)
-                    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-                    p.drawImage(0, 0, img)
-                    p.end()
-                img = res
-            elif fname == "sepia":
-                gray = img.convertToFormat(QImage.Format.Format_Grayscale8)
-                res = gray.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
-                p = QPainter(res)
-                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Multiply)
-                p.fillRect(res.rect(), QColor(255, 220, 180))
-                if img.hasAlphaChannel():
-                    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-                    p.drawImage(0, 0, img)
-                p.end()
-                img = res
-            elif fname == "inverter":
-                res = img.copy()
-                res.invertPixels(QImage.InvertMode.InvertRgb)
-                img = res
-            elif fname == "contraste":
-                res = img.copy()
-                p = QPainter(res)
-                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Overlay)
-                p.drawImage(0, 0, img)
-                if img.hasAlphaChannel():
-                    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-                    p.drawImage(0, 0, img)
-                p.end()
-                img = res
-            elif fname == "vinheta":
-                res = img.copy()
-                center = QPointF(res.width() / 2.0, res.height() / 2.0)
-                radius = math.hypot(res.width() / 2.0, res.height() / 2.0)
-                grad = QRadialGradient(center, radius)
-                grad.setColorAt(0.0, QColor(0, 0, 0, 0))
-                grad.setColorAt(0.5, QColor(0, 0, 0, 40))
-                grad.setColorAt(1.0, QColor(0, 0, 0, 180))
-                p = QPainter(res)
-                p.fillRect(res.rect(), grad)
-                if img.hasAlphaChannel():
-                    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-                    p.drawImage(0, 0, img)
-                p.end()
-                img = res
-        return QPixmap.fromImage(img)
-
-    def _get_clip_pixmap(
-        self, clip: Clip, filters: tuple[str, ...] = ()
-    ) -> QPixmap | None:
-        base_pix: QPixmap | None = None
-        cache_id = None
-        if clip.overlay_type == "text":
-            key = (
-                clip.clip_id,
-                clip.text_content,
-                clip.font_family,
-                clip.font_size,
-                clip.font_bold,
-                clip.font_italic,
-                clip.text_color,
-                clip.stroke_color,
-                clip.stroke_width,
-            )
-            pix = self._text_pixmaps.get(key)
-            if pix is not None and not pix.isNull():
-                base_pix = pix
-            else:
-                try:
-                    if len(self._text_pixmaps) > 60:
-                        self._text_pixmaps.clear()
-                    txt_path = self._rasterizer.render(clip)
-                    pix = QPixmap(str(txt_path))
-                    if not pix.isNull():
-                        self._text_pixmaps[key] = pix
-                    base_pix = pix
-                except Exception:
-                    base_pix = None
-            cache_id = key
-        elif clip.media is not None and clip.media.path:
-            path = clip.media.path
-            pix = self._clip_pixmaps.get(path)
-            if pix is None and path.exists():
-                pix = QPixmap(str(path))
-                if not pix.isNull():
-                    self._clip_pixmaps[path] = pix
-            base_pix = pix
-            cache_id = path
-        else:
-            return None
-
-        if base_pix is None or base_pix.isNull():
-            return None
-
-        if not filters:
-            return base_pix
-
-        filter_key = (cache_id, filters)
-        filtered = self._filtered_pixmaps.get(filter_key)
-        if filtered is not None and not filtered.isNull():
-            return filtered
-
-        if len(self._filtered_pixmaps) > 60:
-            self._filtered_pixmaps.clear()
-
-        applied = self._apply_filters_to_pixmap(base_pix, filters)
-        self._filtered_pixmaps[filter_key] = applied
-        return applied
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(480, self.minimumHeight())
@@ -398,32 +281,39 @@ class _Preview(QLabel):
 
     def set_frame_pixmap(self, pixmap: QPixmap) -> None:
         if not self._drag_mode:
-            self._drag_video_pixmap = None
-            self._drag_base_pixmap = None
+            self._interaction_visible = False
         self._pixmap = pixmap
         if not pixmap.isNull():
             self.setText("")
         self.update()
 
     def clear_frame(self) -> None:
+        self.set_interaction_layers(None)
         self._pixmap = None
-        self._drag_video_pixmap = None
-        self._drag_base_pixmap = None
         self._overlay_clips = ()
-        self._clip_filters = {}
         self._snap_guide_x = None
         self._snap_guide_y = None
         self._snap_guide_rot = None
         self.setText(strings.EDIT_EMPTY)
         self.update()
 
-    def set_overlay_clips(
-        self,
-        clips: Sequence[Clip],
-        clip_filters: dict[int, tuple[str, ...]] | None = None,
-    ) -> None:
+    def set_interaction_layers(self, layers: tuple[QPixmap, ...] | None) -> None:
+        self._interaction_layers = layers
+        if layers is None:
+            self._interaction_visible = False
+        elif self._drag_mode:
+            self._interaction_visible = True
+        self.update()
+
+    def begin_interaction(self) -> bool:
+        if self._interaction_layers is None:
+            return False
+        self._interaction_visible = True
+        self.update()
+        return True
+
+    def set_overlay_clips(self, clips: Sequence[Clip]) -> None:
         self._overlay_clips = tuple(clips)
-        self._clip_filters = dict(clip_filters) if clip_filters else {}
         self.update()
 
     def setPixmap(self, pixmap: QPixmap) -> None:  # noqa: N802
@@ -431,22 +321,20 @@ class _Preview(QLabel):
 
     def set_active_clip(self, clip: Clip | None, proj_w: int, proj_h: int, visible: bool = True) -> None:
         if clip is None or self._active_clip is None or clip.clip_id != self._active_clip.clip_id:
-            if not self._drag_mode:
-                self._drag_video_pixmap = None
-                self._drag_base_pixmap = None
+            self.set_interaction_layers(None)
         self._active_clip = clip
         self._proj_w = max(1, proj_w)
         self._proj_h = max(1, proj_h)
         self._clip_visible = visible
-        self._snap_guide_x = None
-        self._snap_guide_y = None
-        self._snap_guide_rot = None
+        if not (self._drag_mode and clip and self._drag_clip_id == clip.clip_id):
+            self._snap_guide_x = None
+            self._snap_guide_y = None
+            self._snap_guide_rot = None
         self.update()
 
     def set_position(self, pos: float) -> None:
-        if abs(pos - self._position) > 0.001 and not self._drag_mode:
-            self._drag_video_pixmap = None
-            self._drag_base_pixmap = None
+        if abs(pos - self._position) > 0.001:
+            self.set_interaction_layers(None)
         self._position = pos
         self.update()
 
@@ -556,8 +444,6 @@ class _Preview(QLabel):
         transform = clip.transform_at(t_offset)
         if clip.overlay_type == "image" or clip.is_image:
             return self._image_overlay_geometry(clip, transform, vrect)
-        cx = vrect.x() + transform.x * vrect.width()
-        cy = vrect.y() + transform.y * vrect.height()
         sx = max(0.05, transform.scale_x)
         sy = max(0.05, transform.scale_y)
 
@@ -576,19 +462,38 @@ class _Preview(QLabel):
             max_tw = max((fm.horizontalAdvance(l) for l in lines), default=100)
             full_w = max(40, ((max_tw + pad * 2 + 3) // 4) * 4)
             full_h = max(40, ((total_text_h + pad * 2 + 3) // 4) * 4)
-            preview_scale = vrect.width() / max(1.0, float(self._proj_w))
-            w = max(20.0, full_w * preview_scale * sx)
-            h = max(20.0, full_h * preview_scale * sy)
-            return (cx, cy, w, h)
+            output_w = self._pixmap.width() if self._pixmap is not None else self._proj_w
+            output_h = self._pixmap.height() if self._pixmap is not None else self._proj_h
+            compose_w, compose_h = fit_size(self._proj_w, self._proj_h,
+                                           min(self._proj_w, output_w), min(self._proj_h, output_h))
+            ratio = min(compose_w / self._proj_w, compose_h / self._proj_h) * self._text_ratio
+            item_w = max(2, int(full_w * sx * ratio / 2) * 2)
+            item_h = max(2, int(full_h * sy * ratio / 2) * 2)
+            x = float(f"{transform.x:.6f}") * compose_w - item_w / 2
+            y = float(f"{transform.y:.6f}") * compose_h - item_h / 2
+            left = math.floor(x+.5) if x >= 0 else math.ceil(x-.5)
+            top = math.floor(y+.5) if y >= 0 else math.ceil(y-.5)
+            rx, ry = vrect.width()/compose_w, vrect.height()/compose_h
+            return (vrect.x()+(left+item_w/2)*rx, vrect.y()+(top+item_h/2)*ry, item_w*rx, item_h*ry)
 
         if clip.has_image and not clip.audio_only and clip.media is not None:
             mw = clip.media.width or self._proj_w
             mh = clip.media.height or self._proj_h
-            base_w, base_h = fit_size(mw, mh, self._proj_w, self._proj_h)
-            preview_scale = vrect.width() / max(1.0, float(self._proj_w))
-            w = max(20.0, base_w * preview_scale * sx)
-            h = max(20.0, base_h * preview_scale * sy)
-            return (cx, cy, w, h)
+            output_w = self._pixmap.width() if self._pixmap is not None else self._proj_w
+            output_h = self._pixmap.height() if self._pixmap is not None else self._proj_h
+            compose_w, compose_h = fit_size(self._proj_w, self._proj_h,
+                                           min(self._proj_w, output_w), min(self._proj_h, output_h))
+            base_w, base_h = fit_size(mw, mh, compose_w, compose_h)
+            animated = any(abs(k.scale_x - clip.scale_x) > 1e-9 or abs(k.scale_y - clip.scale_y) > 1e-9
+                           for k in clip.keyframes)
+            quantize = int if animated else round
+            w, h = max(2, int(quantize(base_w * sx / 2)) * 2), max(2, int(quantize(base_h * sy / 2)) * 2)
+            left = float(f'{transform.x:.6f}') * compose_w - w / 2
+            top = float(f'{transform.y:.6f}') * compose_h - h / 2
+            left = math.floor(left + .5) if left >= 0 else math.ceil(left - .5)
+            top = math.floor(top + .5) if top >= 0 else math.ceil(top - .5)
+            rx, ry = vrect.width() / compose_w, vrect.height() / compose_h
+            return (vrect.x() + (left + w / 2) * rx, vrect.y() + (top + h / 2) * ry, w * rx, h * ry)
 
         return None
 
@@ -657,11 +562,10 @@ class _Preview(QLabel):
                 if mode and geom:
                     if (
                         mode == "move"
-                        and not (self._active_clip.overlay_type in ("image", "text") or self._active_clip.is_image)
                     ):
-                        for ov_clip in reversed(self._overlay_clips):
+                        for ov_clip in reversed(self._selectable_clips if self._selectable_clips is not None else self._overlay_clips):
                             if ov_clip.clip_id == self._active_clip.clip_id:
-                                continue
+                                break
                             mode_ov, geom_ov = self._hit_test_clip(ov_clip, pos)
                             if mode_ov and geom_ov:
                                 self.clip_selected.emit(ov_clip.clip_id)
@@ -671,6 +575,9 @@ class _Preview(QLabel):
                     t_offset = max(0.0, self._position - self._active_clip.start)
                     transform = self._active_clip.transform_at(t_offset)
                     cx, cy, w, h = geom
+                    self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+                    self.setFocus(Qt.FocusReason.MouseFocusReason)
+                    self._drag_original_clip = self._active_clip
                     self._drag_mode = mode
                     self._drag_clip_id = self._active_clip.clip_id
                     self._drag_start_pos = pos
@@ -685,60 +592,8 @@ class _Preview(QLabel):
                     self._drag_init_keyframes = self._active_clip.keyframes if self._active_clip.has_keyframes else ()
                     self._drag_init_dist = max(10.0, math.hypot(pos.x() - cx, pos.y() - cy))
                     self._drag_init_angle = math.degrees(math.atan2(pos.y() - cy, pos.x() - cx))
-
-                    # Captura visual imediata para feedback a 60 fps ao arrastar clipe visual
-                    is_video_clip = (
-                        self._active_clip.media is not None
-                        and self._active_clip.media.has_video
-                        and not self._active_clip.is_image
-                        and not self._active_clip.audio_only
-                        and self._active_clip.overlay_type not in ("text", "filter", "transition")
-                    )
-                    vrect = self._video_rect()
-                    if (
-                        is_video_clip
-                        and self._pixmap is not None
-                        and not self._pixmap.isNull()
-                        and vrect.width() > 0
-                        and vrect.height() > 0
-                    ):
-                        if self._drag_video_pixmap is None or self._drag_video_pixmap.isNull():
-                            sx_pix = self._pixmap.width() / float(vrect.width())
-                            sy_pix = self._pixmap.height() / float(vrect.height())
-                            rel_cx = (cx - vrect.x()) * sx_pix
-                            rel_cy = (cy - vrect.y()) * sy_pix
-                            pix_w = max(1.0, w * sx_pix)
-                            pix_h = max(1.0, h * sy_pix)
-                            rot = transform.rotation
-
-                            # Extrai a região do clipe desrotacionada para ser desenhada dinamicamente sob o cursor
-                            extracted = QPixmap(int(round(pix_w)), int(round(pix_h)))
-                            extracted.fill(Qt.GlobalColor.transparent)
-                            p_ext = QPainter(extracted)
-                            p_ext.setRenderHint(QPainter.RenderHint.Antialiasing)
-                            p_ext.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-                            p_ext.translate(pix_w / 2.0, pix_h / 2.0)
-                            p_ext.rotate(-rot)
-                            p_ext.translate(-rel_cx, -rel_cy)
-                            p_ext.drawPixmap(0, 0, self._pixmap)
-                            p_ext.end()
-                            self._drag_video_pixmap = extracted
-
-                            # Prepara a imagem base mascarando a posição inicial com preto absoluto
-                            base = self._pixmap.copy()
-                            p_base = QPainter(base)
-                            p_base.setRenderHint(QPainter.RenderHint.Antialiasing)
-                            p_base.translate(rel_cx, rel_cy)
-                            p_base.rotate(rot)
-                            p_base.fillRect(
-                                QRectF(-pix_w / 2.0 - 0.5, -pix_h / 2.0 - 0.5, pix_w + 1.0, pix_h + 1.0),
-                                Qt.GlobalColor.black,
-                            )
-                            p_base.end()
-                            self._drag_base_pixmap = base
-                    else:
-                        self._drag_video_pixmap = None
-                        self._drag_base_pixmap = None
+                    self._drag_last_angle = self._drag_init_angle
+                    self._drag_rotation_delta = 0.0
 
                     if mode.startswith("scale_"):
                         if mode == "scale_tl":
@@ -768,7 +623,7 @@ class _Preview(QLabel):
                     return
 
             # Se não atingiu o clipe ativo, verifica itens sobrepostos (de cima para baixo)
-            for ov_clip in reversed(self._overlay_clips):
+            for ov_clip in reversed(self._selectable_clips if self._selectable_clips is not None else self._overlay_clips):
                 if self._active_clip is not None and ov_clip.clip_id == self._active_clip.clip_id:
                     continue
                 mode_ov, geom_ov = self._hit_test_clip(ov_clip, pos)
@@ -927,10 +782,17 @@ class _Preview(QLabel):
 
                 min_scale = 0.05
                 max_scale = 10.0
-                new_scale = max(min_scale, min(max_scale, self._drag_init_scale * factor))
-                new_scale_x = max(min_scale, min(max_scale, getattr(self, "_drag_init_scale_x", self._drag_init_scale) * factor))
-                new_scale_y = max(min_scale, min(max_scale, getattr(self, "_drag_init_scale_y", self._drag_init_scale) * factor))
-                actual_ratio = new_scale / max(0.001, self._drag_init_scale)
+                sx0 = getattr(self, "_drag_init_scale_x", self._drag_init_scale)
+                sy0 = getattr(self, "_drag_init_scale_y", self._drag_init_scale)
+                axes = [sx0, sy0]
+                if self._whole_animation:
+                    axes += [s for k in (self._drag_init_keyframes or ()) for s in (k.scale_x, k.scale_y)]
+                bounded = max(max(min_scale / s for s in axes), min(min(max_scale / s for s in axes), factor))
+                if bounded != factor:
+                    self._snap_guide_x = self._snap_guide_y = None
+                new_scale_x, new_scale_y = sx0 * bounded, sy0 * bounded
+                new_scale = (new_scale_x + new_scale_y) / 2
+                actual_ratio = bounded
 
                 new_w = w0 * actual_ratio
                 new_h = h0 * actual_ratio
@@ -944,126 +806,27 @@ class _Preview(QLabel):
                 new_y = (new_cy - vrect.y()) / max(1.0, vrect.height())
             elif self._drag_mode == "rotate":
                 cur_angle = math.degrees(math.atan2(pos.y() - cy, pos.x() - cx))
-                delta_angle = cur_angle - self._drag_init_angle
-                raw_rot = (self._drag_init_rot + delta_angle) % 360.0
+                delta_angle = (cur_angle - self._drag_last_angle + 180.0) % 360.0 - 180.0
+                self._drag_last_angle = cur_angle
+                self._drag_rotation_delta += delta_angle
+                raw_rot = self._drag_init_rot + self._drag_rotation_delta
                 new_rot = raw_rot
                 self._snap_guide_rot = None
 
                 if self._snap_enabled:
-                    cardinals = (0.0, 90.0, 180.0, 270.0, 360.0)
-                    best_diff = 999.0
-                    best_target = raw_rot
-                    for target in cardinals:
-                        diff = (raw_rot - target + 180.0) % 360.0 - 180.0
-                        if abs(diff) < abs(best_diff):
-                            best_diff = diff
-                            best_target = target % 360.0
+                    cardinal = round(raw_rot / 90.0) * 90.0
+                    if abs(raw_rot - cardinal) <= 4.0:
+                        new_rot = cardinal
+                        self._snap_guide_rot = cardinal
 
-                    if abs(best_diff) <= 4.0:
-                        new_rot = best_target
-                        self._snap_guide_rot = best_target
-
-            if self._active_clip.has_keyframes and getattr(self, "_drag_init_keyframes", None):
-                init_kfs = self._drag_init_keyframes
-                t_offset = getattr(
-                    self,
-                    "_drag_init_time_offset",
-                    max(0.0, min(self._active_clip.duration, self._position - self._active_clip.start)),
-                )
-                nearest = None
-                for k in init_kfs:
-                    if abs(k.time_offset - t_offset) <= 0.08:
-                        nearest = k
-                        break
-
-                if nearest is not None:
-                    target_time = nearest.time_offset
-                    target_easing = nearest.easing
-                    target_opacity = nearest.opacity
-
-                    target_kf = Keyframe(
-                        time_offset=target_time,
-                        x=new_x,
-                        y=new_y,
-                        scale_x=new_scale_x,
-                        scale_y=new_scale_y,
-                        rotation=new_rot,
-                        opacity=target_opacity,
-                        easing=target_easing,
-                    )
-                    new_kfs = tuple(
-                        sorted(
-                            [k for k in init_kfs if abs(k.time_offset - target_time) >= 1e-4] + [target_kf],
-                            key=lambda k: k.time_offset,
-                        )
-                    )
-                else:
-                    if self._drag_mode.startswith("scale_"):
-                        dx_norm = new_x - self._drag_init_x
-                        dy_norm = new_y - self._drag_init_y
-                        first_k = init_kfs[0]
-                        uniform_scale = all(
-                            abs(k.scale_x - first_k.scale_x) < 0.005 and abs(k.scale_y - first_k.scale_y) < 0.005
-                            for k in init_kfs
-                        )
-                        ratio_x = new_scale_x / max(0.001, getattr(self, "_drag_init_scale_x", self._drag_init_scale))
-                        ratio_y = new_scale_y / max(0.001, getattr(self, "_drag_init_scale_y", self._drag_init_scale))
-                        if uniform_scale:
-                            new_kfs = tuple(
-                                replace(k, x=k.x + dx_norm, y=k.y + dy_norm, scale_x=new_scale_x, scale_y=new_scale_y)
-                                for k in init_kfs
-                            )
-                        else:
-                            new_kfs = tuple(
-                                replace(
-                                    k,
-                                    x=k.x + dx_norm,
-                                    y=k.y + dy_norm,
-                                    scale_x=max(0.05, min(10.0, k.scale_x * ratio_x)),
-                                    scale_y=max(0.05, min(10.0, k.scale_y * ratio_y)),
-                                )
-                                for k in init_kfs
-                            )
-                    else:
-                        target_time = t_offset
-                        target_opacity = getattr(self, "_drag_init_opacity", 1.0)
-                        target_kf = Keyframe(
-                            time_offset=target_time,
-                            x=new_x,
-                            y=new_y,
-                            scale_x=new_scale_x,
-                            scale_y=new_scale_y,
-                            rotation=new_rot,
-                            opacity=target_opacity,
-                            easing="linear",
-                        )
-                        new_kfs = tuple(
-                            sorted(
-                                [k for k in init_kfs if abs(k.time_offset - target_time) >= 1e-4] + [target_kf],
-                                key=lambda k: k.time_offset,
-                            )
-                        )
-
-                self._active_clip = replace(
-                    self._active_clip,
-                    keyframes=new_kfs,
-                    x=new_x,
-                    y=new_y,
-                    scale=new_scale,
-                    scale_x=new_scale_x,
-                    scale_y=new_scale_y,
-                    rotation=new_rot,
-                )
-            else:
-                self._active_clip = replace(
-                    self._active_clip,
-                    x=new_x,
-                    y=new_y,
-                    scale=new_scale,
-                    scale_x=new_scale_x,
-                    scale_y=new_scale_y,
-                    rotation=new_rot,
-                )
+            original = replace(self._active_clip, keyframes=getattr(self, "_drag_init_keyframes", ()) or ())
+            self._active_clip = original.with_edited_transform(
+                self._drag_init_time_offset,
+                {"x": new_x, "y": new_y, "scale_x": new_scale_x, "scale_y": new_scale_y, "rotation": new_rot},
+                fps=self._fps, whole_animation=self._whole_animation)
+            pose = self._active_clip.transform_at(self._drag_init_time_offset)
+            new_x, new_y, new_rot = pose.x, pose.y, pose.rotation
+            new_scale = (pose.scale_x + pose.scale_y) / 2
             self.overlay_transformed.emit(self._drag_clip_id, new_x, new_y, new_scale, new_rot)
             self.update()
             event.accept()
@@ -1082,6 +845,39 @@ class _Preview(QLabel):
             self.setCursor(Qt.CursorShape.ArrowCursor)
         super().mouseMoveEvent(event)
 
+    def end_transform(self) -> None:
+        """Encerra a captura lógica quando outro comando confirma o gesto."""
+        self._drag_mode, self._drag_clip_id = None, -1
+        self._drag_original_clip = self._drag_init_keyframes = None
+        self._snap_guide_x = self._snap_guide_y = self._snap_guide_rot = None
+        self.update()
+
+    def _cancel_transform(self) -> None:
+        if not self._drag_mode:
+            return
+        self._interaction_visible = False
+        clip_id = self._drag_clip_id
+        if self._drag_original_clip is not None:
+            self._active_clip = self._drag_original_clip
+        self._drag_mode, self._drag_clip_id = None, -1
+        self._drag_original_clip = self._drag_init_keyframes = None
+        self._snap_guide_x = self._snap_guide_y = self._snap_guide_rot = None
+        self.overlay_transform_cancelled.emit(clip_id)
+        self.update()
+
+    def event(self, event: QEvent) -> bool:
+        if (event.type() in (QEvent.Type.UngrabMouse, QEvent.Type.Hide, QEvent.Type.WindowDeactivate)
+                and getattr(self, '_drag_mode', None)):
+            self._cancel_transform()
+        return super().event(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape and self._drag_mode:
+            self._cancel_transform()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         self._snap_guide_x = None
         self._snap_guide_y = None
@@ -1091,6 +887,7 @@ class _Preview(QLabel):
             self._drag_mode = None
             self._drag_clip_id = -1
             self._drag_init_keyframes = None
+            self._drag_original_clip = None
             self.overlay_transform_finished.emit(clip_id)
             self.update()
             event.accept()
@@ -1121,13 +918,8 @@ class _Preview(QLabel):
 
         # 2. Canvas efetivo do vídeo (preto absoluto onde o vídeo é exibido)
         painter.fillRect(target, Qt.GlobalColor.black)
-        bg_pix = (
-            self._drag_base_pixmap
-            if (self._drag_base_pixmap is not None and not self._drag_base_pixmap.isNull())
-            else self._pixmap
-        )
-        if bg_pix is not None and not bg_pix.isNull():
-            painter.drawPixmap(target, bg_pix)
+        if self._pixmap is not None and not self._pixmap.isNull():
+            painter.drawPixmap(target, self._pixmap)
 
         clip = self._active_clip
         has_active = (
@@ -1140,110 +932,27 @@ class _Preview(QLabel):
             and clip.contains(self._position)
         )
 
-        # 3. Desenho de clipe de vídeo ativo sendo arrastado sob o cursor
-        if (
-            has_active
-            and clip.media is not None
-            and clip.media.has_video
-            and not clip.is_image
-            and not clip.audio_only
-            and clip.overlay_type not in ("text", "filter", "transition")
-        ):
-            if (
-                self._drag_video_pixmap is not None
-                and not self._drag_video_pixmap.isNull()
-            ):
-                geom = self._clip_geometry(clip)
-                if geom:
-                    t_offset = max(0.0, self._position - clip.start)
-                    transform = clip.transform_at(t_offset)
-                    cx, cy, w, h = geom
-                    painter.save()
-                    painter.setOpacity(1.0)
-                    painter.translate(cx, cy)
-                    painter.rotate(transform.rotation)
-                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-                    painter.drawPixmap(
-                        QRectF(-w / 2.0, -h / 2.0, w, h),
-                        self._drag_video_pixmap,
-                        QRectF(self._drag_video_pixmap.rect()),
-                    )
-                    painter.restore()
-            elif self._drag_mode is not None:
-                geom = self._clip_geometry(clip)
-                if geom:
-                    t_offset = max(0.0, self._position - clip.start)
-                    transform = clip.transform_at(t_offset)
-                    cx, cy, w, h = geom
-                    painter.save()
-                    painter.translate(cx, cy)
-                    painter.rotate(transform.rotation)
-                    painter.fillRect(QRectF(-w / 2, -h / 2, w, h), QColor(0, 229, 255, 35))
-                    painter.restore()
-
-        # 4. Desenho de sobreposições de adicionais (imagens e textos) por cima do vídeo
-        if not self._is_playing:
-            clips_to_draw: list[Clip] = list(self._overlay_clips)
-            if (
-                has_active
-                and (clip.overlay_type in ("image", "text") or clip.is_image)
-                and clip.clip_id not in [c.clip_id for c in clips_to_draw]
-            ):
-                clips_to_draw.append(clip)
-
-            for ov_clip in clips_to_draw:
-                draw_clip = (
-                    clip
-                    if (has_active and clip.clip_id == ov_clip.clip_id)
-                    else ov_clip
-                )
-                if draw_clip.overlay_type == "image" or draw_clip.is_image:
-                    vrect = self._video_rect()
-                    t_offset = max(0.0, self._position - draw_clip.start)
-                    transform = draw_clip.transform_at(t_offset)
-                    geom = self._image_overlay_geometry(draw_clip, transform, vrect)
-                else:
-                    geom = self._clip_geometry(draw_clip)
-                if not geom:
-                    continue
-                t_offset = max(0.0, self._position - draw_clip.start)
-                transform = draw_clip.transform_at(t_offset)
+        # Camadas preparadas preservam o fundo descoberto e objetos superiores.
+        # A pose acompanha cada evento; só o fechamento espera o quadro canônico.
+        if has_active and self._interaction_visible and self._interaction_layers:
+            geom = self._clip_geometry(clip)
+            if geom:
+                background, texture, foreground = self._interaction_layers
+                transform = clip.transform_at(max(0., self._position - clip.start))
                 cx, cy, w, h = geom
+                painter.save()
+                painter.setClipRect(target, Qt.ClipOperation.IntersectClip)
+                painter.drawPixmap(target, background)
                 painter.save()
                 painter.setOpacity(transform.opacity)
                 painter.translate(cx, cy)
                 painter.rotate(transform.rotation)
-
-                if draw_clip.overlay_type in ("image", "text") or draw_clip.is_image:
-                    filters = self._clip_filters.get(draw_clip.clip_id, ())
-                    img_pix = self._get_clip_pixmap(draw_clip, filters=filters)
-                    if img_pix and not img_pix.isNull():
-                        painter.save()
-                        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-                        painter.drawPixmap(
-                            QRectF(-w / 2.0, -h / 2.0, w, h),
-                            img_pix,
-                            QRectF(img_pix.rect()),
-                        )
-                        painter.restore()
-                    elif draw_clip.overlay_type == "text":
-                        painter.save()
-                        scale_factor = target.width() / max(1.0, float(self._proj_w))
-                        px_size = max(8, int(draw_clip.font_size * scale_factor * draw_clip.scale))
-                        f = QFont(draw_clip.font_family or "Sans Serif", px_size)
-                        f.setBold(draw_clip.font_bold)
-                        f.setItalic(draw_clip.font_italic)
-                        painter.setFont(f)
-                        painter.setPen(QColor(draw_clip.text_color or "#ffffff"))
-                        painter.drawText(
-                            QRectF(-w / 2, -h / 2, w, h),
-                            Qt.AlignmentFlag.AlignCenter,
-                            draw_clip.text_content or "Texto",
-                        )
-                        painter.restore()
+                painter.drawPixmap(QRectF(-w / 2, -h / 2, w, h), texture, QRectF(texture.rect()))
+                painter.restore()
+                painter.drawPixmap(target, foreground)
                 painter.restore()
 
-        # 5. Máscara de delimitação e atenuação (dimming) fora da região efetiva do vídeo
+        # 3. Máscara de delimitação e atenuação (dimming) fora da região efetiva do vídeo
         outside_path = QPainterPath()
         outside_path.addRect(QRectF(self.rect()))
         target_path = QPainterPath()
@@ -1251,7 +960,7 @@ class _Preview(QLabel):
         dim_path = outside_path.subtracted(target_path)
         painter.fillPath(dim_path, QColor(10, 10, 14, 175))
 
-        # 5. Moldura de destaque da região efetiva do vídeo
+        # 4. Moldura de destaque da região efetiva do vídeo
         border_pen = QPen(
             QColor("#00e5ff") if has_active else QColor("#444452"),
             1.5 if has_active else 1.0,
@@ -1274,7 +983,7 @@ class _Preview(QLabel):
                 painter.drawLine(QPointF(target.left(), gy), QPointF(target.right(), gy))
             painter.restore()
 
-        # 6. Alças de controle e Bounding Box no topo de tudo
+        # 5. Alças de controle e Bounding Box no topo de tudo
         if has_active:
             t_offset = max(0.0, self._position - clip.start)
             transform = clip.transform_at(t_offset)
@@ -1327,6 +1036,7 @@ class _ClipPropertiesWidget(QWidget):
 
     property_changed = Signal(int, dict)  # clip_id, dict de alterações
     seek_requested = Signal(float)  # timestamp para navegação do cursor
+    animation_scope_changed = Signal(bool)
     close_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -1336,6 +1046,7 @@ class _ClipPropertiesWidget(QWidget):
         self._clip: Clip | None = None
         self._proj_w: int = 1920
         self._proj_h: int = 1080
+        self._fps = 30.0
         self._base_w: float = 1920.0
         self._base_h: float = 1080.0
         self._aspect_ratio: float = 16.0 / 9.0
@@ -1354,7 +1065,7 @@ class _ClipPropertiesWidget(QWidget):
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         outer_layout.addWidget(self._scroll)
 
         self._container = QWidget()
@@ -1513,6 +1224,10 @@ class _ClipPropertiesWidget(QWidget):
         anim_layout = QVBoxLayout(self._animation_group)
         anim_layout.setContentsMargins(6, 8, 6, 6)
         anim_layout.setSpacing(6)
+        self._whole_animation = QCheckBox(strings.EDIT_ANIMATION_GLOBAL)
+        self._whole_animation.setToolTip(strings.EDIT_ANIMATION_GLOBAL_TIP)
+        self._whole_animation.toggled.connect(self.animation_scope_changed)
+        anim_layout.addWidget(self._whole_animation)
 
         # Barra de navegação e adição de quadros-chave
         row_kf = QHBoxLayout()
@@ -1708,10 +1423,13 @@ class _ClipPropertiesWidget(QWidget):
         self._chromakey_group.setVisible(False)
         self._transition_group.setVisible(False)
 
-    def load_clip(self, clip: Clip, proj_w: int, proj_h: int) -> None:
+    def load_clip(self, clip: Clip, proj_w: int, proj_h: int, fps: float = 30.0, text_ratio: float = 1.0) -> None:
         self._updating = True
         try:
+            if self._clip_id != clip.clip_id:
+                self._whole_animation.setChecked(False)
             self._clip_id = clip.clip_id
+            self._fps = fps if fps > 0 else 30.0
             self._clip = clip
             self._proj_w = max(1, proj_w)
             self._proj_h = max(1, proj_h)
@@ -1752,6 +1470,8 @@ class _ClipPropertiesWidget(QWidget):
                 max_tw = max((fm.horizontalAdvance(l) for l in lines), default=100)
                 self._base_w = float(max(40, ((max_tw + pad * 2 + 3) // 4) * 4))
                 self._base_h = float(max(40, ((total_text_h + pad * 2 + 3) // 4) * 4))
+                self._base_w *= text_ratio
+                self._base_h *= text_ratio
             elif clip.overlay_type == "image" or clip.is_image:
                 if clip.media is not None:
                     bw, bh = image_base_size(clip.media.width, clip.media.height, self._proj_w, self._proj_h)
@@ -1777,7 +1497,7 @@ class _ClipPropertiesWidget(QWidget):
             has_image_media = bool(clip.media and (clip.media.has_video or clip.is_image))
             can_chroma = has_image_media and clip.overlay_type not in ("text", "filter", "transition")
 
-            can_animate = not is_trans and (clip.has_image or clip.is_additional)
+            can_animate = clip.overlay_type not in ("transition", "filter") and (clip.has_image or clip.is_additional)
             self._transform_group.setVisible(can_animate)
             self._animation_group.setVisible(can_animate)
             self._chromakey_group.setVisible(can_chroma)
@@ -1801,6 +1521,12 @@ class _ClipPropertiesWidget(QWidget):
                 self._spin_blend.setValue(max(0, min(100, blend_pct)))
                 self._enable_chroma_controls(clip.chromakey_enabled)
 
+            self._last_w = cur_w
+            self._last_h = cur_h
+            self._last_x = clip.x
+            self._last_y = clip.y
+            self._last_rot = clip.rotation
+
             if can_animate:
                 px = round(clip.x * self._proj_w)
                 py = round(clip.y * self._proj_h)
@@ -1815,11 +1541,6 @@ class _ClipPropertiesWidget(QWidget):
                 self._spin_opacity.setValue(op_pct)
                 self._refresh_keyframe_controls()
 
-            self._last_w = cur_w
-            self._last_h = cur_h
-            self._last_x = clip.x
-            self._last_y = clip.y
-            self._last_rot = clip.rotation
         finally:
             self._updating = False
 
@@ -1898,11 +1619,19 @@ class _ClipPropertiesWidget(QWidget):
         self._playhead_pos = pos
         self._refresh_keyframe_controls()
 
+    def _keyframe_in_frame(self, offset: float) -> Keyframe | None:
+        if self._clip is None:
+            return None
+        frame = frame_index(self._clip.start + offset, self._fps)
+        candidates = [k for k in self._clip.visible_keyframes
+                      if frame_index(self._clip.start + k.time_offset, self._fps) == frame]
+        return min(candidates, key=lambda k: abs(k.time_offset - offset), default=None)
+
     def _refresh_keyframe_controls(self) -> None:
         if self._clip is None or not hasattr(self, "_animation_group"):
             return
         t_offset = max(0.0, min(self._clip.duration, self._playhead_pos - self._clip.start))
-        current_kf = self._clip.nearest_keyframe(t_offset, tolerance=0.08)
+        current_kf = self._keyframe_in_frame(t_offset)
 
         if current_kf is not None:
             self._btn_kf_toggle.setText("◆")
@@ -1926,11 +1655,11 @@ class _ClipPropertiesWidget(QWidget):
                 " QPushButton:hover { background: #3f3f4e; border-color: #71717a; }"
             )
 
-        count = len(self._clip.keyframes)
-        if count > 0:
+        count = len(self._clip.visible_keyframes)
+        if self._clip.has_keyframes:
             self._lbl_kf_status.setText(f"{count} quadro(s)-chave")
-            has_prev = any(k.time_offset < t_offset - 0.05 for k in self._clip.keyframes)
-            has_next = any(k.time_offset > t_offset + 0.05 for k in self._clip.keyframes)
+            has_prev = any(k.time_offset < t_offset - 1e-8 for k in self._clip.visible_keyframes)
+            has_next = any(k.time_offset > t_offset + 1e-8 for k in self._clip.visible_keyframes)
             self._btn_kf_prev.setEnabled(has_prev)
             self._btn_kf_next.setEnabled(has_next)
 
@@ -1991,35 +1720,13 @@ class _ClipPropertiesWidget(QWidget):
     def _emit_opacity_change(self, opacity: float) -> None:
         if self._clip_id < 0 or self._clip is None:
             return
-        if self._clip.has_keyframes:
-            t_offset = max(0.0, min(self._clip.duration, self._playhead_pos - self._clip.start))
-            nearest = self._clip.nearest_keyframe(t_offset, tolerance=0.08)
-            if nearest:
-                updated_kf = replace(nearest, opacity=opacity)
-            else:
-                cur_t = self._clip.transform_at(t_offset)
-                updated_kf = Keyframe(
-                    time_offset=t_offset,
-                    x=cur_t.x,
-                    y=cur_t.y,
-                    scale_x=cur_t.scale_x,
-                    scale_y=cur_t.scale_y,
-                    rotation=cur_t.rotation,
-                    opacity=opacity,
-                    easing="linear",
-                )
-            updated_clip = self._clip.with_keyframe(updated_kf)
-            self._clip = updated_clip
-            self.property_changed.emit(self._clip_id, {"keyframes": updated_clip.keyframes, "opacity": opacity})
-            self._refresh_keyframe_controls()
-        else:
-            self.property_changed.emit(self._clip_id, {"opacity": opacity})
+        self._emit_property_change({"opacity": opacity})
 
     def _on_prev_keyframe(self) -> None:
         if self._clip is None or not self._clip.keyframes:
             return
         t_offset = max(0.0, min(self._clip.duration, self._playhead_pos - self._clip.start))
-        prev_kfs = [k for k in self._clip.keyframes if k.time_offset < t_offset - 0.05]
+        prev_kfs = [k for k in self._clip.visible_keyframes if k.time_offset < t_offset - 1e-8]
         if prev_kfs:
             target_kf = max(prev_kfs, key=lambda k: k.time_offset)
             self.seek_requested.emit(self._clip.start + target_kf.time_offset)
@@ -2028,7 +1735,7 @@ class _ClipPropertiesWidget(QWidget):
         if self._clip is None or not self._clip.keyframes:
             return
         t_offset = max(0.0, min(self._clip.duration, self._playhead_pos - self._clip.start))
-        next_kfs = [k for k in self._clip.keyframes if k.time_offset > t_offset + 0.05]
+        next_kfs = [k for k in self._clip.visible_keyframes if k.time_offset > t_offset + 1e-8]
         if next_kfs:
             target_kf = min(next_kfs, key=lambda k: k.time_offset)
             self.seek_requested.emit(self._clip.start + target_kf.time_offset)
@@ -2037,9 +1744,9 @@ class _ClipPropertiesWidget(QWidget):
         if self._clip is None or self._clip_id < 0:
             return
         t_offset = max(0.0, min(self._clip.duration, self._playhead_pos - self._clip.start))
-        nearest = self._clip.nearest_keyframe(t_offset, tolerance=0.08)
+        nearest = self._keyframe_in_frame(t_offset)
         if nearest is not None:
-            updated_clip = self._clip.without_keyframe(t_offset, tolerance=0.08)
+            updated_clip = self._clip.without_keyframe(nearest.time_offset, tolerance=1e-9)
             self._clip = updated_clip
             self.property_changed.emit(self._clip_id, {"keyframes": updated_clip.keyframes})
             self._refresh_keyframe_controls()
@@ -2065,7 +1772,7 @@ class _ClipPropertiesWidget(QWidget):
         if self._updating or self._clip is None or self._clip_id < 0:
             return
         t_offset = max(0.0, min(self._clip.duration, self._playhead_pos - self._clip.start))
-        nearest = self._clip.nearest_keyframe(t_offset, tolerance=0.08)
+        nearest = self._keyframe_in_frame(t_offset)
         if nearest is not None:
             new_easing = self._combo_easing.itemData(index) or "linear"
             updated_kf = replace(nearest, easing=new_easing)
@@ -2084,7 +1791,8 @@ class _ClipPropertiesWidget(QWidget):
             self._clip = updated_clip
             self.property_changed.emit(self._clip_id, {"keyframes": ()})
         else:
-            kfs = create_preset_keyframes(preset, self._clip.base_transform, duration=0.6)
+            end = min(0.6, last_frame_time(self._clip.duration, self._fps))
+            kfs = create_preset_keyframes(preset, self._clip.base_transform, duration=end)
             updated_clip = replace(self._clip, keyframes=kfs)
             self._clip = updated_clip
             self.property_changed.emit(self._clip_id, {"keyframes": kfs})
@@ -2098,107 +1806,14 @@ class _ClipPropertiesWidget(QWidget):
     def _emit_property_change(self, changes: dict) -> None:
         if self._clip_id < 0 or self._clip is None:
             return
-        if self._clip.has_keyframes:
-            t_offset = max(0.0, min(self._clip.duration, self._playhead_pos - self._clip.start))
-            nearest = self._clip.nearest_keyframe(t_offset, tolerance=0.08)
-            cur_t = self._clip.transform_at(t_offset)
-            new_x = float(changes.get("x", cur_t.x))
-            new_y = float(changes.get("y", cur_t.y))
-            new_sx = float(changes.get("scale_x", cur_t.scale_x))
-            new_sy = float(changes.get("scale_y", cur_t.scale_y))
-            new_rot = float(changes.get("rotation", cur_t.rotation))
-
-            is_scale_change = "scale" in changes or "scale_x" in changes or "scale_y" in changes
-
-            if is_scale_change and not nearest:
-                first_k = self._clip.keyframes[0]
-                uniform_scale = len(self._clip.keyframes) > 1 and all(
-                    abs(k.scale_x - first_k.scale_x) < 0.005 and abs(k.scale_y - first_k.scale_y) < 0.005
-                    for k in self._clip.keyframes
-                )
-                if uniform_scale or len(self._clip.keyframes) > 1:
-                    factor_x = new_sx / max(0.001, cur_t.scale_x)
-                    factor_y = new_sy / max(0.001, cur_t.scale_y)
-                    dx_norm = new_x - cur_t.x
-                    dy_norm = new_y - cur_t.y
-                    new_kfs = tuple(
-                        replace(
-                            k,
-                            x=k.x + dx_norm,
-                            y=k.y + dy_norm,
-                            scale_x=new_sx if uniform_scale else max(0.05, min(10.0, k.scale_x * factor_x)),
-                            scale_y=new_sy if uniform_scale else max(0.05, min(10.0, k.scale_y * factor_y)),
-                        )
-                        for k in self._clip.keyframes
-                    )
-                    updated_clip = replace(
-                        self._clip,
-                        keyframes=new_kfs,
-                        scale=changes.get("scale", (new_sx + new_sy) / 2.0),
-                        scale_x=new_sx,
-                        scale_y=new_sy,
-                        x=new_x,
-                        y=new_y,
-                    )
-                else:
-                    target_time = t_offset
-                    easing = self._combo_easing.currentData() or "linear"
-                    new_kf = Keyframe(
-                        time_offset=target_time,
-                        x=new_x,
-                        y=new_y,
-                        scale_x=new_sx,
-                        scale_y=new_sy,
-                        rotation=new_rot,
-                        opacity=float(changes.get("opacity", cur_t.opacity)),
-                        easing=easing,
-                    )
-                    updated_clip = self._clip.with_keyframe(new_kf)
-                    updated_clip = replace(
-                        updated_clip,
-                        scale=changes.get("scale", (new_sx + new_sy) / 2.0),
-                        scale_x=new_sx,
-                        scale_y=new_sy,
-                        x=new_x,
-                        y=new_y,
-                        rotation=new_rot,
-                    )
-            else:
-                target_time = nearest.time_offset if nearest is not None else t_offset
-                easing = nearest.easing if nearest is not None else (self._combo_easing.currentData() or "linear")
-                base_kf = nearest.transform if nearest is not None else cur_t
-
-                new_kf = Keyframe(
-                    time_offset=target_time,
-                    x=float(changes.get("x", base_kf.x)),
-                    y=float(changes.get("y", base_kf.y)),
-                    scale_x=float(changes.get("scale_x", base_kf.scale_x)),
-                    scale_y=float(changes.get("scale_y", base_kf.scale_y)),
-                    rotation=float(changes.get("rotation", base_kf.rotation)),
-                    opacity=float(changes.get("opacity", base_kf.opacity)),
-                    easing=easing,
-                )
-                updated_clip = self._clip.with_keyframe(new_kf)
-                updated_clip = replace(
-                    updated_clip,
-                    scale=changes.get("scale", (new_sx + new_sy) / 2.0),
-                    scale_x=new_sx,
-                    scale_y=new_sy,
-                    x=new_x,
-                    y=new_y,
-                    rotation=new_rot,
-                )
-
-            self._clip = updated_clip
-            self.property_changed.emit(self._clip_id, {"keyframes": updated_clip.keyframes, **changes})
-            self._refresh_keyframe_controls()
-        else:
-            updated_dict = {
-                k: v for k, v in changes.items() if hasattr(self._clip, k)
-            }
-            if updated_dict:
-                self._clip = replace(self._clip, **updated_dict)
-            self.property_changed.emit(self._clip_id, changes)
+        offset = self._playhead_pos - self._clip.start
+        updated = self._clip.with_edited_transform(offset, changes, fps=self._fps,
+                                                   whole_animation=self._whole_animation.isChecked())
+        self._clip = updated
+        result = {name: getattr(updated, name) for name in
+                  ("x", "y", "scale", "scale_x", "scale_y", "rotation", "opacity", "keyframes")}
+        self.property_changed.emit(self._clip_id, result)
+        self._refresh_keyframe_controls()
 
     def update_transform_fields(
         self, x: float, y: float, scale_x: float, scale_y: float | None = None, rotation: float = 0.0
@@ -2277,141 +1892,60 @@ class _ClipPropertiesWidget(QWidget):
             cur_h = self._spin_h.value()
             self._aspect_ratio = max(0.001, cur_w / max(1.0, float(cur_h)))
 
+    def _current_scales(self) -> tuple[float, float]:
+        pose = self._clip.transform_at(max(0, self._playhead_pos - self._clip.start))
+        return pose.scale_x, pose.scale_y
+
+    @staticmethod
+    def _scaled_axes(sx: float, sy: float, factor: float) -> tuple[float, float]:
+        # Limitar o fator, e não cada eixo, conserva a proporção nos extremos.
+        factor = max(max(.05 / sx, .05 / sy), min(min(10 / sx, 10 / sy), factor))
+        return sx * factor, sy * factor
+
+    def _apply_size(self, sx: float, sy: float) -> None:
+        new_w = max(1, round(self._base_w * sx))
+        new_h = max(1, round(self._base_h * sy))
+        new_x, new_y = self._calc_anchor_shift(new_w, new_h)
+        self._updating = True
+        try:
+            self._spin_w.setValue(new_w)
+            self._spin_h.setValue(new_h)
+            self._spin_scale.setValue((sx + sy) / 2)
+            self._spin_x.setValue(round(new_x * self._proj_w))
+            self._spin_y.setValue(round(new_y * self._proj_h))
+            self._last_w, self._last_h = new_w, new_h
+            self._last_x, self._last_y = new_x, new_y
+            self._aspect_ratio = new_w / max(1, new_h)
+        finally:
+            self._updating = False
+        self._emit_property_change({"x": new_x, "y": new_y, "scale": (sx + sy) / 2,
+                                    "scale_x": sx, "scale_y": sy})
+
     def _on_scale_changed(self, val: float) -> None:
         if self._updating or self._clip_id < 0:
             return
-        self._updating = True
-        try:
-            if self._chk_lock_ratio.isChecked():
-                new_w = max(1, round(self._base_w * val))
-                new_h = max(1, round(self._base_h * val))
-                new_sx = val
-                new_sy = val
-            else:
-                cur_sx = self._spin_w.value() / max(1.0, self._base_w)
-                cur_sy = self._spin_h.value() / max(1.0, self._base_h)
-                avg = max(0.001, (cur_sx + cur_sy) / 2.0)
-                factor = val / avg
-                new_sx = max(0.05, min(10.0, cur_sx * factor))
-                new_sy = max(0.05, min(10.0, cur_sy * factor))
-                new_w = max(1, round(self._base_w * new_sx))
-                new_h = max(1, round(self._base_h * new_sy))
-
-            new_x, new_y = self._calc_anchor_shift(new_w, new_h)
-            self._spin_w.setValue(new_w)
-            self._spin_h.setValue(new_h)
-            self._spin_x.setValue(round(new_x * self._proj_w))
-            self._spin_y.setValue(round(new_y * self._proj_h))
-
-            self._last_w = new_w
-            self._last_h = new_h
-            self._last_x = new_x
-            self._last_y = new_y
-
-            changes = {
-                "x": new_x,
-                "y": new_y,
-                "scale": val,
-                "scale_x": new_sx,
-                "scale_y": new_sy,
-            }
-        finally:
-            self._updating = False
-        self._emit_property_change(changes)
+        sx, sy = self._current_scales()
+        self._apply_size(*self._scaled_axes(sx, sy, val / ((sx + sy) / 2)))
 
     def _on_w_changed(self, val: int) -> None:
         if self._updating or self._clip_id < 0:
             return
-        new_scale_x = max(0.05, min(10.0, val / max(1.0, self._base_w)))
-        self._updating = True
-        try:
-            if self._chk_lock_ratio.isChecked():
-                new_h = max(1, round(val / max(0.001, self._aspect_ratio)))
-                new_scale_y = max(0.05, min(10.0, new_h / max(1.0, self._base_h)))
-                self._spin_h.setValue(new_h)
-                avg_scale = (new_scale_x + new_scale_y) / 2.0
-                self._spin_scale.setValue(avg_scale)
-            else:
-                new_h = getattr(self, "_last_h", self._spin_h.value())
-                cur_sy = self._spin_h.value() / max(1.0, self._base_h)
-                new_scale_y = cur_sy
-                avg_scale = (new_scale_x + cur_sy) / 2.0
-                self._spin_scale.setValue(avg_scale)
-
-            new_x, new_y = self._calc_anchor_shift(val, new_h)
-            self._spin_x.setValue(round(new_x * self._proj_w))
-            self._spin_y.setValue(round(new_y * self._proj_h))
-
-            self._last_w = val
-            self._last_h = new_h
-            self._last_x = new_x
-            self._last_y = new_y
-
-            if self._chk_lock_ratio.isChecked():
-                changes = {
-                    "x": new_x,
-                    "y": new_y,
-                    "scale": avg_scale,
-                    "scale_x": new_scale_x,
-                    "scale_y": new_scale_y,
-                }
-            else:
-                changes = {
-                    "x": new_x,
-                    "y": new_y,
-                    "scale": avg_scale,
-                    "scale_x": new_scale_x,
-                }
-        finally:
-            self._updating = False
-        self._emit_property_change(changes)
+        sx, sy = self._current_scales()
+        if self._chk_lock_ratio.isChecked():
+            sx, sy = self._scaled_axes(sx, sy, val / (self._base_w * sx))
+        else:
+            sx = max(.05, min(10, val / self._base_w))
+        self._apply_size(sx, sy)
 
     def _on_h_changed(self, val: int) -> None:
         if self._updating or self._clip_id < 0:
             return
-        new_scale_y = max(0.05, min(10.0, val / max(1.0, self._base_h)))
-        self._updating = True
-        try:
-            if self._chk_lock_ratio.isChecked():
-                new_w = max(1, round(val * self._aspect_ratio))
-                new_scale_x = max(0.05, min(10.0, new_w / max(1.0, self._base_w)))
-                self._spin_w.setValue(new_w)
-                avg_scale = (new_scale_x + new_scale_y) / 2.0
-                self._spin_scale.setValue(avg_scale)
-            else:
-                new_w = getattr(self, "_last_w", self._spin_w.value())
-                cur_sx = self._spin_w.value() / max(1.0, self._base_w)
-                new_scale_x = cur_sx
-                avg_scale = (cur_sx + new_scale_y) / 2.0
-                self._spin_scale.setValue(avg_scale)
-
-            new_x, new_y = self._calc_anchor_shift(new_w, val)
-            self._spin_x.setValue(round(new_x * self._proj_w))
-            self._spin_y.setValue(round(new_y * self._proj_h))
-
-            self._last_w = new_w
-            self._last_h = val
-            self._last_x = new_x
-            self._last_y = new_y
-
-            if self._chk_lock_ratio.isChecked():
-                changes = {
-                    "x": new_x,
-                    "y": new_y,
-                    "scale": avg_scale,
-                    "scale_x": new_scale_x,
-                    "scale_y": new_scale_y,
-                }
-            else:
-                changes = {
-                    "x": new_x,
-                    "y": new_y,
-                    "scale": avg_scale,
-                    "scale_y": new_scale_y,
-                }
-        finally:
-            self._updating = False
-        self._emit_property_change(changes)
+        sx, sy = self._current_scales()
+        if self._chk_lock_ratio.isChecked():
+            sx, sy = self._scaled_axes(sx, sy, val / (self._base_h * sy))
+        else:
+            sy = max(.05, min(10, val / self._base_h))
+        self._apply_size(sx, sy)
 
     def _on_rot_changed(self, val: float) -> None:
         if self._updating or self._clip_id < 0:

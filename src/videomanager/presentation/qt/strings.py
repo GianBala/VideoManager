@@ -386,7 +386,7 @@ EDIT_ZOOM_FIT_TIP = (
 )
 EDIT_TIMELINE_HINT = (
     "Arraste o bloco para mudá-lo de lugar ou de trilha · as pontas ajustam o "
-    "corte · roda do mouse aproxima · Shift+roda desloca · M no cabeçalho cala "
+    "corte · roda rola verticalmente · Shift+roda desloca horizontalmente · Ctrl+roda aproxima · M no cabeçalho cala "
     "a trilha"
 )
 
@@ -597,7 +597,7 @@ EDIT_LOAD_CHANGED = "A edição mudou durante a leitura. Abra o projeto novament
 EDIT_MISSING_MEDIA = "O projeto foi aberto, mas os seguintes arquivos não foram encontrados:\n\n{files}"
 EDIT_READ_CANCEL = "Cancelar"
 
-EDIT_SAVING_PROJECT = "Salvando projeto…"
+EDIT_SAVING_PROJECT = "Salvando projeto v2… Projetos v1 recebem cópia .v1.bak antes da atualização."
 
 EDIT_TRANSITION_AFFECT_ADDITIONALS = "Afetar itens adicionais"
 EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP = (
@@ -628,3 +628,13 @@ JOB_STATUS_LABELS = {
     "pending": "Na fila", "running": "Baixando", "processing": "Processando",
     "done": "Concluído", "failed": "Falhou", "cancelled": "Cancelado",
 }
+EXPORT_SOURCE_CODEC = "codec da origem"
+EXPORT_COPY_CODEC = "Copiar sem recodificar ({codec})"
+EDIT_SPEED_COLLISION = "Não há espaço antes do próximo clipe para essa velocidade. Mova o próximo clipe ou escolha outra velocidade."
+EDIT_PROJECT_V2_TIP = "Formato v2: preserva animações recortadas. Versões antigas do aplicativo não abrem v2. Ao atualizar um projeto v1, o original fica em .vmp.v1.bak (ou cópia numerada)."
+
+EDIT_ANIMATION_GLOBAL = "Editar toda a animação"
+EDIT_ANIMATION_GLOBAL_TIP = "Aplica o ajuste a todos os pontos, inclusive suportes de cortes. Desmarcado: edita somente o instante atual."
+
+EDIT_SLIDESHOW = "Slideshow"
+EDIT_SLIDESHOW_TIP = "Usar o formato da maior foto, limitado a 1920 px. Disponível em projetos sem vídeo visível; não altera o papel das imagens nas trilhas."

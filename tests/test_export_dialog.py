@@ -471,3 +471,20 @@ def test_export_dialog_fast_cut_strips_metadata(
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
 pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+def test_corte_rapido_mostra_apenas_configuracao_real(sample_media, single_clip_project, dummy_tools):
+    ref, local = sample_media
+    dialog = ExportDialog(project=single_clip_project, settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=build_desktop_runtime())
+    dialog._container_box.setCurrentIndex(dialog._container_box.findData('webm'))
+    dialog._fast.setChecked(True)
+    assert dialog._ext_label.text() == '.mp4'
+    assert not dialog._container_box.isEnabled()
+    assert not dialog._video_codec_box.isEnabled()
+    assert 'h264' in dialog._video_codec_box.currentText().lower()
+    dialog._fast.setChecked(False)
+    assert dialog._container_box.isEnabled()
+    assert dialog._video_codec_box.isEnabled()
+    assert dialog._container_box.currentData() == 'webm'
