@@ -5,22 +5,30 @@ em cima, trilhas empilhadas embaixo, blocos que se arrastam no tempo e entre
 trilhas. **O que está nas trilhas é o que vai ser exportado** — não há marca
 de entrada/saída escondida num formulário à parte.
 
-A janela é dividida, de cima para baixo: linha de importação → prévia e
-transporte → linha do tempo → linha de exportação. O divisor entre a prévia e
-a linha do tempo é um `QSplitter` livre — arraste para dar mais espaço a quem
+A janela reúne os comandos de projeto e exportação no topo, acervo e Adicionais
+ao lado da prévia e, abaixo, a linha do tempo. O divisor entre a prévia e
+a linha do tempo é livre — arraste para dar mais espaço a quem
 precisar dele naquele momento; **"Retrair prévia"** é só o atalho para o
 extremo mais pedido (linha do tempo ocupando quase tudo).
 
+Em janelas estreitas, a barra horizontal na base da aba permite alcançar as
+colunas laterais. Propriedades também oferece rolagem quando seus campos não
+cabem no painel.
+
 ## Importando mídia
 
-Na linha do topo:
+No acervo de mídia à esquerda:
 
-- **Importar mídia…** abre o seletor de arquivos (vídeo, foto ou áudio).
+- **Importar** abre o seletor de arquivos (vídeo, foto ou áudio).
   Também é possível **arrastar arquivos direto para a aba**.
-- O combo ao lado lista tudo já importado nesta sessão de edição.
-- **Inserir no cursor** — coloca o item selecionado do combo na trilha ativa,
-  na posição atual do cursor de reprodução (desabilitado sem itens
-  importados).
+- A lista do acervo mostra tudo já importado nesta sessão de edição.
+- **Inserir no cursor** — coloca a mídia na posição atual. Sem destino explícito,
+  prefere uma trilha compatível, visível e com som habilitado quando necessário;
+  cria outra se não houver espaço. Arrastar para uma trilha respeita esse destino.
+
+Fotos entram em **Adicionais**. Em montagens somente de fotos, **Slideshow**
+sugere a tela pelas dimensões das imagens, limitada a 1920 pixels no maior lado.
+A escolha é explícita; imagens decorativas não mudam automaticamente a tela.
 
 Com a linha do tempo vazia, a prévia mostra: *"Importe vídeos, fotos ou
 áudios para montar a edição. Você também pode arrastar os arquivos para
@@ -28,9 +36,13 @@ cá."*
 
 ## Prévia e transporte
 
-A prévia mostra sempre **o quadro exato da posição do cursor** — não o
-keyframe mais próximo, como faria um player comum — porque é desenhada pelo
-mesmo grafo de filtros que vai gerar o arquivo final (ver
+A prévia solicita o quadro da posição do cursor e usa o mesmo compositor da
+exportação. Durante uma atualização, conserva o último quadro entregue e mostra
+a indicação de carregamento. Ao arrastar um objeto, usa camadas preparadas para
+responder diretamente ao mouse e confirma o resultado com o compositor ao
+soltar. Com transições ou filtros que dependem do objeto e das camadas inferiores,
+apresenta versões completas conforme ficam prontas. A indicação de carregamento
+termina quando a versão final chega (ver
 [`arquitetura.md`](arquitetura.md)).
 
 Abaixo da imagem, a barra de transporte:
@@ -79,7 +91,7 @@ Da esquerda para a direita:
   com imã (*snap*) no cursor de reprodução, nas bordas de outros blocos e no
   início da linha do tempo. Se a ponta da frente do bloco arrastado passar do
   **meio** de um vizinho, os dois **trocam de lugar**, sem sobrepor um
-  terceiro.
+  terceiro. O intervalo vazio entre o par é preservado.
 - **Arrastar as pontas (alças)** de um bloco — ajusta o corte daquele lado,
   com o mesmo imã.
 - **Clique simples** no vazio da trilha ou na régua de tempo — move o cursor
@@ -87,8 +99,10 @@ Da esquerda para a direita:
 - **Botão direito** — abre o menu de contexto (ver abaixo), relativo ao que
   está sob o cursor.
 - **Botão do meio, arrastando** — paneia a vista horizontalmente.
-- **Roda do mouse** — zoom, centrado na posição do ponteiro.
+- **Roda do mouse** — desloca verticalmente pelas trilhas.
 - **Shift + roda** — desloca a vista horizontalmente sem mudar o zoom.
+- **Ctrl + roda** — zoom, centrado na posição do ponteiro. Ctrl prevalece
+  quando Shift também estiver pressionado.
 - **Duplo clique num bloco** — enquadra aquele bloco na largura visível.
 - **Clique no "M" do cabeçalho de uma trilha** — muda/desmuda a trilha
   inteira.
@@ -96,6 +110,8 @@ Da esquerda para a direita:
 Um clique isolado nunca conta como edição: só a partir de alguns pixels de
 arrasto é que a ação entra na pilha de desfazer — selecionar um bloco sem
 mover nada não empilha um "desfazer" vazio.
+Escape cancela um arrasto da timeline ou da prévia. Perder a captura do mouse
+ou ocultar a área durante o gesto também cancela a operação incompleta.
 
 ### Transições
 
@@ -129,6 +145,23 @@ esquerda; um que começa ali aparece com o vídeo da direita; um item que contin
 pelos dois lados permanece visível sem piscar. Deixe desmarcado quando títulos,
 logotipos ou filtros devam ficar estáveis acima da transição. A opção também
 fica disponível nas propriedades do marcador e é salva no projeto.
+Com duas passagens simultâneas habilitadas, a da trilha de vídeo mais alta
+controla cada adicional, preservando sua posição na pilha e sem duplicar o efeito.
+
+### Texto e animação
+
+Ao mudar posição, escala, rotação ou opacidade de um clipe animado, o editor
+altera o instante atual. Marque **Editar toda a animação** para ajustar a curva
+inteira. Cortar ou aparar preserva a interpolação do trecho restante.
+
+A digitação é agrupada no histórico do projeto até 1,2 s sem escrever, troca
+de campo ou outro comando. Dentro do campo, os atalhos de edição do texto
+continuam disponíveis. Alterar a resolução de saída mantendo a proporção
+preserva tamanho e posição relativos do texto, incluindo contorno e animação.
+
+Projetos são salvos em `.vmp` versão 2. A versão atual abre v1 e v2; aplicativos
+antigos não abrem v2. Ao salvar sobre v1, uma cópia `.vmp.v1.bak` conserva o
+arquivo original, com numeração se necessário. Guarde também as mídias externas.
 
 ### Menu de contexto (botão direito)
 
@@ -170,6 +203,10 @@ consumo.
 Válidos sempre que o foco não estiver dentro de um campo de texto, número ou
 combo:
 
+Salvar, salvar como, abrir, novo projeto, exportar e F11 continuam disponíveis
+mesmo com um campo em edição. Letras simples e copiar/colar/desfazer respeitam
+o campo que possui o foco.
+
 | Tecla | Ação |
 |---|---|
 | `Espaço` | Reproduzir/Pausar |
@@ -199,7 +236,8 @@ quadro a quadro; `↑`/`↓` sobem/descem o volume em 5.
 
 ## Exportando a edição
 
-Na linha de exportação, abaixo da linha do tempo:
+Use **Exportar**, no topo do editor, para abrir as opções de saída. A tela do
+projeto pode ser escolhida no seletor **Tela**, também no topo:
 
 - **Tela** — tamanhos predefinidos (4K, 1440p, 1080p, 720p, 480p, e variantes
   verticais/quadradas) ou **"Automática · segue o material"**, que usa o

@@ -21,7 +21,8 @@ O plano e as evidências da migração estão em documentos próprios.
 - Editar: acervo → projeto imutável com trilhas e clipes → cortes, transforms,
   volume, velocidade, texto, filtros, chroma key e transições → prévia/exportação.
 - A fila é comum às abas e fica oculta no editor para ampliar a área de trabalho.
-- O .vmp é JSON versão 1; referencia mídias externas, sem embutir seus bytes.
+- O .vmp é JSON versão 2, com leitura de v1; referencia mídias externas, sem
+  embutir seus bytes. Salvar sobre v1 preserva uma cópia `.vmp.v1.bak`.
 
 ## Estrutura e direção de dependências
 

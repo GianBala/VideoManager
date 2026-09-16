@@ -17,7 +17,9 @@ o comando e cria o worker. A interface não monta linhas de ffmpeg.
 ## Quadro parado e busca
 
 Buscar na timeline invalida solicitações anteriores e agenda a prévia atual.
-O worker entrega quadro e token; o controller só aceita a geração vigente.
+O worker entrega quadro e token; `PreviewResultKey` confere geração, revisão,
+instante, dimensões e taxa. Há um quadro pausado em execução e um destino mais
+recente pendente; pedidos intermediários são substituídos.
 Isso impede que uma busca lenta para o segundo 5 apareça depois da busca para
 o segundo 20.
 
@@ -31,11 +33,28 @@ controller. Não se decodifica sempre na resolução final do projeto.
 Quadro parado, reprodução e exportação usam as mesmas regras de composição,
 embora tamanho, fps e interpolação possam diferir conforme o pedido.
 
+No instante pausado, `interaction_plan` separa fundo, objeto e frente quando a
+composição admite essa separação. Um worker prepara três imagens com o mesmo
+compositor (incluindo alfa/chroma e origem temporal); o Qt reaplica a pose a
+cada movimento e conserva a ordem da pilha. A textura inteira é limitada a duas
+vezes as dimensões da prévia. O fim do gesto pede o quadro canônico completo.
+Seleção, instante, geração, tamanho e alterações de conteúdo invalidam o plano;
+um callback antigo não pode instalar camadas em outro contexto.
+
+Transições ativas e filtros posteriores ao objeto que dependem da composição
+continuam no caminho canônico. Nesses casos, snapshots completos da mesma
+posição podem ser apresentados em ordem crescente de revisão, com indicação
+pendente até a revisão final. Um seek nunca aceita o quadro antigo. Não se
+recorta a imagem composta nem se apaga a posição anterior com um retângulo preto.
+Erros atuais são mostrados sem diálogo modal; erros e conclusões de pedidos
+obsoletos não liberam nem substituem o pedido vigente.
+
 ## Reprodução e relógio
 
-`FramePump` mantém a saída de vídeo em uma fila limitada. Quando o consumidor
-não acompanha, a produção encontra limite em vez de acumular o vídeo inteiro
-na memória.
+`FramePump` mantém a saída de vídeo no pipe limitado. `PreviewFrameInbox`
+conserva somente o último quadro e uma notificação pendente na fila Qt. Se a
+interface ficar ocupada, os quadros intermediários são substituídos sem acumular
+imagens RGB. O sinal do worker leva a caixa; o painel retira o snapshot imutável.
 
 Enquanto a prévia está pausada, o controller pode abrir o comando de reprodução
 e manter seu primeiro quadro atrás de uma comporta. O clique em play reutiliza
@@ -49,7 +68,10 @@ chave de projeto, instante, tamanho ou fps deixou de corresponder.
 `infrastructure/qt/audio.py` recebe PCM do ffmpeg e alimenta `QAudioSink`
 por blocos, com fila limitada e sobra parcial controlada. Quando há dispositivo
 de áudio, sua posição é a referência temporal; a imagem acompanha esse relógio.
-Sem áudio disponível, a interface usa seu caminho de relógio sem dispositivo.
+Sem áudio disponível, a interface usa relógio monotônico, iniciado com a
+liberação do primeiro quadro. Taxas fracionárias, como 29,97 fps, permanecem
+fracionárias no comando e na entrega. Terminar o áudio não encerra um vídeo
+mais longo; o relógio monotônico continua do último instante do áudio.
 
 Se o usuário pedir play antes de a pré-carga terminar, o áudio espera o sinal de
 primeiro quadro pronto. No pause, a interface preserva o último quadro realmente
@@ -78,6 +100,13 @@ Filmstrip e waveform são trabalho de fundo, separado da reprodução.
 A quantidade de miniaturas é limitada e depende do espaço visual.
 A forma de onda também tem largura máxima. A extração de miniaturas pode usar
 uma passagem quando isso reduz o trabalho de decodificação.
+
+Pedidos equivalentes de waveform reutilizam o trabalho; novas janelas cancelam
+as anteriores. A prévia não guarda cache próprio de imagens: as camadas vêm do
+compositor, e quem retém pixels é o quadro corrente e o plano de interação.
+Ao concluir, os workers liberam a referência a `Popen`, incluindo buffers
+internos de `communicate`. O runner conserva referência forte somente enquanto
+o trabalho está vivo e usa referência fraca no callback de conclusão.
 
 Os caches consideram mídia, identidade e parâmetros necessários para distinguir
 resultados. Uma alteração de recorte, geometria ou texto precisa invalidar a
@@ -116,4 +145,9 @@ longos ou memória com muitas trilhas. O teste do pacote verifica fontes,
 prévia de texto e exportação real, sem afirmar que testou uma placa de áudio.
 
 Para o ensaio opt-in com placa real, use `scripts/validate_audio.py`.
+`scripts/validate_editor_responsiveness.py` mede 30 gestos com Qt e FFmpeg reais,
+latência dos snapshots/final, workers, processos e encerramento, sem placa de som.
+`scripts/validate_preview_gestures.py` envia eventos de mouse e verifica se as
+bordas dos pixels do objeto acompanham cada movimento; a opção `--canonical-only`
+desativa a preparação de camadas para comparação no mesmo código e ambiente.
 As evidências e limites estão no [checkup final](validacao-final.md).

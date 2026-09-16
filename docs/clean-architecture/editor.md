@@ -56,6 +56,13 @@ entra com o direito; um que atravessa o corte existe nos dois lados e permanece
 contínuo. O campo é persistido no `.vmp` e ausente significa `false` para manter
 compatibilidade com projetos anteriores.
 
+Os adicionais são compostos na própria posição da pilha. Se duas transições
+elegíveis coincidirem, vence a da trilha de vídeo mais alta, uma única vez.
+A avaliação dos itens contínuos mantém o mesmo relógio nos dois lados. A mistura
+visual usa alfa pré-multiplicado e volta ao alfa direto antes do overlay;
+máscaras de filtros usam RGB para não atenuar cromas indevidamente.
+Filtros contínuos após imagens são aplicados aos pixels já compostos.
+
 `clip_id` e `track_id` identificam objetos ao longo das transformações;
 `dataclasses.replace` preserva os IDs. Duplicações criam a identidade da
 nova entidade. Seleção e caches não devem depender apenas da posição numa
@@ -70,6 +77,7 @@ histórico e futuro. O histórico público é uma tupla, sem acesso à lista int
 | --- | --- |
 | `remember()` | Captura o estado anterior, limita o histórico a 60 e limpa refazer. |
 | `replace_current(project)` | Instala o projeto e avança a revisão quando o conteúdo muda. |
+| `begin_edit()` / `commit_edit()` / `cancel_edit()` | Agrupam um gesto; cancelar restaura o estado inicial; ida e volta sem mudança conserva também refazer. |
 | `undo()` / `redo()` | Movem projetos entre histórico, atual e futuro. |
 | `snapshot()` | Captura projeto, caminho, geração e revisão. |
 | `reset(project, path)` | Inicia outra sessão, limpa histórico e muda a geração. |
@@ -82,6 +90,13 @@ indica se há alterações: desfazer pode retornar exatamente à versão salva.
 puras de `Project`, instala o resultado pela sessão e atualiza seleção,
 timeline, propriedades e prévia. Não possui outra cópia mutável do projeto.
 `Timeline` desenha e emite intenções; não grava arquivos nem executa ffmpeg.
+
+Transformações animadas editam o instante atual por padrão; o escopo global é
+uma escolha explícita. Split e trim conservam pontos de suporte fora do clipe,
+inclusive tempos locais negativos, para preservar a curva de interpolação.
+Somente pontos na janela visível aparecem nas ferramentas de navegação.
+A sessão de digitação termina após 1,2 s de inatividade, saída do campo ou outro
+comando. Salvar encerra agrupamentos antes de capturar o snapshot.
 
 ## Abrir e importar
 
@@ -136,9 +151,16 @@ que ainda pode emitir callbacks.
 
 ## Formato .vmp
 
-`infrastructure/storage/project_json.py` mantém o esquema JSON versão 1.
-`projects.py` o expõe pela porta `ProjectRepository`. A reorganização
-preserva extensão, IDs e significado dos campos.
+`infrastructure/storage/project_json.py` escreve JSON versão 2 e lê versões 1 e 2.
+`projects.py` o expõe pela porta `ProjectRepository`. A versão 2 permite pontos
+de suporte assinados e grava `text_reference_width` / `text_reference_height`.
+Essas dimensões conservam a escala relativa do texto quando a resolução muda;
+`Project.for_render` deriva escalas sem modificar o documento nem seus ativos.
+
+Ao substituir um documento v1, o repositório cria uma cópia dos bytes originais
+em `.vmp.v1.bak`, numerada se já existir, antes de escrever v2. Binários antigos
+não abrem v2. Reverter o aplicativo exige usar a cópia v1; não se deve reduzir
+a versão no JSON e apagar os pontos que preservam a animação.
 
 O projeto referencia mídias externas. Caminhos relativos são resolvidos em
 relação ao arquivo de projeto; mover só o `.vmp` não move os vídeos.
