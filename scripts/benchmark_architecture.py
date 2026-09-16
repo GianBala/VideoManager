@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -97,7 +98,8 @@ def compare(args):
                     results['runs'][label + '_' + scenario]['samples'].append(json.loads(completed.stdout))
         for data in results['runs'].values():
             times = [s['seconds'] for s in data['samples']]
-            data.update(median_seconds=statistics.median(times), min_seconds=min(times), max_seconds=max(times))
+            data.update(median_seconds=statistics.median(times), min_seconds=min(times), max_seconds=max(times),
+                        p95_seconds=sorted(times)[math.ceil(len(times) * .95) - 1])
     print(json.dumps(results, ensure_ascii=False, indent=2))
 
 
