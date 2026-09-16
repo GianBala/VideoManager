@@ -453,10 +453,13 @@ class _Preview(QLabel):
             font.setBold(clip.font_bold)
             font.setItalic(clip.font_italic)
             fm = QFontMetrics(font)
-            text = clip.text_content or "Texto"
+            # O conteúdo é o que o rasterizador recebe, sem substituto: com um
+            # texto apagado, inventar "Texto" aqui dimensionava a caixa para
+            # uma palavra que a exportação não tem.
+            text = clip.text_content
             stroke_w = max(0, clip.stroke_width)
             pad = 20 + stroke_w
-            lines = text.splitlines() if text else ["Texto"]
+            lines = text.splitlines() if text else [""]
             line_spacing = fm.lineSpacing()
             total_text_h = (len(lines) - 1) * line_spacing + fm.ascent() + fm.descent()
             max_tw = max((fm.horizontalAdvance(l) for l in lines), default=100)
@@ -1461,10 +1464,10 @@ class _ClipPropertiesWidget(QWidget):
                 font.setBold(clip.font_bold)
                 font.setItalic(clip.font_italic)
                 fm = QFontMetrics(font)
-                text = clip.text_content or "Texto"
+                text = clip.text_content
                 stroke_w = max(0, clip.stroke_width)
                 pad = 20 + stroke_w
-                lines = text.splitlines() if text else ["Texto"]
+                lines = text.splitlines() if text else [""]
                 line_spacing = fm.lineSpacing()
                 total_text_h = (len(lines) - 1) * line_spacing + fm.ascent() + fm.descent()
                 max_tw = max((fm.horizontalAdvance(l) for l in lines), default=100)
