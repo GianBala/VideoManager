@@ -299,15 +299,14 @@ def test_transicao_opcionalmente_compoe_imagem_texto_e_filtro_nos_dois_lados() -
     )
 
     graph = build_graph(project, text_assets={text.clip_id: Path("texto.png")})
-    xfade = next(item for item in graph.filters if "xfade=" in item)
+    xfade = next(item for item in graph.filters if "xfade=" in item and "trpremul0layer0" in item)
     filters = ";".join(graph.filters)
 
-    assert "ftr0al" in xfade, "o lado esquerdo composto deve entrar no xfade"
-    assert "otr0al" in filters, "a imagem deve ser composta antes do filtro"
-    assert "otr0ar" in xfade, "texto da direita deve entrar antes do xfade"
-    assert "ftr0al" in filters, "o filtro da esquerda deve afetar seu lado composto"
+    assert "trpremul0layer0a" in xfade and "trpremul0layer0b" in xfade
+    assert "[o0layer0_0_0]hue=" in filters, "o filtro mantém sua ordem após a imagem"
+    assert 'split=3[pointbase' in filters, 'os dois lados incluem a composição inferior no filtro'
     assert "eof_action=repeat:repeatlast=1" in filters
-    assert "not(between(t,3.500000,4.500000))" in filters
+    assert "not(gte(t,3.500000)*lt(t,4.500000))" in filters
     assert graph.inputs.count("-i") == 8  # 4 normais, 2 da transição e 2 duplicadas
 
 
@@ -339,8 +338,8 @@ def test_item_que_atravessa_o_corte_permanece_nos_dois_lados() -> None:
             )
         )
     )
-    xfade = next(item for item in graph.filters if "xfade=" in item)
-    assert "otr0al" in xfade and "otr0ar" in xfade
+    xfade = next(item for item in graph.filters if "xfade=" in item and "trpremul0layer0" in item)
+    assert "trpremul0layer0a" in xfade and "trpremul0layer0b" in xfade
 
 
 def test_transicao_ignora_adicionais_de_trilha_oculta() -> None:
@@ -377,7 +376,7 @@ def test_transicao_ignora_adicionais_de_trilha_oculta() -> None:
     )
     xfade = next(item for item in graph.filters if "xfade=" in item)
 
-    assert "[tr0a][tr0b]xfade=" in xfade
+    assert "[trpremul0a][trpremul0b]xfade=" in xfade
     assert not any("tr0al" in item or "tr0ar" in item for item in graph.filters)
 
 
@@ -486,7 +485,7 @@ def test_recorte_de_preview_cobre_o_ultimo_meio_quadro_da_transicao() -> None:
         f"trim=start={frame_crop:.6f}:duration={covered:.6f}" in item
         for item in graph.filters
     )
-    assert any("not(between(t,0.000000,0.020854))" in item for item in graph.filters)
+    assert any("not(gte(t,0.000000)*lt(t,0.020854))" in item for item in graph.filters)
     assert any(
         "eof_action=repeat:repeatlast=1" in item and "[to0]" in item
         for item in graph.filters
