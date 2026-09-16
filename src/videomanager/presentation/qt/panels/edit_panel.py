@@ -147,6 +147,11 @@ _RESIZE_SETTLE_MS = 200
 # tocando. Um arrasto de volume avisa a cada meio decibel: sem a espera, cada
 # passo abriria um ffmpeg novo.
 _LIVE_RESTART_MS = 200
+# Espera antes de anunciar que a prévia está atualizando. Arrastar a agulha pede
+# um quadro por evento do mouse: anunciar na hora fazia o aviso piscar durante
+# todo o gesto e disputar a atenção com a imagem, que é o que interessa olhar.
+# Com um quadro já na tela, só uma espera perceptível merece aviso.
+_LOADING_HINT_MS = 250
 # Espera antes de gravar as preferências de som, para um arrasto de volume não
 # escrever o arquivo de configuração dezenas de vezes.
 _PREFS_SAVE_MS = 900
@@ -447,6 +452,13 @@ class EditPanel(QWidget):
         self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(_RESIZE_SETTLE_MS)
         self._resize_timer.timeout.connect(lambda: self._request_frame(force=True))
+
+        self._loading_timer = QTimer(self)
+        self._loading_timer.setSingleShot(True)
+        self._loading_timer.setInterval(_LOADING_HINT_MS)
+        self._loading_timer.timeout.connect(
+            lambda: self._loading_label.setText(strings.EDIT_LOADING_FRAME)
+        )
 
         self._live_timer = QTimer(self)
         self._live_timer.setSingleShot(True)
@@ -3162,6 +3174,24 @@ class EditPanel(QWidget):
         if len(layers) == 3 and all(not p.isNull() for p in layers):
             self._preview.set_interaction_layers(layers)
 
+    def _begin_loading_hint(self) -> None:
+        """Arma o aviso de atualização; ver ``_LOADING_HINT_MS``."""
+        if not self._loading_timer.isActive():
+            self._loading_timer.start()
+
+    def _end_loading_hint(self) -> None:
+        self._loading_timer.stop()
+        self._loading_label.setText("")
+
+    def _defer_loading_hint(self) -> None:
+        """Um quadro chegou, só não é o da posição pedida ainda.
+
+        Recomeçar a contagem faz o aviso aparecer numa parada de verdade, e não
+        por atraso acumulado enquanto a imagem continua acompanhando o gesto.
+        """
+        self._loading_label.setText("")
+        self._loading_timer.start()
+
     def _request_frame(self, *, force: bool = False) -> None:
         if self._closed or self._project.is_empty:
             return
@@ -3169,7 +3199,7 @@ class EditPanel(QWidget):
             self._invalidate_interaction()
         if self._playing:
             if force:
-                self._loading_label.setText(strings.EDIT_LOADING_FRAME)
+                self._begin_loading_hint()
                 if not self._live_timer.isActive():
                     self._live_timer.start()
             return
@@ -3182,9 +3212,9 @@ class EditPanel(QWidget):
         if force or changed:
             self._frame_token = next(self._tokens)
         if self._overlay_drag_session >= 0 and self._preview.begin_interaction():
-            self._loading_label.setText("")
+            self._end_loading_hint()
             return
-        self._loading_label.setText(strings.EDIT_LOADING_FRAME)
+        self._begin_loading_hint()
         if self._frame_busy:
             return
         self._start_frame()
@@ -3245,6 +3275,7 @@ class EditPanel(QWidget):
         self._frame_error_token = token
         if token == self._play_token and self._playing:
             self._stop_playback()
+        self._loading_timer.stop()
         self._loading_label.setText(message)
 
     def _on_frame(self, token: int, frame: object) -> None:
@@ -3255,6 +3286,7 @@ class EditPanel(QWidget):
         if self._overlay_drag_session >= 0 and self._preview._interaction_visible:
             return
         current = True
+        gesture = False
         if token == self._play_token and self._playing:
             current = getattr(self, "_playback_project", self._project) is self._project
         else:
@@ -3264,13 +3296,21 @@ class EditPanel(QWidget):
                     return
             else:
                 if (self._playing or key.token != token or key.generation != self._generation
-                        or key.seconds != self._wanted or key.size != self._preview_size()):
+                        or key.size != self._preview_size()):
                     return
-                current = token == self._frame_token and key.revision == self._frame_revision
-                editing = (self._session.editing or self._overlay_drag_session >= 0
+                gesture = (self._session.editing or self._overlay_drag_session >= 0
                            or self._properties_session >= 0 or self._typing_session >= 0)
-                if not current and not editing:
+                if key.revision != self._frame_revision and not gesture:
                     return
+                # Arrastar a agulha pede um quadro por evento, e o instante
+                # pedido já mudou quando o anterior fica pronto. Exigir
+                # ``key.seconds == self._wanted`` descartava **todos** esses
+                # quadros: a imagem só voltava quando a mão parava. O quadro
+                # entra com o próprio instante e ``current`` continua falso,
+                # então o cursor pedido e o que está na tela seguem distintos.
+                current = (token == self._frame_token
+                           and key.revision == self._frame_revision
+                           and key.seconds == self._wanted)
                 # Durante um gesto, apresentar snapshots completos em ordem
                 # evita esperar a mão parar. A indicação de atualização só
                 # desaparece quando chega a revisão final, nunca num seek antigo.
@@ -3278,7 +3318,12 @@ class EditPanel(QWidget):
                         and self._presented_key.revision > key.revision):
                     return
                 self._presented_key = key
-        self._loading_label.setText("" if current else strings.EDIT_LOADING_FRAME)
+        if current:
+            self._end_loading_hint()
+        elif gesture:
+            self._loading_label.setText(strings.EDIT_LOADING_FRAME)
+        else:
+            self._defer_loading_hint()
         self._shown_frame = frame.seconds
         self._preview.set_position(frame.seconds)
         self._show_frame(frame)
