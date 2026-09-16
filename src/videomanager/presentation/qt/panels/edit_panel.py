@@ -3218,6 +3218,13 @@ class EditPanel(QWidget):
         if self._frame_busy:
             return
         self._start_frame()
+        # A fila ao vivo tem duas vagas exatamente para este par: o quadro
+        # parado aparece assim que fica pronto enquanto o fluxo do play já
+        # prepara seu primeiro quadro ao lado. Deixar a pré-carga só para
+        # quando o quadro parado terminar serializa os dois, e o play depois
+        # de uma busca passa a esperar uma composição inteira antes de
+        # começar — que é a demora que se sente ao apertar play.
+        self._prime_playback()
 
     def _start_frame(self) -> None:
         tools = self._ensure_tools()
