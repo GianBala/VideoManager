@@ -29,7 +29,9 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
+from videomanager.infrastructure.ffmpeg.command_assets import filter_script
 from videomanager.application.capabilities import FFmpegTools
+from videomanager.application.errors import VideoManagerError
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
 
@@ -56,34 +58,68 @@ from videomanager.domain.preview import filmstrip_times as filmstrip_times
 Register = Callable[[subprocess.Popen], None]
 
 
-def _run(command: list[str], timeout: int, register: Register | None = None) -> bytes:
-    """Executa o ffmpeg e devolve o que ele escreveu na saída.
+def _run(command: list[str], timeout: int, register: Register | None = None, *, strict: bool = False) -> bytes:
+    with filter_script(command) as prepared:
+        return _run_raw(prepared, timeout, register, strict=strict)
 
-    Falha silenciosa de propósito: imagem de prévia é cosmética. Quando não sai
-    nada — arquivo protegido, instante além do fim, ffmpeg antigo demais para um
-    filtro — a interface mantém o que já estava na tela, o que é bem melhor que
-    um diálogo de erro no meio de uma navegação.
 
-    ``register`` existe porque estes processos precisam morrer quando a janela
-    fecha. O ``QThreadPool`` espera as threads dele no destrutor, então um
-    ffmpeg de prazo longo aqui segurava o fechamento do aplicativo pelo prazo
-    inteiro, com a janela já fora da tela e nada explicando a espera.
-    """
+def _run_raw(command: list[str], timeout: int, register: Register | None = None, *, strict: bool = False) -> bytes:
+    """Executa um pedido curto; quadros do editor reportam falhas explicitamente."""
     try:
         proc = subprocess.Popen(command, **subprocess_kwargs())
-    except OSError:
+    except OSError as exc:
+        if strict:
+            raise VideoManagerError("Não foi possível iniciar o FFmpeg para atualizar a prévia.") from exc
         return b""
     if register is not None:
         register(proc)
     try:
-        stdout, _ = proc.communicate(timeout=timeout)
+        stdout, stderr = proc.communicate(timeout=timeout)
     except (subprocess.TimeoutExpired, OSError):
         # Nos dois casos o processo pode continuar de pé, e sair daqui sem matá-lo
         # deixaria um ffmpeg decodificando para ninguém até o fim do arquivo.
         proc.kill()
         proc.communicate()
+        if strict:
+            raise VideoManagerError("A atualização da prévia excedeu o prazo. Tente novamente.")
         return b""
+    if strict and proc.returncode != 0:
+        raise VideoManagerError(_preview_error(stderr or b""))
     return stdout or b"" if proc.returncode == 0 else b""
+
+
+def _preview_error(stderr: bytes) -> str:
+    # Nunca publicar caminhos, comandos ou URLs da mídia no diagnóstico.
+    detail = stderr[-8192:].lower()
+    if b"no such file" in detail or b"error opening input" in detail:
+        return "Não foi possível ler uma mídia da prévia. Confira os arquivos do projeto."
+    if b"no such filter" in detail or b"error initializing filter" in detail:
+        return "O FFmpeg não conseguiu aplicar um efeito da prévia. Confira a versão instalada."
+    return "Não foi possível renderizar a prévia. Confira as mídias e os efeitos do projeto."
+
+
+class _DiagnosticTail:
+    """Drena stderr continuamente e guarda no máximo 8 KiB, sem bloquear stdout."""
+    def __init__(self, stream) -> None:
+        self.data = b""
+        self._stream = stream
+        self._thread = threading.Thread(target=self._read, daemon=True)
+        self._thread.start()
+
+    def _read(self) -> None:
+        try:
+            while self._stream is not None:
+                chunk = self._stream.read(4096)
+                if not chunk:
+                    break
+                self.data = (self.data + chunk)[-8192:]
+        except (OSError, ValueError):
+            pass
+
+    def close(self) -> None:
+        self._thread.join(timeout=1)
+        if self._stream is not None:
+            self._stream.close()
 
 
 def frame_from_command(
@@ -92,6 +128,7 @@ def frame_from_command(
     *,
     timeout: int = 60,
     register: Register | None = None,
+    strict: bool = False,
 ) -> RawFrame | None:
     """Um quadro cru produzido por um comando já montado.
 
@@ -101,7 +138,9 @@ def frame_from_command(
     ordem certa.
     """
     width, height = size
-    frame = RawFrame(_run(command, timeout, register), width, height)
+    frame = RawFrame(_run(command, timeout, register, strict=strict), width, height)
+    if strict and not frame.is_complete:
+        raise VideoManagerError("A prévia não retornou um quadro completo. Confira a mídia nesse instante.")
     return frame if frame.is_complete else None
 
 
@@ -354,7 +393,7 @@ class FramePump:
         start: float,
         size: tuple[int, int],
         *,
-        fps: int,
+        fps: float,
     ) -> None:
         self._command = command
         self._start = max(0.0, start)
@@ -384,26 +423,36 @@ class FramePump:
         o fluxo atrasado antes do primeiro quadro e ele dispara vários quadros
         de uma vez para tentar alcançar o tempo perdido.
         """
+        with filter_script(self._command) as prepared:
+            yield from self._frames(prepared, gate=gate, on_primed=on_primed)
+
+    def _frames(self, command, *, gate=None, on_primed=None) -> Iterator[RawFrame]:
         width, height = self._size
         frame_bytes = width * height * BYTES_PER_PIXEL
 
-        kwargs = subprocess_kwargs()
-        # O stderr vai para o vazio, e não para um cano: ninguém o lê aqui, e um
-        # arquivo com defeito que resolvesse reclamar a cada quadro encheria o
-        # cano e travaria o ffmpeg — a prévia congelaria sem explicação.
-        kwargs["stderr"] = subprocess.DEVNULL
-        try:
-            process = subprocess.Popen(self._command, **kwargs)
-        except OSError:
+        if self._stopped:
             return
+        try:
+            process = subprocess.Popen(command, **subprocess_kwargs())
+        except OSError as exc:
+            raise VideoManagerError("Não foi possível iniciar a reprodução da prévia.") from exc
+        diagnostic = _DiagnosticTail(getattr(process, "stderr", None))
 
         with self._lock:
             self._process = process
 
         try:
+            # stop pode ter ocorrido durante Popen, antes de haver um processo
+            # registrado. Não entrar numa leitura bloqueante nessa situação.
+            if self._stopped:
+                return
             assert process.stdout is not None
             first = process.stdout.read(frame_bytes)
             if not first or len(first) < frame_bytes:
+                if not self._stopped:
+                    process.wait(timeout=5)
+                    diagnostic.close()
+                    raise VideoManagerError(_preview_error(diagnostic.data))
                 return
             if on_primed is not None:
                 on_primed()
@@ -428,6 +477,11 @@ class FramePump:
                         break
                 data = process.stdout.read(frame_bytes)
                 if not data or len(data) < frame_bytes:
+                    if not self._stopped:
+                        process.wait(timeout=5)
+                        diagnostic.close()
+                        if process.returncode != 0 or data:
+                            raise VideoManagerError(_preview_error(diagnostic.data))
                     break
                 yield RawFrame(data, width, height, self._start + due)
                 index += 1
@@ -439,6 +493,7 @@ class FramePump:
                 process.wait(timeout=5)
             except subprocess.SubprocessError:
                 process.kill()
+            diagnostic.close()
             with self._lock:
                 self._process = None
 
