@@ -35,7 +35,7 @@ class TestTaxaDaPrevia:
     def test_segue_a_taxa_do_material(self, nativo: float) -> None:
         # Uma taxa fixa mais baixa deixa a imagem aos trancos num vídeo de 30 ou
         # 60 fps — foi o que se via com os 15 fps de antes.
-        assert preview_fps(nativo) == round(nativo)
+        assert preview_fps(nativo) == nativo
 
     def test_teto_para_material_muito_rapido(self) -> None:
         assert preview_fps(240.0) == MAX_PREVIEW_FPS
@@ -61,6 +61,24 @@ class TestAcoplamentoDaTaxa:
 
 
 class TestInicioDaReproducao:
+    def test_cancelamento_durante_abertura_encerra_processo_sem_ler(self, monkeypatch):
+        from types import SimpleNamespace
+        terminated = []
+        class Stream(io.BytesIO):
+            def read(self, *args):
+                pytest.fail('Cancelamento não pode aguardar o primeiro quadro')
+        stream = Stream(b'abc')
+        process = SimpleNamespace(stdout=stream, stderr=None, poll=lambda: None,
+                                  terminate=lambda: terminated.append(True), wait=lambda **kw: 0)
+        pump = FramePump(['ffmpeg'], 0, (1, 1), fps=30)
+        def launch(*args, **kwargs):
+            pump.stop()
+            return process
+        monkeypatch.setattr('videomanager.infrastructure.ffmpeg.preview.subprocess.Popen', launch)
+        assert list(pump.frames()) == []
+        assert terminated
+        assert stream.closed
+
     def test_carregamento_nao_consume_o_relogio(self, monkeypatch) -> None:
         """Depois da pré-carga, os quadros continuam espaçados normalmente.
 
@@ -124,6 +142,25 @@ class TestInicioDaReproducao:
         assert not worker._gate.is_set()
         worker.start_playback()
         assert worker._gate.is_set()
+
+    def test_ui_ocupada_retem_so_quadro_mais_recente(self, desktop_app, monkeypatch):
+        from PySide6.QtCore import Qt
+        from videomanager.domain.preview import RawFrame
+        worker = PlaybackWorker(['ffmpeg'], 0, (1, 1), 17, fps=30)
+        monkeypatch.setattr(worker._pump, 'frames', lambda **kw: (
+            RawFrame(bytes([index % 256]) * 3, 1, 1, index / 30) for index in range(300)))
+        notifications = []
+        worker.signals.frame.connect(lambda token, inbox: notifications.append((token, inbox)),
+                                     Qt.ConnectionType.QueuedConnection)
+        worker.run()
+        assert not notifications
+        desktop_app.processEvents()
+        assert len(notifications) == 1
+        token, inbox = notifications[0]
+        assert token == 17
+        assert inbox.take().seconds == pytest.approx(299 / 30)
+        assert inbox.take() is None
+        assert inbox.publish(RawFrame(b'abc', 1, 1, 10))
 
 
 class TestTamanho:

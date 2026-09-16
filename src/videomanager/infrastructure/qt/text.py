@@ -42,12 +42,12 @@ def _render(clip: Clip, out_path: Path) -> Path:
     font.setBold(clip.font_bold)
     font.setItalic(clip.font_italic)
 
-    text = clip.text_content or "Texto"
+    text = clip.text_content
     metrics = QFontMetrics(font)
     stroke_w = max(0, clip.stroke_width)
     pad = 20 + stroke_w
 
-    lines = text.splitlines() if text else ["Texto"]
+    lines = text.splitlines() if text else [""]
     line_spacing = metrics.lineSpacing()
     total_text_h = (len(lines) - 1) * line_spacing + metrics.ascent() + metrics.descent()
     max_tw = max((metrics.horizontalAdvance(l) for l in lines), default=100)
