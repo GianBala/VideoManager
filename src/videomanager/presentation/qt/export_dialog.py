@@ -8,7 +8,6 @@ liberando espaço para a visualização das trilhas na tela principal.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -521,7 +520,7 @@ class ExportDialog(QDialog):
         material = auto_canvas(self._project)
         w, h = self._canvas_choice or (material.width, material.height)
         fps = self._rate_choice or material.fps
-        return replace(self._project, width=w, height=h, fps=fps)
+        return self._project.with_output_canvas(w, h, fps)
 
     def _on_aspect_changed(self, index: int) -> None:
         if self._syncing or index < 0:
@@ -721,6 +720,31 @@ class ExportDialog(QDialog):
         else:
             self._quality_box.setToolTip(strings.EXPORT_QUALITY_TIP)
 
+        # As escolhas de recodificação são guardadas para a volta ao modo
+        # exato; durante a cópia os controles anunciam a origem real.
+        for box in (self._container_box, self._video_codec_box):
+            box.setEnabled(not is_fast)
+        self._container_box.blockSignals(True)
+        self._video_codec_box.blockSignals(True)
+        for box in (self._container_box, self._video_codec_box):
+            for index in reversed(range(box.count())):
+                if box.itemData(index) == 'source-copy':
+                    box.removeItem(index)
+        if is_fast:
+            source_clip = self._main_clip(proj)
+            source_container = self._container(proj)
+            local = self._probed.get(source_clip.media.path) if source_clip else None
+            codec = local.video.codec if local and local.video else strings.EXPORT_SOURCE_CODEC
+            self._container_box.addItem(source_container.upper(), 'source-copy')
+            self._video_codec_box.addItem(strings.EXPORT_COPY_CODEC.format(codec=codec), 'source-copy')
+            self._container_box.setCurrentIndex(self._container_box.count() - 1)
+            self._video_codec_box.setCurrentIndex(self._video_codec_box.count() - 1)
+        else:
+            self._container_box.setCurrentIndex(_index_of(self._container_box, self._container_choice))
+            self._video_codec_box.setCurrentIndex(_index_of(self._video_codec_box, self._codec_choice))
+        self._container_box.blockSignals(False)
+        self._video_codec_box.blockSignals(False)
+
         if audio_only:
             container = self._audio_format_choice or "mp3"
             plan = describe_export(
@@ -735,6 +759,7 @@ class ExportDialog(QDialog):
         elif is_fast:
             target = self._trim_target(proj)
             if target:
+                container = target.container
                 plan = strings.EDIT_PLAN_FAST.format(
                     container=target.container,
                     duration=format_span(target.output_duration),

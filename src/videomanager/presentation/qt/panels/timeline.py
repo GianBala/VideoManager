@@ -206,10 +206,12 @@ class Timeline(QWidget):
     clip_moved = Signal(int, int, float)  # clip_id, índice da trilha, início
     clip_resized = Signal(int, str, float)  # clip_id, ponta, instante
     edit_finished = Signal()
+    edit_cancelled = Signal()
     clip_selected = Signal(int)
     track_mute_clicked = Signal(int)
     track_visibility_clicked = Signal(int)
     track_reordered = Signal(int, int)  # índice de origem, índice de destino
+    vertical_scroll_requested = Signal(float)
     view_changed = Signal()
     # Botão direito: o widget diz **onde** foi clicado e o painel monta o menu.
     # As ações são dele (é ele quem tem o projeto e o histórico), e assim o menu
@@ -747,7 +749,7 @@ class Timeline(QWidget):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         cy = rect.bottom() - 10.0
-        for kf in clip.keyframes:
+        for kf in clip.visible_keyframes:
             kf_time = clip.start + kf.time_offset
             cx = self._x_of(kf_time)
             if cx < rect.left() - 4.0 or cx > rect.right() + 4.0:
@@ -882,9 +884,12 @@ class Timeline(QWidget):
     # ------------------------------------------------------------------
 
     def event(self, event: QEvent) -> bool:
+        if (event.type() in (QEvent.Type.UngrabMouse, QEvent.Type.Hide, QEvent.Type.WindowDeactivate)
+                and getattr(self, '_dragging', False)):
+            self._cancel_drag()
         if event.type() == QEvent.Type.ToolTip:
             help_event = cast(QHelpEvent, event)
-            pos = help_event.position()
+            pos = help_event.pos()
             kind, index, _ = self._hit(pos.x(), pos.y())
             if kind == "olho" and 0 <= index < len(self._project.tracks):
                 track = self._project.tracks[index]
@@ -893,7 +898,7 @@ class Timeline(QWidget):
                     if track.visible
                     else strings.EDIT_TRACK_SHOW
                 )
-                QToolTip.showText(help_event.globalPosition().toPoint(), text, self)
+                QToolTip.showText(help_event.globalPos(), text, self)
                 return True
             if kind == "mudo" and 0 <= index < len(self._project.tracks):
                 track = self._project.tracks[index]
@@ -902,11 +907,11 @@ class Timeline(QWidget):
                     if track.muted
                     else strings.EDIT_TRACK_MUTE
                 )
-                QToolTip.showText(help_event.globalPosition().toPoint(), text, self)
+                QToolTip.showText(help_event.globalPos(), text, self)
                 return True
             if kind == "cabecalho" and 0 <= index < len(self._project.tracks):
                 QToolTip.showText(
-                    help_event.globalPosition().toPoint(),
+                    help_event.globalPos(),
                     strings.EDIT_TRACK_DRAG_TIP,
                     self,
                 )
@@ -1118,7 +1123,7 @@ class Timeline(QWidget):
             for clip in track.clips:
                 if clip.clip_id != moving.clip_id:
                     targets += [clip.start, clip.end]
-                for kf in clip.keyframes:
+                for kf in clip.visible_keyframes:
                     targets.append(clip.start + kf.time_offset)
         return targets
 
@@ -1153,6 +1158,8 @@ class Timeline(QWidget):
                 and self._drop_track_target != self._drag_track
             ):
                 self.track_reordered.emit(self._drag_track, self._drop_track_target)
+            if self._dragging:
+                self.edit_finished.emit()
             self._drag = ""
             self._drag_track = -1
             self._drop_track_target = -1
@@ -1174,14 +1181,29 @@ class Timeline(QWidget):
             self.set_view(clip.start - folga, clip.end + folga)
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
-        steps = event.angleDelta().y() / 120
-        if not steps:
+        pixel = event.pixelDelta()
+        angle = event.angleDelta()
+        delta = (pixel.y() or pixel.x()) if not pixel.isNull() else (angle.y() or angle.x())
+        if not delta:
+            event.ignore()
             return
-        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-            delta = -steps * self.view_span * 0.15
-            self.set_view(self._view_start + delta, self._view_end + delta)
-            return
-        self.zoom(1.25**steps, self._time_of(event.position().x()))
+        steps = delta / (80 if not pixel.isNull() else 120)
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.zoom(1.25 ** max(-10, min(10, steps)), self._time_of(event.position().x()))
+        elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            shift = -steps * self.view_span * .15
+            self.set_view(self._view_start + shift, self._view_end + shift)
+        else:
+            self.vertical_scroll_requested.emit(-delta if not pixel.isNull() else -steps * 60)
+        event.accept()
+
+    def _cancel_drag(self) -> None:
+        self._drag, self._drag_clip, self._drag_track = '', -1, -1
+        self._drop_track_target = -1
+        self._press_at, self._dragging = None, False
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.edit_cancelled.emit()
+        self.update()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         """Setas andam quadro a quadro — só quando a linha do tempo tem o foco.
@@ -1189,6 +1211,10 @@ class Timeline(QWidget):
         Deixar isto aqui, e não num atalho de janela, é o que permite digitar um
         timecode nos campos ao lado sem que cada seta mova o cursor do vídeo.
         """
+        if event.key() == Qt.Key.Key_Escape and self._dragging:
+            self._cancel_drag()
+            event.accept()
+            return
         step = frame_step(self._project.fps)
         if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
             step = 1.0

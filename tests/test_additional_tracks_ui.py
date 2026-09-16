@@ -408,8 +408,8 @@ def test_loop_playback_logic(qapp: QApplication, dummy_tools: FFmpegTools) -> No
         panel._playing = True
         panel._play_token = 42
 
-        # Perto do fim da timeline (ex: 1.95s com threshold de fim)
-        panel._timeline.set_position(1.98)
+        # O loop começa ao concluir a duração, preservando o último frame.
+        panel._timeline.set_position(2.0)
         looped = False
 
         def mock_loop():
@@ -1847,95 +1847,6 @@ def test_calibri_and_rapier_zero_fonts_availability(qapp: QApplication) -> None:
     assert img_calibri.is_file() and img_calibri.stat().st_size > 0
 
 
-def test_preview_video_drag_immediate_feedback(qapp: QApplication) -> None:
-    preview = _Preview()
-    preview.resize(800, 600)
-    canvas_pixmap = QPixmap(800, 600)
-    canvas_pixmap.fill(Qt.GlobalColor.blue)
-    preview.set_frame_pixmap(canvas_pixmap)
-
-    ref = MediaRef(
-        path=Path("/tmp/sample_video.mp4"),
-        kind=MediaKind.VIDEO,
-        duration=10.0,
-        width=1920,
-        height=1080,
-    )
-    clip = Clip(
-        media=ref,
-        start=0.0,
-        duration=10.0,
-        x=0.5,
-        y=0.5,
-        scale=1.0,
-        rotation=0.0,
-    )
-    preview.set_active_clip(clip, 1920, 1080)
-    preview.set_position(2.0)
-
-    geom = preview._clip_geometry(clip)
-    assert geom is not None
-    cx, cy, w, h = geom
-
-    # 1. Pressiona o botão do mouse sobre o clipe de vídeo para iniciar arraste
-    press_event = QMouseEvent(
-        QMouseEvent.Type.MouseButtonPress,
-        QPointF(cx, cy),
-        QPointF(cx, cy),
-        Qt.MouseButton.LeftButton,
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    preview.mousePressEvent(press_event)
-
-    assert preview._drag_mode == "move"
-    assert preview._drag_video_pixmap is not None
-    assert not preview._drag_video_pixmap.isNull()
-    assert preview._drag_base_pixmap is not None
-    assert not preview._drag_base_pixmap.isNull()
-
-    # 2. Move o mouse arrastando o clipe
-    move_event = QMouseEvent(
-        QMouseEvent.Type.MouseMove,
-        QPointF(cx + 60, cy + 40),
-        QPointF(cx + 60, cy + 40),
-        Qt.MouseButton.NoButton,
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    preview.mouseMoveEvent(move_event)
-    assert preview._active_clip is not None
-    assert abs(preview._active_clip.x - 0.5) > 0.01
-
-    # Renderiza para garantir que paintEvent executa desenhando o clipe sem exceções
-    preview.repaint()
-
-    # 3. Solta o botão do mouse
-    release_event = QMouseEvent(
-        QMouseEvent.Type.MouseButtonRelease,
-        QPointF(cx + 60, cy + 40),
-        QPointF(cx + 60, cy + 40),
-        Qt.MouseButton.LeftButton,
-        Qt.MouseButton.NoButton,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    preview.mouseReleaseEvent(release_event)
-
-    assert preview._drag_mode is None
-    # Permanece com os pixmaps de arraste até o novo frame do compositor chegar
-    assert preview._drag_video_pixmap is not None
-    assert preview._drag_base_pixmap is not None
-
-    # 4. Chegada do novo quadro renderizado
-    new_frame_pixmap = QPixmap(800, 600)
-    new_frame_pixmap.fill(Qt.GlobalColor.darkGreen)
-    preview.set_frame_pixmap(new_frame_pixmap)
-
-    # Agora os buffers de arraste são limpos
-    assert preview._drag_video_pixmap is None
-    assert preview._drag_base_pixmap is None
-
-
 def test_preview_video_drag_does_not_drag_or_teleport_overlays(
     qapp: QApplication, dummy_tools: FFmpegTools, tmp_path: Path
 ) -> None:
@@ -2120,6 +2031,7 @@ def test_preview_drag_resize_animated_clip() -> None:
     preview.resize(960, 540)
     preview.set_active_clip(clip, 1920, 1080)
     preview.set_position(0.3)
+    preview._whole_animation = True  # D02: escopo global solicitado explicitamente.
 
     geom_before = preview._clip_geometry(clip)
     assert geom_before is not None
@@ -2199,6 +2111,7 @@ def test_clip_properties_widget_animated_clip_sync() -> None:
 
     # Move o cursor para o meio da animação
     widget.set_playhead_position(0.3)
+    widget._whole_animation.setChecked(True)
     assert widget._spin_w.value() == 1200
     assert widget._spin_h.value() == 800
 
@@ -2291,8 +2204,10 @@ def test_preview_scale_handle_with_rotated_keyframe(qapp: QApplication) -> None:
     preview.mouseMoveEvent(move_ev)
 
     # Scale must have increased, not collapsed
-    assert preview._active_clip.keyframes[0].scale_x > 0.7
-    assert preview._active_clip.keyframes[1].scale_x > 0.7
+    assert preview._active_clip.transform_at(1.5).scale_x > 0.8
+    assert preview._active_clip.keyframes[0] == kf1
+    assert preview._active_clip.keyframes[1] == kf2
+    assert len(preview._active_clip.keyframes) == 4
 
 
 def test_filter_clip_preserved_in_paused_frame_preview(

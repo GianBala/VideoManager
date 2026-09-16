@@ -80,6 +80,7 @@ class EditorProject(QObject):
 
     def save(self, *, choose_path: bool = False) -> bool:
         p = self.panel
+        p.commit_pending_edits()
         path = p.project_path
         if choose_path or path is None:
             chosen, _ = QFileDialog.getSaveFileName(

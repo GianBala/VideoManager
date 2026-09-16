@@ -207,3 +207,16 @@ def test_animacao_quadros_chave_coincide_com_ffmpeg(tmp_path: Path) -> None:
         ff_h = max(ys) - min(ys) + 1
 
         assert (ff_left, ff_top, ff_w, ff_h) == (geom_left, geom_top, geom_w, geom_h), f"Mismatch at at={at}"
+
+
+def test_texto_pequeno_nao_recebe_minimo_de_tamanho_visual():
+    text = Clip(MediaRef(Path('Texto'), MediaKind.IMAGE), 0, 5, overlay_type='text',
+                text_content='a', font_size=10)
+    preview = _Preview()
+    preview.resize(320, 180)
+    pixmap = QPixmap(320, 180)
+    pixmap.fill(QColor('black'))
+    preview.set_frame_pixmap(pixmap)
+    preview.set_active_clip(text, 1920, 1080)
+    geometry = preview._clip_geometry(text)
+    assert geometry and geometry[2] < 20 and geometry[3] < 20

@@ -59,14 +59,33 @@ class _SeekBar(QSlider):
     ninguém espera isso de um player.
     """
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
-        if event.button() == Qt.MouseButton.LeftButton and self.width():
-            fraction = min(max(0.0, event.position().x() / self.width()), 1.0)
-            self.setValue(round(self.minimum() + fraction * (self.maximum() - self.minimum())))
+    def _seek_at(self, event) -> None:
+        fraction = min(max(0.0, event.position().x() / max(1, self.width())), 1.0)
+        old = self.value()
+        self.setValue(round(self.minimum() + fraction * (self.maximum() - self.minimum())))
+        if self.value() == old:
             self.sliderMoved.emit(self.value())
-            event.accept()
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setSliderDown(True)
+            self._seek_at(event)
             return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self.isSliderDown():
+            self._seek_at(event)
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self.isSliderDown():
+            self._seek_at(event)
+            self.setSliderDown(False)
+            return
+        super().mouseReleaseEvent(event)
 
 
 class FullscreenPreview(QWidget):

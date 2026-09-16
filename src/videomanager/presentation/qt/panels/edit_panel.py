@@ -29,6 +29,7 @@ som, um computador que não dá conta perde quadros e continua no tempo certo.
 from __future__ import annotations
 
 import itertools
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -79,6 +80,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from videomanager.application.media.preview import PreviewFrameInbox, PreviewResultKey
+from videomanager.application.media.interaction import interaction_plan
+from videomanager.domain.project import slideshow_canvas
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.media import LocalMedia
@@ -249,6 +253,9 @@ class EditPanel(QWidget):
 
     def accept_import(self, result, *, insert=False):
         self._probed.update(result.probed)
+        for ref in result.references:
+            self._pool_thumbnails.pop(ref.path, None)
+            self._pool_tokens.pop(ref.path, None)
         existing = {ref.path for ref in self._pool}
         self._pool.extend(ref for ref in result.references if ref.path not in existing)
         self._refresh_pool()
@@ -261,6 +268,8 @@ class EditPanel(QWidget):
                 self._after_edit(refit=True)
 
     def install_project(self, project, path, references, probed, *, reset=True):
+        self._generation += 1
+        self._end_edit_groups()
         self._stop_playback()
         self._cancel_primed_playback()
         self._background.cancel_all()
@@ -273,11 +282,14 @@ class EditPanel(QWidget):
             self._session.reset(project, path)
         self._pool = list(references)
         self._pool_thumbnails.clear()
+        self._pool_tokens.clear()
         self._probed = dict(probed)
         self._canvas_choice = (project.width, project.height) if path else None
+        self._aspect_choice = format_aspect_ratio(project.width, project.height) if path else None
         self._rate_choice = project.fps if path else None
         self._keyframes = ()
         self._keyframe_source = None
+        self._keyframe_token = next(self._tokens)
         self._clipboard = None
         self._refresh_pool()
         self._after_edit(refit=True)
@@ -340,6 +352,8 @@ class EditPanel(QWidget):
         self._clipboard: Clip | None = None
         self._keyframes: tuple[float, ...] = ()
         self._keyframe_source: Path | None = None
+        self._keyframe_token = 0
+        self._keyframe_worker = None
         # Tela pedida, ou ``None`` para seguir o material. Mora aqui, e não no
         # projeto, porque é preferência de saída e não parte da montagem — ver
         # :meth:`_sync_canvas`.
@@ -352,7 +366,15 @@ class EditPanel(QWidget):
         self._play_token = 0
         self._strip_tokens: dict[int, int] = {}
         self._strip_workers: dict[int, object] = {}
+        self._wave_requests: dict[int, tuple] = {}
+        self._pool_tokens: dict[Path, int] = {}
         self._frame_busy = False
+        self._frame_job_token = 0
+        self._frame_key = None
+        self._presented_key = None
+        self._frame_error_token = 0
+        self._generation = 0
+        self._closed = False
         self._wanted: float | None = None
         self._rendered: float | None = None
         # O instante sozinho não identifica um quadro: duas versões diferentes
@@ -376,13 +398,19 @@ class EditPanel(QWidget):
         self._fullscreen: FullscreenPreview | None = None
         self._syncing = False
         self._shown_frame = 0.0
+        self._clock_position = 0.0
+        self._clock_started: float | None = None
         self._resynced_at = 0.0
         self._resume_wanted = False
         self._collapsed = False
         self._gain_session = -1
         self._speed_session = -1
         self._overlay_drag_session = -1
+        self._interaction_context = None
+        self._interaction_worker = None
+        self._interaction_token = 0
         self._properties_session = -1
+        self._typing_session = -1
         self._pool_thumbnails: dict[Path, QIcon] = {}
         self._selected_filter_name = "pb"
         self._project_path: Path | None = None
@@ -409,6 +437,11 @@ class EditPanel(QWidget):
         self._properties_session_timer.setSingleShot(True)
         self._properties_session_timer.setInterval(400)
         self._properties_session_timer.timeout.connect(self._end_properties_session)
+
+        self._typing_timer = QTimer(self)
+        self._typing_timer.setSingleShot(True)
+        self._typing_timer.setInterval(1200)
+        self._typing_timer.timeout.connect(self._end_typing_session)
 
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
@@ -508,6 +541,11 @@ class EditPanel(QWidget):
 
         row.addStretch(1)
 
+        self._slideshow_button = QPushButton(strings.EDIT_SLIDESHOW)
+        self._slideshow_button.setToolTip(strings.EDIT_SLIDESHOW_TIP)
+        self._slideshow_button.clicked.connect(self._apply_slideshow_canvas)
+        row.addWidget(self._slideshow_button)
+
         aspect_label = QLabel(strings.EDIT_CANVAS_ASPECT)
         aspect_label.setProperty("role", "dim")
         row.addWidget(aspect_label)
@@ -556,6 +594,7 @@ class EditPanel(QWidget):
         name = self._project_path.name if self._project_path else strings.EDIT_UNTITLED
         dirty = " *" if self.has_unsaved_changes else ""
         self._project_label.setText(strings.EDIT_PROJECT_STATUS.format(name=name, dirty=dirty))
+        self._project_label.setToolTip(strings.EDIT_PROJECT_V2_TIP)
 
     def _build_media_box(self) -> QWidget:
         box = QWidget()
@@ -642,6 +681,8 @@ class EditPanel(QWidget):
         self._extras_tabs.setTabsClosable(False)
         self._properties_widget = _ClipPropertiesWidget()
         self._properties_widget.property_changed.connect(self._on_properties_changed)
+        self._properties_widget.animation_scope_changed.connect(
+            lambda enabled: setattr(self._preview, "_whole_animation", enabled))
         self._properties_widget.close_requested.connect(self._close_properties_tab)
         self._properties_widget.seek_requested.connect(self._seek_to)
         layout.addWidget(self._extras_tabs, 1)
@@ -969,11 +1010,15 @@ class EditPanel(QWidget):
         clip = self._timeline.selected_clip
         if self._syncing or clip is None or clip.overlay_type != "text":
             return
-        new_text = self._text_input.text().strip() or "Texto"
+        new_text = self._text_input.text()
         if clip.text_content == new_text:
             return
-        self._remember()
+        if self._typing_session != clip.clip_id:
+            self._end_edit_groups()
+            self._session.begin_edit()
+            self._typing_session = clip.clip_id
         self._apply(self._project.with_updated_clip(clip.clip_id, text_content=new_text))
+        self._typing_timer.start()
 
     def _on_text_style_changed(self) -> None:
         clip = self._timeline.selected_clip
@@ -1340,7 +1385,7 @@ class EditPanel(QWidget):
         if hasattr(self, "_properties_widget") and self._extras_tabs.indexOf(self._properties_widget) >= 0:
             if clip is not None:
                 self._properties_widget.set_playhead_position(self._position)
-                self._properties_widget.load_clip(clip, self._project.width, self._project.height)
+                self._properties_widget.load_clip(clip, self._project.width, self._project.height, fps=self._project.fps, text_ratio=self._project.text_ratio)
             elif (
                 self._properties_widget._clip_id >= 0
                 and self._project.find(self._properties_widget._clip_id) is None
@@ -1351,7 +1396,8 @@ class EditPanel(QWidget):
 
         if clip is not None and clip.overlay_type == "text":
             self._extras_tabs.setCurrentIndex(0)
-            self._text_input.setText(clip.text_content or "")
+            if self._text_input.text() != clip.text_content:
+                self._text_input.setText(clip.text_content)
             self._font_selector.set_family(clip.font_family or "Sans Serif")
             self._font_size_spin.setValue(clip.font_size or 48)
             self._bold_btn.setChecked(bool(clip.font_bold))
@@ -1438,12 +1484,14 @@ class EditPanel(QWidget):
         self._preview.play_toggle_requested.connect(self._toggle_play)
         self._preview.overlay_transformed.connect(self._on_overlay_transformed)
         self._preview.overlay_transform_finished.connect(self._on_overlay_transform_finished)
+        self._preview.overlay_transform_cancelled.connect(self._on_overlay_transform_cancelled)
         self._preview.clicked_outside.connect(lambda: self._timeline.select(-1))
         self._preview.clip_selected.connect(lambda cid: self._timeline.select(cid))
         frame_layout.addWidget(self._preview)
 
         column.addWidget(self._preview_frame, 1)
         column.addWidget(self._build_transport())
+        column.addWidget(self._loading_label)
         return box
 
     def _build_transport(self) -> QWidget:
@@ -1467,6 +1515,9 @@ class EditPanel(QWidget):
         self._frame_label.setProperty("role", "dim")
         self._loading_label = QLabel("")
         self._loading_label.setProperty("role", "dim")
+        self._loading_label.setWordWrap(True)
+        # Reservar espaço evita redimensionar a prévia a cada resultado do worker.
+        self._loading_label.setFixedHeight(self._loading_label.fontMetrics().lineSpacing() * 2)
 
         readouts = QWidget()
         readouts.setProperty("role", "plain")
@@ -1602,8 +1653,9 @@ class EditPanel(QWidget):
         self._timeline = Timeline(self._colors)
         self._timeline.setToolTip(strings.EDIT_TIMELINE_HINT)
         self._timeline.scrubbed.connect(self._on_scrub)
-        self._timeline.edit_started.connect(self._remember)
+        self._timeline.edit_started.connect(self._begin_timeline_edit)
         self._timeline.edit_finished.connect(self._on_edit_finished)
+        self._timeline.edit_cancelled.connect(self._on_edit_cancelled)
         self._timeline.clip_moved.connect(self._on_clip_moved)
         self._timeline.clip_resized.connect(self._on_clip_resized)
         self._timeline.clip_selected.connect(self._on_clip_selected)
@@ -1613,6 +1665,8 @@ class EditPanel(QWidget):
         self._timeline.menu_requested.connect(self._show_menu)
         self._timeline.view_changed.connect(self._on_view_changed)
         self._timeline_area.setWidget(self._timeline)
+        bar = self._timeline_area.verticalScrollBar()
+        self._timeline.vertical_scroll_requested.connect(lambda delta: bar.setValue(round(bar.value() + delta)))
         column.addWidget(self._timeline_area)
 
         self._scroll = QScrollBar(Qt.Orientation.Horizontal)
@@ -1774,7 +1828,7 @@ class EditPanel(QWidget):
             settings=self._settings,
             pool=self._pool,
             probed=self._probed,
-            keyframes=self._keyframes,
+            keyframes=self._keyframes_for(self._main_clip()),
             ensure_tools=self._ensure_tools,
             initial_canvas=self._canvas_choice,
             initial_rate=self._rate_choice,
@@ -1829,9 +1883,10 @@ class EditPanel(QWidget):
         ):
             shortcut = QShortcut(QKeySequence(keys), self)
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            shortcut.activated.connect(lambda slot=slot: self._dispatch(slot))
+            global_command = keys in {"Ctrl+S", "Ctrl+Shift+S", "Ctrl+O", "Ctrl+N", "Ctrl+E", "F11"}
+            shortcut.activated.connect(lambda slot=slot, allowed=global_command: self._dispatch(slot, allow_in_field=allowed))
 
-    def _dispatch(self, slot: Callable[[], None]) -> None:
+    def _dispatch(self, slot: Callable[[], None], *, allow_in_field: bool = False) -> None:
         """Filtra os atalhos de uma tecla antes de deixá-los agir.
 
         Sem a primeira guarda, digitar um timecode dispararia as ações letra a
@@ -1842,7 +1897,7 @@ class EditPanel(QWidget):
         # Campo de texto, número ou lista: todos usam teclas que também são
         # atalhos daqui — o espaço abre a lista de mídias, as letras entram no
         # timecode.
-        if isinstance(
+        if not allow_in_field and isinstance(
             QApplication.focusWidget(),
             (QLineEdit, QAbstractSpinBox, QComboBox, QTextEdit, QPlainTextEdit),
         ):
@@ -1877,7 +1932,7 @@ class EditPanel(QWidget):
 
     @property
     def _playable(self) -> bool:
-        return not self._project.is_empty
+        return self._has_video or self._has_sound
 
     @property
     def _on_fullscreen(self) -> bool:
@@ -1916,27 +1971,6 @@ class EditPanel(QWidget):
         if reference.path in self._pool_thumbnails:
             return self._pool_thumbnails[reference.path]
 
-        if reference.kind is MediaKind.IMAGE:
-            try:
-                img = QImage(str(reference.path))
-                if not img.isNull():
-                    card = QPixmap(96, 54)
-                    card.fill(QColor(24, 24, 28))
-                    scaled = img.scaled(
-                        96,
-                        54,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                    p = QPainter(card)
-                    p.drawImage((96 - scaled.width()) // 2, (54 - scaled.height()) // 2, scaled)
-                    p.end()
-                    icon = QIcon(card)
-                    self._pool_thumbnails[reference.path] = icon
-                    return icon
-            except Exception:
-                pass
-
         card = QPixmap(96, 54)
         card.fill(QColor(28, 28, 34))
         p = QPainter(card)
@@ -1956,21 +1990,24 @@ class EditPanel(QWidget):
         icon = QIcon(card)
         self._pool_thumbnails[reference.path] = icon
 
-        if reference.kind is MediaKind.VIDEO:
+        if reference.kind in (MediaKind.VIDEO, MediaKind.IMAGE):
             tools = self._ensure_tools()
             if tools is not None:
                 token = next(self._tokens)
+                self._pool_tokens[reference.path] = token
                 worker = self._runtime.filmstrip_worker(
                     reference.path, 0.0, 0.0, 1, (96, 54), tools, token
                 )
                 worker.signals.strip.connect(
-                    lambda tok, idx, frame, ref=reference: self._on_pool_thumb_ready(ref, frame)
+                    lambda tok, idx, frame, ref=reference: self._on_pool_thumb_ready(ref, frame, token=tok)
                 )
                 self._background.start(worker, worker.signals.done)
 
         return icon
 
-    def _on_pool_thumb_ready(self, reference: MediaRef, frame: object) -> None:
+    def _on_pool_thumb_ready(self, reference: MediaRef, frame: object, *, token: int | None = None) -> None:
+        if self._closed or (token is not None and self._pool_tokens.get(reference.path) != token):
+            return
         try:
             data = getattr(frame, "data", None)
             w = getattr(frame, "width", 96)
@@ -2166,6 +2203,8 @@ class EditPanel(QWidget):
         for index, track in enumerate(self._project.tracks):
             if not accepts(track.kind, clip):
                 continue
+            if ((clip.has_image or clip.has_sound) and not track.visible) or (clip.has_sound and track.muted):
+                continue
             floor, ceiling = track.free_range(clip.start)
             if floor <= clip.start and clip.end <= ceiling:
                 return index
@@ -2284,12 +2323,12 @@ class EditPanel(QWidget):
         _, clip = found
         self._timeline.select(clip_id)
         if not clip.contains(self._position):
-            self._seek(clip.start)
+            self._seek_to(clip.start)
         if self._extras_tabs.indexOf(self._properties_widget) < 0:
             self._extras_tabs.addTab(self._properties_widget, strings.EDIT_TAB_PROPERTIES)
             self._update_extras_tab_close_buttons()
         self._properties_widget.set_playhead_position(self._position)
-        self._properties_widget.load_clip(clip, self._project.width, self._project.height)
+        self._properties_widget.load_clip(clip, self._project.width, self._project.height, fps=self._project.fps, text_ratio=self._project.text_ratio)
         self._extras_tabs.setCurrentWidget(self._properties_widget)
         sizes = self._top_splitter.sizes()
         if len(sizes) >= 3 and sizes[1] < 340:
@@ -2300,6 +2339,33 @@ class EditPanel(QWidget):
 
     def _end_properties_session(self) -> None:
         self._properties_session = -1
+        self._properties_session_timer.stop()
+
+    def _end_typing_session(self) -> None:
+        if self._typing_session < 0:
+            return
+        self._typing_timer.stop()
+        self._typing_session = -1
+        self._session.commit_edit()
+
+    def commit_pending_edits(self) -> None:
+        self._end_edit_groups()
+        self._session.commit_edit()
+
+    def _end_edit_groups(self) -> None:
+        self._end_typing_session()
+        self._end_properties_session()
+        self._end_gain_session()
+        self._end_speed_session()
+        if self._overlay_drag_session >= 0:
+            self._session.commit_edit()
+            self._overlay_drag_session = -1
+            self._preview.end_transform()
+            self._request_frame(force=True)
+
+    def _begin_timeline_edit(self) -> None:
+        self._end_edit_groups()
+        self._session.begin_edit()
 
     def _on_properties_changed(self, clip_id: int, changes: dict) -> None:
         if self._syncing:
@@ -2336,6 +2402,8 @@ class EditPanel(QWidget):
                 updated_clip,
                 self._project.width,
                 self._project.height,
+                fps=self._project.fps,
+                text_ratio=self._project.text_ratio,
             )
 
         track_visible = self._project.tracks[track_idx].visible
@@ -2388,6 +2456,7 @@ class EditPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _remember(self) -> None:
+        self._end_edit_groups()
         self._session.remember()
 
     def _apply(self, project: Project, *, refit: bool = False) -> None:
@@ -2414,18 +2483,26 @@ class EditPanel(QWidget):
         self.changed.emit()
 
     def _on_clip_moved(self, clip_id: int, track_index: int, start: float) -> None:
-        self._project = self._project.moved(clip_id, track_index, start)
+        self._project = self._session.edit_origin.moved(clip_id, track_index, start)
         self._timeline.set_project(self._project)
         self._update_project_label()
         self._update_preview_overlay_clips()
+        self._request_frame(force=True)
 
     def _on_clip_resized(self, clip_id: int, edge: str, seconds: float) -> None:
-        self._project = self._project.resized(clip_id, edge, seconds)
+        self._project = self._session.edit_origin.resized(clip_id, edge, seconds)
         self._timeline.set_project(self._project)
         self._update_project_label()
         self._update_preview_overlay_clips()
+        self._request_frame(force=True)
 
     def _on_edit_finished(self) -> None:
+        self._session.commit_edit()
+        self._after_edit()
+
+    def _on_edit_cancelled(self) -> None:
+        self._session.cancel_edit()
+        self._end_edit_groups()
         self._after_edit()
 
     def _toggle_track_mute(self, index: int) -> None:
@@ -2454,7 +2531,8 @@ class EditPanel(QWidget):
             self._request_frame(force=True)
 
     def _on_track_reordered(self, from_index: int, to_index: int) -> None:
-        self._remember()
+        if not self._session.editing:
+            self._remember()
         self._apply(self._project.reordered_track(from_index, to_index))
         if self._playing:
             self._live_timer.stop()
@@ -2470,9 +2548,11 @@ class EditPanel(QWidget):
             (c for c in self._project.clips if c.contains(position)), None
         )
         selected = self._timeline.selected_clip
-        if selected is not None and selected.contains(position):
+        if selected is not None:
             clip = selected
-        if clip is None:
+        if clip is None or clip.is_transition or not clip.contains(position):
+            return
+        if min(position - clip.start, clip.end - position) < MIN_SEGMENT:
             return
         self._remember()
         self._apply(self._project.split(clip.clip_id, position))
@@ -2523,7 +2603,7 @@ class EditPanel(QWidget):
 
     def _detach_audio(self) -> None:
         clip = self._timeline.selected_clip
-        if clip is None or not clip.media.has_audio:
+        if clip is None or clip.media is None or not clip.media.has_audio:
             return
         self._remember()
         self._apply(self._project.detached_audio(clip.clip_id))
@@ -2561,10 +2641,12 @@ class EditPanel(QWidget):
         self._after_edit()
 
     def _undo_edit(self) -> None:
+        self._end_edit_groups()
         if self._session.undo():
             self._after_edit()
 
     def _redo_edit(self) -> None:
+        self._end_edit_groups()
         if self._session.redo():
             self._after_edit()
 
@@ -2597,15 +2679,19 @@ class EditPanel(QWidget):
         self._apply(self._project.with_updated_clip(clip.clip_id, muted=muted))
 
     def _on_clip_selected(self, _clip_id: int) -> None:
-        self._end_gain_session()
-        self._end_speed_session()
+        self._end_edit_groups()
         self._refresh_clip_fields()
         # Trocar de bloco troca o que os controles alcançam — volume e mudo se
         # desligam num bloco sem som ajustável. Antes isto pegava carona no fim
         # do arrasto; agora que um clique simples não conta como edição (ver
         # ``timeline._DRAG_SLACK``), a seleção precisa avisar por conta própria.
         self._refresh_controls()
-        self._request_frame(force=True)
+        # Selecionar muda as alças, não os pixels da composição.
+        if self._interaction_context != self._interaction_key():
+            self._invalidate_interaction()
+        self._prepare_interaction()
+        if not self._preview.has_frame:
+            self._request_frame()
 
     def _show_volume_popup(self) -> None:
         clip = self._timeline.selected_clip
@@ -2623,7 +2709,14 @@ class EditPanel(QWidget):
         if clip is None:
             return
         popup = _SpeedPopup(clip.speed, parent=self)
-        popup.speed_changed.connect(self._on_speed)
+        def apply_speed(value):
+            self._on_speed(value)
+            updated = self._project.find(clip.clip_id)
+            if updated is not None:
+                popup._spin.blockSignals(True)
+                popup._spin.setValue(updated[1].speed)
+                popup._spin.blockSignals(False)
+        popup.speed_changed.connect(apply_speed)
         popup.finished.connect(self._end_speed_session)
         pos = self._speed_btn.mapToGlobal(QPoint(0, self._speed_btn.height() + 2))
         popup.move(pos)
@@ -2633,16 +2726,12 @@ class EditPanel(QWidget):
         clip = self._timeline.selected_clip
         if self._syncing or clip is None or abs(clip.speed - value) < 0.01:
             return
-        if self._speed_session != clip.clip_id:
-            self._remember()
-            self._speed_session = clip.clip_id
-
         found = self._project.find(clip.clip_id)
         if found is None:
             return
         track_idx, _ = found
         track = self._project.tracks[track_idx]
-        other_clips = [c for c in track.clips if c.clip_id != clip.clip_id]
+        other_clips = [c for c in track.clips if c.clip_id != clip.clip_id and not c.is_transition]
         ceiling = float("inf")
         for c in other_clips:
             if c.start >= clip.start and c.start < ceiling:
@@ -2651,8 +2740,12 @@ class EditPanel(QWidget):
         source_span = clip.duration * clip.speed
         target_duration = source_span / max(0.1, value)
         new_duration = max(MIN_SEGMENT, target_duration)
-        if clip.start + new_duration > ceiling:
-            new_duration = max(MIN_SEGMENT, ceiling - clip.start)
+        if clip.start + new_duration > ceiling + 1e-9:
+            QMessageBox.warning(self, strings.DIALOG_WARNING_TITLE, strings.EDIT_SPEED_COLLISION)
+            return
+        if self._speed_session != clip.clip_id:
+            self._remember()
+            self._speed_session = clip.clip_id
 
         self._apply(
             self._project.with_updated_clip(clip.clip_id, speed=value, duration=new_duration)
@@ -2669,7 +2762,8 @@ class EditPanel(QWidget):
         if self._syncing:
             return
         if self._overlay_drag_session != clip_id:
-            self._remember()
+            self._end_edit_groups()
+            self._session.begin_edit()
             self._overlay_drag_session = clip_id
         active = self._preview._active_clip
         sx = getattr(active, "scale_x", scale) if active else scale
@@ -2698,8 +2792,12 @@ class EditPanel(QWidget):
             and self._properties_widget._clip_id == clip_id
         ):
             self._properties_widget.update_transform_fields(x, y, sx, sy, rotation)
+        self._timeline.set_project(self._project, refit=False)
+        self._request_frame(force=True)
+        self.changed.emit()
 
     def _on_overlay_transform_finished(self, clip_id: int) -> None:
+        self._session.commit_edit()
         self._overlay_drag_session = -1
         self._after_edit()
         if (
@@ -2709,7 +2807,12 @@ class EditPanel(QWidget):
         ):
             found = self._project.find(clip_id)
             if found is not None:
-                self._properties_widget.load_clip(found[1], self._project.width, self._project.height)
+                self._properties_widget.load_clip(found[1], self._project.width, self._project.height, fps=self._project.fps, text_ratio=self._project.text_ratio)
+
+    def _on_overlay_transform_cancelled(self, clip_id: int) -> None:
+        self._preview._interaction_visible = False
+        if self._overlay_drag_session == clip_id:
+            self._on_edit_cancelled()
 
     def _refresh_clip_fields(self) -> None:
         clip = self._timeline.selected_clip
@@ -2739,7 +2842,7 @@ class EditPanel(QWidget):
 
         self._preview.set_active_clip(clip, self._project.width, self._project.height, visible=track_visible)
         info = strings.EDIT_CLIP_INFO.format(
-            name=clip.media.name, duration=format_span(clip.duration)
+            name=clip.media.name if clip.media else (clip.text_content or clip.overlay_type), duration=format_span(clip.duration)
         )
         if clip.detached:
             info = f"{info} · {strings.EDIT_CLIP_DETACHED}"
@@ -2749,9 +2852,22 @@ class EditPanel(QWidget):
         self._update_preview_overlay_clips()
 
     def _update_preview_overlay_clips(self) -> None:
+        # A prévia mostra o quadro composto pelo ffmpeg, e não uma reprodução
+        # própria das camadas: o que chega aqui são as alças e o que pode ser
+        # selecionado, nunca pixels recortados da imagem final.
+        self._preview._fps = self._project.fps
+        self._preview._text_ratio = self._project.text_ratio
         if self._on_fullscreen or self._playing:
             self._preview.set_overlay_clips(())
             return
+        self._preview._selectable_clips = tuple(
+            c for t in reversed(self._project.tracks) if t.visible
+            for c in sorted(t.clips, key=lambda c: (c.start, c.clip_id))
+            if t.kind is not TrackKind.AUDIO and c.has_image and not c.audio_only
+            and c.overlay_type not in ("filter", "transition")
+            and c.contains(self._preview._position)
+            and c.transform_at(self._preview._position - c.start).opacity > 0
+        )
         visual_tracks = [
             t
             for t in self._project.tracks
@@ -2768,45 +2884,7 @@ class EditPanel(QWidget):
             and c.contains(self._position)
             and not c.chromakey_enabled
         )
-        clip_filters: dict[int, tuple[str, ...]] = {}
-        for c in clips:
-            track_idx = None
-            for idx, t in enumerate(self._project.tracks):
-                if any(cl.clip_id == c.clip_id for cl in t.clips):
-                    track_idx = idx
-                    break
-            if track_idx is not None:
-                filters: list[str] = []
-                for t_idx in range(track_idx, -1, -1):
-                    t = self._project.tracks[t_idx]
-                    if not t.visible:
-                        continue
-                    for fc in t.clips:
-                        if fc.overlay_type == "filter" and fc.contains(self._position):
-                            filters.append(fc.filter_name)
-                if filters:
-                    clip_filters[c.clip_id] = tuple(filters)
-
-        active = self._preview._active_clip
-        if active is not None and active.clip_id not in clip_filters:
-            track_idx = None
-            for idx, t in enumerate(self._project.tracks):
-                if any(cl.clip_id == active.clip_id for cl in t.clips):
-                    track_idx = idx
-                    break
-            if track_idx is not None:
-                filters = []
-                for t_idx in range(track_idx, -1, -1):
-                    t = self._project.tracks[t_idx]
-                    if not t.visible:
-                        continue
-                    for fc in t.clips:
-                        if fc.overlay_type == "filter" and fc.contains(self._position):
-                            filters.append(fc.filter_name)
-                if filters:
-                    clip_filters[active.clip_id] = tuple(filters)
-
-        self._preview.set_overlay_clips(clips, clip_filters)
+        self._preview.set_overlay_clips(clips)
 
     # ------------------------------------------------------------------
     # Tela do projeto
@@ -2830,10 +2908,18 @@ class EditPanel(QWidget):
             width, height, fps
         ):
             return
-        self._project = replace(self._project, width=width, height=height, fps=fps)
+        self._project = self._project.with_output_canvas(width, height, fps)
+
+    def _apply_slideshow_canvas(self) -> None:
+        suggestion = slideshow_canvas(self._project)
+        if suggestion is None:
+            return
+        self._canvas_choice = suggestion
+        self._aspect_choice = format_aspect_ratio(*suggestion)
+        self._after_edit()
 
     def _aspect_options(self) -> list[tuple[str, str | None]]:
-        return [
+        options = [
             (strings.EDIT_CANVAS_ASPECT_AUTO, None),
             ("16:9", "16:9"),
             ("4:3", "4:3"),
@@ -2841,6 +2927,9 @@ class EditPanel(QWidget):
             ("1:1", "1:1"),
             ("21:9", "21:9"),
         ]
+        if self._aspect_choice and all(value != self._aspect_choice for _, value in options):
+            options.append((self._aspect_choice, self._aspect_choice))
+        return options
 
     def _on_aspect_choice(self, index: int) -> None:
         if self._syncing or index < 0:
@@ -2891,7 +2980,9 @@ class EditPanel(QWidget):
             if ref.has_video and ref.width and ref.height
         ]
         ordered = sorted(sizes, key=lambda size: -size[0] * size[1])
-        all_candidates = [*ordered, *_CANVAS_PRESETS]
+        # Projetos reabertos e o slideshow podem usar tamanhos que não estão
+        # no acervo nem nos presets. A reconstrução do controle deve conservá-los.
+        all_candidates = ([self._canvas_choice] if self._canvas_choice else []) + [*ordered, *_CANVAS_PRESETS]
         if self._aspect_choice:
             filtered = [
                 (w, h)
@@ -3025,29 +3116,78 @@ class EditPanel(QWidget):
             max(120, area.height()),
         )
 
-    def _request_frame(self, *, force: bool = False) -> None:
-        if self._project.is_empty or self._playing:
+    def _interaction_key(self):
+        clip = self._preview._active_clip
+        if self._closed or self._playing or self._on_fullscreen or clip is None:
+            return None
+        plan = interaction_plan(self._project, clip.clip_id, self._position)
+        return (self._generation, self._preview_size(), plan) if plan else None
+
+    def _invalidate_interaction(self) -> None:
+        self._interaction_context = None
+        self._interaction_token = next(self._tokens)
+        self._preview.set_interaction_layers(None)
+        if self._interaction_worker is not None:
+            self._interaction_worker.cancel()
+
+    def _prepare_interaction(self) -> None:
+        key = self._interaction_key()
+        if key is None or key == self._interaction_context:
             return
-        # Qualquer nova posição ou revisão invalida o fluxo que estava pronto.
-        # Ele é refeito depois que o quadro parado mais recente chegar.
+        if self._interaction_worker is not None:
+            return
+        tools = self._ensure_tools()
+        if tools is None:
+            return
+        self._interaction_context = key
+        self._interaction_token = next(self._tokens)
+        plan = key[2]
+        worker = self._runtime.interaction_worker(plan, key[1], tools, self._interaction_token,
+                                                  text_assets=self.editor.text_assets(self._project))
+        self._interaction_worker = worker
+        worker.signals.frame.connect(self._on_interaction_ready)
+        worker.signals.done.connect(self._on_interaction_done)
+        self._runner.start(worker, worker.signals.done)
+
+    def _on_interaction_done(self) -> None:
+        self._interaction_worker = None
+        if not self._closed and self._interaction_context != self._interaction_key():
+            self._prepare_interaction()
+
+    def _on_interaction_ready(self, token: int, images: object) -> None:
+        if (self._closed or token != self._interaction_token
+                or self._interaction_context != self._interaction_key()):
+            return
+        layers = tuple(QPixmap.fromImage(QImage.fromData(data)) for data in images)
+        if len(layers) == 3 and all(not p.isNull() for p in layers):
+            self._preview.set_interaction_layers(layers)
+
+    def _request_frame(self, *, force: bool = False) -> None:
+        if self._closed or self._project.is_empty:
+            return
+        if self._interaction_context is not None and self._interaction_context != self._interaction_key():
+            self._invalidate_interaction()
+        if self._playing:
+            if force:
+                self._loading_label.setText(strings.EDIT_LOADING_FRAME)
+                if not self._live_timer.isActive():
+                    self._live_timer.start()
+            return
         self._cancel_primed_playback()
+        changed = self._wanted != self._position
         self._wanted = self._position
         if force:
             self._frame_revision += 1
             self._rendered = None
-            if self._frame_busy:
-                # O processo em andamento termina normalmente e libera sua
-                # vaga, mas seu quadro já não pode chegar à tela. Trocar o token
-                # aqui fecha a janela entre a edição e o sinal ``done``.
-                self._frame_token = next(self._tokens)
+        if force or changed:
+            self._frame_token = next(self._tokens)
+        if self._overlay_drag_session >= 0 and self._preview.begin_interaction():
+            self._loading_label.setText("")
+            return
+        self._loading_label.setText(strings.EDIT_LOADING_FRAME)
         if self._frame_busy:
             return
         self._start_frame()
-        # Há duas vagas na fila ao vivo justamente para este par: o quadro
-        # parado continua aparecendo assim que pronto, enquanto o fluxo do play
-        # prepara seu primeiro quadro em paralelo. Fazer um depois do outro
-        # deixava uma janela perceptível logo após pausar ou editar.
-        self._prime_playback()
 
     def _start_frame(self) -> None:
         tools = self._ensure_tools()
@@ -3062,59 +3202,91 @@ class EditPanel(QWidget):
         self._frame_token = next(self._tokens)
         size = self._preview_size()
 
-        if not self._on_fullscreen and not self._playing:
-            additional_ids = [
-                c.clip_id
-                for t in self._project.tracks
-                if t.visible and t.kind is TrackKind.ADDITIONAL
-                for c in t.clips
-                if c.overlay_type != "filter"
-                and (c.overlay_type in ("image", "text") or c.is_image)
-                and c.contains(self._wanted)
-                and not c.chromakey_enabled
-            ]
-            proj = self._project
-            for cid in additional_ids:
-                proj = proj.without_clip(cid)
-        else:
-            proj = self._project
+        proj = self._project
+        key = PreviewResultKey(self._frame_token, self._generation, revision,
+                               self._wanted, size, self._project.fps)
+        self._frame_key = key
+        self._frame_job_token = key.token
+        self._frame_error_token = 0
 
         worker = self._runtime.frame_worker(
             proj, self._wanted, size, tools, self._frame_token,
             text_assets=self.editor.text_assets(proj),
         )
         worker.signals.frame.connect(self._on_frame)
+        if hasattr(worker.signals, "failed"):
+            worker.signals.failed.connect(self._on_preview_failed)
         worker.signals.done.connect(
-            lambda revision=revision: self._on_frame_done(revision)
+            lambda key=key: self._on_frame_done(key.revision, key.token)
         )
         self._runner.start(worker, worker.signals.done)
 
-    def _on_frame_done(self, revision: int) -> None:
+    def _on_frame_done(self, revision: int, token: int | None = None) -> None:
+        if self._closed or (token is not None and token != self._frame_job_token):
+            return
         self._frame_busy = False
-        current = (
-            revision == self._frame_revision
-            and (self._wanted is None or self._wanted == self._rendered)
-        )
-        if hasattr(self, "_loading_label") and current:
-            self._loading_label.setText("")
+        self._frame_job_token = 0
+        if self._overlay_drag_session >= 0 and self._preview._interaction_visible:
+            return
+        if self._playing or self._project.is_empty:
+            return
+        current = (revision == self._frame_revision
+                   and (token is None or token == self._frame_token)
+                   and (self._frame_key is None or self._frame_key.size == self._preview_size())
+                   and (self._wanted is None or self._wanted == self._rendered))
         if self._wanted is not None and not current:
             self._start_frame()
-            self._prime_playback()
-        elif current:
+        elif current and self._frame_error_token != token:
             self._prime_playback()
 
+    def _on_preview_failed(self, token: int, message: str) -> None:
+        if self._closed or token not in (self._frame_token, self._play_token):
+            return
+        self._frame_error_token = token
+        if token == self._play_token and self._playing:
+            self._stop_playback()
+        self._loading_label.setText(message)
+
     def _on_frame(self, token: int, frame: object) -> None:
-        if token not in (self._frame_token, self._play_token):
+        if isinstance(frame, PreviewFrameInbox):
+            frame = frame.take()
+        if self._closed or frame is None:
             return
-        if hasattr(self, "_loading_label"):
-            self._loading_label.setText("")
-        self._show_frame(frame)
-        if token != self._play_token or not self._playing:
+        if self._overlay_drag_session >= 0 and self._preview._interaction_visible:
             return
+        current = True
+        if token == self._play_token and self._playing:
+            current = getattr(self, "_playback_project", self._project) is self._project
+        else:
+            key = self._frame_key
+            if key is None:
+                if token != self._frame_token:
+                    return
+            else:
+                if (self._playing or key.token != token or key.generation != self._generation
+                        or key.seconds != self._wanted or key.size != self._preview_size()):
+                    return
+                current = token == self._frame_token and key.revision == self._frame_revision
+                editing = (self._session.editing or self._overlay_drag_session >= 0
+                           or self._properties_session >= 0 or self._typing_session >= 0)
+                if not current and not editing:
+                    return
+                # Durante um gesto, apresentar snapshots completos em ordem
+                # evita esperar a mão parar. A indicação de atualização só
+                # desaparece quando chega a revisão final, nunca num seek antigo.
+                if (self._presented_key is not None and self._presented_key.generation == key.generation
+                        and self._presented_key.revision > key.revision):
+                    return
+                self._presented_key = key
+        self._loading_label.setText("" if current else strings.EDIT_LOADING_FRAME)
         self._shown_frame = frame.seconds
-        if not self._audio.playing:
-            self._timeline.set_position(frame.seconds)
-            self._update_time_labels()
+        self._preview.set_position(frame.seconds)
+        self._show_frame(frame)
+        if current:
+            self._prepare_interaction()
+        if token == self._play_token and self._playing and self._clock_started is None:
+            self._clock_position = frame.seconds
+            self._clock_started = time.monotonic()
 
     def _show_frame(self, frame: object) -> None:
         pixmap = pixmap_from_frame(frame.data, frame.width, frame.height)
@@ -3199,7 +3371,7 @@ class EditPanel(QWidget):
                     continue
                 if track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type == "image":
                     self._request_thumbs(clip, tools)
-                elif clip.media.has_audio:
+                elif clip.media is not None and clip.media.has_audio:
                     self._request_wave(clip, tools)
 
     def _strip_window(self, clip: Clip) -> tuple[float, float]:
@@ -3249,13 +3421,6 @@ class EditPanel(QWidget):
         return max(1.0, visivel / span * max(1, self._timeline.width() - 120))
 
     def _request_thumbs(self, clip: Clip, tools: FFmpegTools) -> None:
-        if (clip.is_image or clip.overlay_type == "image") and clip.media.path and clip.media.path.exists():
-            img = QImage(str(clip.media.path))
-            if not img.isNull():
-                self._timeline.set_strip(clip.clip_id, clip.in_point, clip.out_point, 1)
-                self._timeline.set_thumb(clip.clip_id, clip.in_point, img)
-                return
-
         # Uma imagem não tem trecho de origem para percorrer: uma miniatura só,
         # esticada por todo o bloco. Sem isso a tira cobriria uma fatia mínima
         # dele e o resto ficaria em branco.
@@ -3279,8 +3444,9 @@ class EditPanel(QWidget):
                 tok, cid, index, frame
             )
         )
-        self._background.start(worker, worker.signals.done)
         self._strip_workers[clip.clip_id] = worker
+        worker.signals.done.connect(lambda cid=clip.clip_id, tok=token: self._on_strip_done(cid, tok))
+        self._background.start(worker, worker.signals.done)
 
     def _cancel_strip(self, clip_id: int) -> None:
         """Interrompe a geração anterior de miniaturas deste bloco.
@@ -3289,6 +3455,7 @@ class EditPanel(QWidget):
         gerando cada uma delas: aproximar três vezes seguidas deixaria três
         gerações disputando a fila de trabalho.
         """
+        self._wave_requests.pop(clip_id, None)
         worker = self._strip_workers.pop(clip_id, None)
         if worker is not None:
             worker.cancel()
@@ -3306,10 +3473,15 @@ class EditPanel(QWidget):
         )
 
     def _request_wave(self, clip: Clip, tools: FFmpegTools) -> None:
-        token = next(self._tokens)
-        self._strip_tokens[clip.clip_id] = token
         begin, finish = self._strip_window(clip)
         width = int(min(_WAVE_MAX_WIDTH, max(80, self._clip_pixels(clip))))
+        key = (self._generation, clip.media.path, begin, finish, width, self._colors["accent"])
+        if self._wave_requests.get(clip.clip_id) == key:
+            return
+        self._cancel_strip(clip.clip_id)
+        token = next(self._tokens)
+        self._strip_tokens[clip.clip_id] = token
+        self._wave_requests[clip.clip_id] = key
         worker = self._runtime.waveform_worker(
             clip.media.path,
             begin,
@@ -3324,7 +3496,15 @@ class EditPanel(QWidget):
                 tok, c, a, b, png
             )
         )
+        self._strip_workers[clip.clip_id] = worker
+        worker.signals.done.connect(lambda cid=clip.clip_id, tok=token: self._on_strip_done(cid, tok))
         self._background.start(worker, worker.signals.done)
+
+    def _on_strip_done(self, clip_id: int, token: int) -> None:
+        if self._strip_tokens.get(clip_id) != token:
+            return
+        self._strip_workers.pop(clip_id, None)
+        self._wave_requests.pop(clip_id, None)
 
     def _on_wave(
         self, token: int, clip_id: int, begin: float, finish: float, png: bytes
@@ -3361,6 +3541,7 @@ class EditPanel(QWidget):
 
     def _on_scrub(self, seconds: float) -> None:
         self._stop_playback()
+        self._timeline.set_position(seconds)
         self._request_frame()
         self._update_time_labels()
         self._refresh_clip_actions()
@@ -3368,6 +3549,7 @@ class EditPanel(QWidget):
     def _seek_to(self, seconds: float) -> None:
         if self._project.is_empty:
             return
+        self._end_edit_groups()
         self._stop_playback()
         self._timeline.set_position(seconds)
         self._request_frame()
@@ -3390,12 +3572,19 @@ class EditPanel(QWidget):
         self._seek_to(self._position + direction * frame_step(self._fps))
 
     def _jump_keyframe(self, direction: int) -> None:
+        from videomanager.domain.timing import timeline_time
+        clip = self._keyframe_clip()
+        if clip is None:
+            return
+        times = tuple(timeline_time(t, clip.start, clip.in_point, clip.speed)
+                      for t in self._keyframes_for(clip)
+                      if clip.in_point <= t < clip.out_point)
         if direction < 0:
             target = keyframe_at_or_before(
-                self._keyframes, self._position - frame_step(self._fps)
+                times, self._position - frame_step(self._fps)
             )
         else:
-            target = keyframe_after(self._keyframes, self._position)
+            target = keyframe_after(times, self._position)
         if target is not None:
             self._seek_to(target)
 
@@ -3412,7 +3601,6 @@ class EditPanel(QWidget):
         self._frame_label.setText(
             strings.EDIT_FRAME_NUMBER.format(index=frame_index(self._position, self._fps))
         )
-        self._preview.set_position(self._position)
         self._update_preview_overlay_clips()
         if hasattr(self, "_properties_widget"):
             self._properties_widget.set_playhead_position(self._position)
@@ -3489,6 +3677,8 @@ class EditPanel(QWidget):
         tools = self._ensure_tools()
         if tools is None or self._project.is_empty:
             return
+        self._end_edit_groups()
+        self._invalidate_interaction()
         if seconds >= self._duration - frame_step(self._fps):
             seconds = 0.0
             self._timeline.set_position(0.0)
@@ -3509,10 +3699,14 @@ class EditPanel(QWidget):
         if tools is None:
             return
         self._live_timer.stop()
+        self._playback_project = self._project
         self._pending_audio = None
+        self._clock_position = seconds
+        self._clock_started = None
         started = self._start_frames(seconds)
         text_assets = self.editor.text_assets(self._project)
         if started is None or started[1]:
+            self._clock_started = time.monotonic()
             self._runtime.play_audio(
                 self._audio,
                 self._project,
@@ -3544,7 +3738,7 @@ class EditPanel(QWidget):
         self._open_stream(position)
 
     def _playback_key(
-        self, seconds: float, size: tuple[int, int], fps: int
+        self, seconds: float, size: tuple[int, int], fps: float
     ) -> tuple[object, ...]:
         return (id(self._project), round(seconds, 9), size, fps)
 
@@ -3559,7 +3753,7 @@ class EditPanel(QWidget):
 
     def _prime_playback(self) -> None:
         """Prepara o primeiro quadro enquanto a interface está pausada."""
-        if self._playing or self._project.is_empty or not self._has_video:
+        if self._closed or self._playing or self._project.is_empty or not self._has_video:
             return
         tools = self._ensure_tools()
         if tools is None:
@@ -3584,6 +3778,8 @@ class EditPanel(QWidget):
         )
         worker.signals.frame.connect(self._on_frame)
         worker.signals.primed.connect(self._on_playback_primed)
+        if hasattr(worker.signals, "failed"):
+            worker.signals.failed.connect(self._on_preview_failed)
         worker.signals.done.connect(
             lambda token=token: self._on_playback_worker_done(token)
         )
@@ -3603,6 +3799,8 @@ class EditPanel(QWidget):
             return
         self._pending_audio = None
         project, seconds, tools, text_assets = pending
+        self._clock_position = seconds
+        self._clock_started = time.monotonic()
         self._runtime.play_audio(
             self._audio,
             project,
@@ -3625,7 +3823,6 @@ class EditPanel(QWidget):
             return None
         if self._playback is not None:
             self._playback.cancel()
-        self._shown_frame = seconds
         size = self._preview_size()
         fps = preview_fps(self._fps)
         key = self._playback_key(seconds, size, fps)
@@ -3650,6 +3847,8 @@ class EditPanel(QWidget):
         )
         worker.signals.frame.connect(self._on_frame)
         worker.signals.primed.connect(self._on_playback_primed)
+        if hasattr(worker.signals, "failed"):
+            worker.signals.failed.connect(self._on_preview_failed)
         worker.signals.done.connect(
             lambda token=self._play_token: self._on_playback_worker_done(token)
         )
@@ -3672,50 +3871,42 @@ class EditPanel(QWidget):
     def _on_audio_stopped(self) -> None:
         if not self._playing:
             return
-        if self._loop.isChecked():
-            self._loop_playback()
-        else:
-            self._stop_playback()
+        # O término do som não encerra imagens, vãos ou trilhas mais longas.
+        self._clock_position = max(self._position, self._audio.position)
+        self._clock_started = time.monotonic()
+        self._on_tick()
 
     def _on_tick(self) -> None:
         if not self._playing:
             return
+        now = time.monotonic()
+        position = self._position
         if self._audio.playing:
             position = self._audio.position
-            self._timeline.set_position(position)
-            self._update_time_labels()
+            self._clock_position, self._clock_started = position, now
             drift = abs(self._shown_frame - position)
-            max_clip_speed = max((c.speed for c in self._project.clips), default=1.0)
-            allowed_drift = max(_MAX_DRIFT, _MAX_DRIFT * max_clip_speed * 0.75)
-            if (
-                self._has_video
-                and drift > allowed_drift
-                and position - self._resynced_at > _RESYNC_COOLDOWN
-            ):
+            if (self._has_video and drift > _MAX_DRIFT
+                    and position - self._resynced_at > _RESYNC_COOLDOWN):
                 self._resynced_at = position
                 self._start_frames(position)
-        frame_time = frame_step(self._fps)
-        max_clip_speed = max((c.speed for c in self._project.clips), default=1.0)
-        end_threshold = max(0.06, frame_time * max_clip_speed * 1.5)
-        if self._duration > 0 and self._position >= self._duration - end_threshold:
+        elif self._clock_started is not None:
+            position = self._clock_position + now - self._clock_started
+        self._timeline.set_position(min(self._duration, position))
+        self._update_time_labels()
+        # Duração é da saída: velocidade de outro clipe não encurta este fim.
+        if self._duration > 0 and position >= self._duration - 1e-8:
             if self._loop.isChecked():
                 self._loop_playback()
             else:
                 self._stop_playback()
 
     def _on_playback_done(self, token: int) -> None:
-        """O fluxo de quadros acabou: sem som, é ele quem diz que terminou."""
         if token != self._play_token or not self._playing:
             return
-        frame_time = frame_step(self._fps)
-        max_clip_speed = max((c.speed for c in self._project.clips), default=1.0)
-        end_threshold = max(0.1, frame_time * max_clip_speed * 2.0)
-        if self._has_sound and self._audio.playing and self._position < self._duration - end_threshold:
-            return
-        if self._loop.isChecked():
-            self._loop_playback()
-        else:
-            self._stop_playback()
+        self._playback = None
+        # O último frame ainda ocupa um intervalo. O relógio conclui esse
+        # intervalo e o eventual trecho de áudio posterior ao vídeo.
+        self._on_tick()
 
     def _stop_playback(self) -> None:
         # A imagem pode estar alguns quadros à frente da última atualização do
@@ -3726,6 +3917,7 @@ class EditPanel(QWidget):
         self._tick.stop()
         self._live_timer.stop()
         self._pending_audio = None
+        self._clock_started = None
         self._audio.stop()
         if self._playback is not None:
             self._playback.cancel()
@@ -3755,6 +3947,8 @@ class EditPanel(QWidget):
                 self._wanted = None
                 self._rendered = visible_position
                 self._prime_playback()
+            self._update_preview_overlay_clips()
+            self._prepare_interaction()
         self._refresh_play_button()
 
     def _refresh_play_button(self) -> None:
@@ -3771,6 +3965,7 @@ class EditPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _toggle_fullscreen(self) -> None:
+        self._end_edit_groups()
         if self._on_fullscreen:
             self._fullscreen.close()
             return
@@ -3881,7 +4076,7 @@ class EditPanel(QWidget):
         if not segments or len(segments) != 1:
             return None
         clip = self._project.clips[0]
-        anchor = keyframe_at_or_before(self._keyframes, segments[0].start)
+        anchor = keyframe_at_or_before(self._keyframes_for(clip), segments[0].start)
         return TrimTarget(
             segments=segments,
             container=clip.media.path.suffix.lstrip(".").lower() or "mp4",
@@ -3934,6 +4129,8 @@ class EditPanel(QWidget):
         logo depois de importar um arquivo longo deixava o processo pendurado
         até o prazo acabar, sem janela e sem explicação.
         """
+        self._closed = True
+        self.commit_pending_edits()
         self._stop_playback()
         self._cancel_primed_playback()
         for clip_id in list(self._strip_workers):
@@ -3951,6 +4148,8 @@ class EditPanel(QWidget):
                 pass
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.FocusOut and obj is getattr(self, "_text_input", None):
+            self._end_typing_session()
         if event.type() == QEvent.Type.MouseButtonPress:
             if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.LeftButton:
                 if hasattr(self, "_timeline") and self._timeline.selected_clip is not None:
@@ -4020,7 +4219,7 @@ class EditPanel(QWidget):
         self._refresh_clip_actions()
 
         for button in (self._prev_key, self._next_key):
-            button.setEnabled(bool(self._keyframes) and self._fast_available())
+            button.setEnabled(bool(self._keyframes_for(self._keyframe_clip())))
         self._refresh_play_button()
         for widget in (self._mute, self._volume):
             widget.setEnabled(self._audio.available)
@@ -4036,11 +4235,19 @@ class EditPanel(QWidget):
             if loaded
             else ""
         )
+        self._slideshow_button.setEnabled(slideshow_canvas(self._project) is not None)
         self._refresh_canvas_controls()
         self._lock_readouts()
         self._update_time_labels()
         self._sync_scrollbar()
         self._scan_keyframes()
+
+    def _keyframes_for(self, clip: Clip | None) -> tuple[float, ...]:
+        return self._keyframes if clip and clip.media and clip.media.path == self._keyframe_source else ()
+
+    def _keyframe_clip(self) -> Clip | None:
+        clip = self._timeline.selected_clip or self._main_clip()
+        return clip if clip and clip.media and clip.media.kind is MediaKind.VIDEO and not clip.is_transition else None
 
     def _scan_keyframes(self) -> None:
         """Mapeia os keyframes da mídia única, quando ainda houver uma só.
@@ -4049,23 +4256,36 @@ class EditPanel(QWidget):
         recorte de um arquivo — daí o mapeamento não acontecer numa montagem com
         várias mídias, onde não teria uso.
         """
-        if not self._fast_available():
-            return
-        source = self._project.clips[0].media.path
+        clip = self._keyframe_clip()
+        source = clip.media.path if clip else None
         if source == self._keyframe_source:
+            return
+        if self._keyframe_worker is not None:
+            self._keyframe_worker.cancel()
+            self._keyframe_worker = None
+        self._keyframe_token = next(self._tokens)
+        self._keyframes = ()
+        self._keyframe_source = source
+        for button in (self._prev_key, self._next_key):
+            button.setEnabled(False)
+        if source is None:
             return
         tools = self._ensure_tools()
         if tools is None:
             return
-        self._keyframe_source = source
         worker = self._runtime.keyframe_worker(source, tools)
-        worker.signals.keyframes.connect(self._on_keyframes)
+        self._keyframe_worker = worker
+        token = self._keyframe_token
+        worker.signals.keyframes.connect(lambda times, s=source, t=token: self._on_keyframes(times, s, t))
         self._background.start(worker, worker.signals.done)
 
-    def _on_keyframes(self, times: object) -> None:
+    def _on_keyframes(self, times: object, source: Path, token: int) -> None:
+        if source != self._keyframe_source or token != self._keyframe_token:
+            return
+        self._keyframe_worker = None
         self._keyframes = tuple(times) if isinstance(times, tuple) else ()
         for button in (self._prev_key, self._next_key):
-            button.setEnabled(bool(self._keyframes) and self._fast_available())
+            button.setEnabled(bool(self._keyframes_for(self._keyframe_clip())))
 
     # ------------------------------------------------------------------
     # Projeto (Salvar e Carregar)
@@ -4079,9 +4299,13 @@ class EditPanel(QWidget):
         return self._project_actions.new()
 
     def save_project(self) -> bool:
+        self._session.commit_edit()
+        self._end_edit_groups()
         return self._project_actions.save()
 
     def save_project_as(self) -> bool:
+        self._session.commit_edit()
+        self._end_edit_groups()
         return self._project_actions.save(choose_path=True)
 
     def open_project(self, path: Path | None = None) -> bool:
