@@ -19,6 +19,8 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     clips = project.clips
     if not clips:
         return None
+    if any(clip.media is None for clip in clips):
+        return None
     first = clips[0].media
     if any(clip.media.path != first.path for clip in clips):
         return None
@@ -27,6 +29,8 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     # Um bloco de "separar áudio" é só o som do arquivo, e copiar os dados
     # levaria a imagem junto: o que se pediu na tela deixaria de ser o que sai.
     if any(clip.audio_only or clip.detached for clip in clips):
+        return None
+    if any(clip.speed != 1.0 or clip.opacity != 1.0 or clip.keyframes for clip in clips):
         return None
     if first.kind is MediaKind.IMAGE:
         return None
@@ -46,11 +50,11 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     if any(clip.is_additional for clip in clips) or any(track.clips for track in project.additional_tracks):
         return None
     if any(
-        abs(clip.x - 0.5) >= 0.001
-        or abs(clip.y - 0.5) >= 0.001
-        or abs(getattr(clip, "scale_x", clip.scale) - 1.0) >= 0.001
-        or abs(getattr(clip, "scale_y", clip.scale) - 1.0) >= 0.001
-        or abs(clip.rotation) >= 0.1
+        abs(clip.x - 0.5) > 1e-9
+        or abs(clip.y - 0.5) > 1e-9
+        or abs(getattr(clip, "scale_x", clip.scale) - 1.0) > 1e-9
+        or abs(getattr(clip, "scale_y", clip.scale) - 1.0) > 1e-9
+        or abs(clip.rotation) > 1e-9
         or clip.chromakey_enabled
         for clip in clips
     ):
@@ -61,6 +65,12 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
         return None
 
     ordered = sorted(clips, key=lambda clip: clip.start)
+    # Concatenar recortes elimina lacunas e não representa sobreposições.
+    if abs(ordered[0].start) > 1e-9 or any(
+        abs(later.start - earlier.end) > 1e-9
+        for earlier, later in zip(ordered, ordered[1:])
+    ):
+        return None
     # O recorte simples é a mídia na ordem original: se os blocos foram
     # embaralhados no tempo, quem monta é o compositor.
     if any(
@@ -94,7 +104,9 @@ def _interpolated_clips(project: Project) -> list[Clip]:
         for track in project.video_tracks
         if track.visible
         for clip in track.clips
-        if clip.has_image and clip.media.fps and clip.media.fps < project.fps - 0.01
+        if clip.media is not None and clip.media.kind is MediaKind.VIDEO
+        and clip.has_image and clip.media.fps
+        and clip.media.fps * clip.speed < project.fps - 0.01
     ]
 
 
