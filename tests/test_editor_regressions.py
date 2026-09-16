@@ -135,7 +135,7 @@ def test_inserir_colar_transformar_e_apagar_exige_salvar(panel, tmp_path):
 
 
 def test_abrir_preserva_canvas_e_nao_marca_alteracoes(panel, tmp_path, wait_until):
-    project, _ = project_from_dict(document())
+    project, _ = project_from_dict(document(), base_dir=tmp_path)
     project = replace(project, width=720, height=1280, fps=25)
     path = tmp_path / "p.vmp"
     save_project(project, path)
@@ -281,3 +281,535 @@ def test_dialogo_de_gravacao_so_fecha_com_resultado_do_worker(desktop_app):
     finally:
         dialog.finish(False)
         dialog.deleteLater()
+
+
+def test_propriedade_apos_undo_nao_reaproveita_sessao_anterior(panel):
+    panel._insert_text_clip()
+    clip = panel._timeline.selected_clip
+    panel._on_properties_changed(clip.clip_id, {'x': .6})
+    panel._undo_edit()
+    panel._on_properties_changed(clip.clip_id, {'x': .7})
+    panel._redo_edit()
+    assert panel._project.find(clip.clip_id)[1].x == .7
+    panel._undo_edit()
+    assert panel._project.find(clip.clip_id)[1].x == clip.x
+
+
+def test_reordenacao_de_trilhas_produz_um_unico_undo(panel):
+    original = panel._project
+    panel._timeline.edit_started.emit()
+    panel._timeline.track_reordered.emit(0, 1)
+    panel._timeline.edit_finished.emit()
+    assert len(panel._session.history) == 1
+    panel._undo_edit()
+    assert panel._project is original
+
+
+def test_abrir_projeto_limpa_proporcao_anterior(panel):
+    project = replace(panel._project, width=1080, height=1920, fps=24)
+    panel._aspect_choice = '16:9'
+    panel.install_project(project, Path('/tmp/vertical.vmp'), [], {})
+    assert (panel._project.width, panel._project.height, panel._project.fps) == (1080, 1920, 24)
+    assert panel._aspect_choice == '9:16'
+    assert not panel.has_unsaved_changes
+
+
+def test_velocidade_que_nao_cabe_nao_trunca_origem(panel):
+    media = MediaRef(Path('/m/video.mp4'), MediaKind.VIDEO, duration=20)
+    item, neighbor = Clip(media, 0, 5), Clip(media, 5, 5)
+    project = replace(panel._project, tracks=(Track(TrackKind.VIDEO, clips=(item, neighbor)),))
+    panel.install_project(project, None, [], {})
+    panel._timeline.select(item.clip_id)
+    panel._on_speed(.5)
+    assert panel._project.find(item.clip_id)[1] == item
+    assert not panel._session.history
+
+
+def test_tesoura_com_selecao_fora_do_cursor_nao_corta_outro(panel):
+    media = MediaRef(Path('/m/video.mp4'), MediaKind.VIDEO, duration=20)
+    item, neighbor = Clip(media, 0, 5), Clip(media, 5, 5)
+    project = replace(panel._project, tracks=(Track(TrackKind.VIDEO, clips=(item, neighbor)),))
+    panel.install_project(project, None, [], {})
+    panel._timeline.select(item.clip_id)
+    panel._timeline.set_position(7)
+    panel._split_here()
+    assert len(panel._project.clips) == 2
+
+
+def test_arrastar_afastar_e_devolver_preserva_transicao(panel):
+    media = MediaRef(Path('/m/video.mp4'), MediaKind.VIDEO, duration=20)
+    left, right = Clip(media, 0, 5), Clip(media, 5, 5)
+    marker = Clip(MediaRef(Path('Transição_teste'), MediaKind.IMAGE), 4, 2, overlay_type='transition',
+                  transition_left_id=left.clip_id, transition_right_id=right.clip_id)
+    project = replace(panel._project, tracks=(Track(TrackKind.VIDEO, clips=(left, right, marker)),))
+    panel.install_project(project, None, [], {})
+    panel._timeline.edit_started.emit()
+    panel._on_clip_moved(right.clip_id, 0, 10)
+    assert panel._project.find(marker.clip_id) is None
+    panel._on_clip_moved(right.clip_id, 0, 5)
+    panel._timeline.edit_finished.emit()
+    assert panel._project.find(marker.clip_id) is not None
+    assert not panel._session.history
+
+
+def test_navegacao_keyframe_converte_origem_para_timeline(panel, monkeypatch):
+    media = MediaRef(Path('/m/video.mp4'), MediaKind.VIDEO, duration=30)
+    item = Clip(media, 5, 5, in_point=10, speed=2)
+    panel.install_project(replace(panel._project, tracks=(Track(TrackKind.VIDEO, clips=(item,)),)), None, [], {})
+    panel._timeline.select(item.clip_id)
+    panel._keyframe_source = media.path
+    panel._keyframes = (0, 10, 12, 16, 22)
+    panel._timeline.set_position(5)
+    positions = []
+    monkeypatch.setattr(panel, '_seek_to', positions.append)
+    panel._jump_keyframe(1)
+    assert positions == [6]
+
+
+def test_indice_tardio_nao_substitui_midia_atual(panel):
+    panel._keyframe_source = Path('/m/atual.mp4')
+    panel._keyframe_token = 12
+    panel._keyframes = (0, 2, 4)
+    panel._on_keyframes((1, 5), Path('/m/anterior.mp4'), 11)
+    assert panel._keyframes == (0, 2, 4)
+    panel._on_keyframes((1, 5), Path('/m/atual.mp4'), 10)
+    assert panel._keyframes == (0, 2, 4)
+
+
+def test_seek_ocupado_rejeita_quadro_anterior_e_inicia_so_ultimo(panel, monkeypatch):
+    from videomanager.domain.project import Project
+    from videomanager.domain.preview import RawFrame
+    from videomanager.application.media.preview import PreviewResultKey
+    clip = Clip(MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO), 0, 5)
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(clip,)),))
+    panel._project = project
+    panel._timeline.set_project(project)
+    panel._frame_busy = True
+    panel._frame_token = panel._frame_job_token = 71
+    panel._wanted = panel._rendered = 1
+    panel._frame_key = PreviewResultKey(71, panel._generation, 0, 1, (2, 2), 30)
+    shown, started = [], []
+    monkeypatch.setattr(panel, '_show_frame', shown.append)
+    monkeypatch.setattr(panel, '_start_frame', lambda: started.append(panel._wanted))
+    panel._timeline.set_position(2)
+    panel._request_frame()
+    panel._timeline.set_position(3)
+    panel._request_frame()
+    panel._on_frame(71, RawFrame(bytes(12), 2, 2, 1))
+    assert not shown
+    panel._on_frame_done(0, 71)
+    assert started == [3]
+    panel._frame_busy = True
+    panel._frame_job_token = 72
+    panel._on_frame_done(0, 71)
+    assert panel._frame_busy
+    assert started == [3]
+
+
+def test_seek_de_ida_e_volta_reagenda_quadro_invalidado(panel, monkeypatch):
+    from videomanager.domain.project import Project
+    clip = Clip(MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO), 0, 5)
+    panel._project = Project(tracks=(Track(TrackKind.VIDEO, clips=(clip,)),))
+    panel._timeline.set_project(panel._project)
+    panel._frame_busy = True
+    panel._frame_token = panel._frame_job_token = 71
+    panel._wanted = panel._rendered = 1
+    started = []
+    monkeypatch.setattr(panel, '_start_frame', lambda: started.append(panel._wanted))
+    panel._timeline.set_position(2)
+    panel._request_frame()
+    panel._timeline.set_position(1)
+    panel._request_frame()
+    panel._on_frame_done(0, 71)
+    assert started == [1]
+
+
+def test_callback_apos_fechar_nao_reinicia_worker(panel, monkeypatch):
+    started = []
+    monkeypatch.setattr(panel, '_start_frame', lambda: started.append(True))
+    panel._closed = True
+    panel._wanted = 2
+    panel._on_frame_done(-1)
+    assert not started
+
+
+def _clock_project(panel, *, speed=1):
+    from videomanager.domain.project import Project
+    clip = Clip(MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO), 0, 4, speed=speed)
+    panel._project = Project(tracks=(Track(TrackKind.VIDEO, clips=(clip,)),))
+    panel._timeline.set_project(panel._project)
+    panel._playing = True
+    return clip
+
+
+def test_scrub_durante_play_preserva_destino_e_nao_frame_antigo(panel):
+    _clock_project(panel)
+    panel._shown_frame = .5
+    panel._timeline.set_position(2)
+    panel._on_scrub(2)
+    assert panel._position == 2
+    assert not panel._playing
+
+
+def test_fim_do_audio_continua_video_e_relogio_monotonico(panel, monkeypatch):
+    _clock_project(panel)
+    panel._timeline.set_position(1)
+    now = [10.0]
+    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.time.monotonic', lambda: now[0])
+    panel._on_audio_stopped()
+    assert panel._playing
+    now[0] = 12
+    panel._on_tick()
+    assert panel._position == pytest.approx(3)
+    assert panel._playing
+
+
+@pytest.mark.parametrize('fps', [24, 29.97, 60])
+def test_pausa_e_retomada_seguem_frame_exibido_sem_deriva_acumulada(panel, monkeypatch, fps):
+    import math
+    from types import SimpleNamespace
+    _clock_project(panel)
+    panel._project = replace(panel._project, fps=fps)
+    panel._timeline.set_project(panel._project)
+    now = [100.0]
+    sound = SimpleNamespace(playing=True, position=0., available=True)
+    sound.stop = lambda: setattr(sound, 'playing', False)
+    monkeypatch.setattr(panel, '_audio', sound)
+    monkeypatch.setattr(panel, '_ensure_tools', lambda: object())
+    monkeypatch.setattr(panel, '_prime_playback', lambda: None)
+    monkeypatch.setattr(panel, '_start_frames', lambda seconds: (17, True))
+    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.time.monotonic', lambda: now[0])
+    resumed = []
+    def start(audio, project, seconds, tools, **kw):
+        resumed.append(seconds)
+        audio.playing, audio.position = True, seconds
+    monkeypatch.setattr(panel._runtime, 'play_audio', start)
+    for index in range(30):
+        sound.playing = True
+        sound.position = .5 + index * .05
+        visible = math.floor(sound.position * fps) / fps
+        panel._shown_frame = visible
+        panel._playing = True
+        panel._on_tick()
+        assert panel._position == pytest.approx(sound.position)
+        panel._stop_playback()
+        assert panel._position == pytest.approx(visible)
+        assert 0 <= sound.position - panel._position < 1 / fps + 1e-9
+        now[0] += .1
+        panel._start_playback(panel._position)
+        assert resumed[-1] == pytest.approx(visible)
+        assert panel._clock_position == pytest.approx(visible)
+        assert panel._clock_started == now[0]
+
+
+def test_velocidade_de_clipe_nao_antecipa_fim(panel, monkeypatch):
+    _clock_project(panel, speed=10)
+    panel._clock_position = 3.8
+    panel._clock_started = 10
+    now = [10.0]
+    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.time.monotonic', lambda: now[0])
+    panel._on_tick()
+    assert panel._playing
+    panel._shown_frame = 119/30
+    now[0] = 10.2
+    panel._on_tick()
+    assert not panel._playing
+    assert panel._position == pytest.approx(119/30)
+
+
+def test_projeto_sem_saida_reproduzivel_nao_habilita_play(panel):
+    from videomanager.domain.project import Project
+    clip = Clip(MediaRef(Path('/m/a.wav'), MediaKind.AUDIO), 0, 4)
+    panel._project = Project(tracks=(Track(TrackKind.AUDIO, clips=(clip,), muted=True),))
+    assert not panel._playable
+
+
+def test_onda_equivalente_reusa_worker_e_done_antigo_nao_libera_novo(panel, monkeypatch):
+    from videomanager.infrastructure.qt.workers.signals import PreviewSignals
+    from types import SimpleNamespace
+    clip = Clip(MediaRef(Path('/m/a.wav'), MediaKind.AUDIO), 0, 5)
+    workers = []
+    def make(*args):
+        worker = SimpleNamespace(signals=PreviewSignals(), cancel=lambda: None)
+        workers.append(worker)
+        return worker
+    monkeypatch.setattr(panel._runtime, 'waveform_worker', make)
+    monkeypatch.setattr(panel._background, 'start', lambda *args: None)
+    monkeypatch.setattr(panel, '_strip_window', lambda clip: (0, 2))
+    panel._request_wave(clip, None)
+    first_token = panel._strip_tokens[clip.clip_id]
+    panel._request_wave(clip, None)
+    assert len(workers) == 1
+    monkeypatch.setattr(panel, '_strip_window', lambda clip: (2, 4))
+    panel._request_wave(clip, None)
+    assert len(workers) == 2
+    panel._on_strip_done(clip.clip_id, first_token)
+    assert panel._strip_workers[clip.clip_id] is workers[-1]
+    panel._request_wave(clip, None)
+    assert len(workers) == 2
+
+
+def test_slideshow_preserva_formato_sugerido_nos_controles_e_edicoes(panel):
+    from videomanager.domain.project import Project
+    photo = MediaRef(Path('/m/vertical.png'), MediaKind.IMAGE, width=3000, height=4000)
+    clip = Clip(photo, 0, 5)
+    panel._project = Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(clip,)),))
+    panel._apply_slideshow_canvas()
+    assert panel._canvas_choice == (1440, 1920)
+    assert panel._canvas_box.currentData() == (1440, 1920)
+    assert panel._aspect_box.currentData() == '3:4'
+    panel._after_edit()
+    assert (panel._project.width, panel._project.height) == (1440, 1920)
+
+
+def test_salvar_e_desfazer_apos_mudar_resolucao_preserva_controles_e_texto(panel, tmp_path):
+    panel._insert_text_clip()
+    clip = panel._project.clips[0]
+    reference = (panel._project.text_reference_width, panel._project.text_reference_height)
+    panel._project_path = tmp_path / 'resolution.vmp'
+    assert panel.save_project()
+    panel._canvas_choice = (3840, 2160)
+    panel._aspect_choice = '16:9'
+    panel._after_edit()
+    assert panel.save_project()
+    panel._on_overlay_transformed(clip.clip_id, .3, .4, 1, 0)
+    panel._on_overlay_transform_finished(clip.clip_id)
+    assert panel.has_unsaved_changes
+    panel._undo_edit()
+    assert not panel.has_unsaved_changes
+    assert panel._canvas_box.currentData() == (3840, 2160)
+    assert (panel._project.width, panel._project.height) == (3840, 2160)
+    assert (panel._project.text_reference_width, panel._project.text_reference_height) == reference
+    saved, _ = load_project(panel._project_path)
+    assert saved == panel._project
+
+
+def test_insercao_automatica_evita_trilha_oculta_e_muda(panel):
+    from videomanager.domain.project import Project
+    media = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, has_audio=True, duration=2)
+    panel._project = Project(tracks=(Track(TrackKind.VIDEO, visible=False), Track(TrackKind.VIDEO, muted=True)))
+    panel._place(media, at=0)
+    found = next((t for t in panel._project.tracks if t.clips))
+    assert found.visible and not found.muted
+    assert len(panel._project.tracks) == 3
+
+
+def test_digitacao_e_undo_preservam_sessao_espacos_e_cursor(panel):
+    from PySide6.QtTest import QTest
+    from videomanager.domain.project import Project
+    clip = Clip(None, 0, 5, overlay_type='text', text_content='Oi')
+    panel._project = Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(clip,)),))
+    panel._timeline.set_project(panel._project)
+    panel._timeline.select(clip.clip_id)
+    panel._text_input.setCursorPosition(2)
+    QTest.keyClicks(panel._text_input, ' tudo bem')
+    assert panel._project.find(clip.clip_id)[1].text_content == 'Oi tudo bem'
+    assert len(panel._session.history) == 1
+    panel._text_input.setCursorPosition(3)
+    QTest.keyClicks(panel._text_input, 'muito ')
+    assert panel._project.find(clip.clip_id)[1].text_content == 'Oi muito tudo bem'
+    assert panel._text_input.cursorPosition() == 9
+    panel._undo_edit()
+    assert panel._project.find(clip.clip_id)[1].text_content == 'Oi'
+    panel._redo_edit()
+    assert panel._project.find(clip.clip_id)[1].text_content == 'Oi muito tudo bem'
+    panel.commit_pending_edits()
+    QTest.keyClicks(panel._text_input, '!')
+    assert len(panel._session.history) == 2
+
+
+@pytest.mark.parametrize('reason', ['escape', 'capture', 'hide'])
+def test_cancelamento_de_gesto_no_preview_restaura_projeto_e_historico(panel, reason):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    panel._insert_text_clip()
+    original = panel._project
+    clip = original.clips[0]
+    history = panel._session.history
+    panel._on_overlay_transformed(clip.clip_id, .2, .3, 1, 0)
+    panel._preview._drag_mode = 'move'
+    panel._preview._drag_clip_id = clip.clip_id
+    panel._preview._drag_original_clip = clip
+    if reason == 'escape':
+        panel._preview.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
+    else:
+        panel._preview.event(QEvent(QEvent.Type.UngrabMouse if reason == 'capture' else QEvent.Type.Hide))
+    assert panel._project == original
+    assert panel._session.history == history
+    assert not panel._session.editing
+    assert panel._preview._drag_mode is None
+
+
+def test_gesto_do_preview_de_ida_e_volta_preserva_refazer(panel):
+    panel._insert_text_clip()
+    clip = panel._project.clips[0]
+    panel._on_overlay_transformed(clip.clip_id, .2, .3, 1, 0)
+    panel._on_overlay_transform_finished(clip.clip_id)
+    panel._undo_edit()
+    history, future = panel._session.history, panel._session.future
+    panel._on_overlay_transformed(clip.clip_id, .1, .2, 1, 0)
+    panel._on_overlay_transformed(clip.clip_id, clip.x, clip.y, clip.scale, clip.rotation)
+    panel._on_overlay_transform_finished(clip.clip_id)
+    assert panel._session.history == history
+    assert panel._session.future == future
+
+
+def test_gesto_continuo_apresenta_snapshot_com_indicacao_de_atualizacao(panel, monkeypatch):
+    from videomanager.application.media.preview import PreviewResultKey
+    from videomanager.domain.preview import RawFrame
+    _clock_project(panel)
+    panel._playing = False
+    panel._session.begin_edit()
+    panel._wanted = 1
+    panel._frame_key = PreviewResultKey(71, panel._generation, 1, 1, (2, 2), 30)
+    panel._frame_revision = 2
+    panel._frame_token = 72
+    shown = []
+    monkeypatch.setattr(panel, '_preview_size', lambda: (2, 2))
+    monkeypatch.setattr(panel, '_show_frame', shown.append)
+    frame = RawFrame(bytes(12), 2, 2, 1)
+    panel._on_frame(71, frame)
+    assert shown == [frame]
+    assert panel._loading_label.text()
+    panel._session.commit_edit()
+    panel._on_frame(71, frame)
+    assert len(shown) == 1
+    panel._frame_key = PreviewResultKey(72, panel._generation, 2, 1, (2, 2), 30)
+    panel._on_frame(72, frame)
+    assert len(shown) == 2 and not panel._loading_label.text()
+
+
+@pytest.mark.parametrize('width', [1280, 1440])
+def test_editor_estreito_permite_alcancar_controles_e_status(panel, desktop_app, width):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QScrollArea
+    from videomanager.presentation.qt.main_window import MainWindow
+    from videomanager.presentation.qt import strings
+
+    wrapper = MainWindow._wrap_tab(panel, horizontal=True)
+    wrapper.resize(width, 900)
+    wrapper.show()
+    try:
+        desktop_app.processEvents()
+        area = wrapper.findChild(QScrollArea)
+        assert area.horizontalScrollBar().isVisible()
+        area.horizontalScrollBar().setValue(area.horizontalScrollBar().maximum())
+        desktop_app.processEvents()
+        volume = panel._mute
+        center = volume.mapTo(area.viewport(), volume.rect().center())
+        assert area.viewport().rect().contains(center)
+        assert volume.visibleRegion().contains(volume.rect().center())
+        label = panel._loading_label
+        panel._loading_label.setText(strings.EDIT_LOADING_FRAME)
+        desktop_app.processEvents()
+        assert label.isVisibleTo(wrapper)
+        assert label.visibleRegion().contains(label.rect().center())
+        preview_size = panel._preview.size()
+        label.setText('')
+        desktop_app.processEvents()
+        assert panel._preview.size() == preview_size
+        assert label.mapTo(area.viewport(), QPoint(0, 0)).y() >= 0
+    finally:
+        wrapper.hide()
+        panel.setParent(None)
+
+
+def test_propriedades_estreitas_permite_alcancar_valores(desktop_app):
+    from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget
+
+    widget = _ClipPropertiesWidget()
+    clip = Clip(MediaRef(Path('Texto'), MediaKind.IMAGE), 0, 5,
+                overlay_type='text', text_content='Título')
+    widget.load_clip(clip, 1920, 1080)
+    widget.resize(260, 600)
+    widget.show()
+    try:
+        desktop_app.processEvents()
+        area = widget._scroll
+        assert area.horizontalScrollBar().isVisible()
+        target = widget._spin_opacity
+        area.ensureWidgetVisible(target)
+        desktop_app.processEvents()
+        assert area.viewport().rect().contains(target.mapTo(area.viewport(), target.rect().center()))
+        assert target.visibleRegion().contains(target.rect().center())
+    finally:
+        widget.close()
+
+
+def test_selecao_com_quadro_disponivel_nao_dispara_render(panel, monkeypatch):
+    from PySide6.QtGui import QPixmap
+    panel._text_input.setText('Teste')
+    panel._insert_text_clip()
+    panel._preview.set_frame_pixmap(QPixmap(320, 180))
+    requests = []
+    monkeypatch.setattr(panel, '_request_frame', lambda **kwargs: requests.append(kwargs))
+    panel._on_clip_selected(panel._project.clips[0].clip_id)
+    assert requests == []
+
+
+def test_pausa_sem_adicionais_restaura_alvos_selecionaveis(panel, monkeypatch):
+    from videomanager.domain.project import Project
+    clip = Clip(MediaRef(Path('video.mp4'), MediaKind.VIDEO, width=320, height=180), 0, 5)
+    panel._project = Project(tracks=(Track(TrackKind.VIDEO, clips=(clip,)),))
+    panel._playing = True
+    panel._shown_frame = 1
+    panel._preview.set_position(1)
+    panel._preview._selectable_clips = ()
+    monkeypatch.setattr(panel, '_prime_playback', lambda: None)
+    panel._stop_playback()
+    assert [c.clip_id for c in panel._preview._selectable_clips] == [clip.clip_id]
+
+
+@pytest.mark.parametrize('command', ['undo', 'seek', 'play'])
+def test_comando_durante_arrasto_nao_deixa_gesto_ressuscitar(panel, monkeypatch, command):
+    from PySide6.QtCore import Qt, QPointF, QEvent
+    from PySide6.QtGui import QMouseEvent
+    panel._insert_text_clip()
+    original = panel._project
+    clip = original.clips[0]
+    panel._preview._drag_mode = 'move'
+    panel._preview._drag_clip_id = clip.clip_id
+    panel._preview._drag_original_clip = clip
+    panel._on_overlay_transformed(clip.clip_id, .7, .5, 1, 0)
+    if command == 'undo':
+        panel._undo_edit()
+        assert panel._project == original
+    elif command == 'seek':
+        panel._seek_to(1)
+    else:
+        monkeypatch.setattr(panel, '_ensure_tools', lambda: object())
+        monkeypatch.setattr(panel, '_request_frame', lambda **kwargs: None)
+        monkeypatch.setattr(panel, '_open_stream', lambda seconds: None)
+        panel._start_playback(0)
+    expected = panel._project
+    assert not panel._session.editing
+    assert panel._preview._drag_mode is None
+    event = QMouseEvent(QEvent.Type.MouseMove, QPointF(200, 180), QPointF(200, 180),
+                        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    panel._preview.mouseMoveEvent(event)
+    assert panel._project == expected
+
+
+def test_camadas_atrasadas_descartadas_apos_seek_selecao_e_edicao(panel):
+    from PySide6.QtCore import QBuffer, QIODevice
+    from PySide6.QtGui import QImage
+    panel._insert_text_clip()
+    context = panel._interaction_key()
+    assert context is not None
+    panel._interaction_context = context
+    panel._interaction_token = 987
+    img = QImage(32, 32, QImage.Format.Format_RGBA8888)
+    img.fill(0)
+    buf = QBuffer(); buf.open(QIODevice.OpenModeFlag.WriteOnly); img.save(buf, 'PNG')
+    images = (bytes(buf.data()),) * 3
+    panel._timeline.set_position(1)
+    panel._on_interaction_ready(987, images)
+    assert panel._preview._interaction_layers is None
+    panel._timeline.set_position(0)
+    clip = panel._project.clips[0]
+    panel._project = panel._project.with_updated_clip(clip.clip_id, text_content='Outro conteúdo')
+    panel._on_interaction_ready(987, images)
+    assert panel._preview._interaction_layers is None
+    panel._preview.set_active_clip(None, 1920, 1080)
+    panel._on_interaction_ready(987, images)
+    assert panel._preview._interaction_layers is None

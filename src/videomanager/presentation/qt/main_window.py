@@ -186,7 +186,7 @@ class MainWindow(QMainWindow):
         self._edit = EditPanel(self._settings, self._tools_for_convert, editor=self._editor_service, processing=self._processing, runtime=self._runtime)
         self._edit.jobs_ready.connect(self._submit_jobs)
         self._edit.changed.connect(self._balance_panes)
-        self._tabs.addTab(self._wrap_tab(self._edit), strings.TAB_EDIT)
+        self._tabs.addTab(self._wrap_tab(self._edit, horizontal=True), strings.TAB_EDIT)
 
         self._vertical = QSplitter(Qt.Orientation.Vertical)
         self._vertical.addWidget(self._tabs)
@@ -230,13 +230,13 @@ class MainWindow(QMainWindow):
         return tab
 
     @staticmethod
-    def _wrap_tab(inner: QWidget) -> QWidget:
+    def _wrap_tab(inner: QWidget, *, horizontal: bool = False) -> QWidget:
         """Dá à aba a mesma margem e a mesma rolagem da outra."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(*_TAB_MARGINS)
         layout.setSpacing(_TAB_SPACING)
-        layout.addWidget(MainWindow._wrap_scrollable(inner))
+        layout.addWidget(MainWindow._wrap_scrollable(inner, horizontal=horizontal))
         return tab
 
     def _on_split_moved(self, *_: int) -> None:
@@ -352,7 +352,7 @@ class MainWindow(QMainWindow):
             self._balancing = False
 
     @staticmethod
-    def _wrap_scrollable(inner: QWidget) -> QScrollArea:
+    def _wrap_scrollable(inner: QWidget, *, horizontal: bool = False) -> QScrollArea:
         """Torna roláveis as duas colunas de controles, juntas.
 
         A soma dos grupos tem altura mínima considerável. Em tela de notebook
@@ -365,7 +365,11 @@ class MainWindow(QMainWindow):
         area.setWidget(inner)
         area.setWidgetResizable(True)
         area.setFrameShape(QScrollArea.Shape.NoFrame)
-        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # O editor tem três colunas: telas estreitas precisam alcançar as laterais.
+        area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded if horizontal
+            else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         return area
 
     def _build_header(self) -> QWidget:
