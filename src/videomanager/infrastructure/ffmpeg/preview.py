@@ -144,6 +144,21 @@ def frame_from_command(
     return frame if frame.is_complete else None
 
 
+def _fit_filter(width: int, height: int) -> str:
+    """Encaixa na célula conservando a proporção, completando com preto.
+
+    A saída é rawvideo: o tamanho precisa ser exatamente o pedido, senão o
+    buffer não fecha e o quadro é descartado como incompleto. Por isso encolher
+    não basta — o que sobra vira tarja. Pedir ``scale=w:h`` cru esticava a
+    imagem para o formato da célula, e uma foto em pé aparecia achatada na
+    largura de um quadro 16:9.
+    """
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+    )
+
+
 def render_frame(
     path: Path,
     seconds: float,
@@ -171,7 +186,7 @@ def render_frame(
         "-ss", f"{max(0.0, seconds):.6f}",
         "-i", str(path),
         "-frames:v", "1",
-        "-vf", f"scale={width}:{height}",
+        "-vf", _fit_filter(width, height),
         "-f", "rawvideo",
         "-pix_fmt", "rgb24",
         "pipe:1",
@@ -228,7 +243,7 @@ def _strip_command(
         *decode_thread_args(),
         "-ss", f"{max(0.0, times[0]):.6f}",
         "-i", str(path),
-        "-vf", f"fps={1.0 / step:.9f}:round=up,scale={width}:{height}",
+        "-vf", f"fps={1.0 / step:.9f}:round=up,{_fit_filter(width, height)}",
         "-frames:v", str(len(times)),
         "-f", "rawvideo",
         "-pix_fmt", "rgb24",
