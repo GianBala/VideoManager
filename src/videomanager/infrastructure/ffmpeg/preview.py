@@ -144,18 +144,39 @@ def frame_from_command(
     return frame if frame.is_complete else None
 
 
-def _fit_filter(width: int, height: int) -> str:
-    """Encaixa na célula conservando a proporção, completando com preto.
+def _fit_filter(width: int, height: int, *, prefix: str = "") -> str:
+    """Encaixa na célula sem deformar, preto de verdade sob transparência.
 
     A saída é rawvideo: o tamanho precisa ser exatamente o pedido, senão o
     buffer não fecha e o quadro é descartado como incompleto. Por isso encolher
     não basta — o que sobra vira tarja. Pedir ``scale=w:h`` cru esticava a
     imagem para o formato da célula, e uma foto em pé aparecia achatada na
     largura de um quadro 16:9.
+
+    ``pad`` sozinho só preenche a moldura nova; o que já estava transparente
+    **dentro** da imagem escalada continua com o RGB que o decodificador
+    guardou sob alfa=0 — não é necessariamente preto, é lixo do codificador.
+    Medido num WebP real com canal alfa: a borda transparente saía
+    (255,255,255) em vez de preta, um risco branco visível na miniatura. O
+    ``geq`` multiplica cada canal pelo próprio alfa (0 a 1): onde alfa é zero,
+    a cor vai a zero junto, sem depender do que o codificador deixou ali.
+
+    A primeira versão disto compunha com ``overlay`` sobre uma segunda fonte
+    ``color``, que É a forma canônica de compor sobre um fundo — mas exige
+    sincronizar duas correntes de quadros, e a tira de miniaturas pede várias
+    de uma vez pelo mesmo ``fps``. Medido: a partir da segunda miniatura o
+    brilho saía cada vez mais errado, a base ficando para trás da frente sem
+    avisar nada. O ``geq`` opera quadro a quadro, sem segunda corrente para
+    dessincronizar, e por isso serve aos dois caminhos igual. ``prefix`` entra
+    antes do ``scale`` para filtros que precisam do quadro cru primeiro, como
+    o ``fps`` da tira.
     """
     return (
-        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+        f"[0:v]{prefix}scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"format=rgba,"
+        f"geq=r='r(X,Y)*alpha(X,Y)/255':g='g(X,Y)*alpha(X,Y)/255':b='b(X,Y)*alpha(X,Y)/255',"
+        f"format=yuv420p,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black[__fit]"
     )
 
 
@@ -175,6 +196,15 @@ def render_frame(
     vídeo de horas. Quem chama já recuou o instante um quarto de quadro (ver
     ``trimmer.seek_time``), o que garante que o quadro devolvido seja o que
     contém ``seconds``, e não o seguinte.
+
+    ``seconds <= 0`` omite o ``-ss`` inteiro em vez de pedir ``0.000000``:
+    buscar o início é sempre um no-op, e para uma imagem única que o ffprobe
+    detectou como ``image2`` (comum em JPEG baixado da internet, por
+    conteúdo, não pela extensão) o demuxer trata ``-ss`` como "avance para a
+    próxima imagem da sequência" — que não existe. Medido: o mesmo arquivo,
+    mesmo filtro, sem ``-ss`` sai 15552 bytes; com ``-ss 0.000000`` o ffmpeg
+    devolve zero bytes e nenhum aviso, porque ``-v error`` não imprime o
+    "No filtered frames for output stream" que explicaria o motivo.
     """
     width, height = size
     command = [
@@ -183,10 +213,14 @@ def render_frame(
         "-hide_banner",
         "-v", "error",
         *decode_thread_args(),
-        "-ss", f"{max(0.0, seconds):.6f}",
+    ]
+    if seconds > 0:
+        command += ["-ss", f"{seconds:.6f}"]
+    command += [
         "-i", str(path),
         "-frames:v", "1",
-        "-vf", _fit_filter(width, height),
+        "-filter_complex", _fit_filter(width, height),
+        "-map", "[__fit]",
         "-f", "rawvideo",
         "-pix_fmt", "rgb24",
         "pipe:1",
@@ -243,7 +277,8 @@ def _strip_command(
         *decode_thread_args(),
         "-ss", f"{max(0.0, times[0]):.6f}",
         "-i", str(path),
-        "-vf", f"fps={1.0 / step:.9f}:round=up,{_fit_filter(width, height)}",
+        "-filter_complex", _fit_filter(width, height, prefix=f"fps={1.0 / step:.9f}:round=up,"),
+        "-map", "[__fit]",
         "-frames:v", str(len(times)),
         "-f", "rawvideo",
         "-pix_fmt", "rgb24",
