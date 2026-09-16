@@ -265,3 +265,65 @@ def test_save_and_load_keyframes(tmp_path: Path) -> None:
     assert loaded_clip.keyframes[1].scale_x == 1.5
     assert loaded_clip.keyframes[1].rotation == 360.0
     assert loaded_clip.keyframes[1].opacity == 0.8
+
+
+def test_caminho_relativo_prioriza_pasta_do_documento(tmp_path, monkeypatch):
+    from videomanager.infrastructure.storage.project_json import project_from_dict
+    project_dir = tmp_path / 'projeto'
+    cwd_dir = tmp_path / 'cwd'
+    for directory in (project_dir, cwd_dir):
+        (directory / 'midias').mkdir(parents=True)
+        (directory / 'midias' / 'video.mp4').write_bytes(b'video')
+    monkeypatch.chdir(cwd_dir)
+    project, missing = project_from_dict({'tracks': [{'clips': [{'duration': 1,
+        'media': {'path': 'midias/video.mp4', 'kind': 'VIDEO'}}]}]}, base_dir=project_dir)
+    assert not missing
+    assert project.clips[0].media.path == project_dir / 'midias' / 'video.mp4'
+
+
+@pytest.mark.parametrize('kind,overlay', [('IMAGE', 'none'), ('IMAGE', 'text'), ('IMAGE', 'filter')])
+def test_recupera_origem_negativa_apenas_em_estatico(kind, overlay):
+    from videomanager.infrastructure.storage.project_json import project_from_dict, project_to_dict
+    data = {'tracks': [{'kind': 'VIDEO', 'clips': [{'duration': 2, 'in_point': -4,
+            'overlay_type': overlay, 'media': {'path': 'Texto_teste', 'kind': kind}}]}]}
+    loaded, _ = project_from_dict(data)
+    assert loaded.clips[0].in_point == 0
+    assert data['tracks'][0]['clips'][0]['in_point'] == -4
+    # Legado em vídeo conserva camada e identidade; não reordenar na leitura.
+    assert loaded.tracks[0].kind is TrackKind.VIDEO
+    again, _ = project_from_dict(project_to_dict(loaded))
+    assert again == loaded
+    data['tracks'][0]['clips'][0]['media']['kind'] = 'VIDEO'
+    data['tracks'][0]['clips'][0]['overlay_type'] = 'none'
+    with pytest.raises(ProjectError):
+        project_from_dict(data)
+
+
+def test_migracao_v1_preserva_backup_exato_e_nao_sobrescreve(tmp_path):
+    from videomanager.infrastructure.storage.project_json import project_from_dict
+    path = tmp_path / 'p.vmp'
+    original = b'{"version": 1, "tracks": []}'
+    path.write_bytes(original)
+    existing = tmp_path / 'p.vmp.v1.bak'
+    existing.write_bytes(b'copia anterior')
+    project, _ = project_from_dict(json.loads(original))
+    save_project(project, path)
+    assert existing.read_bytes() == b'copia anterior'
+    assert (tmp_path / 'p.vmp.v1.bak.1').read_bytes() == original
+    assert json.loads(path.read_text())['version'] == 2
+    save_project(project, path)
+    assert not (tmp_path / 'p.vmp.v1.bak.2').exists()
+
+
+def test_suportes_negativos_exigem_v2_e_sobrevivem_roundtrip(tmp_path):
+    from videomanager.domain.keyframe import Keyframe
+    from videomanager.infrastructure.storage.project_json import project_from_dict, project_to_dict
+    project = _sample_project(tmp_path / 'video.mp4')
+    clip = project.clips[0]
+    project = project.with_updated_clip(clip.clip_id, keyframes=(Keyframe(-5, x=0), Keyframe(5, x=1, easing='ease_in')))
+    encoded = project_to_dict(project)
+    loaded, _ = project_from_dict(encoded)
+    assert loaded.clips[0].transform_at(2.5).x == pytest.approx(.5625)
+    encoded['version'] = 1
+    with pytest.raises(ProjectError):
+        project_from_dict(encoded)
