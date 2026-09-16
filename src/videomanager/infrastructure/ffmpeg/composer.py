@@ -273,6 +273,36 @@ def _atempo_filters(speed: float) -> list[str]:
     return filters
 
 
+def _alpha_before_dynamic_scale(steps: list[str]) -> list[str]:
+    """Põe o alfa animado antes do ``scale`` que muda de tamanho a cada quadro.
+
+    ``geq`` fixa as dimensões do link quando o filtro é configurado. Estando
+    **depois** de um ``scale=…:eval=frame``, ele trava justamente o tamanho que
+    o scale deveria variar, e a escala animada desaparece do arquivo sem erro
+    nenhum. Medido: o preset ``zoom_in`` — que anima escala e opacidade juntas —
+    exportava a imagem no tamanho do primeiro quadro-chave do começo ao fim
+    (0,49 de largura em todo o clipe, contra 0,51 → 0,74 → 0,97 esperados),
+    enquanto a prévia, que monta um grafo por quadro, mostrava o movimento
+    certo. A opacidade animada é um fator uniforme no quadro, então aplicá-la
+    antes do scale dá o mesmo resultado; o chromakey precisa vir junto porque
+    ele **grava** o alfa em vez de multiplicá-lo, e ficaria por cima do fator.
+    """
+    alpha = next((i for i, s in enumerate(steps) if s.startswith("geq=")), None)
+    scale = next(
+        (i for i, s in enumerate(steps) if s.startswith("scale=") and "eval=frame" in s), None
+    )
+    if alpha is None or scale is None or alpha < scale:
+        return steps
+    chroma = next((i for i, s in enumerate(steps) if s.startswith("chromakey=")), None)
+    movidos = {i for i in (chroma, alpha) if i is not None}
+    adiantado = ([steps[chroma]] if chroma is not None else []) + ["format=rgba", steps[alpha]]
+    return (
+        steps[:scale]
+        + adiantado
+        + [s for i, s in enumerate(steps[scale:], start=scale) if i not in movidos]
+    )
+
+
 def _chromakey_filter(clip: Clip) -> str | None:
     """Gera a cláusula do filtro chromakey se habilitado no clipe."""
     if not clip.chromakey_enabled:
@@ -520,6 +550,7 @@ def _video_chain(
         elif clip.opacity < 1 - 1e-9:
             steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
         steps.append("format=rgba")
+        steps = _alpha_before_dynamic_scale(steps)
         return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
 
     steps = []
@@ -644,6 +675,7 @@ def _video_chain(
             steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
         steps.append("format=rgba")
         steps.append("setsar=1")
+        steps = _alpha_before_dynamic_scale(steps)
         return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
 
     if _rate_first(piece, project, fps, interpolate):
