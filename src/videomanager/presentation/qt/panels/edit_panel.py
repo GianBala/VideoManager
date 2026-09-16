@@ -3725,13 +3725,30 @@ class EditPanel(QWidget):
             return
         self._start_playback(self._position)
 
+    def _at_last_frame(self, seconds: float) -> bool:
+        """Se ``seconds`` já está no último quadro exibível da saída.
+
+        Tocar a partir daqui não produz quadro nenhum: o fluxo abre, não entrega
+        o primeiro quadro, e sem ele a pré-carga não avisa que começou — o som
+        pendente nunca entra e o relógio não anda. Por isso quem chega ao fim
+        recomeça do zero. A margem cobre o ruído de ponto flutuante do relógio
+        de reprodução: em 30000/1001 o último quadro entregue caía alguns
+        micros abaixo do limite exato e a regra não pegava, então apertar play
+        no fim reabria o fluxo num ponto sem quadro nenhum — e sem o primeiro
+        quadro a pré-carga não avisa que começou, o som pendente não entra e o
+        relógio não anda.
+        """
+        if self._duration <= 0:
+            return False
+        return seconds >= self._duration - frame_step(self._fps) - 1e-6
+
     def _start_playback(self, seconds: float) -> None:
         tools = self._ensure_tools()
         if tools is None or self._project.is_empty:
             return
         self._end_edit_groups()
         self._invalidate_interaction()
-        if seconds >= self._duration - frame_step(self._fps):
+        if self._at_last_frame(seconds):
             seconds = 0.0
             self._timeline.set_position(0.0)
 
@@ -3784,7 +3801,7 @@ class EditPanel(QWidget):
         if not self._playing:
             return
         position = self._position
-        if position >= self._duration - frame_step(self._fps):
+        if self._at_last_frame(position):
             self._stop_playback()
             return
         self._open_stream(position)
