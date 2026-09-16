@@ -112,7 +112,7 @@ class TestVideo:
     def test_bloco_entra_no_instante_em_que_foi_colocado(self) -> None:
         texto = filtros(projeto(video_track(clip(start=4.0, duration=6.0))))
         assert "setpts=PTS-STARTPTS+4.000000/TB" in texto
-        assert "between(t,4.000000,10.000000)" in texto
+        assert "gte(t,4.000000)*lt(t,10.000000)" in texto
 
     def test_bloco_no_zero_nao_recebe_atraso(self) -> None:
         texto = filtros(projeto(video_track(clip(start=0.0))))
@@ -801,7 +801,7 @@ class TestVelocidadeEFiltros:
         graph = build_graph(proj, text_assets={c_txt.clip_id: Path("texto.png")})
         filter_str = ";".join(graph.filters)
         # Deve usar escalonamento proporcional ao iw/ih e NÃO escala de imagem base fixa (400:300)
-        assert "scale=w='trunc(iw*1.2000/2)*2':h='trunc(ih*1.2000/2)*2'" in filter_str
+        assert "scale=w='max(2,trunc(iw*1.200000/2)*2)':h='max(2,trunc(ih*1.200000/2)*2)'" in filter_str
         assert "scale=400:300" not in filter_str
         assert "scale=480:360" not in filter_str
         assert "overlay=x='round((0.500000)*W-w/2)':y='round((0.800000)*H-h/2)'" in filter_str
@@ -1118,3 +1118,25 @@ class TestVelocidadeEFiltros:
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
 pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+def test_reducao_de_preview_preserva_escala_textual_animada():
+    from dataclasses import replace
+    from videomanager.domain.keyframe import Keyframe
+    from videomanager.infrastructure.ffmpeg.composer import _preview_project
+    text = Clip(FOTO, 0, 5, overlay_type='text', scale_x=2, scale_y=3,
+                keyframes=(Keyframe(0, scale_x=2, scale_y=3), Keyframe(5, scale_x=4, scale_y=5)))
+    project = Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(text,)),), width=1920, height=1080)
+    reduced = _preview_project(project, (320, 180))
+    assert reduced.clips[0].transform_at(2).scale_x == pytest.approx(text.transform_at(2).scale_x/6)
+    assert reduced.clips[0].transform_at(2).scale_y == pytest.approx(text.transform_at(2).scale_y/6)
+    assert replace(project) == project and project.clips[0] is text
+
+
+@pytest.mark.parametrize('source_fps,speed,target_fps,expected', [(60, .5, 60, True), (30, 2, 60, False)])
+def test_interpolacao_considera_cadencia_apos_velocidade(source_fps, speed, target_fps, expected):
+    from dataclasses import replace
+    media = replace(VIDEO, fps=source_fps)
+    p = Project(tracks=(video_track(clip(media, speed=speed)),), fps=target_fps)
+    assert can_interpolate(p) is expected
+    assert ('minterpolate' in filtros(p, interpolate=True)) is expected

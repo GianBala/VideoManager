@@ -224,7 +224,7 @@ def _interpolates(piece: _Piece, fps: float, interpolate: bool) -> bool:
     movimento para nada, e uma imagem parada não tem movimento a estimar.
     """
     origem = piece.clip.media.fps
-    return bool(interpolate and origem and origem < fps - 0.01)
+    return bool(interpolate and origem and origem * piece.clip.speed < fps - 0.01)
 
 
 def _rate_chain(piece: _Piece, fps: float, interpolate: bool) -> str:
@@ -372,6 +372,7 @@ def _video_chain(
     fps: float,
     interpolate: bool = False,
     canonical_size: tuple[int, int] | None = None,
+    standalone: bool = False,
 ) -> str:
     """Ajusta um bloco ao formato da tela e o coloca no instante certo."""
     clip = piece.clip
@@ -389,12 +390,12 @@ def _video_chain(
         origin = _clip_stream_origin(piece)
         has_anim_scale = clip.has_keyframes and (
             any(
-                abs(k.scale_x - sx) > 0.01 or abs(k.scale_y - sy) > 0.01
+                abs(k.scale_x - sx) > 1e-9 or abs(k.scale_y - sy) > 1e-9
                 for k in clip.keyframes
             )
             or any(
-                abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x) > 0.01
-                or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y) > 0.01
+                abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x) > 1e-9
+                or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y) > 1e-9
                 for i in range(len(clip.keyframes) - 1)
             )
         )
@@ -421,8 +422,8 @@ def _video_chain(
                     f"scale=w='max(2,trunc({base_w}*({expr_sx})/2)*2)':h='max(2,trunc({base_h}*({expr_sy})/2)*2)':eval=frame"
                 )
         elif clip.overlay_type == "text":
-            if abs(sx - 1.0) >= 0.01 or abs(sy - 1.0) >= 0.01:
-                steps.append(f"scale=w='trunc(iw*{sx:.4f}/2)*2':h='trunc(ih*{sy:.4f}/2)*2'")
+            if abs(sx - 1.0) > 1e-9 or abs(sy - 1.0) > 1e-9:
+                steps.append(f"scale=w='max(2,trunc(iw*{sx:.6f}/2)*2)':h='max(2,trunc(ih*{sy:.6f}/2)*2)'")
         elif clip.overlay_type == "image" or clip.is_image:
             canon_w, canon_h = canonical_size or (project.width, project.height)
             canon_base_w, canon_base_h = image_base_size(
@@ -438,17 +439,17 @@ def _video_chain(
             target_w = max(2, int(round(base_w * sx / 2.0) * 2))
             target_h = max(2, int(round(base_h * sy / 2.0) * 2))
             steps.append(f"scale={target_w}:{target_h}")
-        elif abs(sx - 1.0) >= 0.01 or abs(sy - 1.0) >= 0.01:
-            steps.append(f"scale=w='trunc(iw*{sx:.4f}/2)*2':h='trunc(ih*{sy:.4f}/2)*2'")
+        elif abs(sx - 1.0) > 1e-9 or abs(sy - 1.0) > 1e-9:
+            steps.append(f"scale=w='max(2,trunc(iw*{sx:.6f}/2)*2)':h='max(2,trunc(ih*{sy:.6f}/2)*2)'")
         if clip.chromakey_enabled:
             ck = _chromakey_filter(clip)
             if ck:
                 steps.append(ck)
 
         has_anim_rotation = clip.has_keyframes and (
-            any(abs(k.rotation - clip.rotation) > 0.01 for k in clip.keyframes)
+            any(abs(k.rotation - clip.rotation) > 1e-9 for k in clip.keyframes)
             or any(
-                abs(clip.keyframes[i].rotation - clip.keyframes[i + 1].rotation) > 0.01
+                abs(clip.keyframes[i].rotation - clip.keyframes[i + 1].rotation) > 1e-9
                 for i in range(len(clip.keyframes) - 1)
             )
         )
@@ -488,7 +489,7 @@ def _video_chain(
                 steps.append(
                     f"rotate=a='({expr_rot})*PI/180':ow='2*ceil(hypot(iw,ih)/2)':oh='2*ceil(hypot(iw,ih)/2)':c=black@0"
                 )
-        elif abs(clip.rotation) >= 0.1:
+        elif abs(clip.rotation) > 1e-9:
             rad = math.radians(clip.rotation)
             if max_diag is not None:
                 steps.append(
@@ -501,9 +502,9 @@ def _video_chain(
 
         if clip.has_keyframes:
             has_anim_opacity = any(
-                abs(k.opacity - clip.opacity) > 0.01 for k in clip.keyframes
+                abs(k.opacity - clip.opacity) > 1e-9 for k in clip.keyframes
             ) or any(
-                abs(clip.keyframes[i].opacity - clip.keyframes[i + 1].opacity) > 0.01
+                abs(clip.keyframes[i].opacity - clip.keyframes[i + 1].opacity) > 1e-9
                 for i in range(len(clip.keyframes) - 1)
             )
             if has_anim_opacity:
@@ -514,15 +515,15 @@ def _video_chain(
                 steps.append(
                     f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({expr_op})'"
                 )
-            elif clip.opacity < 0.99:
+            elif clip.opacity < 1 - 1e-9:
                 steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
-        elif clip.opacity < 0.99:
+        elif clip.opacity < 1 - 1e-9:
             steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
         steps.append("format=rgba")
         return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
 
     steps = []
-    if abs(clip.speed - 1.0) >= 0.01:
+    if abs(clip.speed - 1.0) > 1e-9:
         steps.append(f"trim=duration={piece.duration * clip.speed:.6f}")
         inv = 1.0 / clip.speed
         if piece.offset > 0:
@@ -542,31 +543,32 @@ def _video_chain(
     origin = _clip_stream_origin(piece)
     has_anim_scale = has_keyframes and (
         any(
-            abs(k.scale_x - sx) > 0.01 or abs(k.scale_y - sy) > 0.01
+            abs(k.scale_x - sx) > 1e-9 or abs(k.scale_y - sy) > 1e-9
             for k in clip.keyframes
         )
         or any(
-            abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x) > 0.01
-            or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y) > 0.01
+            abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x) > 1e-9
+            or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y) > 1e-9
             for i in range(len(clip.keyframes) - 1)
         )
     )
     has_anim_rotation = has_keyframes and (
-        any(abs(k.rotation - clip.rotation) > 0.01 for k in clip.keyframes)
+        any(abs(k.rotation - clip.rotation) > 1e-9 for k in clip.keyframes)
         or any(
-            abs(clip.keyframes[i].rotation - clip.keyframes[i + 1].rotation) > 0.01
+            abs(clip.keyframes[i].rotation - clip.keyframes[i + 1].rotation) > 1e-9
             for i in range(len(clip.keyframes) - 1)
         )
     )
     has_transform = (
-        has_keyframes
-        or abs(clip.x - 0.5) >= 0.0001
-        or abs(clip.y - 0.5) >= 0.0001
-        or abs(sx - 1.0) >= 0.001
-        or abs(sy - 1.0) >= 0.001
-        or abs(clip.rotation) >= 0.1
+        standalone
+        or has_keyframes
+        or abs(clip.x - 0.5) > 1e-9
+        or abs(clip.y - 0.5) > 1e-9
+        or abs(sx - 1.0) > 1e-9
+        or abs(sy - 1.0) > 1e-9
+        or abs(clip.rotation) > 1e-9
         or clip.chromakey_enabled
-        or clip.opacity < 0.99
+        or clip.opacity < 1 - 1e-9
     )
     if has_transform:
         steps.append(_rate_chain(piece, fps, interpolate))
@@ -610,7 +612,7 @@ def _video_chain(
                 steps.append(
                     f"rotate=a='({expr_rot})*PI/180':ow='2*ceil(hypot(iw,ih)/2)':oh='2*ceil(hypot(iw,ih)/2)':c=black@0"
                 )
-        elif abs(clip.rotation) >= 0.1:
+        elif abs(clip.rotation) > 1e-9:
             rad = math.radians(clip.rotation)
             if max_diag is not None:
                 steps.append(
@@ -623,9 +625,9 @@ def _video_chain(
 
         if clip.has_keyframes:
             has_anim_opacity = any(
-                abs(k.opacity - clip.opacity) > 0.01 for k in clip.keyframes
+                abs(k.opacity - clip.opacity) > 1e-9 for k in clip.keyframes
             ) or any(
-                abs(clip.keyframes[i].opacity - clip.keyframes[i + 1].opacity) > 0.01
+                abs(clip.keyframes[i].opacity - clip.keyframes[i + 1].opacity) > 1e-9
                 for i in range(len(clip.keyframes) - 1)
             )
             if has_anim_opacity:
@@ -636,9 +638,9 @@ def _video_chain(
                 steps.append(
                     f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({expr_op})'"
                 )
-            elif clip.opacity < 0.99:
+            elif clip.opacity < 1 - 1e-9:
                 steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
-        elif clip.opacity < 0.99:
+        elif clip.opacity < 1 - 1e-9:
             steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
         steps.append("format=rgba")
         steps.append("setsar=1")
@@ -650,8 +652,9 @@ def _video_chain(
     else:
         steps.append(_fit_scale(project.width, project.height))
         steps.append(_rate_chain(piece, fps, interpolate))
+    steps.append("format=rgba")
     steps.append(
-        f"pad={project.width}:{project.height}:(ow-iw)/2:(oh-ih)/2:color=black"
+        f"pad={project.width}:{project.height}:(ow-iw)/2:(oh-ih)/2:color=black@0"
     )
     steps.append("setsar=1")
     return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
@@ -833,7 +836,7 @@ def _transition_additional_pieces(
                     continue
                 begin = context.start if clip.start <= context.cut + 1e-6 else clip.start
                 end = min(context.end, clip.end)
-                source_at = active_start
+                source_at = begin
             begin = max(context.start, begin)
             end = min(context.end, end)
             if end - begin <= 1e-6:
@@ -962,51 +965,24 @@ def _transition_video_chain(
         )
     )
 
-    sx = getattr(clip, "scale_x", clip.scale)
-    sy = getattr(clip, "scale_y", clip.scale)
-    has_transform = (
-        abs(clip.x - 0.5) >= 0.0001
-        or abs(clip.y - 0.5) >= 0.0001
-        or abs(sx - 1.0) >= 0.001
-        or abs(sy - 1.0) >= 0.001
-        or abs(clip.rotation) >= 0.1
-        or clip.chromakey_enabled
-    )
-    if not has_transform:
-        steps.extend(
-            (
-                _fit_scale(project.width, project.height),
-                f"pad={project.width}:{project.height}:(ow-iw)/2:(oh-ih)/2:color=black",
-                "setsar=1",
-                "format=yuv420p",
-            )
-        )
-        return [f"[{side.index}:v]" + ",".join(steps) + label]
-
-    width, height = fit_size(
-        clip.media.width, clip.media.height, project.width, project.height
-    )
-    target_w = max(2, int(round(width * sx / 2.0) * 2))
-    target_h = max(2, int(round(height * sy / 2.0) * 2))
-    steps.append(f"scale={target_w}:{target_h}")
-    chromakey = _chromakey_filter(clip)
-    if chromakey:
-        steps.append(chromakey)
-    if abs(clip.rotation) >= 0.1:
-        radians = math.radians(clip.rotation)
-        steps.append("format=rgba")
-        steps.append(
-            f"rotate={radians:.4f}:ow='rotw({radians:.4f})':oh='roth({radians:.4f})':c=black@0"
-        )
-    steps.append("format=rgba")
-    raw = f"{label[:-1]}_raw]"
+    # Decodificação/alças são específicas da transição; transformação e alfa
+    # usam a mesma composição de uma camada normal, no relógio da timeline.
+    elapsed = (side.seek - clip.in_point) / side.playback_speed - side.prepad
+    local_clip = replace(clip, start=0, duration=side.duration, in_point=0, speed=1,
+                         keyframes=tuple(replace(k, time_offset=k.time_offset-elapsed) for k in clip.keyframes))
+    decoded = f"{label[:-1]}_decoded]"
     base = f"{label[:-1]}_base]"
-    return [
-        f"[{side.index}:v]" + ",".join(steps) + raw,
-        f"color=c=black:s={project.width}x{project.height}:r={fps:.6f}:d={side.duration:.6f}{base}",
-        f"{base}{raw}overlay=x='round(({clip.x:.6f})*W-w/2)':y='round(({clip.y:.6f})*H-h/2)'"
-        f":eof_action=pass:repeatlast=0,format=yuv420p{label}",
+    filters = [
+        f"[{side.index}:v]" + ",".join(steps) + decoded,
+        f"color=c=black@0:s={project.width}x{project.height}:r={fps:.6f}:d={side.duration:.6f},format=rgba{base}",
     ]
+    transformed: list[str] = []
+    piece = _Piece(local_clip, side.index, 0, 0, side.duration, -1)
+    output = _compose_video_piece(transformed, base, piece, project, fps, False,
+                                  f"{label[1:-1]}_pose", hold_last=True)
+    filters.extend(part.replace(f"[{side.index}:v]", decoded) for part in transformed)
+    filters.append(f"{output}format=gbrap,setsar=1,settb=AVTB{label}")
+    return filters
 
 
 def _transition_audio_chain(side: _TransitionSide, label: str) -> str:
@@ -1059,15 +1035,16 @@ def _compose_video_piece(
     excluded_ranges: tuple[tuple[float, float], ...] = (),
     hold_last: bool = False,
     canonical_size: tuple[int, int] | None = None,
+    label_suffix: str = '',
 ) -> str:
     """Aplica um bloco visual e devolve o novo rótulo da composição."""
     start, end = piece.offset, piece.offset + piece.duration
-    enable = f"between(t,{start:.6f},{end:.6f})"
+    enable = f"gte(t,{start:.6f})*lt(t,{end:.6f})"
     for excluded_start, excluded_end in excluded_ranges:
         if excluded_end <= start + 1e-6 or excluded_start >= end - 1e-6:
             continue
         enable += (
-            f"*not(between(t,{excluded_start:.6f},{excluded_end:.6f}))"
+            f"*not(gte(t,{excluded_start:.6f})*lt(t,{excluded_end:.6f}))"
         )
     if piece.clip.overlay_type == "filter":
         name = piece.clip.filter_name
@@ -1090,18 +1067,20 @@ def _compose_video_piece(
         filters.append(f"{current}{expression}{label}")
         return label
 
-    filters.append(_video_chain(piece, project, fps, interpolate, canonical_size=canonical_size))
+    video_label = f'[v{piece.index}{label_suffix}]'
+    filters.append(_video_chain(piece, project, fps, interpolate, canonical_size=canonical_size)
+                   .replace(f'[v{piece.index}]', video_label))
     label = f"[o{order}]"
     is_overlay_item = piece.clip.overlay_type in ("image", "text") or piece.clip.is_image
     has_transform = (
         piece.clip.has_keyframes
-        or abs(piece.clip.x - 0.5) >= 0.0001
-        or abs(piece.clip.y - 0.5) >= 0.0001
-        or abs(getattr(piece.clip, "scale_x", piece.clip.scale) - 1.0) >= 0.001
-        or abs(getattr(piece.clip, "scale_y", piece.clip.scale) - 1.0) >= 0.001
-        or abs(piece.clip.rotation) >= 0.1
+        or abs(piece.clip.x - 0.5) > 1e-9
+        or abs(piece.clip.y - 0.5) > 1e-9
+        or abs(getattr(piece.clip, "scale_x", piece.clip.scale) - 1.0) > 1e-9
+        or abs(getattr(piece.clip, "scale_y", piece.clip.scale) - 1.0) > 1e-9
+        or abs(piece.clip.rotation) > 1e-9
         or piece.clip.chromakey_enabled
-        or piece.clip.opacity < 0.99
+        or piece.clip.opacity < 1 - 1e-9
     )
     if piece.clip.has_keyframes:
         origin = _clip_stream_origin(piece)
@@ -1116,7 +1095,7 @@ def _compose_video_piece(
         coordinates = "x=0:y=0"
     eof = "repeat:repeatlast=1" if hold_last else "pass:repeatlast=0"
     filters.append(
-        f"{current}[v{piece.index}]"
+        f"{current}{video_label}"
         f"overlay={coordinates}:eof_action={eof}:format=auto"
         f":enable='{enable}'{label}"
     )
@@ -1133,65 +1112,184 @@ def _compose_video_transition(
     interpolate: bool,
     canonical_size: tuple[int, int] | None = None,
 ) -> str:
-    context = render.context
     left_label = f"[tr{number}a]"
     right_label = f"[tr{number}b]"
     filters.extend(_transition_video_chain(render.left, project, fps, left_label))
     filters.extend(_transition_video_chain(render.right, project, fps, right_label))
-    for item, piece in enumerate(render.left_additionals):
-        left_label = _compose_video_piece(
-            filters,
-            left_label,
-            piece,
-            project,
-            fps,
-            interpolate,
-            f"tr{number}al{item}",
-            hold_last=True,
-            canonical_size=canonical_size,
-        )
-    for item, piece in enumerate(render.right_additionals):
-        right_label = _compose_video_piece(
-            filters,
-            right_label,
-            piece,
-            project,
-            fps,
-            interpolate,
-            f"tr{number}ar{item}",
-            hold_last=True,
-            canonical_size=canonical_size,
-        )
-    raw_label = f"[trx{number}]"
-    visible_label = f"[trv{number}]"
-    filters.append(
-        f"{left_label}{right_label}xfade="
-        f"transition={_xfade_name(context.marker.transition_name)}:"
-        f"duration={context.duration:.6f}:offset=0{raw_label}"
-    )
-    # Uma janela de prévia pode começar entre dois timestamps do xfade. Se
-    # restar menos de um quadro até o fim, aparar exatamente em ``crop`` não
-    # encontra amostra alguma: o overlay some por um quadro e um Adicional que
-    # estava dentro da transição pisca antes de voltar ao fluxo principal.
-    # Partir do quadro anterior garante cobertura; o ``enable`` abaixo limita
-    # a exibição ao intervalo real e impede que a passagem seja alongada.
-    frame_crop = math.floor(render.crop * fps + 1e-6) / fps
-    covered_duration = render.visible_duration + render.crop - frame_crop
-    filters.append(
-        f"{raw_label}trim=start={frame_crop:.6f}:"
-        f"duration={covered_duration:.6f},setpts=PTS-STARTPTS+"
-        f"{render.offset:.6f}/TB{visible_label}"
-    )
+    visible_label = _transition_window(filters, left_label, right_label, render, fps, str(number), alpha=True)
     label = f"[to{number}]"
     filters.append(
-        # O resultado do xfade termina no timestamp do último quadro, um passo
-        # antes do fim nominal. Sustentá-lo fecha essa fração final; o enable
-        # abaixo encerra o overlay no corte e impede qualquer congelamento.
         f"{current}{visible_label}overlay=x=0:y=0:eof_action=repeat:repeatlast=1:format=auto:"
-        f"enable='between(t,{render.offset:.6f},"
-        f"{render.offset + render.visible_duration:.6f})'{label}"
+        f"enable='{_ranges_enable(((render.offset, render.offset+render.visible_duration),))}'{label}"
     )
     return label
+
+
+def _ranges_enable(ranges: tuple[tuple[float, float], ...]) -> str:
+    return '+'.join(f'gte(t,{a:.6f})*lt(t,{b:.6f})' for a, b in ranges) or '0'
+
+
+def _transition_window(filters: list[str], left: str, right: str,
+                       render: _TransitionRender, fps: float, name: str, *, alpha: bool = False) -> str:
+    """Mantém a fase do xfade mesmo quando a busca começa no meio de um frame."""
+    raw, visible = f'[trx{name}]', f'[trv{name}]'
+    if alpha:
+        # A interpolação deve ponderar cores pela cobertura de cada lado.
+        # Misturar RGB e alfa independentes produz halos e cores indevidas
+        # quando uma das fontes é transparente ou tem opacidade diferente.
+        for suffix, source in (('a', left), ('b', right)):
+            filters.append(f'{source}premultiply=inplace=1[trpremul{name}{suffix}]')
+        left, right = f'[trpremul{name}a]', f'[trpremul{name}b]'
+    filters.append(f'{left}{right}xfade=transition={_xfade_name(render.context.marker.transition_name)}:'
+                   f'duration={render.context.duration:.6f}:offset=0{raw}')
+    if alpha:
+        straight = f'[trstraight{name}]'
+        filters.append(f'{raw}unpremultiply=inplace=1{straight}')
+        raw = straight
+    crop = math.floor(render.crop * fps + 1e-6) / fps
+    duration = render.visible_duration + render.crop - crop
+    filters.append(f'{raw}trim=start={crop:.6f}:duration={duration:.6f},'
+                   f'setpts=PTS-STARTPTS+{render.offset:.6f}/TB{visible}')
+    return visible
+
+
+def _additional_windows(renders: list[_TransitionRender], track_index: int, clip_id: int | None = None
+                        ) -> dict[int, tuple[tuple[float, float], ...]]:
+    """Particiona o tempo; somente a transição elegível mais alta vence."""
+    candidates = {i: r for i, r in enumerate(renders)
+                  if any(p.track_index == track_index and (clip_id is None or p.clip.clip_id == clip_id)
+                         for p in (*r.left_additionals, *r.right_additionals))}
+    edges = sorted({t for r in candidates.values() for t in (r.offset, r.offset+r.visible_duration)})
+    result: dict[int, list[tuple[float, float]]] = {}
+    for a, b in zip(edges, edges[1:]):
+        active = [i for i, r in candidates.items() if r.offset <= a < r.offset+r.visible_duration]
+        if active:
+            winner = min(active, key=lambda i: (renders[i].context.track_index, renders[i].context.marker.clip_id))
+            result.setdefault(winner, []).append((a, b))
+    return {i: tuple(ranges) for i, ranges in result.items()}
+
+
+def _compose_mixed_additional_windows(filters, current, renders, track_index, windows,
+                                      clip_windows, normal_parts, project, fps, canonical_size):
+    """Arbitra por item quando passagens diferentes alcançam a mesma trilha.
+
+    Um item pode estar na alça de uma passagem inferior sem pertencer à superior.
+    Agrupar apenas pela trilha apagaria esse item. Particionamos tempo e pilha,
+    conservando juntos itens consecutivos que têm o mesmo controlador.
+    """
+    normal = {p.clip.clip_id: p for p in normal_parts if p.track_index == track_index}
+    ordered = [c for c in project.tracks[track_index].sorted_clips() if c.has_image and not c.is_transition]
+    intervals = sorted(interval for ranges in windows.values() for interval in ranges)
+    for window, (a, b) in enumerate(intervals):
+        groups: list[tuple[int | None, list[int]]] = []
+        for clip in ordered:
+            winner = next((i for i, ranges in clip_windows[clip.clip_id].items()
+                           if any(start <= a < end for start, end in ranges)), None)
+            if groups and groups[-1][0] == winner:
+                groups[-1][1].append(clip.clip_id)
+            else:
+                groups.append((winner, [clip.clip_id]))
+        for group, (winner, identities) in enumerate(groups):
+            name = f'm{track_index}w{window}g{group}'
+            if winner is None:
+                for index, identity in enumerate(identities):
+                    piece = normal.get(identity)
+                    if piece is None or piece.offset >= b or piece.offset + piece.duration <= a:
+                        continue
+                    current = _compose_video_piece(filters, current, piece, project, fps, False,
+                                                    f'{name}n{index}', ((0, a), (b, project.export_duration)),
+                                                    canonical_size=canonical_size, label_suffix=f'_{name}n{index}')
+                continue
+            render = renders[winner]
+            part = replace(render,
+                           left_additionals=tuple(p for p in render.left_additionals if p.clip.clip_id in identities),
+                           right_additionals=tuple(p for p in render.right_additionals if p.clip.clip_id in identities))
+            current = _compose_additional_transition(filters, current, part, track_index, ((a, b),),
+                                                      project, fps, name, canonical_size)
+    return current
+
+
+def _compose_additional_transition(filters: list[str], current: str, render: _TransitionRender,
+                                   track_index: int, ranges: tuple[tuple[float, float], ...],
+                                   project: Project, fps: float, name: str,
+                                   canonical_size: tuple[int, int]) -> str:
+    """Aplica a passagem na camada original do adicional, sem rebaixá-lo ao vídeo."""
+    sides = [[p for p in pieces if p.track_index == track_index]
+             for pieces in (render.left_additionals, render.right_additionals)]
+    effects = [p for side in sides for p in side if p.clip.overlay_type == 'filter']
+    if effects:
+        # Filtros recebem os pixels compostos de cada lado, inclusive o fundo.
+        # As passagens espaciais compensam o movimento desse fundo abaixo.
+        transition = _xfade_name(render.context.marker.transition_name)
+        original, left_base, right_base = f'[pointbase{name}]', f'[pointleft{name}]', f'[pointright{name}]'
+        recovery = f'[pointrecovery{name}]'
+        if transition == 'fadeblack':
+            filters.append(f'{current}split=4{original}{left_base}{right_base}{recovery}')
+        else:
+            filters.append(f'{current}split=3{original}{left_base}{right_base}')
+        prepared = []
+        for index, (side, base) in enumerate(zip(sides, (left_base, right_base))):
+            label = f'[pointlocal{name}_{index}]'
+            filters.append(f'{base}trim=start={render.offset:.6f},setpts=PTS-STARTPTS,fps={fps:.6f},'
+                           f'tpad=start_mode=clone:start_duration={render.crop:.6f}:'
+                           f'stop_mode=clone:stop_duration={render.context.duration:.6f},'
+                           f'trim=duration={render.context.duration:.6f},settb=AVTB{label}')
+            transition = _xfade_name(render.context.marker.transition_name)
+            if transition in ('slideleft', 'slideright'):
+                # Compensa só o deslocamento do fundo. Os adicionais continuam
+                # deslizando; o vídeo inferior já composto permanece no lugar.
+                direction = '-' if transition == 'slideleft' else '+'
+                x = f'mod(mod(X{direction}floor(W*T/{render.context.duration:.6f}),W)+W,W)'
+                shifted = f'[pointshifted{name}_{index}]'
+                filters.append(f"{label}format=gbrap,geq=r='r({x},Y)':g='g({x},Y)':"
+                               f"b='b({x},Y)':a='alpha({x},Y)':interpolation=nearest{shifted}")
+                label = shifted
+            for item, piece in enumerate(side):
+                label = _compose_video_piece(filters, label, piece, project, fps, False,
+                                              f'{name}_{index}_{item}', hold_last=True, canonical_size=canonical_size,
+                                              label_suffix=f'_{name}_{index}_{item}')
+            output = f'[pointprepared{name}_{index}]'
+            filters.append(f'{label}format=gbrap,setsar=1,settb=AVTB{output}')
+            prepared.append(output)
+        visible = _transition_window(filters, *prepared, render, fps, name, alpha=True)
+        if transition == 'fadeblack':
+            # O preto faz os adicionais desaparecerem, revelando o fundo. A
+            # curva vem do próprio xfade, sem aproximar suas fases por uma rampa.
+            white_a, white_b = f'[white{name}a]', f'[white{name}b]'
+            filters.append(f'color=c=white:s={project.width}x{project.height}:r={fps:.6f}:'
+                           f'd={render.context.duration:.6f},format=gbrp,settb=AVTB,split=2{white_a}{white_b}')
+            weight = _transition_window(filters, white_a, white_b, render, fps, f'{name}weight')
+            black, rgb_base, rgb_weight = f'[black{name}]', f'[recoverrgb{name}]', f'[weightrgb{name}]'
+            filters.append(f'color=c=black:s={project.width}x{project.height}:r={fps:.6f}:'
+                           f'd={project.export_duration:.6f},format=gbrp,settb=AVTB{black}')
+            filters.append(f'{recovery}format=gbrp{rgb_base}')
+            filters.append(f'{weight}format=gbrp{rgb_weight}')
+            restored, rgb_visible, combined = f'[restored{name}]', f'[visiblergb{name}]', f'[combined{name}]'
+            filters.append(f'{rgb_base}{black}{rgb_weight}maskedmerge=planes=7{restored}')
+            filters.append(f'{visible}format=gbrp{rgb_visible}')
+            filters.append(f'{rgb_visible}{restored}blend=all_mode=addition{combined}')
+            visible = combined
+        result = f'[pointout{name}]'
+        filters.append(f'{original}{visible}overlay=x=0:y=0:eof_action=repeat:repeatlast=1:format=auto:'
+                       f"enable='{_ranges_enable(ranges)}'{result}")
+        return result
+    labels = []
+    for index, side in enumerate(sides):
+        label = f'[additional{name}_{index}]'
+        filters.append(f'color=c=black@0:s={project.width}x{project.height}:r={fps:.6f}:'
+                       f'd={render.context.duration:.6f},format=rgba{label}')
+        for item, piece in enumerate(side):
+            label = _compose_video_piece(filters, label, piece, project, fps, False,
+                                          f'{name}_{index}_{item}', hold_last=True, canonical_size=canonical_size,
+                                          label_suffix=f'_{name}_{index}_{item}')
+        prepared = f'[prepared{name}_{index}]'
+        filters.append(f'{label}format=gbrap,setsar=1,settb=AVTB{prepared}')
+        labels.append(prepared)
+    visible = _transition_window(filters, labels[0], labels[1], render, fps, name, alpha=True)
+    output = f'[additionalout{name}]'
+    filters.append(f'{current}{visible}overlay=x=0:y=0:eof_action=repeat:repeatlast=1:format=auto:'
+                   f"enable='{_ranges_enable(ranges)}'{output}")
+    return output
 
 
 @dataclass(frozen=True)
@@ -1215,6 +1313,7 @@ def build_graph(
     interpolate: bool = False,
     text_assets: dict[int, Path] | None = None,
     canonical_size: tuple[int, int] | None = None,
+    transparent: bool = False,
 ) -> Graph:
     """Traduz o projeto num grafo de filtros do ffmpeg.
 
@@ -1223,6 +1322,7 @@ def build_graph(
     reprodução da prévia, que precisam sair na hora. É a única coisa que a
     prévia não mostra do resultado, e a aba diz isso ao lado do controle.
     """
+    project = project.for_render()
     fps = fps or project.fps
     pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio)
     duration = span if span is not None else max(_MIN_CANVAS, project.export_duration - at)
@@ -1334,8 +1434,9 @@ def build_graph(
     video_label = None
     if want_video and project.has_video:
         filters.append(
-            f"color=c=black:s={project.width}x{project.height}"
-            f":r={fps:.6f}:d={max(_MIN_CANVAS, duration):.6f}[base]"
+            f"color=c={'black@0' if transparent else 'black'}:s={project.width}x{project.height}"
+            f":r={fps:.6f}:d={max(_MIN_CANVAS, duration):.6f}"
+            f"{',format=rgba' if transparent else ''}[base]"
         )
         current = "[base]"
         visual_layers = [
@@ -1343,18 +1444,17 @@ def build_graph(
             for index, track in reversed(tuple(enumerate(project.tracks)))
             if track.visible and track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL)
         ]
-        # Os Adicionais já compostos dentro dos lados do xfade não podem ser
-        # desenhados novamente por cima dele. Fora da passagem continuam no
-        # fluxo principal, inclusive quando o clipe atravessa todo o corte.
         additional_exclusions: dict[int, list[tuple[float, float]]] = {}
         for render in transition_renders:
-            if not render.context.marker.transition_affects_additionals:
-                continue
             interval = (render.offset, render.offset + render.visible_duration)
-            for piece in (*render.left_additionals, *render.right_additionals):
-                ranges = additional_exclusions.setdefault(piece.clip.clip_id, [])
-                if interval not in ranges:
-                    ranges.append(interval)
+            for clip in (render.context.left, render.context.right):
+                additional_exclusions.setdefault(clip.clip_id, []).append(interval)
+        layer_windows = {index: _additional_windows(transition_renders, index)
+                         for index in visual_layers if project.tracks[index].kind is TrackKind.ADDITIONAL}
+        for track_index, windows in layer_windows.items():
+            intervals = [interval for ranges in windows.values() for interval in ranges]
+            for clip in project.tracks[track_index].clips:
+                additional_exclusions.setdefault(clip.clip_id, []).extend(intervals)
         order = 0
         canon_size = canonical_size or (project.width, project.height)
         for track_index in visual_layers:
@@ -1371,6 +1471,19 @@ def build_graph(
                     canonical_size=canon_size,
                 )
                 order += 1
+
+            windows = layer_windows.get(track_index, {})
+            clip_windows = {clip.clip_id: _additional_windows(transition_renders, track_index, clip.clip_id)
+                            for clip in project.tracks[track_index].clips if clip.has_image and not clip.is_transition} if windows else {}
+            signatures = {tuple((i, ranges) for i, ranges in mapping.items()) for mapping in clip_windows.values()}
+            if windows and len(signatures) > 1:
+                current = _compose_mixed_additional_windows(filters, current, transition_renders, track_index,
+                                                             windows, clip_windows, video_parts, project, fps, canon_size)
+            else:
+                for number, ranges in windows.items():
+                    current = _compose_additional_transition(
+                        filters, current, transition_renders[number], track_index, ranges,
+                        project, fps, f'{number}layer{track_index}', canon_size)
 
             # A transição é parte desta trilha de vídeo. Por padrão, aplicá-la
             # antes da próxima camada preserva os Adicionais por cima. Quando o
@@ -1506,15 +1619,7 @@ def export_args(
         filters = list(graph.filters)
         if filters:
             filter_text = ";".join(filters)
-            if len(filter_text) > 4000:
-                try:
-                    script_path = destination.with_suffix(".filter_script")
-                    script_path.write_text(filter_text, encoding="utf-8")
-                    args += ["-filter_complex_script", str(script_path)]
-                except OSError:
-                    args += ["-filter_complex", filter_text]
-            else:
-                args += ["-filter_complex", filter_text]
+            args += ["-filter_complex", filter_text]
 
         target_codec = (audio_codec or container).lower()
         args += ["-map", graph.audio_label, "-vn"]
@@ -1555,15 +1660,7 @@ def export_args(
         video_label = "[vhw]"
     if filters:
         filter_text = ";".join(filters)
-        if len(filter_text) > 4000:
-            try:
-                script_path = destination.with_suffix(".filter_script")
-                script_path.write_text(filter_text, encoding="utf-8")
-                args += ["-filter_complex_script", str(script_path)]
-            except OSError:
-                args += ["-filter_complex", filter_text]
-        else:
-            args += ["-filter_complex", filter_text]
+        args += ["-filter_complex", filter_text]
     if video_label:
         args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality]
         if (
@@ -1625,27 +1722,7 @@ def _preview_project(project: Project, size: tuple[int, int]) -> Project:
     )
     width = max(2, int(width) // 2 * 2)
     height = max(2, int(height) // 2 * 2)
-    if width == project.width and height == project.height:
-        return project
-
-    ratio = min(width / project.width, height / project.height)
-    tracks = tuple(
-        replace(
-            track,
-            clips=tuple(
-                replace(
-                    clip,
-                    scale_x=clip.scale_x * ratio,
-                    scale_y=clip.scale_y * ratio,
-                )
-                if clip.overlay_type == "text"
-                else clip
-                for clip in track.clips
-            ),
-        )
-        for track in project.tracks
-    )
-    return replace(project, tracks=tracks, width=width, height=height)
+    return project.for_render(width, height)
 
 
 def frame_command(
@@ -1655,6 +1732,8 @@ def frame_command(
     tools: FFmpegTools,
     *,
     text_assets: dict[int, Path] | None = None,
+    transparent: bool = False,
+    png: bool = False,
 ) -> list[str]:
     """Comando que devolve **um** quadro da composição, em rgb24 cru.
 
@@ -1673,6 +1752,7 @@ def frame_command(
         want_audio=False,
         text_assets=text_assets,
         canonical_size=(project.width, project.height),
+        transparent=transparent,
     )
     args = [
         tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error",
@@ -1685,7 +1765,10 @@ def frame_command(
     else:
         # Projeto sem imagem no instante pedido: um quadro preto diz isso melhor
         # que a tela vazia da prévia, que parece falha de carregamento.
-        args += ["-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:d=0.1"]
+        color = 'black@0' if transparent else 'black'
+        args += ["-f", "lavfi", "-i", f"color=c={color}:s={width}x{height}:d=0.1,format=rgba"]
+    if png:
+        return args + ["-frames:v", "1", "-f", "image2pipe", "-c:v", "png", "-pix_fmt", "rgba", "pipe:1"]
     return args + [
         "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"
     ]
@@ -1697,7 +1780,7 @@ def playback_command(
     size: tuple[int, int],
     tools: FFmpegTools,
     *,
-    fps: int,
+    fps: float,
     text_assets: dict[int, Path] | None = None,
 ) -> list[str]:
     """Comando que produz o fluxo de quadros da reprodução, a partir de ``at``."""
@@ -1881,15 +1964,7 @@ def segment_video_args(
         filters.append(f"{video_label}{encoder.filter_suffix}[vhw]")
         video_label = "[vhw]"
     filter_text = ";".join(filters)
-    if len(filter_text) > 4000:
-        try:
-            script_path = destination.with_suffix(f".{destination.stem}_filter.txt")
-            script_path.write_text(filter_text, encoding="utf-8")
-            args += ["-filter_complex_script", str(script_path)]
-        except OSError:
-            args += ["-filter_complex", filter_text]
-    else:
-        args += ["-filter_complex", filter_text]
+    args += ["-filter_complex", filter_text]
     args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality]
     if encoder.name in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi") and container == "mp4":
         args += ["-tag:v", "hvc1"]
@@ -1982,3 +2057,24 @@ __all__ = [
     'interpolation_bytes',
     'describe_export',
 ]
+
+
+def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[str], ...]:
+    """Fundo e frente canônicos; textura isolada sem recortar pixels da cena."""
+    background = frame_command(plan.background, plan.seconds, size, tools, text_assets=text_assets, png=True)
+    foreground = frame_command(plan.foreground, plan.seconds, size, tools, text_assets=text_assets,
+                               transparent=True, png=True)
+    source = _preview_project(plan.source, size)
+    pieces = _pieces(source, plan.seconds, 1 / source.fps, want_audio=False)
+    piece = next(p for p in pieces if p.clip.clip_id == plan.clip_id)
+    graph = _video_chain(piece, source, source.fps, canonical_size=(plan.source.width, plan.source.height),
+                         standalone=True)
+    # Texto pode exceder o canvas. Conservar a textura inteira, com memória
+    # limitada, permite revelar conteúdo ao arrastar sem recorte na borda.
+    graph += (f";[v{piece.index}]scale=w='min(iw,{size[0] * 2})':"
+              f"h='min(ih,{size[1] * 2})':force_original_aspect_ratio=decrease[texture]")
+    texture = [tools.ffmpeg_str, '-nostdin', '-hide_banner', '-v', 'error',
+               *_limited_inputs(_input_args(piece, source.fps, text_assets=text_assets)),
+               '-filter_complex', graph, '-map', '[texture]',
+               '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgba', 'pipe:1']
+    return background, texture, foreground
