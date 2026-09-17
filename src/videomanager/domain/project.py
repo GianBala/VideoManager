@@ -186,10 +186,17 @@ def media_ref(local: LocalMedia) -> MediaRef:
         radians = math.radians(video.rotation)
         c, s = abs(math.cos(radians)), abs(math.sin(radians))
         width, height = round(width * c + height * s), round(width * s + height * c)
+    duration = local.duration
+    if (kind is MediaKind.VIDEO and video is not None and video.duration and duration
+            and video.duration < duration - 1e-3):
+        # O bloco dura o que tem imagem. Com a duração do container, os últimos
+        # quadros do bloco saíam pretos — lampejo entre blocos e tela preta na
+        # emenda do loop da prévia.
+        duration = video.duration
     return MediaRef(
         path=local.path,
         kind=kind,
-        duration=None if kind is MediaKind.IMAGE else local.duration,
+        duration=None if kind is MediaKind.IMAGE else duration,
         # Largura de **exibição**, e não a de armazenamento: um rip de DVD
         # guarda 720×480 para aparecer em 16:9, e é a forma exibida que decide o
         # formato da tela do projeto. Guardar a largura crua fazia a edição

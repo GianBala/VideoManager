@@ -676,6 +676,7 @@ def _video_chain(
         steps.append("format=rgba")
         steps.append("setsar=1")
         steps = _alpha_before_dynamic_scale(steps)
+        steps += _tail_hold(clip)
         return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
 
     if _rate_first(piece, project, fps, interpolate):
@@ -689,7 +690,27 @@ def _video_chain(
         f"pad={project.width}:{project.height}:(ow-iw)/2:(oh-ih)/2:color=black@0"
     )
     steps.append("setsar=1")
+    steps += _tail_hold(clip)
     return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
+
+
+# Quanto um bloco de vídeo pode segurar o último quadro quando a trilha de vídeo
+# acaba antes do bloco. Cobre a sobra comum do container (AAC, 23,976 fps) em
+# projetos gravados antes de o bloco durar a trilha de vídeo; uma parte só de
+# áudio de verdade, mais longa que isto, continua preta como no arquivo.
+_TAIL_HOLD_SECONDS = 1.0
+
+
+def _tail_hold(clip: Clip) -> list[str]:
+    """Segura o último quadro de um bloco de vídeo em vez de deixar preto.
+
+    Os quadros clonados passam do fim do bloco, mas a janela ``enable`` do
+    ``overlay`` não os desenha fora dele: só preenchem o vão entre o fim da
+    trilha de vídeo e o fim do bloco.
+    """
+    if clip.media is None or clip.media.kind is not MediaKind.VIDEO:
+        return []
+    return [f"tpad=stop_mode=clone:stop_duration={_TAIL_HOLD_SECONDS:.3f}"]
 
 
 def _rate_first(
