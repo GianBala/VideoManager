@@ -2059,8 +2059,14 @@ class EditPanel(QWidget):
             if tools is not None:
                 token = next(self._tokens)
                 self._pool_tokens[reference.path] = token
+                # Vídeo mostra o quadro do **meio**: o primeiro costuma ser
+                # preto ou um título. Uma tira de uma célula sobre a duração
+                # inteira pede exatamente esse instante (``filmstrip_times``).
+                # Imagem fica em 0: ``-ss`` num JPEG lido como image2 não
+                # devolve quadro nenhum.
+                end = (reference.duration or 0.0) if reference.kind is MediaKind.VIDEO else 0.0
                 worker = self._runtime.filmstrip_worker(
-                    reference.path, 0.0, 0.0, 1, (96, 54), tools, token
+                    reference.path, 0.0, end, 1, (96, 54), tools, token
                 )
                 worker.signals.strip.connect(
                     lambda tok, idx, frame, ref=reference: self._on_pool_thumb_ready(ref, frame, token=tok)
