@@ -55,6 +55,9 @@ class ProcessingService:
         cache = probed or {}
         # A trilha de vídeo inferior define a referência principal da montagem.
         ordered = [c for t in reversed(project.video_tracks) if t.visible for c in t.sorted_clips()]
+        # Fotos agora estão nas trilhas de vídeo; o nome da saída continua vindo
+        # de um vídeo quando há algum.
+        ordered = [c for c in ordered if not c.is_image] + [c for c in ordered if c.is_image]
         ordered += list(project.clips)
         source = next((c.media.path for c in ordered if c.overlay_type not in ('text', 'filter', 'transition')
                        and self.catalog.exists(c.media.path)), None)

@@ -310,7 +310,7 @@ def test_migracao_v1_preserva_backup_exato_e_nao_sobrescreve(tmp_path):
     save_project(project, path)
     assert existing.read_bytes() == b'copia anterior'
     assert (tmp_path / 'p.vmp.v1.bak.1').read_bytes() == original
-    assert json.loads(path.read_text())['version'] == 2
+    assert json.loads(path.read_text())['version'] == 3
     save_project(project, path)
     assert not (tmp_path / 'p.vmp.v1.bak.2').exists()
 

@@ -20,8 +20,8 @@ Usa **yt-dlp** para extração e **ffmpeg** para processamento.
   downloads, sem interromper o que já está em andamento.
 - **Edição multipista** na aba **Editar**, com os gestos que o CapCut e o
   Filmora tornaram padrão:
-  - **Várias trilhas** de vídeo, imagem e áudio, empilhadas — a de baixo é o
-    fundo, as de cima sobrepõem.
+  - **Várias trilhas** de vídeo (com fotos), adicionais e áudio, em qualquer
+    ordem — entre vídeo e adicionais, a de cima sobrepõe as de baixo.
   - **Importar** vídeos, fotos e áudios para dentro da edição, arrastando ou
     pelo botão.
   - **Arrastar os blocos** no tempo e entre trilhas, com imantação nas pontas

@@ -23,6 +23,17 @@ from videomanager.presentation.qt.panels.edit_widgets import _Preview
 pytestmark = pytest.mark.usefixtures("desktop_app")
 
 
+def _migrado(clip: Clip, width: int = 1920, height: int = 1080) -> Clip:
+    """Clipe de projeto antigo, convertido pela migração do formato 3.
+
+    Os valores destes testes foram escolhidos para cair em casos-limite do
+    arredondamento com a imagem no tamanho natural. Migrá-los precisa manter
+    os mesmos pixels — e é isso que os testes passam a garantir também.
+    """
+    legacy = Project(width=width, height=height, tracks=(Track(kind=TrackKind.ADDITIONAL, clips=(clip,)),))
+    return legacy.with_images_in_video_tracks(legacy_scale=True).tracks[0].clips[0]
+
+
 def test_imagem_pausada_respeita_grade_de_pixels_do_ffmpeg() -> None:
     """A imagem não pode saltar ao trocar o desenho do Qt pelo do FFmpeg.
 
@@ -55,6 +66,7 @@ def test_imagem_pausada_respeita_grade_de_pixels_do_ffmpeg() -> None:
         scale_y=scale,
         keyframes=(still,),
     )
+    clip = _migrado(clip)
     preview = _Preview()
     preview.resize(960, 540)
     preview.set_frame_pixmap(QPixmap(960, 540))
@@ -103,10 +115,11 @@ def test_imagem_pausada_coincide_com_frame_real_do_ffmpeg(tmp_path: Path) -> Non
         scale_y=scale,
         keyframes=(still,),
     )
+    clip = _migrado(clip)
     proj = Project(
         width=1920,
         height=1080,
-        tracks=(Track(kind=TrackKind.ADDITIONAL, clips=(clip,)),),
+        tracks=(Track(kind=TrackKind.VIDEO, clips=(clip,)),),
     )
 
     preview = _Preview()
@@ -166,10 +179,11 @@ def test_animacao_quadros_chave_coincide_com_ffmpeg(tmp_path: Path) -> None:
         scale_y=1.0,
         keyframes=(kf0, kf1),
     )
+    clip = _migrado(clip)
     proj = Project(
         width=1920,
         height=1080,
-        tracks=(Track(kind=TrackKind.ADDITIONAL, clips=(clip,)),),
+        tracks=(Track(kind=TrackKind.VIDEO, clips=(clip,)),),
     )
 
     pw, ph = 960, 540
