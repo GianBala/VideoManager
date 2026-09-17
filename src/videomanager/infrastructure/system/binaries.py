@@ -147,6 +147,29 @@ def subprocess_kwargs() -> dict:
     return kwargs
 
 
+_BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+
+
+def lower_priority(process: subprocess.Popen) -> None:
+    """Rebaixa um processo de fundo para não disputar CPU com a interface.
+
+    Serve ao preenchimento do cache da agulha: ele pode rodar por minutos, e
+    quem está editando ou tocando a prévia vem primeiro. Falhar aqui não é
+    motivo para interromper o trabalho.
+    """
+    try:
+        if is_windows():
+            import ctypes
+            handle = ctypes.windll.kernel32.OpenProcess(0x0200, False, process.pid)  # SET_INFORMATION
+            if handle:
+                ctypes.windll.kernel32.SetPriorityClass(handle, _BELOW_NORMAL_PRIORITY_CLASS)
+                ctypes.windll.kernel32.CloseHandle(handle)
+        else:
+            os.setpriority(os.PRIO_PROCESS, process.pid, 10)
+    except (OSError, AttributeError):
+        pass
+
+
 # Teto de threads de decodificação para o que serve à **prévia**. O padrão do
 # ffmpeg é uma thread por núcleo, e numa máquina de vinte núcleos montar vinte
 # threads para devolver um quadro custa mais do que decodificá-lo. Medido, dez

@@ -28,6 +28,7 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [domain/geometry.py](../../src/videomanager/domain/geometry.py) | Dimensão base de imagem para transformações consistentes. |
 | [domain/media.py](../../src/videomanager/domain/media.py) | LocalMedia/LocalStream e alvos AudioTarget/VideoTarget, sem inspeção externa. |
 | [domain/preview.py](../../src/videomanager/domain/preview.py) | RawFrame RGB24, limites de fps, ajuste de dimensões e instantes de miniaturas. |
+| [domain/scrub.py](../../src/videomanager/domain/scrub.py) | Assinatura do que compõe um instante e trechos de assinatura constante, para validar quadros guardados. |
 | [domain/project.py](../../src/videomanager/domain/project.py) | Project, Track, Clip, MediaRef e operações imutáveis: cortes, trilhas, transforms, tela, IDs e duração. |
 | [domain/render_cost.py](../../src/videomanager/domain/render_cost.py) | Estimativa calibrada de memória da interpolação a partir dos clipes e dimensões. |
 | [domain/selection.py](../../src/videomanager/domain/selection.py) | VideoRequest/AudioRequest e escolhas de container/qualidade de download. |
@@ -55,6 +56,7 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [application/media/downloads.py](../../src/videomanager/application/media/downloads.py) | DownloadService: valida URL e coordena análise e planejamento pelo gateway. |
 | [application/media/export_description.py](../../src/videomanager/application/media/export_description.py) | Descrição da exportação de projeto, incluindo áudio, qualidade e interpolação. |
 | [application/media/preview.py](../../src/videomanager/application/media/preview.py) | PreviewRequest e normalização de tempo, tamanho, fps, token e recursos. |
+| [application/media/scrub.py](../../src/videomanager/application/media/scrub.py) | ScrubFrameCache: quadros JPEG por índice e assinatura, teto de memória, obsoletos e faltantes. |
 | [application/media/processing.py](../../src/videomanager/application/media/processing.py) | ExportOptions e ProcessingService: valida escolhas, define alvos, prepara texto e reserva saída. |
 | [application/media/trim_description.py](../../src/videomanager/application/media/trim_description.py) | Descrição do recorte e seu modo. |
 | [application/ports/downloads.py](../../src/videomanager/application/ports/downloads.py) | DownloadGateway e DownloadPlan para análise e planejamento substituíveis. |

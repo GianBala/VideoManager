@@ -90,6 +90,8 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 .venv/bin/python -m pytest -m network
 # Ensaio opt-in com áudio real em volume baixo:
 PYTHONPATH=src .venv/bin/python scripts/validate_audio.py
+# Resposta da agulha com e sem o cache de quadros:
+PYTHONPATH=src .venv/bin/python scripts/validate_scrub.py
 .venv/bin/python -m pyflakes src/videomanager tests scripts/benchmark_architecture.py
 git diff --check
 ```

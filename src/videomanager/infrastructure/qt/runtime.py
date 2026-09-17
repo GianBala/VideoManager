@@ -12,12 +12,14 @@ from videomanager import APP_NAME
 from videomanager.application.media.preview import prepare_preview
 from videomanager.infrastructure.ffmpeg import hardware, composer
 from videomanager.infrastructure.system import binaries
+from videomanager.infrastructure.system import memory
 from videomanager.infrastructure.storage.settings import Settings
 from .audio import AudioPreview
 from .workers.queue import JobQueue
 from .workers.media_worker import MediaWorker
 from .workers.function_worker import FunctionWorker
 from .workers.preview_worker import FrameWorker, PlaybackWorker, FilmstripWorker, WaveformWorker, KeyframeWorker, InteractionWorker
+from .workers.preview_worker import ScrubCacheWorker
 from .workers.engine_worker import FFmpegSetupWorker, EngineUpdateWorker, is_packaged
 from .workers.hwaccel_worker import HardwareProbeWorker
 from .workers.probe_worker import ProbeWorker
@@ -102,6 +104,21 @@ class DesktopRuntime:
             fps=request.fps,
             autostart=autostart,
         )
+
+    def scrub_cache_worker(self, project, seconds, span, size, tools, token, *, fps, first_index,
+                           text_assets=None):
+        request = prepare_preview(project, seconds, size, token, fps=fps, text_assets=text_assets)
+        command = composer.scrub_command(request.project, request.seconds, span, request.size, tools,
+                                         fps=fps, text_assets=dict(request.text_assets))
+        return ScrubCacheWorker(command, first_index, token)
+
+    def scrub_cache_budget(self) -> int:
+        """Memória para o cache da agulha: até 512 MB, e no máximo 15% da livre."""
+        available = memory.available_bytes()
+        ceiling = 512 * 1024 * 1024
+        if available is None:
+            return ceiling // 2
+        return max(64 * 1024 * 1024, min(ceiling, int(available * 0.15)))
 
     def audio_output(self, parent=None):
         return AudioPreview(parent, enabled=self._audio_enabled)

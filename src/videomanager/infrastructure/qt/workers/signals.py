@@ -69,6 +69,8 @@ class PreviewSignals(QObject):
     strip = Signal(int, int, object)  # token, índice na tira, RawFrame
     waveform = Signal(int, bytes)  # token, PNG
     keyframes = Signal(object)  # tuple[float, ...]
+    # Cache da agulha: token, índice do primeiro quadro do lote, list[bytes] (JPEG)
+    scrub_frames = Signal(int, int, object)
     # Emitido sempre, inclusive em falha: é por ele que o WorkerRunner solta a
     # referência do worker (ver presentation/qt/tasks.py).
     done = Signal()

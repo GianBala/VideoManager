@@ -23,6 +23,35 @@ recente pendente; pedidos intermediários são substituídos.
 Isso impede que uma busca lenta para o segundo 5 apareça depois da busca para
 o segundo 20.
 
+### Cache da agulha
+
+Um quadro exato custa um ffmpeg (perto de 100 ms no Windows), o que limitava o
+arrasto da agulha a uns 10 quadros por segundo. Por isso a prévia mantém quadros
+já compostos em JPEG pequeno (até 640×360, até 30 q/s):
+
+- `domain/scrub.py` calcula a **assinatura** de um instante: tela e blocos
+  visíveis que entram na composição, na ordem da pilha, ampliada para a janela
+  inteira de uma transição. `signature_segments` a calcula por trecho, porque
+  ela só muda nas pontas dos blocos e das transições.
+- `application/media/scrub.py` guarda os quadros por índice com a assinatura;
+  um quadro de composição diferente é descartado ao ser consultado. Há teto de
+  memória (`scrub_cache_budget`: até 512 MB e 15% da livre) e saem primeiro os
+  mais distantes da agulha.
+- O preenchimento roda numa pool de uma vaga, com o ffmpeg em prioridade baixa,
+  depois de 700 ms sem edição, busca ou reprodução. `composer.scrub_command`
+  compõe um trecho de até 20 s e emite MJPEG; `jpeg_frames` separa as imagens
+  pelos segmentos do JPEG. Os lotes guardam a assinatura do projeto que foi
+  composto, então um trecho editado no meio do caminho nasce obsoleto. Tocar,
+  arrastar um bloco ou um objeto cancela o preenchimento.
+- Ao arrastar a agulha, um quadro guardado vai direto para a tela (cerca de
+  1 ms) e o exato só é pedido quando a mão para 120 ms ou solta. Quadros exatos
+  atrasados de pontos anteriores do arrasto não cobrem o guardado mais novo.
+  Sem quadro guardado vale o caminho exato de sempre. A pré-carga do play não é
+  aberta durante o arrasto, só quando ele termina.
+
+`scripts/validate_scrub.py` mede preenchimento e custo por movimento com e sem
+cache. `--smoke-test` confere o suporte a JPEG do Qt no pacote.
+
 `ffmpeg/preview.py` decodifica o quadro; o adaptador/painel Qt cria a
 representação gráfica. A imagem apresentada precisa possuir os bytes pelo
 tempo necessário à pintura. Não guardar um ponteiro para buffer temporário

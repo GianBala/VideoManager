@@ -1832,6 +1832,46 @@ def frame_command(
     ]
 
 
+def scrub_command(
+    project: Project,
+    at: float,
+    span: float,
+    size: tuple[int, int],
+    tools: FFmpegTools,
+    *,
+    fps: float,
+    text_assets: dict[int, Path] | None = None,
+    quality: int = 5,
+) -> list[str]:
+    """Quadros de um trecho, pequenos e em JPEG, para o cache da agulha.
+
+    É o grafo da reprodução, só que limitado ao trecho e com saída MJPEG: o
+    ffmpeg codifica em C e em várias threads, e cada quadro de ~640 px ocupa
+    algumas dezenas de KB em vez dos 700 KB do RGB cru. O quadro ``k`` mostra
+    o instante ``at + k / fps``.
+    """
+    width, height = size
+    count = max(1, int(round(span * fps)))
+    preview_project = _preview_project(project, size)
+    graph = build_graph(
+        preview_project,
+        at=at,
+        span=span,
+        fps=float(fps),
+        want_audio=False,
+        text_assets=text_assets,
+        canonical_size=(project.width, project.height),
+    )
+    args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", *_limited_inputs(graph.inputs)]
+    if graph.video_label:
+        filters = [*graph.filters, f"{graph.video_label}scale={width}:{height},format=yuvj420p[out]"]
+        args += ["-filter_complex", ";".join(filters), "-map", "[out]"]
+    else:
+        args += ["-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r={fps}:d={max(span, 0.1):.3f}",
+                 "-vf", "format=yuvj420p"]
+    return args + ["-frames:v", str(count), "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", str(quality), "pipe:1"]
+
+
 def playback_command(
     project: Project,
     at: float,
