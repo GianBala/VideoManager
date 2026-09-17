@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
+from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
 from PySide6.QtGui import QDragMoveEvent, QDropEvent
 
 from videomanager.application.editor.media import MediaResult
