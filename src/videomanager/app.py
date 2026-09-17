@@ -196,6 +196,17 @@ def _smoke_check(app: QApplication, window: MainWindow) -> None:
         from videomanager.infrastructure.system.binaries import find_js_runtime
         runtime = find_js_runtime()
         print(f'VM_SMOKE_JS_RUNTIME: {runtime[0] if runtime else "nenhum"}', flush=True)
+        # O cache da agulha guarda quadros em JPEG e depende do plugin de imagem
+        # do Qt; sem ele o arrasto cai no quadro exato sem avisar.
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+        from PySide6.QtGui import QImage
+        probe = QImage(8, 8, QImage.Format.Format_RGB32)
+        probe.fill(0xFF3366)
+        encoded = QByteArray()
+        buffer = QBuffer(encoded)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not probe.save(buffer, 'JPG') or QImage.fromData(bytes(encoded.data()), 'JPG').isNull():
+            raise RuntimeError('Suporte a JPEG do Qt ausente do pacote.')
         tools = find_tools()
         if tools is None:
             raise RuntimeError('FFmpeg/ffprobe ausentes; provisione ou inclua no PATH.')

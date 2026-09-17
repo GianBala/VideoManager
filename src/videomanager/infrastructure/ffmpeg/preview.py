@@ -427,6 +427,72 @@ def render_waveform(
     return _run(command, timeout, register)
 
 
+def _jpeg_end(data: bytearray, start: int) -> int | None:
+    """Fim (exclusivo) da imagem JPEG que começa em ``start``, ou ``None`` se incompleta.
+
+    Percorre os segmentos pelo tamanho declarado de cada um, em vez de procurar
+    o marcador de fim no meio dos bytes: dentro de tabelas o par ``FF D9`` pode
+    aparecer sem ser fim de imagem. Nos dados comprimidos o formato garante que
+    ``FF`` seguido de algo diferente de ``00`` e dos reinícios é um marcador.
+    """
+    size = len(data)
+    if size - start < 2:
+        return None
+    if data[start] != 0xFF or data[start + 1] != 0xD8:
+        raise VideoManagerError("Fluxo de quadros da prévia inválido.")
+    index = start + 2
+    while True:
+        if index + 1 >= size:
+            return None
+        if data[index] != 0xFF:
+            raise VideoManagerError("Fluxo de quadros da prévia inválido.")
+        marker = data[index + 1]
+        if marker == 0xFF:
+            index += 1  # byte de preenchimento
+            continue
+        if marker == 0xD9:
+            return index + 2
+        if marker == 0x01 or 0xD0 <= marker <= 0xD7:
+            index += 2
+            continue
+        if index + 3 >= size:
+            return None
+        segment_end = index + 2 + ((data[index + 2] << 8) | data[index + 3])
+        if segment_end > size:
+            return None
+        if marker != 0xDA:
+            index = segment_end
+            continue
+        scan = segment_end
+        while True:
+            scan = data.find(b"\xff", scan)
+            if scan < 0 or scan + 1 >= size:
+                return None
+            following = data[scan + 1]
+            if following == 0x00 or 0xD0 <= following <= 0xD7:
+                scan += 2
+            elif following == 0xFF:
+                scan += 1
+            else:
+                break
+        index = scan
+
+
+def jpeg_frames(read: Callable[[int], bytes], chunk: int = 1 << 16) -> Iterator[bytes]:
+    """Separa as imagens de um fluxo MJPEG (``image2pipe``), uma a uma."""
+    buffer = bytearray()
+    while True:
+        end = _jpeg_end(buffer, 0) if buffer else None
+        if end is not None:
+            yield bytes(buffer[:end])
+            del buffer[:end]
+            continue
+        data = read(chunk)
+        if not data:
+            return
+        buffer += data
+
+
 class FramePump:
     """Fluxo contínuo de quadros para a reprodução, com ritmo de tempo real.
 
@@ -548,6 +614,7 @@ class FramePump:
                 self._process = None
 
 __all__ = [
+    'jpeg_frames',
     'FFmpegTools',
     'MAX_PREVIEW_FPS',
     'preview_fps',

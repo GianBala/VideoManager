@@ -217,6 +217,8 @@ class Timeline(QWidget):
     """Trilhas, blocos, cursor e régua."""
 
     scrubbed = Signal(float)
+    # O arrasto da agulha terminou: a prévia troca o quadro guardado pelo exato.
+    scrub_finished = Signal()
     # Uma alteração vai começar: o painel guarda o estado para o desfazer.
     edit_started = Signal()
     # Intenções, aplicadas pelo painel sobre o projeto imutável.
@@ -378,6 +380,11 @@ class Timeline(QWidget):
     @property
     def position(self) -> float:
         return self._position
+
+    @property
+    def is_scrubbing(self) -> bool:
+        """Se a agulha está sendo arrastada pela régua agora."""
+        return self._drag == "cursor"
 
     def set_position(self, seconds: float, *, follow: bool = True) -> None:
         previous = self._position
@@ -1307,8 +1314,11 @@ class Timeline(QWidget):
             return
         if self._dragging and self._drag in ("inicio", "fim", "corpo"):
             self.edit_finished.emit()
+        was_scrubbing = self._drag == "cursor"
         self._drag, self._drag_clip = "", -1
         self._press_at, self._dragging = None, False
+        if was_scrubbing:
+            self.scrub_finished.emit()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         kind, index, clip_id = self._hit(event.position().x(), event.position().y())

@@ -29,6 +29,7 @@ som, um computador que não dá conta perde quadros e continua no tempo certo.
 from __future__ import annotations
 
 import itertools
+import math
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -83,6 +84,8 @@ from PySide6.QtWidgets import (
 
 from videomanager.application.media.preview import PreviewFrameInbox, PreviewResultKey
 from videomanager.application.media.interaction import interaction_plan
+from videomanager.application.media.scrub import ScrubFrameCache
+from videomanager.domain.scrub import render_signature, signature_at, signature_segments
 from videomanager.domain.project import slideshow_canvas
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.domain.export_policy import simple_trim
@@ -164,6 +167,19 @@ _RESYNC_COOLDOWN = 1.5
 # ser preparados: abrir o ffmpeg e chegar ao primeiro quadro leva de 150 a
 # 500 ms, e é esse tempo que aparecia como corte na volta.
 _LOOP_LEAD = 1.5
+# Cache da agulha (ver ``application.media.scrub``). Os quadros guardados são
+# pequenos de propósito: aparecem enquanto a mão arrasta, e o quadro exato, no
+# tamanho da prévia, chega quando ela para.
+_SCRUB_WIDTH, _SCRUB_HEIGHT = 640, 360
+_SCRUB_MAX_FPS = 30.0
+# Só preenche depois de um tempo sem edição, busca ou reprodução.
+_SCRUB_FILL_IDLE_MS = 700
+_SCRUB_NEXT_MS = 30
+# Parada da mão que já pede o quadro exato, sem esperar soltar.
+_SCRUB_SETTLE_MS = 120
+_SCRUB_CHUNK_SECONDS = 20
+_SCRUB_FRAME_ESTIMATE = 40_000
+_SCRUB_MAX_RADIUS_SECONDS = 180
 # Quanto o relógio pode passar do fim esperando a emenda do som chegar à placa
 # antes de desistir e reabrir do zero.
 _LOOP_GRACE = 0.5
@@ -286,6 +302,9 @@ class EditPanel(QWidget):
     def install_project(self, project, path, references, probed, *, reset=True):
         self._generation += 1
         self._end_edit_groups()
+        self._cancel_scrub_fill()
+        self._scrub_cache = None
+        self._cache_shown_for = None
         self._stop_playback()
         self._cancel_primed_playback()
         self._background.cancel_all()
@@ -358,6 +377,13 @@ class EditPanel(QWidget):
         # fundo, aparecem preenchendo e podem esperar.
         self._runner = WorkerRunner(_bounded_pool(self, _LIVE_WORKERS))
         self._background = WorkerRunner(_bounded_pool(self, _BACKGROUND_WORKERS))
+        # Cache da agulha: um ffmpeg de cada vez, com prioridade baixa, numa fila
+        # só dele — nunca disputa vaga com quadro, reprodução ou miniaturas.
+        self._scrub_runner = WorkerRunner(_bounded_pool(self, 1))
+        self._scrub_cache: ScrubFrameCache | None = None
+        self._scrub_job: tuple[int, object, list] | None = None
+        # Instante do quadro guardado que está na tela, enquanto o exato não vem.
+        self._cache_shown_for: float | None = None
         self._colors = palette(settings.theme)
 
         self._processing = processing
@@ -450,6 +476,15 @@ class EditPanel(QWidget):
         self._view_timer.setSingleShot(True)
         self._view_timer.setInterval(_VIEW_SETTLE_MS)
         self._view_timer.timeout.connect(self._refresh_backdrop)
+
+        self._scrub_fill_timer = QTimer(self)
+        self._scrub_fill_timer.setSingleShot(True)
+        self._scrub_fill_timer.setInterval(_SCRUB_FILL_IDLE_MS)
+        self._scrub_fill_timer.timeout.connect(self._start_scrub_fill)
+        self._scrub_settle_timer = QTimer(self)
+        self._scrub_settle_timer.setSingleShot(True)
+        self._scrub_settle_timer.setInterval(_SCRUB_SETTLE_MS)
+        self._scrub_settle_timer.timeout.connect(self._settle_scrub)
 
         self._prefs_timer = QTimer(self)
         self._prefs_timer.setSingleShot(True)
@@ -1683,6 +1718,7 @@ class EditPanel(QWidget):
         self._timeline = Timeline(self._colors)
         self._timeline.setToolTip(strings.EDIT_TIMELINE_HINT)
         self._timeline.scrubbed.connect(self._on_scrub)
+        self._timeline.scrub_finished.connect(self._on_scrub_finished)
         # Tocar e pausar anda a agulha sem passar por ``_on_scrub``; sem isto
         # a tesoura ficava com o estado de antes do play até outro clique.
         self._timeline.position_changed.connect(lambda _seconds: self._refresh_clip_actions())
@@ -2454,6 +2490,7 @@ class EditPanel(QWidget):
 
     def _begin_timeline_edit(self) -> None:
         self._end_edit_groups()
+        self._cancel_scrub_fill()
         self._session.begin_edit()
 
     def _on_properties_changed(self, clip_id: int, changes: dict) -> None:
@@ -2569,6 +2606,7 @@ class EditPanel(QWidget):
             self._live_timer.start()
         self._update_preview_overlay_clips()
         self._update_project_label()
+        self._schedule_scrub_fill()
         self.changed.emit()
 
     def _on_clip_moved(self, clip_id: int, track_index: int, start: float) -> None:
@@ -2861,6 +2899,7 @@ class EditPanel(QWidget):
             return
         if self._overlay_drag_session != clip_id:
             self._end_edit_groups()
+            self._cancel_scrub_fill()
             self._session.begin_edit()
             self._overlay_drag_session = clip_id
         active = self._preview._active_clip
@@ -3310,7 +3349,12 @@ class EditPanel(QWidget):
         # quando o quadro parado terminar serializa os dois, e o play depois
         # de uma busca passa a esperar uma composição inteira antes de
         # começar — que é a demora que se sente ao apertar play.
-        self._prime_playback()
+        #
+        # Com a agulha sendo arrastada, não: cada pausa da mão abria o fluxo do
+        # projeto inteiro dali até o fim, para ser morto no movimento seguinte
+        # ocupando a segunda vaga. A pré-carga vem quando o arrasto termina.
+        if not self._timeline.is_scrubbing:
+            self._prime_playback()
 
     def _start_frame(self) -> None:
         tools = self._ensure_tools()
@@ -3359,7 +3403,7 @@ class EditPanel(QWidget):
                    and (self._wanted is None or self._wanted == self._rendered))
         if self._wanted is not None and not current:
             self._start_frame()
-        elif current and self._frame_error_token != token:
+        elif current and self._frame_error_token != token and not self._timeline.is_scrubbing:
             self._prime_playback()
 
     def _on_preview_failed(self, token: int, message: str) -> None:
@@ -3395,6 +3439,11 @@ class EditPanel(QWidget):
                            or self._properties_session >= 0 or self._typing_session >= 0)
                 if key.revision != self._frame_revision and not gesture:
                     return
+                if self._cache_shown_for is not None and key.seconds != self._wanted:
+                    # A tela já mostra o quadro guardado de um instante mais
+                    # novo: o exato de um ponto anterior do arrasto voltaria no
+                    # tempo.
+                    return
                 # Arrastar a agulha pede um quadro por evento, e o instante
                 # pedido já mudou quando o anterior fica pronto. Exigir
                 # ``key.seconds == self._wanted`` descartava **todos** esses
@@ -3418,6 +3467,7 @@ class EditPanel(QWidget):
         else:
             self._defer_loading_hint()
         self._shown_frame = frame.seconds
+        self._cache_shown_for = None
         self._preview.set_position(frame.seconds)
         self._show_frame(frame)
         if current:
@@ -3680,9 +3730,148 @@ class EditPanel(QWidget):
     def _on_scrub(self, seconds: float) -> None:
         self._stop_playback()
         self._timeline.set_position(seconds)
-        self._request_frame()
+        if self._show_cached_frame(self._position) and self._timeline.is_scrubbing:
+            # O quadro guardado já está na tela; o exato só quando a mão parar.
+            self._scrub_settle_timer.start()
+        else:
+            self._request_frame()
         self._update_time_labels()
         self._refresh_clip_actions()
+
+    # ------------------------------------------------------------------
+    # Cache da agulha
+    # ------------------------------------------------------------------
+
+    def _scrub_fps(self) -> float:
+        return min(_SCRUB_MAX_FPS, float(preview_fps(self._project.fps)))
+
+    def _scrub_size(self) -> tuple[int, int]:
+        return fit_size(self._project.width, self._project.height, _SCRUB_WIDTH, _SCRUB_HEIGHT)
+
+    def _show_cached_frame(self, seconds: float) -> bool:
+        """Mostra o quadro guardado deste instante, se houver um válido."""
+        cache = self._scrub_cache
+        if cache is None or self._closed or self._project.is_empty:
+            return False
+        if cache.size != self._scrub_size() or abs(cache.fps - self._scrub_fps()) > 1e-9:
+            return False
+        index = cache.index_of(seconds)
+        data = cache.get(index, render_signature(self._project, cache.seconds_of(index)))
+        if data is None:
+            return False
+        image = QImage.fromData(data, "JPG")
+        if image.isNull():
+            return False
+        pixmap = QPixmap.fromImage(image)
+        self._wanted = seconds
+        self._cache_shown_for = seconds
+        self._shown_frame = seconds
+        self._preview.set_position(seconds)
+        if self._on_fullscreen:
+            self._fullscreen.set_frame(pixmap)
+        else:
+            self._preview.set_frame_pixmap(pixmap)
+            self._update_preview_overlay_clips()
+        return True
+
+    def _settle_scrub(self) -> None:
+        if not self._playing and self._cache_shown_for is not None:
+            self._request_frame()
+
+    def _on_scrub_finished(self) -> None:
+        self._scrub_settle_timer.stop()
+        if self._playing or self._project.is_empty:
+            return
+        if self._cache_shown_for is not None or self._rendered != self._position:
+            self._request_frame()
+        else:
+            self._prime_playback()
+        self._schedule_scrub_fill()
+
+    def _schedule_scrub_fill(self, delay: int = _SCRUB_FILL_IDLE_MS) -> None:
+        if not self._closed and hasattr(self, "_scrub_fill_timer"):
+            self._scrub_fill_timer.start(delay)
+
+    def _cancel_scrub_fill(self) -> None:
+        if hasattr(self, "_scrub_fill_timer"):
+            self._scrub_fill_timer.stop()
+        job, self._scrub_job = self._scrub_job, None
+        if job is not None:
+            job[1].cancel()
+
+    def _start_scrub_fill(self) -> None:
+        """Compõe em segundo plano o trecho sem quadro guardado mais perto da agulha."""
+        if self._closed or self._project.is_empty or self._scrub_job is not None:
+            return
+        if (self._playing or self._session.editing or self._overlay_drag_session >= 0
+                or self._timeline.is_scrubbing):
+            self._schedule_scrub_fill()
+            return
+        tools = self._ensure_tools()
+        if tools is None:
+            return
+        fps, size = self._scrub_fps(), self._scrub_size()
+        cache = self._scrub_cache
+        if cache is None or cache.size != size or abs(cache.fps - fps) > 1e-9:
+            cache = self._scrub_cache = ScrubFrameCache(fps, size, self._runtime.scrub_cache_budget())
+        duration = self._project.export_duration
+        if duration <= 0:
+            return
+        total = int(math.ceil(duration * fps - 1e-6))
+        segments = signature_segments(self._project, 0.0, duration)
+        cache.discard_stale(segments)
+        focus = min(cache.index_of(self._position), max(0, total - 1))
+        per_frame = cache.average_frame_bytes or _SCRUB_FRAME_ESTIMATE
+        # Só o que cabe no orçamento em volta da agulha: preencher além disso
+        # descartaria na hora os quadros mais distantes, e o trabalho recomeçaria
+        # sem fim.
+        radius = min(int(_SCRUB_MAX_RADIUS_SECONDS * fps),
+                     max(int(fps), cache.budget_bytes // max(1, per_frame) // 2))
+        gaps = cache.missing(segments, max(0, focus - radius), min(total, focus + radius))
+        if not gaps:
+            return
+
+        def distance(gap: tuple[int, int]) -> int:
+            first, last = gap
+            return 0 if first <= focus < last else min(abs(first - focus), abs(last - 1 - focus))
+
+        first, last = min(gaps, key=distance)
+        chunk = int(_SCRUB_CHUNK_SECONDS * fps)
+        if first <= focus < last:
+            start = max(first, focus - int(fps))
+        elif first > focus:
+            start = first
+        else:
+            start = max(first, last - chunk)
+        end = min(last, start + chunk)
+        token = next(self._tokens)
+        worker = self._runtime.scrub_cache_worker(
+            self._project, cache.seconds_of(start), (end - start) / fps, size, tools, token,
+            fps=fps, first_index=start, text_assets=self.editor.text_assets(self._project),
+        )
+        worker.signals.scrub_frames.connect(self._on_scrub_frames)
+        worker.signals.done.connect(lambda token=token: self._on_scrub_fill_done(token))
+        self._scrub_job = (token, worker, segments)
+        self._scrub_runner.start(worker, worker.signals.done)
+
+    def _on_scrub_frames(self, token: int, first_index: int, images: object) -> None:
+        job, cache = self._scrub_job, self._scrub_cache
+        if job is None or job[0] != token or cache is None:
+            return
+        segments = job[2]
+        focus = cache.index_of(self._position)
+        for offset, data in enumerate(images):
+            index = first_index + offset
+            # A assinatura é a do projeto que o trabalho compôs, e não a atual:
+            # um quadro de trecho editado no meio do caminho nasce obsoleto.
+            signature = signature_at(segments, cache.seconds_of(index))
+            if signature is not None:
+                cache.put(index, signature, data, focus_index=focus)
+
+    def _on_scrub_fill_done(self, token: int) -> None:
+        if self._scrub_job is not None and self._scrub_job[0] == token:
+            self._scrub_job = None
+            self._schedule_scrub_fill(_SCRUB_NEXT_MS)
 
     def _seek_to(self, seconds: float) -> None:
         if self._project.is_empty:
@@ -3832,6 +4021,10 @@ class EditPanel(QWidget):
         tools = self._ensure_tools()
         if tools is None or self._project.is_empty:
             return
+        # Tocar vem antes de preencher o cache: a CPU é da reprodução.
+        self._cancel_scrub_fill()
+        self._scrub_settle_timer.stop()
+        self._cache_shown_for = None
         self._end_edit_groups()
         self._invalidate_interaction()
         if self._at_last_frame(seconds):
@@ -4198,6 +4391,8 @@ class EditPanel(QWidget):
                 self._prime_playback()
             self._update_preview_overlay_clips()
             self._prepare_interaction()
+            # Pausado, a CPU volta a sobrar para preencher o cache da agulha.
+            self._schedule_scrub_fill()
         self._refresh_play_button()
 
     def _refresh_play_button(self) -> None:
@@ -4388,6 +4583,9 @@ class EditPanel(QWidget):
         self.commit_pending_edits()
         self._stop_playback()
         self._cancel_primed_playback()
+        self._cancel_scrub_fill()
+        self._scrub_runner.cancel_all()
+        self._scrub_cache = None
         for clip_id in list(self._strip_workers):
             self._cancel_strip(clip_id)
         self._project_actions.cancel_pending()

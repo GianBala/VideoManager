@@ -63,6 +63,11 @@ apresenta versões completas conforme ficam prontas. A indicação de carregamen
 termina quando a versão final chega (ver
 [`arquitetura.md`](arquitetura.md)).
 
+Arrastar a agulha responde na hora: em segundo plano, com prioridade baixa, a
+prévia guarda versões menores dos quadros em volta da agulha, e é uma delas que
+aparece durante o arrasto. Ao parar ou soltar, chega o quadro exato. Depois de
+uma edição, só o trecho afetado volta a ser preparado.
+
 Abaixo da imagem, a barra de transporte:
 
 | Controle | Atalho | Ação |
