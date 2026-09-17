@@ -212,6 +212,10 @@ class Timeline(QWidget):
     track_visibility_clicked = Signal(int)
     track_reordered = Signal(int, int)  # índice de origem, índice de destino
     vertical_scroll_requested = Signal(float)
+    # Qualquer mudança da agulha — busca, reprodução, desfazer que encurta a
+    # edição. Os botões de corte dependem dela, e a reprodução não passa por
+    # ``scrubbed``.
+    position_changed = Signal(float)
     view_changed = Signal()
     # Botão direito: o widget diz **onde** foi clicado e o painel monta o menu.
     # As ações são dele (é ele quem tem o projeto e o histórico), e assim o menu
@@ -263,7 +267,9 @@ class Timeline(QWidget):
         # O cursor não pode ficar além do fim: apagar um bloco ou desfazer
         # encurta a edição, e um cursor solto lá fora pede quadros que não
         # existem e mostra um tempo que não é mais possível.
-        self._position = min(self._position, max(0.0, project.duration))
+        clamped = min(self._position, max(0.0, project.duration))
+        moved = clamped != self._position
+        self._position = clamped
         if refit:
             self.fit()
         # Imagens de blocos que não existem mais saem da memória junto com eles.
@@ -276,6 +282,8 @@ class Timeline(QWidget):
         # que mantém o vazio abaixo das trilhas clicável.
         self.setMinimumHeight(self._needed_height())
         self.update()
+        if moved:
+            self.position_changed.emit(self._position)
 
     def _needed_height(self) -> int:
         total = RULER_HEIGHT + 6
@@ -314,10 +322,13 @@ class Timeline(QWidget):
         return self._position
 
     def set_position(self, seconds: float, *, follow: bool = True) -> None:
+        previous = self._position
         self._position = min(max(0.0, seconds), max(0.0, self._project.duration))
         if follow:
             self._keep_visible(self._position)
         self.update()
+        if self._position != previous:
+            self.position_changed.emit(self._position)
 
     def set_strip(self, clip_id: int, in_point: float, out_point: float, count: int) -> None:
         # As imagens anteriores ficam até as novas chegarem: apagá-las aqui
@@ -986,7 +997,10 @@ class Timeline(QWidget):
             return
         if clip_id >= 0:
             self.select(clip_id)
-        else:
+        elif y >= RULER_HEIGHT:
+            # Na régua não: é nela que se posiciona o corte do bloco escolhido.
+            # Desselecionar ali fazia a tesoura cair no bloco de cima — o vídeo
+            # — em vez do áudio que o usuário tinha selecionado.
             self.select(-1)
         if kind in ("inicio", "fim", "corpo"):
             # O aviso de que uma edição começou fica para o primeiro movimento
