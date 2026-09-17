@@ -1181,3 +1181,36 @@ class TestBuscaDoQuadroParado:
         args = frame_command(projeto(video_track(clip(duration=4.0))), instante, (320, 180), TOOLS)
         assert "lavfi" not in args and args.count("-i") == 1, "o vídeo entra, não o quadro preto"
         assert self.busca(args) == pytest.approx(4.0 - 1 / 30 + 0.25 / 30, abs=1e-6)
+
+
+class TestGif:
+    """Exportar como GIF: 256 cores, em loop e sem som."""
+
+    @staticmethod
+    def graph(args: list[str]) -> str:
+        return args[args.index("-filter_complex") + 1]
+
+    def test_paleta_unica_sem_som_e_em_loop(self) -> None:
+        # Tela reduzida, como se faz num GIF: cabe a paleta única, que dá o
+        # menor arquivo.
+        pequeno = projeto(video_track(clip(duration=4.0)), audio_track(clip(ESTEREO, duration=4.0)),
+                          width=640, height=360)
+        args = export_args(pequeno, Path("/saida/a.gif"), TOOLS, container="gif")
+        grafo = self.graph(args)
+        assert "palettegen=stats_mode=diff" in grafo and "paletteuse=dither=bayer" in grafo
+        assert args[args.index("-loop") + 1] == "0"
+        assert "-an" in args and "-c:v" not in args, "o GIF não passa por encoder de vídeo"
+        assert args[args.index("-map") + 1] == "[out]"
+        assert str(Path("/saida/a.gif")) in args
+
+    def test_exportacao_grande_troca_para_paleta_por_quadro(self) -> None:
+        # Uma paleta só para tudo obriga o ffmpeg a segurar todos os quadros
+        # (medido: 582 MB num GIF de 30 s a 640×360). Em 1080p o teto de 512 MB
+        # é alcançado com poucos segundos, e a paleta passa a ser por quadro.
+        longo = projeto(video_track(clip(duration=4.0)))
+        grafo = self.graph(export_args(longo, Path("/saida/a.gif"), TOOLS, container="gif"))
+        assert "palettegen=stats_mode=single" in grafo and "paletteuse=new=1" in grafo
+
+    def test_sem_imagem_na_linha_do_tempo_recusa(self) -> None:
+        with pytest.raises(ConversionError):
+            export_args(projeto(audio_track(clip(ESTEREO))), Path("/saida/a.gif"), TOOLS, container="gif")
