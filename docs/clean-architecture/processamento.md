@@ -51,6 +51,18 @@ hardware desejado, qualidade, interpolação e opções de áudio. O serviço
 rasteriza os textos necessários antes de reservar a saída. Falha ao preparar
 texto não deixa um placeholder para uma tarefa que não pode ser criada.
 
+### GIF
+
+O container `gif` tem caminho próprio em `composer.gif_args`: sem áudio, em
+loop infinito e com a paleta de 256 cores montada a partir da própria edição —
+nada de encoder de vídeo nem de placa. Uma paleta única para a animação inteira
+dá o menor arquivo, mas obriga o ffmpeg a segurar todos os quadros até tê-los
+visto (medido: 582 MB e 9,6 MB de arquivo num GIF de 30 s a 640×360, contra
+116 MB e 15,5 MB da paleta por quadro). Acima de 512 MB estimados
+(`quadros × largura × altura × 4`) a paleta passa a ser por quadro, de memória
+constante. A janela de exportação esconde codec e qualidade, oferece taxas
+baixas (10 a 25 q/s) e avisa que o som fica de fora.
+
 ```mermaid
 sequenceDiagram
     participant U as ExportDialog

@@ -488,3 +488,45 @@ def test_corte_rapido_mostra_apenas_configuracao_real(sample_media, single_clip_
     assert dialog._container_box.isEnabled()
     assert dialog._video_codec_box.isEnabled()
     assert dialog._container_box.currentData() == 'webm'
+
+
+def test_export_dialog_gif(qapp, sample_media, single_clip_project, dummy_tools):
+    """GIF: sem codec nem qualidade para escolher, com taxas próprias e aviso."""
+    from videomanager.presentation.qt import strings
+
+    ref, local = sample_media
+    dialog = ExportDialog(project=single_clip_project, settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=build_desktop_runtime())
+    dialog._fast.setChecked(False)
+    dialog._container_box.setCurrentIndex(dialog._container_box.findData("gif"))
+
+    assert dialog._ext_label.text() == ".gif"
+    assert not dialog._video_codec_box.isVisibleTo(dialog)
+    assert not dialog._quality_box.isVisibleTo(dialog)
+    assert dialog._canvas_box.isVisibleTo(dialog) and dialog._rate_box.isVisibleTo(dialog)
+    taxas = [dialog._rate_box.itemData(i) for i in range(dialog._rate_box.count())]
+    assert 10.0 in taxas and 12.5 in taxas, "GIF oferece taxas baixas"
+    assert dialog._warning.text() == strings.EXPORT_GIF_NOTE
+    assert "sem som" in dialog._plan.text()
+    assert not dialog._fast.isEnabled(), "não há como copiar os dados da origem num GIF"
+
+    dialog._on_enqueue()
+    target = dialog.created_job.request.target
+    assert target.container == "gif" and target.extension == "gif"
+    assert target.family is None
+    assert dialog.created_job.request.destination.suffix == ".gif"
+
+
+def test_export_dialog_volta_do_gif_restaura_codec(qapp, sample_media, single_clip_project, dummy_tools):
+    ref, local = sample_media
+    dialog = ExportDialog(project=single_clip_project, settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=build_desktop_runtime())
+    dialog._fast.setChecked(False)
+    dialog._container_box.setCurrentIndex(dialog._container_box.findData("gif"))
+    dialog._container_box.setCurrentIndex(dialog._container_box.findData("mp4"))
+    assert dialog._video_codec_box.isVisibleTo(dialog)
+    assert dialog._quality_box.isVisibleTo(dialog)
+    assert dialog._warning.text() == ""
+    assert dialog._fast.isEnabled()

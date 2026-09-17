@@ -1758,6 +1758,55 @@ def build_graph(
 # ---------------------------------------------------------------------------
 
 
+# GIF tem 256 cores por quadro: a qualidade depende de escolher bem essas cores.
+# Uma paleta para a animação inteira é a que dá o melhor resultado e o menor
+# arquivo (medido num GIF de 30 s: 9,6 MB contra 15,5 MB da paleta por quadro),
+# mas o ffmpeg precisa segurar os quadros até ter visto todos — 582 MB no mesmo
+# teste. Acima deste teto a paleta passa a ser por quadro, que custa memória
+# constante.
+_GIF_PALETTE_BUDGET = 512 * 1024 * 1024
+# ``bayer`` espalha o erro em padrão fixo: numa animação isso não "ferve" entre
+# quadros como o ruído do difusor de erro, e ainda comprime melhor.
+_GIF_DITHER = "dither=bayer:bayer_scale=5"
+
+
+def _gif_single_palette(project: Project) -> bool:
+    """Se cabe montar uma paleta só para a animação inteira (ver o teto)."""
+    frames = max(1.0, project.export_duration * max(1.0, project.fps))
+    return frames * project.width * project.height * 4 <= _GIF_PALETTE_BUDGET
+
+
+def gif_args(
+    project: Project,
+    destination: Path,
+    tools: FFmpegTools,
+    *,
+    text_assets: dict[int, Path] | None = None,
+) -> list[str]:
+    """Grava a edição como GIF animado: 256 cores, em loop e sem som.
+
+    O GIF não tem trilha de áudio — o som da edição fica de fora, e é isso que
+    a janela de exportação avisa.
+    """
+    graph = build_graph(project, want_video=True, want_audio=False, text_assets=text_assets)
+    if not graph.video_label:
+        raise ConversionError("Não há imagem na linha do tempo para exportar como GIF.")
+    if _gif_single_palette(project):
+        palette = (f"palettegen=stats_mode=diff[gifp];[gifb][gifp]"
+                   f"paletteuse={_GIF_DITHER}:diff_mode=rectangle[out]")
+    else:
+        palette = (f"palettegen=stats_mode=single[gifp];[gifb][gifp]"
+                   f"paletteuse=new=1:{_GIF_DITHER}[out]")
+    filters = [*graph.filters, f"{graph.video_label}split[gifa][gifb];[gifa]{palette}"]
+    args = [
+        tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y", *graph.inputs,
+        "-filter_complex", ";".join(filters), "-map", "[out]", "-an",
+        # Loop infinito, que é como um GIF é esperado na web.
+        "-loop", "0",
+    ]
+    return args + tail_args("gif", destination, map_metadata=False)
+
+
 def export_args(
     project: Project,
     destination: Path,
@@ -1812,6 +1861,9 @@ def export_args(
             "-nostats",
             str(destination),
         ]
+
+    if container == "gif":
+        return gif_args(project, destination, tools, text_assets=text_assets)
 
     graph = build_graph(project, interpolate=interpolate, text_assets=text_assets)
     codec_family = family or hwaccel.family_for(container)

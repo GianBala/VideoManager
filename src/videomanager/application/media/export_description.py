@@ -27,6 +27,14 @@ def describe_export(
         return " · ".join(parts)
 
     videos = sum(len(track.clips) for track in project.video_tracks)
+    if container == "gif":
+        # GIF não guarda som: dizer isso aqui evita a surpresa no arquivo.
+        parts = [".gif (GIF · 256 cores · sem som)"]
+        if videos:
+            parts.append(f"{videos} bloco(s) de imagem")
+        parts.append(f"{project.width}×{project.height} · {project.fps:g} fps")
+        parts.append(f"{format_span(project.export_duration)} de duração")
+        return " · ".join(parts)
     codec_family = family or hwaccel.family_for(container)
     parts = [f".{container} ({hwaccel.family_label(codec_family)})"]
     if videos:
