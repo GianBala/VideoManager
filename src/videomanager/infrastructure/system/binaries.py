@@ -18,6 +18,7 @@ ffmpeg pisca um console preto na frente da janela.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -263,6 +264,34 @@ def find_js_runtime() -> tuple[str, Path] | None:
         if found:
             return name, Path(found)
     return None
+
+
+_major_versions: dict[str, int | None] = {}
+
+
+def major_version(ffmpeg: Path | str) -> int | None:
+    """Número maior da versão deste ffmpeg — ``None`` se não der para ler.
+
+    A máquina do usuário decide: o pacote traz o seu, mas no Linux vale o que
+    estiver instalado, e as versões que circulam vão da 6 (Ubuntu 24.04) à 9
+    (Chocolatey). O que muda entre elas não é só o formato de vídeo — opções
+    saem, e o agendamento interno do ffmpeg mudou na 7.
+    """
+    chave = str(ffmpeg)
+    if chave in _major_versions:
+        return _major_versions[chave]
+    encontrado: int | None = None
+    try:
+        proc = subprocess.run([chave, "-hide_banner", "-version"], timeout=20, check=False,
+                              **subprocess_kwargs())
+        linhas = (proc.stdout or b"").decode("utf-8", "replace").splitlines()
+        achado = re.search(r"version\s+n?(\d+)", linhas[0]) if linhas else None
+        if achado:
+            encontrado = int(achado.group(1))
+    except (OSError, subprocess.SubprocessError):
+        encontrado = None
+    _major_versions[chave] = encontrado
+    return encontrado
 
 
 def probe_version(ffmpeg: Path) -> str:

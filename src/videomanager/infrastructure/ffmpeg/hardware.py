@@ -72,10 +72,13 @@ _ENCODER_QUALITY: dict[str, dict[str, tuple[str, ...]]] = {
         QUALITY_BALANCED: ("-crf", "25", "-pix_fmt", "yuv420p"),
         QUALITY_ECONOMY: ("-crf", "30", "-pix_fmt", "yuv420p"),
     },
+    # O ``-pix_fmt`` é obrigatório aqui, como no x264/x265: a composição chega
+    # com alfa (RGBA), e a partir do ffmpeg 9 o libvpx-vp9 recusa o quadro em
+    # vez de converter — a exportação .webm terminava sem escrever nada.
     "libvpx-vp9": {
-        QUALITY_HIGH: ("-crf", "25", "-b:v", "0"),
-        QUALITY_BALANCED: ("-crf", "31", "-b:v", "0"),
-        QUALITY_ECONOMY: ("-crf", "38", "-b:v", "0"),
+        QUALITY_HIGH: ("-crf", "25", "-b:v", "0", "-pix_fmt", "yuv420p"),
+        QUALITY_BALANCED: ("-crf", "31", "-b:v", "0", "-pix_fmt", "yuv420p"),
+        QUALITY_ECONOMY: ("-crf", "38", "-b:v", "0", "-pix_fmt", "yuv420p"),
     },
     "libsvtav1": {
         QUALITY_HIGH: ("-crf", "26",),

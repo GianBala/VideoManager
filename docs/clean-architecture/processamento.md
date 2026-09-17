@@ -165,6 +165,29 @@ Conversões locais continuam serializadas na fila, mesmo quando uma exportação
 usa trechos internos paralelos. A CPU sozinha não é critério suficiente para
 aumentar concorrência: cada decodificador e filtro consome memória.
 
+## Versões do ffmpeg
+
+A máquina do usuário decide qual ffmpeg roda: o pacote traz o seu (7.1), mas no
+Linux vale o instalado, e as versões em uso vão da 6 (Ubuntu 24.04) à 9
+(Chocolatey). `binaries.major_version` lê esse número uma vez por executável, e
+duas decisões dependem dele:
+
+- **Grafo em arquivo.** Um projeto grande passa do limite da linha de comando,
+  então o grafo vai para um arquivo temporário. A opção antiga
+  (`-filter_complex_script`) saiu no ffmpeg 8; a nova (`-/filter_complex`, a
+  forma genérica "o valor vem deste arquivo") entrou no 7. `command_assets`
+  escolhe conforme a versão; usar a errada faz o ffmpeg recusar o comando
+  inteiro.
+- **`-pix_fmt` no VP9.** A composição chega com alfa, e do ffmpeg 9 em diante o
+  `libvpx-vp9` recusa esse quadro em vez de convertê-lo: a exportação `.webm`
+  terminava sem escrever nada. O formato agora é fixado como já era no x264 e
+  no x265.
+
+Uma limitação fica registrada: no ffmpeg 6, uma transição que atravessa um
+adicional **com filtro** deixa o ramo do adicional sem quadros, e ele some
+durante a transição. O agendamento interno que resolve isso chegou no ffmpeg 7.
+Os testes desse caso são pulados quando a ferramenta é mais antiga.
+
 ## Validação
 
 Os testes existentes de compositor, converter, trimmer, exportação paralela e

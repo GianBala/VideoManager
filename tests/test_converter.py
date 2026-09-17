@@ -357,6 +357,25 @@ class TestProporcaoDoPixel:
         assert _ratio("30/1") is None
 
 
+def test_opcao_de_grafo_em_arquivo_segue_a_versao_do_ffmpeg(tmp_path, monkeypatch):
+    """A opção antiga saiu no ffmpeg 8; a nova só existe do 7 em diante.
+
+    As duas versões estão em uso: o Ubuntu 24.04 traz o 6.1 e o Chocolatey
+    instala o 9. Usar a errada faz o ffmpeg recusar o comando inteiro, e todo
+    grafo longo (projeto com vários blocos) passa por aqui.
+    """
+    from videomanager.infrastructure.ffmpeg import command_assets
+
+    args = ['ffmpeg', '-filter_complex', 'null;' * 1000, 'saida.mp4']
+    for versao, esperado in ((6, '-filter_complex_script'), (7, '-/filter_complex'),
+                             (9, '-/filter_complex'), (None, '-filter_complex_script')):
+        command_assets._script_options.clear()
+        monkeypatch.setattr(command_assets, 'major_version', lambda _caminho, v=versao: v)
+        with command_assets.filter_script(args, tmp_path) as prepared:
+            assert prepared[1] == esperado, f"versão {versao}"
+            assert Path(prepared[2]).read_text() == args[2]
+
+
 def test_script_longo_e_exclusivo_e_limpo_em_sucesso_e_falha(tmp_path):
     from videomanager.infrastructure.ffmpeg.command_assets import filter_script
     graph = 'null;' * 1000
