@@ -1289,12 +1289,12 @@ class Project:
         """
         if not any(t.kind is TrackKind.ADDITIONAL and any(c.is_image for c in t.clips) for t in self.tracks):
             return self
-        videos = sum(1 for t in self.tracks if t.kind is TrackKind.VIDEO)
+        nomes = [t.name for t in self.tracks if t.kind is TrackKind.VIDEO]
 
         def video_name() -> str:
-            nonlocal videos
-            videos += 1
-            return f"{TrackKind.VIDEO.value.capitalize()} {videos}"
+            nome = _free_name(TrackKind.VIDEO, nomes)
+            nomes.append(nome)
+            return nome
 
         tracks: list[Track] = []
         for track in self.tracks:
@@ -1371,9 +1371,28 @@ def accepts(kind: TrackKind, clip: Clip) -> bool:
     return clip.media.kind is MediaKind.AUDIO or clip.audio_only
 
 
+def _free_name(kind: TrackKind, names: Iterable[str]) -> str:
+    """Nome da trilha nova: o primeiro número livre da espécie.
+
+    Contar quantas trilhas existem repetia nome depois de apagar uma do meio:
+    com "Vídeo 1" e "Vídeo 3" na tela, a conta dava 3 e a nova nascia "Vídeo 3"
+    também. Nomes escolhidos pelo usuário não entram na conta — só os do
+    padrão "Espécie N".
+    """
+    label = kind.value.capitalize()
+    used = {
+        int(match.group(1))
+        for match in (re.fullmatch(rf"{label} (\d+)", (name or "").strip()) for name in names)
+        if match
+    }
+    number = 1
+    while number in used:
+        number += 1
+    return f"{label} {number}"
+
+
 def _default_name(project: Project, kind: TrackKind) -> str:
-    same = sum(1 for track in project.tracks if track.kind is kind)
-    return f"{kind.value.capitalize()} {same + 1}"
+    return _free_name(kind, [track.name for track in project.tracks if track.kind is kind])
 
 
 def new_project(media: MediaRef | None = None) -> Project:

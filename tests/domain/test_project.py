@@ -606,6 +606,42 @@ class TestExcluirTrilha:
         assert projeto.without_track(7) == projeto
 
 
+class TestNomeDaTrilhaNova:
+    """Apagar uma trilha do meio não pode fazer a próxima nascer repetida."""
+
+    def test_ocupa_o_primeiro_numero_livre(self) -> None:
+        from videomanager.domain.project import Project
+
+        projeto = Project()
+        for _ in range(3):
+            projeto = projeto.with_track(TrackKind.VIDEO)
+        assert sorted(t.name for t in projeto.tracks) == ["Vídeo 1", "Vídeo 2", "Vídeo 3"]
+
+        sem_a_do_meio = projeto.without_track([t.name for t in projeto.tracks].index("Vídeo 2"))
+        nova = sem_a_do_meio.with_track(TrackKind.VIDEO)
+        assert sorted(t.name for t in nova.tracks) == ["Vídeo 1", "Vídeo 2", "Vídeo 3"]
+        seguinte = nova.with_track(TrackKind.VIDEO)
+        assert sorted(t.name for t in seguinte.tracks) == ["Vídeo 1", "Vídeo 2", "Vídeo 3", "Vídeo 4"]
+
+    @pytest.mark.parametrize(
+        ("kind", "rotulo"), [(TrackKind.AUDIO, "Áudio"), (TrackKind.ADDITIONAL, "Adicionais")]
+    )
+    def test_vale_para_todas_as_especies(self, kind, rotulo) -> None:
+        from videomanager.domain.project import Project
+
+        projeto = Project().with_track(kind).with_track(kind)
+        primeira = [t.name for t in projeto.tracks].index(f"{rotulo} 1")
+        livre = projeto.without_track(primeira)
+        assert [t.name for t in livre.tracks] == [f"{rotulo} 2"]
+        assert sorted(t.name for t in livre.with_track(kind).tracks) == [f"{rotulo} 1", f"{rotulo} 2"]
+
+    def test_nome_escolhido_pelo_usuario_nao_entra_na_conta(self) -> None:
+        from videomanager.domain.project import Project
+
+        projeto = Project().with_track(TrackKind.VIDEO, name="Narração")
+        assert projeto.with_track(TrackKind.VIDEO).tracks[0].name == "Vídeo 1"
+
+
 class TestSomDoProjeto:
     def test_trilha_muda_nao_conta(self) -> None:
         projeto = montado(clip(VIDEO, start=0.0, duration=5.0))
