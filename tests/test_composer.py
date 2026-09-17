@@ -1141,3 +1141,43 @@ def test_interpolacao_considera_cadencia_apos_velocidade(source_fps, speed, targ
     p = Project(tracks=(video_track(clip(media, speed=speed)),), fps=target_fps)
     assert can_interpolate(p) is expected
     assert ('minterpolate' in filtros(p, interpolate=True)) is expected
+
+
+class TestBuscaDoQuadroParado:
+    """O quadro parado mostra o quadro que **contém** o instante da agulha.
+
+    O ``-ss`` descarta quadros que começam antes do pedido: no meio de um quadro
+    vinha o seguinte e, dentro do último quadro de um bloco, nenhum — a prévia
+    ficava preta no fim do vídeo e em cada corte (visível com zoom máximo).
+    """
+
+    @staticmethod
+    def busca(args: list[str]) -> float:
+        return float(args[args.index("-ss") + 1])
+
+    def test_meio_do_quadro_busca_o_quadro_que_contem_o_instante(self) -> None:
+        args = frame_command(projeto(video_track(clip())), 1.0 + 0.5 / 30, (320, 180), TOOLS)
+        assert args[args.index("-ss") - 1] == "-noaccurate_seek"
+        assert self.busca(args) == pytest.approx(1.0 + 0.25 / 30, abs=1e-6)
+        assert "select='gte(t,-0.016667)'" in " ".join(args)
+
+    def test_keyframe_nao_faz_voltar_ao_anterior(self) -> None:
+        # Buscar antes do instante de um keyframe decodificaria o GOP anterior
+        # inteiro; a busca fica sempre no próprio quadro ou depois dele.
+        args = frame_command(projeto(video_track(clip())), 2.0, (320, 180), TOOLS)
+        assert self.busca(args) >= 2.0
+
+    def test_reproducao_mantem_a_busca_exata(self) -> None:
+        args = playback_command(projeto(video_track(clip())), 1.0 + 0.5 / 30, (320, 180), TOOLS, fps=30)
+        assert self.busca(args) == pytest.approx(1.0 + 0.5 / 30, abs=1e-6)
+        assert "-noaccurate_seek" not in args and "select=" not in " ".join(args)
+
+    def test_ponto_de_entrada_no_meio_de_um_quadro_mostra_esse_quadro(self) -> None:
+        args = frame_command(projeto(video_track(clip(in_point=2.51))), 0.0, (320, 180), TOOLS)
+        assert self.busca(args) == pytest.approx(2.5 + 0.25 / 30, abs=1e-6)
+
+    @pytest.mark.parametrize("instante", [4.0 - 0.5 / 30, 4.0, 4.5])
+    def test_no_fim_da_edicao_mostra_o_ultimo_quadro(self, instante: float) -> None:
+        args = frame_command(projeto(video_track(clip(duration=4.0))), instante, (320, 180), TOOLS)
+        assert "lavfi" not in args and args.count("-i") == 1, "o vídeo entra, não o quadro preto"
+        assert self.busca(args) == pytest.approx(4.0 - 1 / 30 + 0.25 / 30, abs=1e-6)
