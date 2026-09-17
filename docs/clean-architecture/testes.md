@@ -23,6 +23,12 @@ No Windows, use os executáveis de `.venv\Scripts`.
 Testes `ffmpeg` requerem ferramentas locais; cenários sem hardware disponível
 podem ser ignorados. Rede é opcional e depende de plataformas externas.
 
+A versão do ffmpeg muda o resultado de alguns cenários, e a CI roda com a do
+sistema (6.1 no Ubuntu, 9.0 no Windows) enquanto o pacote traz a 7.1. Um teste
+que dependa de comportamento posterior à 6 declara isso com
+`_exige_ffmpeg(tools, 7)` em vez de falhar — ver
+[processamento.md](processamento.md#versões-do-ffmpeg).
+
 ## Camadas e cobertura
 
 | Local | O que verifica |

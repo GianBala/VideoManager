@@ -291,6 +291,11 @@ quadro a quadro; `↑`/`↓` sobem/descem o volume em 5.
 
 ## Exportando a edição
 
+No Linux, a edição usa o ffmpeg instalado no sistema. Com o ffmpeg 6 (o do
+Ubuntu 24.04), uma transição que atravessa um adicional **com filtro** perde
+esse adicional durante a transição; a partir do ffmpeg 7 funciona. O pacote do
+Windows já traz a versão certa.
+
 Use **Exportar**, no topo do editor, para abrir as opções de saída. A tela do
 projeto pode ser escolhida no seletor **Tela**, também no topo:
 

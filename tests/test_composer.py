@@ -1214,3 +1214,14 @@ class TestGif:
     def test_sem_imagem_na_linha_do_tempo_recusa(self) -> None:
         with pytest.raises(ConversionError):
             export_args(projeto(audio_track(clip(ESTEREO))), Path("/saida/a.gif"), TOOLS, container="gif")
+
+
+def test_webm_fixa_o_formato_de_pixel() -> None:
+    """A composição chega com alfa; do ffmpeg 9 em diante o VP9 recusa o quadro.
+
+    Sem o ``-pix_fmt``, a exportação .webm terminava sem escrever nada — e o
+    caminho paralelo (interpolação) falhava no meio, com "Invalid argument".
+    """
+    args = export_args(projeto(video_track(clip())), Path("/saida/a.webm"), TOOLS, container="webm")
+    assert args[args.index("-c:v") + 1] == "libvpx-vp9"
+    assert args[args.index("-pix_fmt") + 1] == "yuv420p"
