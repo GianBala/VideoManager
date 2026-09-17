@@ -22,7 +22,10 @@ No acervo de mídia à esquerda:
 - **Importar** abre o seletor de arquivos (vídeo, foto ou áudio). Arquivos
   arrastados para o acervo ou para outra área da aba também são importados.
   **Importar não coloca nada na edição**: a mídia fica no acervo.
-- A lista do acervo mostra tudo já importado nesta sessão de edição.
+- A lista do acervo mostra tudo já importado nesta sessão de edição. A
+  miniatura de um vídeo é o quadro do **meio** dele, que representa o conteúdo
+  melhor que o primeiro (quase sempre preto ou um título). Arquivos exportados
+  e convertidos também recebem como capa o quadro do meio.
 - **Arrastar um cartão do acervo até a linha do tempo** coloca a mídia na
   trilha e no instante em que ela for solta, com o mesmo ímã dos blocos. Um
   bloco fantasma mostra onde ela vai cair. Se a trilha sob o ponteiro não
