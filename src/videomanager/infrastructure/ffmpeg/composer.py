@@ -850,6 +850,11 @@ def _transition_additional_pieces(
     for track_index, track in reversed(tuple(enumerate(project.tracks))):
         if not track.visible or track.kind is not TrackKind.ADDITIONAL:
             continue
+        # Com a ordem livre, uma trilha de adicionais pode estar **abaixo** da
+        # trilha da transição. Ela não passa por cima do efeito e não pode
+        # entrar nos lados dele: seria desenhada acima do vídeo que a cobre.
+        if track_index >= context.track_index:
+            continue
         for clip in track.sorted_clips():
             if clip.is_transition or not clip.has_image:
                 continue
