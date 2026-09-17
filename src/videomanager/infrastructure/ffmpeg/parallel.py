@@ -303,7 +303,10 @@ class ParallelExport:
         kwargs["stdout"] = subprocess.PIPE
         kwargs["stderr"] = subprocess.PIPE
         try:
-            process = subprocess.Popen(args, text=True, bufsize=1, **kwargs)
+            # UTF-8 explícito pelo mesmo motivo de ``Converter._execute_serial``:
+            # em cp1252 a leitura do stderr morria e o trecho travava.
+            process = subprocess.Popen(args, text=True, bufsize=1, encoding="utf-8",
+                                       errors="replace", **kwargs)
         except OSError as exc:
             self._fail(str(exc))
             return
