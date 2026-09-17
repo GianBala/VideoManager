@@ -26,7 +26,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import cast
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
+import json
+from pathlib import Path
+
+from PySide6.QtCore import QEvent, QMimeData, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -43,9 +46,11 @@ from PySide6.QtGui import (
     QRadialGradient,
     QWheelEvent,
 )
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaKind
 from videomanager.domain.project import Project
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import accepts
@@ -53,6 +58,11 @@ from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_step
 from videomanager.presentation.qt import strings
+
+# Mídia do acervo sendo arrastada: lista JSON de {"path", "kind", "duration"}.
+# Leva espécie e duração para a linha do tempo desenhar o bloco fantasma antes
+# de soltar, sem consultar o painel a cada movimento.
+MEDIA_MIME = "application/x-videomanager-media"
 
 # Faixas do widget.
 RULER_HEIGHT = 20
@@ -231,6 +241,10 @@ class Timeline(QWidget):
     # As ações são dele (é ele quem tem o projeto e o histórico), e assim o menu
     # e os atalhos de teclado partem do mesmo lugar.
     menu_requested = Signal(str, int, int, object)  # espécie, trilha, clip, posição
+    # Mídia solta: carga (lista de dicionários do acervo ou de caminhos do
+    # sistema), trilha sob o ponteiro (-1 fora delas), posição para uma
+    # trilha nova e instante.
+    media_dropped = Signal(object, int, int, float)
 
     def __init__(self, colors: dict[str, str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -272,6 +286,10 @@ class Timeline(QWidget):
         )
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAcceptDrops(True)
+        # Onde a mídia arrastada vai cair: (trilha, posição da trilha nova,
+        # instante, duração, espécies). ``None`` fora de um arrasto.
+        self._drop_hint: tuple[int, int, float, float, tuple[str, ...]] | None = None
 
     # ------------------------------------------------------------------
     # Estado
@@ -561,6 +579,8 @@ class Timeline(QWidget):
             and self._drop_track_target != self._drag_track
         ):
             self._paint_track_drop_indicator(painter)
+        if self._drop_hint is not None:
+            self._paint_drop_hint(painter)
         painter.restore()
         self._paint_ruler(painter)
         self._paint_playhead(painter)
@@ -1230,11 +1250,11 @@ class Timeline(QWidget):
             return origin
         return index
 
-    def _snap_targets(self, moving: Clip) -> list[float]:
+    def _snap_targets(self, moving: Clip | None) -> list[float]:
         targets = [self._position, 0.0]
         for track in self._project.tracks:
             for clip in track.clips:
-                if clip.clip_id != moving.clip_id:
+                if moving is None or clip.clip_id != moving.clip_id:
                     targets += [clip.start, clip.end]
                 for kf in clip.visible_keyframes:
                     targets.append(clip.start + kf.time_offset)
@@ -1246,6 +1266,9 @@ class Timeline(QWidget):
         return best if abs(best - moment) <= tolerance else moment
 
     def _snap_start(self, start: float, moving: Clip) -> float:
+        return self._snap_span(start, moving.duration, moving)
+
+    def _snap_span(self, start: float, duration: float, moving: Clip | None) -> float:
         """Imanta o começo **ou o fim** do bloco arrastado.
 
         Encostar dois blocos é a operação mais comum de uma linha do tempo, e
@@ -1255,7 +1278,7 @@ class Timeline(QWidget):
         tolerance = _SNAP_PIXELS * self._seconds_per_pixel()
         candidates = self._snap_targets(moving)
         options = [(abs(t - start), t) for t in candidates]
-        options += [(abs(t - (start + moving.duration)), t - moving.duration) for t in candidates]
+        options += [(abs(t - (start + duration)), t - duration) for t in candidates]
         distance, value = min(options, key=lambda pair: pair[0])
         return value if distance <= tolerance else start
 
@@ -1311,6 +1334,113 @@ class Timeline(QWidget):
         else:
             self.set_scroll(self._scroll_y + round(-delta if not pixel.isNull() else -steps * 60))
         event.accept()
+
+    # ------------------------------------------------------------------
+    # Mídia arrastada do acervo ou do sistema
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _drop_payload(data: QMimeData) -> list[dict] | list[Path] | None:
+        if data.hasFormat(MEDIA_MIME):
+            try:
+                items = json.loads(bytes(data.data(MEDIA_MIME)).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                return None
+            return [item for item in items if isinstance(item, dict) and item.get("path")] or None
+        if data.hasUrls():
+            paths = [Path(url.toLocalFile()) for url in data.urls() if url.isLocalFile()]
+            return paths or None
+        return None
+
+    def _update_drop_hint(self, point: QPointF, payload: list[dict] | list[Path]) -> None:
+        x, y = point.x(), point.y()
+        if y > self.height() - _AUTOSCROLL_ZONE:
+            self.set_scroll(self._scroll_y + 12)
+        elif y < RULER_HEIGHT + _AUTOSCROLL_ZONE:
+            self.set_scroll(self._scroll_y - 12)
+        index = self._track_at(y)
+        if index >= 0:
+            new_index = index
+        else:
+            first = self._lane_rect(0) if self._project.tracks else QRectF()
+            new_index = 0 if self._project.tracks and y < first.top() else len(self._project.tracks)
+        known = [item for item in payload if isinstance(item, dict)]
+        duration = sum(float(item.get("duration") or 0.0) for item in known)
+        kinds = tuple(str(item.get("kind") or "") for item in known)
+        start = self._snap_span(max(0.0, self._time_of(x)), duration, None) if duration else self._time_of(x)
+        self._drop_hint = (index, new_index, max(0.0, start), duration, kinds)
+        self.update()
+
+    def _drop_accepted_by(self, index: int, kinds: tuple[str, ...]) -> bool:
+        if not (0 <= index < len(self._project.tracks)) or not kinds:
+            return False
+        track_kind = self._project.tracks[index].kind
+        visual = {MediaKind.VIDEO.name, MediaKind.IMAGE.name}
+        first = kinds[0]
+        if first in visual:
+            return track_kind is TrackKind.VIDEO
+        return track_kind is TrackKind.AUDIO
+
+    def _paint_drop_hint(self, painter: QPainter) -> None:
+        index, new_index, start, duration, kinds = self._drop_hint
+        x = self._x_of(start)
+        painter.save()
+        if self._drop_accepted_by(index, kinds) and duration > 0:
+            lane = self._lane_rect(index)
+            ghost = QRectF(x, lane.top(), max(6.0, self._x_of(start + duration) - x), lane.height())
+            painter.setPen(QPen(self._color("accent"), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(self._color("accent", 60))
+            painter.drawRoundedRect(ghost, 5, 5)
+        else:
+            # Sem vão compatível: mostra onde nasce a trilha nova.
+            if index >= 0:
+                y = self._lane_rect(index).top() - TRACK_GAP / 2
+            elif new_index == 0 and self._project.tracks:
+                y = self._lane_rect(0).top() - TRACK_GAP / 2
+            elif self._project.tracks:
+                y = self._lane_rect(len(self._project.tracks) - 1).bottom() + TRACK_GAP / 2
+            else:
+                y = _TRACKS_TOP
+            painter.setPen(QPen(self._color("accent"), 3))
+            painter.drawLine(QPointF(0, y), QPointF(self.width(), y))
+            painter.setPen(QPen(self._color("accent"), 2, Qt.PenStyle.DashLine))
+            painter.drawLine(QPointF(x, y - 10), QPointF(x, y + 10))
+        painter.restore()
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+        payload = self._drop_payload(event.mimeData())
+        if payload is None:
+            event.ignore()
+            return
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        self._update_drop_hint(event.position(), payload)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:  # noqa: N802
+        payload = self._drop_payload(event.mimeData())
+        if payload is None:
+            event.ignore()
+            return
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        self._update_drop_hint(QPointF(event.position()), payload)
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802
+        self._drop_hint = None
+        self.update()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        payload = self._drop_payload(event.mimeData())
+        if payload is None:
+            event.ignore()
+            return
+        self._update_drop_hint(event.position(), payload)
+        index, new_index, start, _duration, _kinds = self._drop_hint
+        self._drop_hint = None
+        self.update()
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        self.media_dropped.emit(payload, index, new_index, start)
 
     def _cancel_drag(self) -> None:
         self._autoscroll.stop()
