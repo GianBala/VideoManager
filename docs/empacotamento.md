@@ -59,6 +59,12 @@ PYTHONPATH=src python packaging/fetch_binaries.py
 Se os binários já estiverem presentes em `vendor/`, o script não baixa de
 novo.
 
+O mesmo script baixa o **Deno** (versão fixa, conferida por SHA-256) para o
+yt-dlp resolver os desafios JavaScript do YouTube; sem um runtime JavaScript,
+parte dos formatos some. A aplicação não baixa o Deno em execução: ele vem no
+pacote ou vale o Deno/Node do sistema (`binaries.find_js_runtime`).
+`VM_BUNDLE_DENO=0` dispensa o download e a inclusão (~110 MB a menos).
+
 ## `videomanager.spec`
 
 O ponto de entrada do PyInstaller é `src/videomanager/__main__.py`, com
@@ -79,6 +85,18 @@ própria paleta. Ao alterar a lista de poda, duas regras:
 2. O `ffmpeg` embutido também é uma raiz do grafo — uma biblioteca que parece
    órfã pelo lado do Qt pode ser dependência dele.
 
+Outros dois pontos do `.spec` que não seguem imports e por isso ficam
+explícitos:
+
+- **Scripts do solver JavaScript do yt-dlp** (`collect_data_files("yt_dlp",
+  includes=["**/*.js"])`): são lidos com `importlib.resources`; sem eles o
+  pacote não resolvia os desafios do YouTube nem com o Deno presente.
+- **Ícone do executável** (`icon=`): `packaging/make_icon.py` gera
+  `build/videomanager.ico` a partir de `resources/videomanager.png` com o Qt,
+  em nove tamanhos de 16 a 256 px. Sem `icon=` o `.exe` saía com o ícone
+  padrão do PyInstaller. O Explorer guarda ícones em cache: se o desenho antigo
+  persistir, renomeie o executável ou rode `ie4uinit.exe -show`.
+
 ## Conferindo que o pacote abre
 
 ```bash
@@ -93,7 +111,10 @@ sem nenhum aviso na geração). O script usa `QT_QPA_PLATFORM=offscreen` e o
 argumento `--smoke-test`, com perfil temporário e prazo padrão de 30 segundos.
 Exige código de saída zero e o marcador `VM_SMOKE_OK`: janela montada, fonte
 Carlito carregada, prévia de texto renderizada e vídeo de 1 segundo exportado
-e inspecionado. Um processo que apenas continua aberto não passa no teste.
+e inspecionado. Também confere que os scripts do solver JavaScript do yt-dlp e
+o mutagen estão no pacote, e informa o runtime JavaScript encontrado
+(`VM_SMOKE_JS_RUNTIME`). Um processo que apenas continua aberto não passa no
+teste.
 
 A consulta a dispositivos de áudio fica desabilitada nesse diagnóstico.
 ffmpeg/ffprobe precisam estar empacotados, provisionados ou no PATH. Com
@@ -121,7 +142,26 @@ máquina sem FUSE, ainda roda assim:
 O build Windows executa `packaging/smoke_windows.ps1` e exige código zero
 antes de anunciar sucesso. O diagnóstico cria a janela, carrega fontes, gera
 uma prévia com texto e exporta mídia de um segundo. O script encerra o processo
-se ele ultrapassar o prazo. A CI gera o pacote no Windows e guarda o artefato
+se ele ultrapassar o prazo. Depois confere arquivos que o diagnóstico em
+execução não alcança: scripts do solver, `deno.exe` (salvo com
+`VM_BUNDLE_DENO=0`) e, com `-Icon`, se o ícone do executável é o do aplicativo.
+
+### Diagnóstico de análise de URL
+
+```powershell
+VideoManager.exe --diagnose-url "https://..." --report relatorio.txt
+```
+
+Refaz, no próprio pacote, o caminho do botão Analisar — worker, pool e os slots
+que montam cartão e qualidades — e grava no relatório título, quantidade de
+formatos, se o botão de enfileirar ficou habilitado, diálogos de erro e avisos
+registrados. Termina com `VM_DIAGNOSE_OK` ou `VM_DIAGNOSE_FAILED`. Foi assim que
+se achou o cartão lendo um atributo removido do domínio: a exceção nascia dentro
+de um slot e, sem console, não deixava rastro.
+
+O aplicativo grava log com rotação em `videomanager.log`, na pasta de logs do
+usuário (`%LOCALAPPDATA%\VideoManager\Logs` no Windows), incluindo exceções não
+tratadas em slots e threads. A CI gera o pacote no Windows e guarda o artefato
 por sete dias.
 
 Em Linux, `VM_DIST_DIR` e `VM_BUILD_DIR` permitem escolher diretórios separados

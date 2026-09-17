@@ -508,8 +508,9 @@ class ExportDialog(QDialog):
     def _default_container(project: Project) -> str:
         """Determina o container padrão a partir da mídia principal do projeto."""
         for track in reversed(project.video_tracks):
-            if track.visible and track.clips:
-                clip = track.sorted_clips()[0]
+            clips = [c for c in track.sorted_clips() if not c.is_image and not c.is_transition]
+            if track.visible and clips:
+                clip = clips[0]
                 ext = clip.media.path.suffix.lstrip(".").lower()
                 if ext in ("mp4", "mkv", "webm", "mov"):
                     return ext
@@ -649,11 +650,15 @@ class ExportDialog(QDialog):
         )
 
     def _main_clip(self, proj: Project) -> Clip | None:
-        for track in reversed(proj.video_tracks):
-            if track.visible and track.clips:
-                for clip in track.sorted_clips():
-                    if clip.overlay_type not in ("text", "filter", "transition") and clip.media and clip.media.path.is_file():
-                        return clip
+        # Primeiro um vídeo da trilha mais baixa; foto só na falta de vídeo.
+        for skip_images in (True, False):
+            for track in reversed(proj.video_tracks):
+                if track.visible and track.clips:
+                    for clip in track.sorted_clips():
+                        if skip_images and clip.is_image:
+                            continue
+                        if clip.overlay_type not in ("text", "filter", "transition") and clip.media and clip.media.path.is_file():
+                            return clip
         for t in proj.tracks:
             if t.visible:
                 for c in t.clips:

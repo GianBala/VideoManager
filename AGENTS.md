@@ -21,8 +21,10 @@ O plano e as evidências da migração estão em documentos próprios.
 - Editar: acervo → projeto imutável com trilhas e clipes → cortes, transforms,
   volume, velocidade, texto, filtros, chroma key e transições → prévia/exportação.
 - A fila é comum às abas e fica oculta no editor para ampliar a área de trabalho.
-- O .vmp é JSON versão 2, com leitura de v1; referencia mídias externas, sem
-  embutir seus bytes. Salvar sobre v1 preserva uma cópia `.vmp.v1.bak`.
+- O .vmp é JSON versão 3, com leitura de v1 e v2; referencia mídias externas,
+  sem embutir seus bytes. Salvar sobre v1/v2 preserva `.vmp.v1.bak`/`.vmp.v2.bak`.
+  Imagens vivem na trilha de vídeo, ajustadas à tela; ao abrir v1/v2 elas saem
+  das trilhas de Adicionais com a escala convertida.
 
 ## Estrutura e direção de dependências
 
@@ -88,6 +90,8 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 .venv/bin/python -m pytest -m network
 # Ensaio opt-in com áudio real em volume baixo:
 PYTHONPATH=src .venv/bin/python scripts/validate_audio.py
+# Resposta da agulha com e sem o cache de quadros:
+PYTHONPATH=src .venv/bin/python scripts/validate_scrub.py
 .venv/bin/python -m pyflakes src/videomanager tests scripts/benchmark_architecture.py
 git diff --check
 ```
@@ -134,6 +138,10 @@ Veja [testes](docs/clean-architecture/testes.md) para detalhes e limites.
 Os builds PyInstaller acontecem no sistema de destino. Os scripts podem baixar
 dependências/binários e recriar build/dist. `VM_BUNDLE_FFMPEG=0` dispensa
 embutir ffmpeg; nesse caso as ferramentas devem estar disponíveis no ambiente.
+`VM_BUNDLE_DENO=0` dispensa o Deno que o yt-dlp usa no YouTube (vale então
+Deno/Node do sistema). O ícone do .exe sai de `packaging/make_icon.py`.
+`VideoManager --diagnose-url URL --report ARQ` refaz a análise pela janela no
+pacote; o log fica em `platformdirs.user_log_dir`.
 
 `--smoke-test` verifica janela, fontes, prévia e exportação curta, sem consultar
 dispositivo físico de áudio. `packaging/smoke_run.sh` exige conclusão com prazo

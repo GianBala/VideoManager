@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 
 from PySide6.QtGui import (
     QColor,
@@ -64,6 +65,8 @@ from videomanager.presentation.qt.fonts import ensure_application_fonts
 from videomanager.domain.project import MAX_GAIN_DB
 from videomanager.domain.project import MIN_GAIN_DB
 from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaRef
+from videomanager.presentation.qt.panels.timeline import MEDIA_MIME
 
 from videomanager.presentation.qt import strings
 
@@ -1976,6 +1979,16 @@ class _MediaListWidget(QListWidget):
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setWordWrap(True)
         self.setTextElideMode(Qt.TextElideMode.ElideRight)
+        # Arrastar um cartão até a linha do tempo põe a mídia na trilha e no
+        # instante escolhidos. A lista só exporta: soltar um cartão nela mesma
+        # não reordena nada.
+        #
+        # **Depois** de ``setMovement``: o Qt desliga ``dragEnabled`` por dentro
+        # quando o movimento é estático, e com a ordem inversa o cartão nunca
+        # começava a ser arrastado.
+        self.setDragEnabled(True)
+        self.setDragDropMode(QListView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
@@ -1997,17 +2010,34 @@ class _MediaListWidget(QListWidget):
         )
         painter.end()
 
+    def mimeTypes(self) -> list[str]:  # noqa: N802
+        return [MEDIA_MIME]
+
+    def mimeData(self, items) -> QMimeData:  # noqa: N802
+        payload = []
+        for item in items:
+            reference = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(reference, MediaRef):
+                payload.append({"path": str(reference.path), "kind": reference.kind.name,
+                                "duration": float(reference.natural_duration)})
+        data = QMimeData()
+        data.setData(MEDIA_MIME, json.dumps(payload).encode("utf-8"))
+        return data
+
+    def supportedDropActions(self) -> Qt.DropAction:  # noqa: N802
+        return Qt.DropAction.CopyAction
+
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
-            super().dragEnterEvent(event)
+            event.ignore()
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:  # noqa: N802
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
-            super().dragMoveEvent(event)
+            event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
         paths = [
@@ -2019,7 +2049,7 @@ class _MediaListWidget(QListWidget):
             self.files_dropped.emit(paths)
             event.acceptProposedAction()
         else:
-            super().dropEvent(event)
+            event.ignore()
 
 
 _POPULAR_FONTS = [
