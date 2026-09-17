@@ -2021,8 +2021,17 @@ class EditPanel(QWidget):
 
     @property
     def _loop_end(self) -> float:
-        """Onde o loop volta: o fim do que se vê e se ouve, como no arquivo."""
-        return self._project.export_duration or self._duration
+        """Onde o loop volta: o fim do que se vê e se ouve, como no arquivo.
+
+        Até o fim do **último quadro**, e não da edição: uma edição de 4,27 s a
+        30 q/s tem o último quadro começando em 4,2667 s, e voltar em 4,27
+        deixava esse quadro 3 ms na tela — uma piscada na volta. O som ganha o
+        mesmo tanto de silêncio, que não se ouve.
+        """
+        end = self._project.export_duration or self._duration
+        if self._has_video and self._fps > 0 and end > 0:
+            return math.ceil(end * self._fps - 1e-6) / self._fps
+        return end
 
     @property
     def _position(self) -> float:

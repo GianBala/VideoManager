@@ -36,6 +36,17 @@ com GOP de 2 s). Instantes no fim exato da edição ou depois dele mostram o
 último quadro. Reprodução e exportação continuam com a busca exata, e as
 transições já compunham o quadro certo pelo próprio recorte.
 
+No **último quadro de um arquivo** a grade da taxa declarada não descreve o que
+existe: um GIF de 128 quadros declarando 30 q/s anda de 33,4 ms, e seu último
+quadro começa 37 ms antes do que a grade diz — mais de um quadro, e a tela
+ficava preta no fim. Só nesse caso (`_still_lead`) a composição começa alguns
+quadros antes e o comando entrega o do instante (`trim=start_frame`): o fluxo
+tem quadro, o `tpad` segura o último e ele chega onde a agulha está. O recuo
+acompanha a taxa da fonte (um vídeo de 10 q/s numa tela de 30 recua mais) e tem
+teto de meio segundo de composição; a janela nunca passa para antes do fim de um
+bloco que já terminou, para não abrir arquivo à toa. Fora do último quadro nada
+muda, e o custo por quadro continua o mesmo.
+
 ### Cache da agulha
 
 Um quadro exato custa um ffmpeg (perto de 100 ms no Windows), o que limitava o
@@ -165,7 +176,12 @@ andamento é aberto com `audio_command(until=fim)`, que completa com silêncio e
 corta exatamente no fim, para a emenda cair no instante certo. Quando o trecho
 atual acaba, `_pump` troca para a fila preparada sem parar a placa e registra a
 fronteira em `_segments`: `position` passa a contar a partir de 0. Ao ver o
-relógio voltar, o painel passa a ele o controle (`_swap_loop_video`). A imagem
+O fim do loop é o fim do **último quadro**, não o da edição: uma edição de
+4,27 s a 30 q/s tem o último quadro começando em 4,2667 s, e voltar em 4,27
+deixava esse quadro 3 ms na tela — o que se vê como uma piscada na volta
+(medido: 6 ms em vez de 33 ms). O som ganha o mesmo tanto de silêncio.
+
+Ao ver o relógio voltar, o painel passa a ele o controle (`_swap_loop_video`). A imagem
 do começo, porém, é solta já ao armar, com hora marcada para quando o relógio
 da imagem atual chega ao fim; os quadros dela são aceitos antes da troca, e
 quadros atrasados do fluxo que acabou não a cobrem. Esperar o tique que percebe
