@@ -11,7 +11,9 @@ _EQUIVALENT_SOURCE_CODECS = {
     "ogg": {"vorbis"},
     "flac": {"flac"},
     "alac": {"alac"},
-    "wav": {"pcm_s16le", "pcm_s16be", "pcm_u8"},
+    # Só o que o muxer WAV grava como está: PCM big-endian (comum em AIFF e
+    # MOV) é recusado por ele, e "copiar" terminava em erro do ffmpeg.
+    "wav": {"pcm_s16le", "pcm_u8"},
 }
 
 
@@ -47,8 +49,46 @@ def can_copy_audio(media: LocalMedia, codec: str) -> bool:
     return stream.codec.lower() in _EQUIVALENT_SOURCE_CODECS.get(codec, set())
 
 
+def display_size(media: LocalMedia) -> tuple[int, int] | None:
+    """Largura e altura **como o vídeo aparece**, já considerando a rotação.
+
+    O ffmpeg aplica a rotação dos metadados antes dos filtros, então é nesta
+    orientação que o redimensionamento trabalha.
+    """
+    stream = media.video
+    if stream is None or not stream.width or not stream.height:
+        return None
+    if round(abs(stream.rotation)) % 180 == 90:
+        return stream.height, stream.width
+    return stream.width, stream.height
+
+
+def is_portrait(media: LocalMedia) -> bool:
+    size = display_size(media)
+    return bool(size and size[1] > size[0])
+
+
 def needs_scaling(media: LocalMedia, target: VideoTarget) -> bool:
-    return bool(target.height and media.video and media.video.height != target.height)
+    """Se a resolução pedida exige redimensionar.
+
+    "720p" é o lado **curto**: num vídeo retrato ele é a largura. Comparar só a
+    altura armazenada fazia um retrato 1080×1920 virar 405×720 — e um vídeo
+    gravado de lado, com rotação nos metadados, nunca era reconhecido.
+    """
+    size = display_size(media)
+    if not target.height or size is None:
+        return bool(target.height and media.video and media.video.height != target.height)
+    return min(size) != target.height
+
+
+def container_accepts_video(container: str, codec: str) -> bool:
+    """Se um codec **escolhido** pelo usuário cabe no container.
+
+    Diferente da cópia, que cai no codec natural do container, uma escolha
+    explícita incompatível não pode ser trocada em silêncio: a interface deixa
+    de oferecê-la e o serviço a recusa antes de enfileirar.
+    """
+    return codec == "copy" or _container_accepts(_CONTAINER_VIDEO_OK, container, codec)
 
 
 def _container_accepts(table: dict[str, set[str] | None], container: str, codec: str) -> bool:
