@@ -70,7 +70,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
     QScrollBar,
     QSlider,
     QSpinBox,
@@ -1651,19 +1650,18 @@ class EditPanel(QWidget):
 
         column.addLayout(self._build_toolbar())
 
-        # A linha do tempo cresce com o número de trilhas, e a partir de certo
-        # ponto ela empurraria a exportação para fora da vista. Numa área de
-        # rolagem, ela para de crescer e passa a rolar — como em qualquer editor
-        # com mais trilhas do que tela.
-        self._timeline_area = QScrollArea()
-        self._timeline_area.setWidgetResizable(True)
-        self._timeline_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        # Com mais trilhas do que tela, as trilhas rolam **dentro** da linha do
+        # tempo, com a barra ao lado. Numa área de rolagem em volta do widget a
+        # régua e a cabeça da agulha rolavam junto e sumiam da vista, e não havia
+        # onde pegar o cursor nem ler o tempo.
+        self._timeline_area = QWidget()
+        self._timeline_area.setProperty("role", "plain")
         # Sem teto: quem decide quanto das trilhas fica à vista é o divisor. O
         # piso garante uma trilha de cada espécie inteira.
         self._timeline_area.setMinimumHeight(_TIMELINE_MIN_HEIGHT)
-        self._timeline_area.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        area_row = QHBoxLayout(self._timeline_area)
+        area_row.setContentsMargins(0, 0, 0, 0)
+        area_row.setSpacing(0)
 
         self._timeline = Timeline(self._colors)
         self._timeline.setToolTip(strings.EDIT_TIMELINE_HINT)
@@ -1682,9 +1680,13 @@ class EditPanel(QWidget):
         self._timeline.track_reordered.connect(self._on_track_reordered)
         self._timeline.menu_requested.connect(self._show_menu)
         self._timeline.view_changed.connect(self._on_view_changed)
-        self._timeline_area.setWidget(self._timeline)
-        bar = self._timeline_area.verticalScrollBar()
-        self._timeline.vertical_scroll_requested.connect(lambda delta: bar.setValue(round(bar.value() + delta)))
+        area_row.addWidget(self._timeline, 1)
+        self._timeline_vbar = QScrollBar(Qt.Orientation.Vertical)
+        self._timeline_vbar.setVisible(False)
+        self._timeline_vbar.valueChanged.connect(self._timeline.set_scroll)
+        self._timeline.scroll_changed.connect(self._timeline_vbar.setValue)
+        self._timeline.scroll_range_changed.connect(self._on_timeline_scroll_range)
+        area_row.addWidget(self._timeline_vbar)
         column.addWidget(self._timeline_area)
 
         self._scroll = QScrollBar(Qt.Orientation.Horizontal)
@@ -1692,6 +1694,14 @@ class EditPanel(QWidget):
         column.addWidget(self._scroll)
 
         return box
+
+    def _on_timeline_scroll_range(self, maximum: int, page: int) -> None:
+        bar = self._timeline_vbar
+        bar.setRange(0, maximum)
+        bar.setPageStep(page)
+        bar.setSingleStep(max(1, VIDEO_TRACK_HEIGHT // 2))
+        bar.setValue(self._timeline.scroll)
+        bar.setVisible(maximum > 0)
 
     def _build_toolbar(self) -> QHBoxLayout:
         """Barra curta de propósito.

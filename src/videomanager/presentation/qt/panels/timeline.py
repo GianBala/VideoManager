@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import cast
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -109,6 +109,13 @@ _DRAG_SLACK = 4
 
 # Altura mínima do widget: régua, uma trilha de vídeo e uma de áudio inteiras.
 _FLOOR_HEIGHT = RULER_HEIGHT + VIDEO_TRACK_HEIGHT + AUDIO_TRACK_HEIGHT + 20
+# Onde começa a primeira trilha, antes da rolagem.
+_TRACKS_TOP = RULER_HEIGHT + 6
+# Faixa junto às bordas de cima e de baixo em que arrastar um bloco ou uma
+# trilha rola as trilhas: sem ela não havia como levar algo a uma trilha fora
+# da vista.
+_AUTOSCROLL_ZONE = 24
+_AUTOSCROLL_INTERVAL_MS = 30
 
 # Até onde se pode afastar **além** do fim da edição. Parar em "cabe tudo" deixa
 # a linha do tempo sem vazio nenhum depois do último bloco — e é justamente
@@ -211,7 +218,10 @@ class Timeline(QWidget):
     track_mute_clicked = Signal(int)
     track_visibility_clicked = Signal(int)
     track_reordered = Signal(int, int)  # índice de origem, índice de destino
-    vertical_scroll_requested = Signal(float)
+    # Rolagem vertical das trilhas, feita aqui e não por uma área de rolagem
+    # em volta: assim a régua e a cabeça da agulha ficam sempre à vista.
+    scroll_changed = Signal(int)
+    scroll_range_changed = Signal(int, int)  # máximo, passo de página
     # Qualquer mudança da agulha — busca, reprodução, desfazer que encurta a
     # edição. Os botões de corte dependem dela, e a reprodução não passa por
     # ``scrubbed``.
@@ -244,6 +254,11 @@ class Timeline(QWidget):
         self._dragging = False
         self._pan_origin: QPointF | None = None
         self._pan_start = 0.0
+        self._scroll_y = 0
+        self._last_drag_point: QPointF | None = None
+        self._autoscroll = QTimer(self)
+        self._autoscroll.setInterval(_AUTOSCROLL_INTERVAL_MS)
+        self._autoscroll.timeout.connect(self._autoscroll_step)
 
         self.setMinimumHeight(_FLOOR_HEIGHT)
         # **Cresce até o fim da área**, em vez de parar onde as trilhas acabam.
@@ -277,22 +292,47 @@ class Timeline(QWidget):
         self._strips = {k: v for k, v in self._strips.items() if k in alive}
         if self._selected >= 0 and self._selected not in alive:
             self.select(-1)
-        # Piso, e não altura fixa: com muitas trilhas é ele que faz a área de
-        # rolagem rolar, e com poucas o widget se estica até o fim da área — o
-        # que mantém o vazio abaixo das trilhas clicável.
-        self.setMinimumHeight(self._needed_height())
+        # As trilhas rolam dentro do widget, que continua do tamanho da área:
+        # o vazio abaixo delas segue clicável e a régua não sai do lugar.
+        self._sync_scroll_range()
         self.update()
         if moved:
             self.position_changed.emit(self._position)
 
-    def _needed_height(self) -> int:
-        total = RULER_HEIGHT + 6
+    def _content_height(self) -> int:
+        """Altura de régua e trilhas juntas, como se nada estivesse rolado."""
+        total = _TRACKS_TOP
         for track in self._project.tracks:
             total += self._track_height(track.kind) + TRACK_GAP
-        # O piso é a constante, e **não** ``self.minimumHeight()``: lendo a
-        # altura corrente, cada chamada partiria da anterior e a linha do tempo
-        # nunca encolheria ao se excluir uma trilha.
-        return max(_FLOOR_HEIGHT, total + 4)
+        return total + 4
+
+    @property
+    def scroll(self) -> int:
+        return self._scroll_y
+
+    @property
+    def max_scroll(self) -> int:
+        return max(0, self._content_height() - self.height())
+
+    def set_scroll(self, value: int) -> None:
+        value = max(0, min(int(value), self.max_scroll))
+        if value == self._scroll_y:
+            return
+        self._scroll_y = value
+        self.update()
+        self.scroll_changed.emit(value)
+
+    def _sync_scroll_range(self) -> None:
+        """Reaplica o limite depois de mudar trilhas ou altura."""
+        maximum = self.max_scroll
+        if self._scroll_y > maximum:
+            self._scroll_y = maximum
+            self.scroll_changed.emit(maximum)
+        self.scroll_range_changed.emit(maximum, max(1, self.height() - _TRACKS_TOP))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_scroll_range()
 
     @staticmethod
     def _track_height(kind: TrackKind) -> int:
@@ -460,7 +500,7 @@ class Timeline(QWidget):
     # ------------------------------------------------------------------
 
     def _lane_rect(self, index: int) -> QRectF:
-        top = RULER_HEIGHT + 6
+        top = _TRACKS_TOP - self._scroll_y
         for position, track in enumerate(self._project.tracks):
             height = self._track_height(track.kind)
             if position == index:
@@ -473,7 +513,10 @@ class Timeline(QWidget):
         return QRectF(0, lane.top(), HEADER_WIDTH - 6, lane.height())
 
     def _track_at(self, y: float) -> int:
-        top = RULER_HEIGHT + 6
+        if y < RULER_HEIGHT:
+            # O que rolou para baixo da régua não está à vista nem ao alcance.
+            return -1
+        top = _TRACKS_TOP - self._scroll_y
         for index, track in enumerate(self._project.tracks):
             height = self._track_height(track.kind)
             if top <= y < top + height + TRACK_GAP:
@@ -504,7 +547,10 @@ class Timeline(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), self._color("bg"))
 
-        self._paint_ruler(painter)
+        # Trilhas primeiro e recortadas abaixo da régua: ao rolar, elas passam
+        # por baixo dela em vez de a empurrar para fora da vista.
+        painter.save()
+        painter.setClipRect(QRectF(0, RULER_HEIGHT, self.width(), max(0, self.height() - RULER_HEIGHT)))
         for index, track in enumerate(self._project.tracks):
             self._paint_header(painter, index, track)
             self._paint_lane(painter, index, track)
@@ -515,6 +561,8 @@ class Timeline(QWidget):
             and self._drop_track_target != self._drag_track
         ):
             self._paint_track_drop_indicator(painter)
+        painter.restore()
+        self._paint_ruler(painter)
         self._paint_playhead(painter)
         painter.end()
 
@@ -647,7 +695,9 @@ class Timeline(QWidget):
         painter.drawRoundedRect(lane, 5, 5)
 
         painter.save()
-        painter.setClipRect(lane)
+        # Interseção, e não substituição: o recorte de fora esconde o que rolou
+        # para baixo da régua.
+        painter.setClipRect(lane, Qt.ClipOperation.IntersectClip)
         if not track.visible:
             painter.setOpacity(0.35)
         # Clipes comuns primeiro, marcador de transição por último. Ele ocupa o
@@ -1052,10 +1102,8 @@ class Timeline(QWidget):
             if not self._past_slack(event.position()):
                 return
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
-            target = self._target_reorder_track(y)
-            if target != self._drop_track_target:
-                self._drop_track_target = target
-                self.update()
+            self._track_autoscroll(event.position())
+            self._drag_motion(event.position())
             return
 
         if self._drag == "cursor":
@@ -1066,16 +1114,15 @@ class Timeline(QWidget):
         if not self._past_slack(event.position()):
             return
 
+        if self._drag == "corpo":
+            self._track_autoscroll(event.position())
+            self._drag_motion(event.position())
+            return
+
         found = self._project.find(self._drag_clip)
         if found is None:
             return
         origin, clip = found
-
-        if self._drag == "corpo":
-            start = self._snap_start(self._time_of(x) - self._grab_offset, clip)
-            target = self._drop_track(y, clip, origin)
-            self.clip_moved.emit(clip.clip_id, target, max(0.0, start))
-            return
 
         if clip.is_transition and self._press_at is not None:
             # O retângulo pode ser visualmente maior que sua duração. Medir o
@@ -1086,6 +1133,61 @@ class Timeline(QWidget):
         else:
             moment = self._snap(self._time_of(x), clip)
         self.clip_resized.emit(clip.clip_id, self._drag, moment)
+
+    def _drag_motion(self, point: QPointF) -> None:
+        """Aplica a posição do ponteiro a um arrasto de bloco ou de trilha.
+
+        Separado do evento de mouse porque a rolagem automática também o chama:
+        com a mão parada na borda, as trilhas continuam passando e o destino
+        precisa acompanhar.
+        """
+        x, y = point.x(), point.y()
+        if self._drag == "cabecalho":
+            target = self._target_reorder_track(y)
+            if target != self._drop_track_target:
+                self._drop_track_target = target
+                self.update()
+            return
+        if self._drag != "corpo":
+            return
+        found = self._project.find(self._drag_clip)
+        if found is None:
+            return
+        origin, clip = found
+        start = self._snap_start(self._time_of(x) - self._grab_offset, clip)
+        target = self._drop_track(y, clip, origin)
+        self.clip_moved.emit(clip.clip_id, target, max(0.0, start))
+
+    def _autoscroll_speed(self, y: float) -> int:
+        top = RULER_HEIGHT + _AUTOSCROLL_ZONE
+        bottom = self.height() - _AUTOSCROLL_ZONE
+        if y < top:
+            return -int(4 + (top - y) / 2)
+        if y > bottom:
+            return int(4 + (y - bottom) / 2)
+        return 0
+
+    def _track_autoscroll(self, point: QPointF) -> None:
+        # Cópia: o ponto do evento pertence ao evento, que o Qt libera depois
+        # do handler, e o temporizador o lê mais tarde.
+        self._last_drag_point = QPointF(point.x(), point.y())
+        if self._autoscroll_speed(point.y()) and self.max_scroll:
+            if not self._autoscroll.isActive():
+                self._autoscroll.start()
+        else:
+            self._autoscroll.stop()
+
+    def _autoscroll_step(self) -> None:
+        point = self._last_drag_point
+        if point is None or self._drag not in ("corpo", "cabecalho") or not self._dragging:
+            self._autoscroll.stop()
+            return
+        before = self._scroll_y
+        self.set_scroll(before + self._autoscroll_speed(point.y()))
+        if self._scroll_y == before:
+            self._autoscroll.stop()
+            return
+        self._drag_motion(point)
 
     def _target_reorder_track(self, y: float) -> int:
         if not (0 <= self._drag_track < len(self._project.tracks)):
@@ -1161,6 +1263,8 @@ class Timeline(QWidget):
         return value if distance <= tolerance else start
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        self._autoscroll.stop()
+        self._last_drag_point = None
         if self._pan_origin is not None:
             self._pan_origin = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -1208,10 +1312,12 @@ class Timeline(QWidget):
             shift = -steps * self.view_span * .15
             self.set_view(self._view_start + shift, self._view_end + shift)
         else:
-            self.vertical_scroll_requested.emit(-delta if not pixel.isNull() else -steps * 60)
+            self.set_scroll(self._scroll_y + round(-delta if not pixel.isNull() else -steps * 60))
         event.accept()
 
     def _cancel_drag(self) -> None:
+        self._autoscroll.stop()
+        self._last_drag_point = None
         self._drag, self._drag_clip, self._drag_track = '', -1, -1
         self._drop_track_target = -1
         self._press_at, self._dragging = None, False
