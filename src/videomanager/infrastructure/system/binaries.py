@@ -223,6 +223,25 @@ def find_tools() -> FFmpegTools | None:
     return None
 
 
+def find_js_runtime() -> tuple[str, Path] | None:
+    """Runtime JavaScript para o yt-dlp resolver os desafios do YouTube.
+
+    Sem um, o yt-dlp cai num cliente sem JavaScript e parte dos formatos some.
+    O Deno empacotado vem primeiro, pelo mesmo motivo do ffmpeg: o pacote tem de
+    funcionar num computador sem nada instalado. Depois valem Deno e Node do
+    ``PATH`` — o yt-dlp só habilita o Deno sozinho, então o Node instalado era
+    ignorado mesmo estando ali.
+    """
+    bundled = vendor_dir() / exe_name("deno")
+    if _usable(bundled):
+        return "deno", bundled
+    for name in ("deno", "node"):
+        found = shutil.which(name)
+        if found:
+            return name, Path(found)
+    return None
+
+
 def probe_version(ffmpeg: Path) -> str:
     """Executa ``ffmpeg -version`` e devolve a primeira linha.
 

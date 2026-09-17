@@ -95,10 +95,12 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [infrastructure/storage/project_json.py](../../src/videomanager/infrastructure/storage/project_json.py) | Esquema .vmp versão 1, caminhos, validação, IDs, mídias ausentes e escrita atômica. |
 | [infrastructure/storage/projects.py](../../src/videomanager/infrastructure/storage/projects.py) | JsonProjectRepository adapta o serializador à porta de projetos. |
 | [infrastructure/storage/settings.py](../../src/videomanager/infrastructure/storage/settings.py) | Persistência de Preferences, defaults de diretórios do sistema e resolução de pasta de downloads. |
-| [infrastructure/system/binaries.py](../../src/videomanager/infrastructure/system/binaries.py) | Localiza/provisiona ffmpeg/ffprobe, valida binários e prepara ambiente de subprocessos. |
+| [infrastructure/system/binaries.py](../../src/videomanager/infrastructure/system/binaries.py) | Localiza/provisiona ffmpeg/ffprobe, localiza o runtime JavaScript (Deno/Node), valida binários e prepara ambiente de subprocessos. |
+| [infrastructure/system/logs.py](../../src/videomanager/infrastructure/system/logs.py) | Log em arquivo com rotação e registro de exceções não tratadas (slots Qt e threads). |
 | [infrastructure/system/memory.py](../../src/videomanager/infrastructure/system/memory.py) | Consulta de memória disponível em Linux/Windows para planejamento externo. |
 | [infrastructure/system/process.py](../../src/videomanager/infrastructure/system/process.py) | ProcessControl: execução registrada, cancelamento, timeout e encerramento. |
 | [infrastructure/yt_dlp/downloader.py](../../src/videomanager/infrastructure/yt_dlp/downloader.py) | Instância de YoutubeDL por tarefa, hooks, progresso, logs, cancelamento e resultado. |
+| [infrastructure/yt_dlp/extras.py](../../src/videomanager/infrastructure/yt_dlp/extras.py) | Opção `js_runtimes` conforme o ambiente e capa tolerante (`TolerantEmbedThumbnailPP`) que não derruba o download. |
 | [infrastructure/yt_dlp/formats.py](../../src/videomanager/infrastructure/yt_dlp/formats.py) | Normaliza dados brutos dos extratores, classifica presença de streams e monta FormatMatrix. |
 | [infrastructure/yt_dlp/gateway.py](../../src/videomanager/infrastructure/yt_dlp/gateway.py) | Implementa DownloadGateway combinando probe e política de planejamento. |
 | [infrastructure/yt_dlp/probe.py](../../src/videomanager/infrastructure/yt_dlp/probe.py) | Executa análise de URL, traduz erros e constrói MediaInfo/PlaylistInfo. |

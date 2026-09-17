@@ -36,12 +36,24 @@ binaries_to_bundle = (
     if os.environ.get("VM_BUNDLE_FFMPEG", "1") != "0"
     else []
 )
+# Deno para o yt-dlp resolver os desafios JavaScript do YouTube; baixado pelo
+# mesmo fetch_binaries.py. Ausente, a aplicação usa Deno ou Node do sistema.
+if os.environ.get("VM_BUNDLE_DENO", "1") != "0" and (_vendor / exe_name("deno")).is_file():
+    binaries_to_bundle.append((str(_vendor / exe_name("deno")), f"vendor/{platform_key()}"))
+
+# Os scripts do solver JavaScript que o yt-dlp traz dentro do próprio pacote
+# são lidos por ``importlib.resources`` e não seguem os imports: sem coletá-los,
+# o pacote não resolvia os desafios do YouTube nem com um runtime disponível.
+from PyInstaller.utils.hooks import collect_data_files  # noqa: E402
 
 a = Analysis(
     [str(REPO_ROOT / "src" / "videomanager" / "__main__.py")],
     pathex=[str(REPO_ROOT / "src")],
     binaries=binaries_to_bundle,
-    datas=[(str(REPO_ROOT / "src" / "videomanager" / "resources"), "resources")],
+    datas=[
+        (str(REPO_ROOT / "src" / "videomanager" / "resources"), "resources"),
+        *collect_data_files("yt_dlp", includes=["**/*.js"]),
+    ],
     # Os extratores do yt-dlp são carregados dinamicamente; sem coletá-los
     # explicitamente, o pacote reconhece só uma fração dos sites.
     hiddenimports=[
@@ -141,6 +153,13 @@ a.datas = [entrada for entrada in a.datas if _manter(entrada)]
 
 pyz = PYZ(a.pure)
 
+# Ícone do executável no Windows, gerado por packaging/make_icon.py a partir do
+# PNG do aplicativo. Sem ``icon=`` o .exe saía com o ícone padrão do
+# PyInstaller; a janela em execução já usava o certo (ver app.py), e era só o
+# Explorer, o atalho e a barra fixada que mostravam o errado.
+_ICON = REPO_ROOT / "build" / "videomanager.ico"
+_icon_arg = str(_ICON) if sys.platform == "win32" and _ICON.is_file() else None
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -152,6 +171,7 @@ exe = EXE(
     upx=False,
     # Sem console: no Windows um console preto apareceria atrás da janela.
     console=False,
+    icon=_icon_arg,
 )
 
 coll = COLLECT(
