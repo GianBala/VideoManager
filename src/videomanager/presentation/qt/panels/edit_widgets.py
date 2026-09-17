@@ -1972,12 +1972,6 @@ class _MediaListWidget(QListWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAcceptDrops(True)
-        # Arrastar um cartão até a linha do tempo põe a mídia na trilha e no
-        # instante escolhidos. A lista só exporta: soltar um cartão nela mesma
-        # não reordena nada.
-        self.setDragEnabled(True)
-        self.setDragDropMode(QListView.DragDropMode.DragDrop)
-        self.setDefaultDropAction(Qt.DropAction.CopyAction)
         self.setViewMode(QListView.ViewMode.IconMode)
         self.setIconSize(QSize(96, 54))
         self.setGridSize(QSize(116, 92))
@@ -1985,6 +1979,16 @@ class _MediaListWidget(QListWidget):
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setWordWrap(True)
         self.setTextElideMode(Qt.TextElideMode.ElideRight)
+        # Arrastar um cartão até a linha do tempo põe a mídia na trilha e no
+        # instante escolhidos. A lista só exporta: soltar um cartão nela mesma
+        # não reordena nada.
+        #
+        # **Depois** de ``setMovement``: o Qt desliga ``dragEnabled`` por dentro
+        # quando o movimento é estático, e com a ordem inversa o cartão nunca
+        # começava a ser arrastado.
+        self.setDragEnabled(True)
+        self.setDragDropMode(QListView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
