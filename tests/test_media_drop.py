@@ -162,3 +162,63 @@ def test_arquivo_do_sistema_solto_na_timeline_importa_e_coloca(panel, monkeypatc
     panel.accept_import(MediaResult(references=(SOM,)), placement=captured["placement"])
     audio = panel._project.tracks[1]
     assert audio.kind is TrackKind.AUDIO and audio.clips[0].start == pytest.approx(3, abs=0.05)
+
+
+def test_acervo_inicia_o_arrasto_com_o_mouse(panel, monkeypatch) -> None:
+    """Eventos de mouse de verdade, e não o handler chamado direto.
+
+    ``QListView.setMovement(Static)`` desliga ``dragEnabled`` por dentro; com a
+    ordem errada no construtor, o cartão nunca começava a ser arrastado e o
+    teste que chamava ``mimeData`` direto não percebia.
+    """
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    from videomanager.presentation.qt.panels.edit_widgets import _MediaListWidget
+
+    started = []
+    monkeypatch.setattr(_MediaListWidget, "startDrag", lambda self, actions: started.append(actions))
+    panel.resize(1300, 800)
+    panel.show()
+    panel.accept_import(MediaResult(references=(VIDEO,)))
+    QApplication.processEvents()
+    media = panel._media_list
+    assert media.dragEnabled()
+    center = media.visualItemRect(media.item(0)).center()
+    viewport = media.viewport()
+    QTest.mousePress(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
+    distance = QApplication.startDragDistance() + 10
+    for step in range(1, 4):
+        QTest.mouseMove(viewport, center + QPoint(distance * step, 0))
+    QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                       center + QPoint(distance * 3, 0))
+    assert started, "o arrasto do cartão não começou"
+
+
+def test_soltura_chega_a_linha_do_tempo_pelo_despacho_de_eventos(panel) -> None:
+    """Enter, move e drop enviados pelo Qt, passando por ``Timeline.event``."""
+    from PySide6.QtGui import QDragEnterEvent
+    from PySide6.QtWidgets import QApplication
+
+    panel.resize(1300, 800)
+    panel.show()
+    panel.accept_import(MediaResult(references=(VIDEO,)))
+    QApplication.processEvents()
+    timeline = panel._timeline
+    timeline.set_view(0, 20)
+    data = _media_mime(VIDEO)
+    point = QPointF(timeline._x_of(3), timeline._lane_rect(0).center().y())
+    enter = QDragEnterEvent(point.toPoint(), Qt.DropAction.CopyAction, data, Qt.MouseButton.LeftButton,
+                            Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(timeline, enter)
+    assert enter.isAccepted()
+    move = QDragMoveEvent(point.toPoint(), Qt.DropAction.CopyAction, data, Qt.MouseButton.LeftButton,
+                          Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(timeline, move)
+    assert move.isAccepted()
+    drop = QDropEvent(point, Qt.DropAction.CopyAction, data, Qt.MouseButton.LeftButton,
+                      Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(timeline, drop)
+    clips = panel._project.tracks[0].clips
+    assert len(clips) == 1 and clips[0].start == pytest.approx(3, abs=0.05)
