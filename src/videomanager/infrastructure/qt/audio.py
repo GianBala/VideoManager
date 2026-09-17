@@ -126,6 +126,13 @@ class AudioPreview(QObject):
         self._stopping = threading.Event()
         self._origin = 0.0
         self._finished = False
+        # Trechos emendados na mesma placa: (segundos já processados em que o
+        # trecho começa a soar, instante da edição correspondente). O loop da
+        # prévia acrescenta o começo da edição sem parar a placa.
+        self._segments: list[tuple[float, float]] = [(0.0, 0.0)]
+        self._written = 0
+        # Próximo trecho já em preparo: (processo, fila, instante, sinal de parada).
+        self._next: tuple[subprocess.Popen, queue.Queue, float, threading.Event] | None = None
         # Cada início e cada parada abrem uma geração nova. Avisos agendados
         # numa geração anterior são descartados (ver :meth:`_emit_stopped`).
         self._generation = 0
@@ -156,7 +163,11 @@ class AudioPreview(QObject):
         """Instante da edição que está saindo pela placa, em segundos."""
         if self._sink is None:
             return self._origin
-        return self._origin + self._sink.processedUSecs() / 1_000_000
+        processed = self._sink.processedUSecs() / 1_000_000
+        for boundary, origin in reversed(self._segments):
+            if processed >= boundary:
+                return origin + processed - boundary
+        return self._origin + processed
 
     @property
     def target_format(self) -> tuple[int, int]:
@@ -208,6 +219,8 @@ class AudioPreview(QObject):
         )
         self._origin = at
         self._finished = False
+        self._segments = [(0.0, at)]
+        self._written = 0
         # Fila e sinal de parada **novos**, e entregues ao leitor como
         # argumentos: a reprodução anterior é encerrada sem espera, então o
         # leitor dela ainda pode estar de pé por alguns instantes. Enquanto os
@@ -299,13 +312,62 @@ class AudioPreview(QObject):
                 except queue.Empty:
                     return
                 if chunk is None:
+                    if self._next is not None:
+                        self._advance()
+                        continue
                     self._finish()
                     return
                 self._pending = chunk
             written = self._device.write(self._pending[:free])
             if written <= 0:
                 return
+            self._written += written
             self._pending = self._pending[written:] or None
+
+    def queue_next(self, command: list[str], at: float) -> bool:
+        """Prepara o trecho que toca **logo depois** do atual, sem pausa.
+
+        É o loop da prévia: o som do começo da edição já vai sendo lido
+        enquanto o fim toca, e entra na mesma fila da placa quando o trecho
+        atual acaba. Reabrir a placa nesse ponto custava um silêncio audível.
+        """
+        if self._sink is None:
+            return False
+        self.cancel_next()
+        try:
+            kwargs = subprocess_kwargs()
+            kwargs["stderr"] = subprocess.DEVNULL
+            process = subprocess.Popen(command, **kwargs)
+        except OSError:
+            return False
+        chunks: queue.Queue[bytes | None] = queue.Queue(_QUEUE_CHUNKS)
+        stopping = threading.Event()
+        threading.Thread(target=self._read, args=(process, chunks, stopping), daemon=True).start()
+        self._next = (process, chunks, at, stopping)
+        return True
+
+    def cancel_next(self) -> None:
+        """Desiste do trecho preparado — a edição mudou ou o loop foi desligado."""
+        if self._next is None:
+            return
+        process, _chunks, _at, stopping = self._next
+        self._next = None
+        stopping.set()
+        _dispose(process)
+
+    def _advance(self) -> None:
+        """O trecho atual acabou: o preparado passa a alimentar a placa."""
+        process, chunks, at, stopping = self._next
+        self._next = None
+        bps = getattr(self, "_bytes_per_second", None) or _BYTES_PER_SECOND
+        # O que já foi escrito termina de soar neste ponto do relógio da placa;
+        # dali em diante o relógio conta a partir do instante do trecho novo.
+        self._segments.append((self._written / bps, at))
+        if self._process is not None:
+            _dispose(self._process)
+        self._process = process
+        self._chunks = chunks
+        self._stopping = stopping
 
     def _finish(self) -> None:
         """O áudio acabou: avisa quem ouve e desmonta o que sobrou.
@@ -345,6 +407,7 @@ class AudioPreview(QObject):
         self._generation += 1
         self._feed.stop()
         self._stopping.set()
+        self.cancel_next()
         if self._sink is not None:
             if self._device is not None:
                 self._origin = self.position
@@ -358,6 +421,8 @@ class AudioPreview(QObject):
         self._reader = None
         self._pending = None
         self._finished = False
+        self._segments = [(0.0, self._origin)]
+        self._written = 0
 
     # ------------------------------------------------------------------
 

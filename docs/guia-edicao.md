@@ -76,6 +76,13 @@ Abaixo da imagem, a barra de transporte:
 | Ir ao fim | — | vai para o fim da edição |
 | ◁ keyframe / keyframe ▷ | — | pula para o ponto de corte rápido mais próximo, antes/depois do cursor |
 
+Com **Loop** marcado, a reprodução volta ao começo sem corte: um pouco antes do
+fim, imagem e som do começo já ficam prontos, e o som é emendado na mesma saída
+de áudio. A volta acontece no fim do que se vê e se ouve (o mesmo fim do arquivo
+exportado). Um bloco de vídeo nunca termina em preto por causa de sobra no
+arquivo: blocos novos duram exatamente a trilha de vídeo, e os de projetos
+antigos seguram o último quadro.
+
 Ao lado, um botão de mudo e um controle de volume regulam **apenas a prévia**
 (não afetam o volume dos blocos nem o resultado exportado).
 

@@ -52,6 +52,8 @@ class Painel:
         for pedaco in pedacos:
             self._chunks.put(pedaco)
         self._pending: bytes | None = None
+        self._written = 0
+        self._next = None
         self.terminou = False
 
     def _finish(self) -> None:

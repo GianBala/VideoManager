@@ -86,6 +86,25 @@ como float/int32 quando o dispositivo não aceita o formato. Falha de abertura
 limpa o produtor. EOF aguarda espaço na fila e o relógio continua ativo até
 esvaziar o buffer da placa, preservando o final do áudio.
 
+### Loop sem corte
+
+Com Loop marcado, `_on_tick` arma a volta quando faltam até 1,5 s para o fim do
+loop (`export_duration`): abre o fluxo de imagem em 0 atrás da comporta, como a
+pré-carga, e chama `AudioPreview.queue_next` com a mixagem do começo. O som em
+andamento é aberto com `audio_command(until=fim)`, que completa com silêncio e
+corta exatamente no fim, para a emenda cair no instante certo. Quando o trecho
+atual acaba, `_pump` troca para a fila preparada sem parar a placa e registra a
+fronteira em `_segments`: `position` passa a contar a partir de 0. Ao ver o
+relógio voltar, o painel libera a imagem preparada (`_swap_loop_video`). Sem
+som, a volta é feita no relógio monotônico. Se a preparação falhar, vale o
+caminho antigo de reabrir do zero. Editar, buscar, parar ou alternar o Loop
+cancela o que foi preparado.
+
+A sondagem guarda a duração de cada trilha; um bloco novo de vídeo dura a
+trilha de vídeo, e não o container. Blocos de vídeo recebem `tpad` clone de até
+1 s no grafo, para projetos antigos cujo bloco passa do fim do vídeo não
+mostrarem preto no fim.
+
 Parar incrementa a geração, encerra alimentação e solicita descarte dos processos.
 Callbacks agendados para uma reprodução antiga não podem parar a reprodução
 nova. A janela de tela cheia observa a mesma prévia e seus controles.
