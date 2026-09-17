@@ -51,6 +51,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QAbstractSlider,
     QAbstractSpinBox,
     QApplication,
     QButtonGroup,
@@ -74,6 +75,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QSpinBox,
     QSplitter,
+    QSplitterHandle,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -1666,6 +1668,9 @@ class EditPanel(QWidget):
         self._timeline = Timeline(self._colors)
         self._timeline.setToolTip(strings.EDIT_TIMELINE_HINT)
         self._timeline.scrubbed.connect(self._on_scrub)
+        # Tocar e pausar anda a agulha sem passar por ``_on_scrub``; sem isto
+        # a tesoura ficava com o estado de antes do play até outro clique.
+        self._timeline.position_changed.connect(lambda _seconds: self._refresh_clip_actions())
         self._timeline.edit_started.connect(self._begin_timeline_edit)
         self._timeline.edit_finished.connect(self._on_edit_finished)
         self._timeline.edit_cancelled.connect(self._on_edit_cancelled)
@@ -4253,7 +4258,10 @@ class EditPanel(QWidget):
                             return super().eventFilter(obj, event)
 
                         # Se for um controle interativo de propriedades (botão, spinbox, tab, input, slider, etc.)
-                        if isinstance(obj, (QAbstractButton, QAbstractSpinBox, QLineEdit, QComboBox, QSlider, QTabBar)):
+                        # Barras de rolagem e divisórias só navegam ou redimensionam:
+                        # desselecionar ali mudava o alvo da tesoura sem o usuário ver.
+                        if isinstance(obj, (QAbstractButton, QAbstractSpinBox, QLineEdit, QComboBox,
+                                            QAbstractSlider, QTabBar, QSplitterHandle)):
                             return super().eventFilter(obj, event)
 
                         # Clique fora das trilhas e de controles interativos: desseleciona
