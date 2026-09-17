@@ -73,11 +73,17 @@ _CANVAS_PRESETS: tuple[tuple[int, int], ...] = (
 
 _RATE_PRESETS: tuple[float, ...] = (24.0, 25.0, 30.0, 50.0, 60.0)
 
+# Taxas usuais de GIF. São baixas de propósito: cada quadro do GIF é uma imagem
+# inteira, então dobrar a taxa dobra o arquivo. Todas dividem 100 sem sobra, que
+# é como o formato guarda a duração de cada quadro (centésimos de segundo).
+_GIF_RATE_PRESETS: tuple[float, ...] = (10.0, 12.5, 20.0, 25.0)
+
 _CONTAINER_PRESETS: tuple[tuple[str, str], ...] = (
     ("MP4 (.mp4)", "mp4"),
     ("MKV (.mkv)", "mkv"),
     ("WebM (.webm)", "webm"),
     ("QuickTime (.mov)", "mov"),
+    ("GIF animado (.gif)", "gif"),
 )
 
 _VIDEO_CODEC_PRESETS: tuple[tuple[str, str], ...] = (
@@ -418,18 +424,7 @@ class ExportDialog(QDialog):
         self._canvas_box.blockSignals(False)
 
         # Opções de taxa
-        self._rate_box.clear()
-        options_rate: list[tuple[str, float | None]] = [
-            (strings.EDIT_CANVAS_RATE_AUTO, None)
-        ]
-        rates = {round(ref.fps, 3) for ref in self._pool if ref.has_video and ref.fps}
-        for r in sorted(rates | set(_RATE_PRESETS)):
-            options_rate.append((strings.EDIT_CANVAS_FPS.format(fps=format_rate(r)), r))
-        for label, val in options_rate:
-            self._rate_box.addItem(label, val)
-
-        idx_r = _index_of(self._rate_box, self._rate_choice)
-        self._rate_box.setCurrentIndex(max(0, idx_r))
+        self._fill_rates()
 
         # Container de vídeo
         self._container_box.blockSignals(True)
@@ -463,6 +458,35 @@ class ExportDialog(QDialog):
 
         # Visibilidade inicial
         self._apply_audio_only_visibility()
+
+    def _fill_rates(self) -> None:
+        """Repopula as taxas — o GIF traz as dele, mais baixas."""
+        self._rate_box.blockSignals(True)
+        self._rate_box.clear()
+        options_rate: list[tuple[str, float | None]] = [
+            (strings.EDIT_CANVAS_RATE_AUTO, None)
+        ]
+        rates = {round(ref.fps, 3) for ref in self._pool if ref.has_video and ref.fps}
+        presets = set(_RATE_PRESETS)
+        if self._container_choice == "gif":
+            presets |= set(_GIF_RATE_PRESETS)
+        for r in sorted(rates | presets):
+            options_rate.append((strings.EDIT_CANVAS_FPS.format(fps=format_rate(r)), r))
+        for label, val in options_rate:
+            self._rate_box.addItem(label, val)
+        idx_r = _index_of(self._rate_box, self._rate_choice)
+        self._rate_box.setCurrentIndex(max(0, idx_r))
+        self._rate_box.blockSignals(False)
+
+    def _apply_container_visibility(self) -> None:
+        """GIF não tem codec, qualidade nem cópia dos dados da origem."""
+        gif = self._container_choice == "gif" and not self._audio_only_check.isChecked()
+        for widget in (self._video_codec_label, self._video_codec_box,
+                       self._quality_label, self._quality_box):
+            widget.setVisible(not gif and not self._audio_only_check.isChecked())
+        if gif and self._fast.isChecked():
+            self._fast.setChecked(False)
+        self._fast.setToolTip(strings.EXPORT_GIF_NO_FAST if gif else strings.EDIT_MODE_TIP)
 
     def _sync_codecs(self) -> None:
         """Repopula o combo de codecs conforme o container selecionado."""
@@ -503,6 +527,7 @@ class ExportDialog(QDialog):
         # Campos de áudio — mostrar apenas no modo somente-áudio
         self._audio_format_label.setVisible(audio_only)
         self._audio_format_box.setVisible(audio_only)
+        self._apply_container_visibility()
 
     @staticmethod
     def _default_container(project: Project) -> str:
@@ -581,6 +606,8 @@ class ExportDialog(QDialog):
             return
         self._container_choice = self._container_box.itemData(index)
         self._sync_codecs()
+        self._fill_rates()
+        self._apply_container_visibility()
         self._update_plan()
 
     def _on_video_codec_changed(self, index: int) -> None:
@@ -681,7 +708,9 @@ class ExportDialog(QDialog):
         proj = self._effective_project()
         audio_only = self._audio_only_check.isChecked()
 
-        can_fast = self._fast_available(proj) and not audio_only
+        # Copiar os dados como estão produziria o vídeo da origem, não um GIF.
+        can_fast = (self._fast_available(proj) and not audio_only
+                    and self._container_choice != "gif")
         self._fast.setEnabled(can_fast)
         if not can_fast and self._fast.isChecked():
             self._fast.setChecked(False)
@@ -775,7 +804,8 @@ class ExportDialog(QDialog):
                 warning = ""
         else:
             container = self._container_choice or "mp4"
-            codec_family = self._codec_choice or hwaccel.family_for(container)
+            codec_family = ("gif" if container == "gif"
+                            else self._codec_choice or hwaccel.family_for(container))
             plan = describe_export(
                 proj,
                 container,
@@ -784,7 +814,7 @@ class ExportDialog(QDialog):
                 family=codec_family,
                 quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
             )
-            warning = ""
+            warning = strings.EXPORT_GIF_NOTE if container == "gif" else ""
             if interpolating:
                 warning = strings.EDIT_INTERPOLATE_WARN.format(
                     memory=format_size(interpolation_bytes(proj))
@@ -809,7 +839,8 @@ class ExportDialog(QDialog):
         source_dur = getattr(local, "duration", None)
 
         export_duration = target.output_duration if (is_fast and target) else proj.export_duration
-        codec_family = self._codec_choice or hwaccel.family_for(self._container_choice or "mp4")
+        codec_family = ("gif" if self._container_choice == "gif"
+                        else self._codec_choice or hwaccel.family_for(self._container_choice or "mp4"))
 
         est_bytes = estimate_export_size(
             duration=export_duration,
@@ -855,8 +886,10 @@ class ExportDialog(QDialog):
             return
 
         audio_only = self._audio_only_check.isChecked()
+        gif = (self._container_choice == "gif") and not audio_only
         options = ExportOptions(
-            container=self._container_choice or "mp4", family=self._codec_choice,
+            container=self._container_choice or "mp4",
+            family=None if gif else self._codec_choice,
             quality=self._quality_choice or "balanced", hardware=self._settings.hardware_encoder,
             interpolate=self._interpolate.isChecked(), audio_only=audio_only,
             audio_codec=self._audio_format_choice or "mp3", fast=self._fast.isChecked(),

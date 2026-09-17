@@ -226,6 +226,11 @@ EXPORT_MODE_AUDIO_ONLY_TIP = (
 )
 EXPORT_CONTAINER = "Formato de vídeo"
 EXPORT_CONTAINER_TIP = "Formato do arquivo de vídeo gerado (container)"
+EXPORT_GIF_NO_FAST = "GIF é sempre recodificado: não há como copiar os dados como estão."
+EXPORT_GIF_NOTE = (
+    "GIF não guarda som: a trilha de áudio fica de fora. Ele também cresce "
+    "depressa — uma tela menor e 10 a 15 quadros por segundo costumam bastar."
+)
 EXPORT_VIDEO_CODEC = "Codec de vídeo"
 EXPORT_VIDEO_CODEC_TIP = "Algoritmo de compressão de vídeo (H.264, HEVC, AV1, VP9)"
 EXPORT_QUALITY = "Qualidade do vídeo"

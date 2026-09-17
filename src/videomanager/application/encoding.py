@@ -29,11 +29,13 @@ def quality_label(quality: str) -> str:
     return QUALITY_LABELS.get(quality, quality)
 
 
-FAMILY_NAMES = {"h264": "H.264", "hevc": "HEVC", "vp9": "VP9", "av1": "AV1"}
+FAMILY_NAMES = {"h264": "H.264", "hevc": "HEVC", "vp9": "VP9", "av1": "AV1", "gif": "GIF"}
 
 
 def family_for(container: str) -> str:
     """Família de codec que combina com o container de saída."""
+    if container == "gif":
+        return "gif"
     return "vp9" if container == "webm" else "h264"
 
 

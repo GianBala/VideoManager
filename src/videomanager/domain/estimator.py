@@ -85,6 +85,11 @@ def estimate_video_bitrate(
     fps_factor = (safe_fps / 30.0) ** 0.5
 
     clean_codec = codec.lower().strip()
+    if clean_codec == "gif":
+        # GIF é comprimido sem prever movimento: o tamanho acompanha pixels por
+        # segundo, não a taxa de bits de um codec de vídeo. Cerca de 0,2 byte
+        # por pixel, medido em exportações de 480 e 640 px de largura.
+        return max(200.0, pixels * safe_fps * 0.2 * 8 / 1000)
     efficiency = _CODEC_EFFICIENCY.get(clean_codec, 1.0)
     q_factor = _QUALITY_FACTOR.get(quality.lower().strip(), 1.0)
 
@@ -267,5 +272,6 @@ def estimate_export_size(
         return int((source_size / source_duration) * duration)
 
     v_rate = estimate_video_bitrate(width, height, fps, video_codec, quality=quality)
-    a_rate = 192.0  # exportação de vídeo compõe áudio padrão a ~192 kbps
+    # GIF não tem trilha de áudio para somar.
+    a_rate = 0.0 if video_codec.lower().strip() == "gif" else 192.0
     return int(((v_rate + a_rate) * 1000 / 8) * duration * 1.015)

@@ -298,7 +298,14 @@ projeto pode ser escolhida no seletor **Tela**, também no topo:
   verticais/quadradas) ou **"Automática · segue o material"**, que usa o
   maior bloco do projeto para decidir o tamanho (ver
   [`arquitetura.md`](arquitetura.md#projectpy--composerpy-o-editor)).
-- **Taxa** — 24/25/30/50/60 fps, ou **Automática**.
+- **Taxa** — 24/25/30/50/60 fps, ou **Automática**. Com GIF escolhido,
+  entram também 10, 12,5, 20 e 25 — taxas que cabem certo na forma como o GIF
+  guarda a duração de cada quadro.
+- **Formato de vídeo** — MP4, MKV, WebM, MOV ou **GIF animado**. O GIF sai em
+  loop infinito e com 256 cores; ele não guarda som, então a trilha de áudio
+  fica de fora, e não tem codec nem nível de qualidade para escolher (esses
+  campos somem). Cada quadro de um GIF é uma imagem inteira: reduza a tela e
+  fique entre 10 e 15 quadros por segundo, ou o arquivo cresce depressa.
 - **Interpolar movimento** — gera quadros de verdade para blocos abaixo da
   taxa da tela, em vez de só duplicar o quadro anterior. Fica desabilitado
   quando nenhum bloco está abaixo da taxa escolhida. É uma opção cara — o
