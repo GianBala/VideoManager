@@ -117,6 +117,12 @@ Da esquerda para a direita:
 - **Duplo clique num bloco** — enquadra aquele bloco na largura visível.
 - **Clique no "M" do cabeçalho de uma trilha** — muda/desmuda a trilha
   inteira.
+- **Arrastar o cabeçalho de uma trilha** — muda a posição dela na pilha, para
+  qualquer lugar e com qualquer espécie (vídeo, adicionais ou áudio). Entre
+  trilhas de vídeo e de adicionais, **a que está mais acima aparece por cima**
+  na prévia e na exportação: um texto numa trilha abaixo de um vídeo fica
+  coberto por ele, e um filtro só age sobre o que está abaixo da trilha dele.
+  A posição do áudio não muda o som, só a organização.
 
 Um clique isolado nunca conta como edição: só a partir de alguns pixels de
 arrasto é que a ação entra na pilha de desfazer — selecionar um bloco sem

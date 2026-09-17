@@ -21,6 +21,11 @@ Por exemplo, `start=12`, `in_point=30`, `duration=4`, `speed=2` ocupa
 
 As trilhas são armazenadas na ordem visual, de cima para baixo. O compositor
 percorre vídeo de baixo para cima para construir fundo e sobreposições.
+A ordem é livre: vídeo, adicionais e áudio podem estar intercalados, e a
+prioridade visual é só a posição. `Project.with_track` põe adicionais no topo,
+vídeo logo acima da trilha de vídeo mais alta (ou antes do primeiro áudio) e
+áudio no fim; o cabeçalho arrastado aceita qualquer posição. Uma transição que
+afeta adicionais só leva as trilhas de adicionais **acima** da trilha dela.
 Texto, filtro e transição têm referência sintética: ela não deve ser sondada
 como arquivo. Uma imagem importada continua tendo um arquivo real.
 
