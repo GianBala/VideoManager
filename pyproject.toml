@@ -12,7 +12,10 @@ dependencies = [
     "PySide6>=6.6",
     # Sem teto de versão de propósito: extratores quebram quando as plataformas
     # mudam, então o yt-dlp precisa poder ser atualizado a qualquer momento.
-    "yt-dlp>=2025.1.1",
+    # O extra "default" traz o que o pacote não tinha: os scripts do solver
+    # JavaScript do YouTube (yt-dlp-ejs), o mutagen para capa em opus/ogg/flac,
+    # certificados, brotli e websockets.
+    "yt-dlp[default]>=2025.1.1",
     "platformdirs>=4.0",
 ]
 

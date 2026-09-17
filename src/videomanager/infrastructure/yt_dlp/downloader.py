@@ -21,6 +21,8 @@ from yt_dlp.utils import DownloadCancelled, DownloadError, ExtractorError
 
 from videomanager.application.errors import DownloadFailedError
 from videomanager.application.errors import JobCancelled
+from videomanager.infrastructure.yt_dlp.extras import TolerantEmbedThumbnailPP
+from videomanager.infrastructure.yt_dlp.extras import split_thumbnail_postprocessor
 from videomanager.infrastructure.yt_dlp.probe import _translate_error
 
 from videomanager.application.events import Progress as Progress
@@ -215,7 +217,7 @@ class Downloader:
 
     def run(self, url: str) -> DownloadResult:
         """Baixa a URL. Levanta :class:`JobCancelled` se cancelado."""
-        opts = dict(self._opts)
+        opts, thumbnail = split_thumbnail_postprocessor(dict(self._opts))
         opts["logger"] = self._logger
         opts["progress_hooks"] = [self._progress_hook]
         opts["postprocessor_hooks"] = [self._postprocessor_hook]
@@ -223,6 +225,8 @@ class Downloader:
         title = url
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
+                if thumbnail is not None:
+                    ydl.add_post_processor(TolerantEmbedThumbnailPP(ydl, **thumbnail), when="post_process")
                 info = ydl.extract_info(url, download=True)
                 if isinstance(info, dict):
                     title = str(info.get("title") or url)
@@ -234,7 +238,7 @@ class Downloader:
             # DownloadError, então a checagem de cancelamento vem primeiro.
             if self._cancelled:
                 raise JobCancelled("Download cancelado.") from exc
-            translated = _translate_error(exc)
+            translated = _translate_error(exc, "baixar")
             raise DownloadFailedError(str(translated)) from exc
         except OSError as exc:
             raise DownloadFailedError(
