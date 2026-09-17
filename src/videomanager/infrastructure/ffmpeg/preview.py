@@ -23,6 +23,8 @@ filtro ``showwavespic``, e sai em PNG.
 
 from __future__ import annotations
 
+import math
+import queue
 import subprocess
 import threading
 import time
@@ -35,6 +37,7 @@ from videomanager.application.errors import VideoManagerError
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
 
+from videomanager.application.media.preview import playback_clock
 from videomanager.domain.preview import MAX_PREVIEW_FPS as MAX_PREVIEW_FPS
 from videomanager.domain.preview import preview_fps as preview_fps
 from videomanager.domain.preview import BYTES_PER_PIXEL as BYTES_PER_PIXEL
@@ -493,14 +496,38 @@ def jpeg_frames(read: Callable[[int], bytes], chunk: int = 1 << 16) -> Iterator[
         buffer += data
 
 
+# Quadros lidos adiante do relógio. O cano do ffmpeg só segura um quadro
+# pronto; sem esta fila, uma demora na produção — abrir o decodificador do bloco
+# seguinte num corte, uma transição pesada, material 4K — aparecia inteira como
+# quadro parado na tela. Com ela, a demora é paga com quadros já prontos. O teto
+# é em bytes: em tela cheia (1080p) são 5 quadros, e perto da volta do loop há
+# dois fluxos abertos ao mesmo tempo.
+_READ_AHEAD_BYTES = 32 * 1024 * 1024
+_READ_AHEAD_FRAMES = 10
+# Correção máxima do relógio por quadro depois do início: 3 ms a 30 q/s é uma
+# variação de velocidade de 10%, imperceptível, e ainda fecha 100 ms em um
+# segundo.
+_CLOCK_STEP = 0.003
+# No começo, e para diferenças grandes, a correção é inteira de uma vez:
+# segurar o primeiro quadro até o som começar não se vê.
+_CLOCK_SNAP_SECONDS = 0.35
+_CLOCK_SNAP_OFFSET = 0.25
+# Atraso a partir do qual um quadro é descartado para alcançar o relógio.
+_LATE_FRAMES = 3
+_END_OF_STREAM = object()
+
+
 class FramePump:
     """Fluxo contínuo de quadros para a reprodução, com ritmo de tempo real.
 
-    Um processo só do ffmpeg decodifica e escala; nós lemos quadro a quadro e
-    seguramos a leitura até a hora de cada um. Segurar é o ponto: o cano tem
-    capacidade limitada, então o ffmpeg fica bloqueado esperando espaço em vez de
-    decodificar o vídeo inteiro para a memória — a mesma pressão de volta que um
-    player de verdade usa.
+    Um processo só do ffmpeg decodifica e escala; uma thread lê os quadros
+    adiante, numa fila curta, e o laço de ritmo entrega cada um na hora dele.
+    A fila é limitada: cheia, ela segura a leitura e o cano segura o ffmpeg — a
+    mesma pressão de volta que um player de verdade usa, sem decodificar o
+    vídeo inteiro para a memória.
+
+    O relógio da imagem pode ser ajustado de fora (:meth:`set_clock_offset`):
+    é assim que a reprodução acompanha o relógio do som sem reabrir o fluxo.
     """
 
     def __init__(
@@ -518,6 +545,10 @@ class FramePump:
         self._process: subprocess.Popen | None = None
         self._stopped = False
         self._lock = threading.Lock()
+        self._clock_lock = threading.Lock()
+        self._began: float | None = None
+        self._start_at: float | None = None
+        self._offset = 0.0
 
     def stop(self) -> None:
         self._stopped = True
@@ -525,6 +556,44 @@ class FramePump:
             process = self._process
         if process and process.poll() is None:
             process.terminate()
+
+    def start_at(self, moment: float | None) -> None:
+        """Instante de :func:`playback_clock` em que o primeiro quadro sai.
+
+        Serve para emendar dois fluxos: o seguinte começa exatamente quando o
+        atual acaba, e não quando alguém percebe que ele acabou. Um instante já
+        passado ancora o relógio nele — a imagem sai atrasada e alcança
+        descartando quadros, em vez de ficar para sempre atrás do som.
+        """
+        with self._clock_lock:
+            if self._began is None:
+                self._start_at = moment
+
+    def hold_start(self) -> None:
+        """Segura o primeiro quadro até :meth:`start_at` dizer quando sair.
+
+        É a espera pelo som no play: a placa leva de 100 a 150 ms para começar
+        a tocar, e a imagem que sai antes disso precisa parar no meio para ele
+        alcançar — o engasgo logo depois de apertar play.
+        """
+        self.start_at(math.inf)
+
+    def set_clock_offset(self, seconds: float) -> None:
+        """Quanto a imagem está **à frente** do relógio de referência.
+
+        Substitui a correção pendente em vez de somar: quem chama mede de novo a
+        cada tique, e a medida já inclui o que foi corrigido.
+        """
+        with self._clock_lock:
+            self._offset = seconds
+
+    def clock_position(self, now: float | None = None) -> float | None:
+        """Instante da edição que o relógio da imagem marca agora."""
+        with self._clock_lock:
+            began = self._began
+        if began is None:
+            return None
+        return self._start + ((playback_clock() if now is None else now) - began)
 
     def frames(
         self,
@@ -542,6 +611,53 @@ class FramePump:
         with filter_script(self._command) as prepared:
             yield from self._frames(prepared, gate=gate, on_primed=on_primed)
 
+    def _read_ahead(self, process, frame_bytes: int, ahead: queue.Queue, partial: list[bytes]) -> None:
+        try:
+            while not self._stopped:
+                data = process.stdout.read(frame_bytes)
+                if not data or len(data) < frame_bytes:
+                    if data:
+                        partial.append(data)
+                    break
+                while not self._stopped:
+                    try:
+                        ahead.put(data, timeout=0.1)
+                        break
+                    except queue.Full:
+                        continue
+        except (OSError, ValueError):
+            pass
+        finally:
+            while True:
+                try:
+                    ahead.put(_END_OF_STREAM, timeout=0.1)
+                    break
+                except queue.Full:
+                    if self._stopped:
+                        break
+
+    def _take(self, ahead: queue.Queue):
+        while not self._stopped:
+            try:
+                return ahead.get(timeout=0.05)
+            except queue.Empty:
+                continue
+        return _END_OF_STREAM
+
+    def _correct_clock(self, began: float, index: int) -> float:
+        with self._clock_lock:
+            offset = self._offset
+            if abs(offset) < 1e-4:
+                return began
+            if index <= self._fps * _CLOCK_SNAP_SECONDS or abs(offset) > _CLOCK_SNAP_OFFSET:
+                step = offset
+            else:
+                step = max(-_CLOCK_STEP, min(_CLOCK_STEP, offset))
+            began += step
+            self._began = began
+            self._offset = offset - step
+            return began
+
     def _frames(self, command, *, gate=None, on_primed=None) -> Iterator[RawFrame]:
         width, height = self._size
         frame_bytes = width * height * BYTES_PER_PIXEL
@@ -557,6 +673,7 @@ class FramePump:
         with self._lock:
             self._process = process
 
+        reader: threading.Thread | None = None
         try:
             # stop pode ter ocorrido durante Popen, antes de haver um processo
             # registrado. Não entrar numa leitura bloqueante nessa situação.
@@ -578,31 +695,62 @@ class FramePump:
                         return
             if self._stopped:
                 return
+            # A leitura adiante só começa com o play. Na pré-carga da pausa ela
+            # faria o ffmpeg compor uma dezena de quadros a cada parada da mão,
+            # disputando a CPU com o quadro exato da edição seguinte. Enquanto a
+            # imagem espera o som (hold_start), a fila já vai enchendo.
+            capacity = max(2, min(_READ_AHEAD_FRAMES, _READ_AHEAD_BYTES // frame_bytes))
+            ahead: queue.Queue = queue.Queue(capacity)
+            partial: list[bytes] = []
+            reader = threading.Thread(target=self._read_ahead, args=(process, frame_bytes, ahead, partial),
+                                      daemon=True)
+            reader.start()
 
-            began = time.monotonic()
+            while True:
+                if self._stopped:
+                    return
+                with self._clock_lock:
+                    # Ler a hora marcada e fixar o início sob a mesma trava:
+                    # uma hora nova chegando no meio seria ignorada.
+                    start_at = self._start_at
+                    now = playback_clock()
+                    if start_at is None or start_at <= now:
+                        began = now if start_at is None else start_at
+                        self._began = began
+                        break
+                # Fatias curtas: a hora marcada pode mudar (ver hold_start).
+                time.sleep(min(start_at - now, 0.005))
             yield RawFrame(first, width, height, self._start)
             index = 1
             while not self._stopped:
-                # A espera acontece antes da leitura: enquanto dormimos, o cano
-                # enche e o ffmpeg para sozinho.
+                began = self._correct_clock(began, index)
                 due = index / self._fps
-                behind = due - (time.monotonic() - began)
+                behind = due - (playback_clock() - began)
                 if behind > 0:
+                    # A espera acontece antes de retirar o quadro: enquanto
+                    # dormimos, a fila enche e o ffmpeg para sozinho.
                     time.sleep(behind)
                     if self._stopped:
                         break
-                data = process.stdout.read(frame_bytes)
-                if not data or len(data) < frame_bytes:
+                data = self._take(ahead)
+                if data is _END_OF_STREAM:
                     if not self._stopped:
                         process.wait(timeout=5)
                         diagnostic.close()
-                        if process.returncode != 0 or data:
+                        if process.returncode != 0 or partial:
                             raise VideoManagerError(_preview_error(diagnostic.data))
                     break
+                if -behind > _LATE_FRAMES / self._fps and not ahead.empty():
+                    # Muito atrás do relógio (o som seguiu e a imagem não):
+                    # descarta em vez de despejar uma rajada de quadros velhos.
+                    index += 1
+                    continue
                 yield RawFrame(data, width, height, self._start + due)
                 index += 1
         finally:
             self.stop()
+            if reader is not None:
+                reader.join(timeout=2)
             if process.stdout is not None:
                 process.stdout.close()
             try:

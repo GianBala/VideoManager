@@ -499,7 +499,7 @@ def test_fim_do_audio_continua_video_e_relogio_monotonico(panel, monkeypatch):
     _clock_project(panel)
     panel._timeline.set_position(1)
     now = [10.0]
-    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.time.monotonic', lambda: now[0])
+    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.playback_clock', lambda: now[0])
     panel._on_audio_stopped()
     assert panel._playing
     now[0] = 12
@@ -522,7 +522,7 @@ def test_pausa_e_retomada_seguem_frame_exibido_sem_deriva_acumulada(panel, monke
     monkeypatch.setattr(panel, '_ensure_tools', lambda: object())
     monkeypatch.setattr(panel, '_prime_playback', lambda: None)
     monkeypatch.setattr(panel, '_start_frames', lambda seconds: (17, True))
-    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.time.monotonic', lambda: now[0])
+    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.playback_clock', lambda: now[0])
     resumed = []
     def start(audio, project, seconds, tools, **kw):
         resumed.append(seconds)
@@ -551,7 +551,7 @@ def test_velocidade_de_clipe_nao_antecipa_fim(panel, monkeypatch):
     panel._clock_position = 3.8
     panel._clock_started = 10
     now = [10.0]
-    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.time.monotonic', lambda: now[0])
+    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.playback_clock', lambda: now[0])
     panel._on_tick()
     assert panel._playing
     panel._shown_frame = 119/30
