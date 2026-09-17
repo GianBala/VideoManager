@@ -789,18 +789,25 @@ class Project:
         return replace(self, tracks=tuple(tracks))
 
     def with_track(self, kind: TrackKind, name: str = "") -> Project:
-        """Acrescenta uma trilha vazia, no lugar certo da pilha.
+        """Acrescenta uma trilha vazia, num lugar previsível da pilha.
 
-        Adicionais entram no topo absoluto (camadas superiores).
-        Vídeo entra abaixo dos adicionais e no topo dos vídeos existentes.
-        Áudio entra no fim da lista.
+        Adicionais entram no topo absoluto. Vídeo entra logo acima da trilha de
+        vídeo mais alta — ou, sem vídeo nenhum, antes do primeiro áudio. Áudio
+        entra no fim.
+
+        A ordem das trilhas é livre: o usuário arrasta qualquer uma para qualquer
+        posição, e é a posição que decide quem aparece por cima. Por isso a
+        regra procura as trilhas pela espécie em vez de contar quantos
+        adicionais há no topo, o que só valia com a pilha agrupada.
         """
         track = Track(kind=kind, name=name or _default_name(self, kind))
         tracks = list(self.tracks)
         if kind is TrackKind.ADDITIONAL:
             tracks.insert(0, track)
         elif kind is TrackKind.VIDEO:
-            tracks.insert(len(self.additional_tracks), track)
+            anchor = next((i for i, t in enumerate(tracks) if t.kind is TrackKind.VIDEO),
+                          next((i for i, t in enumerate(tracks) if t.kind is TrackKind.AUDIO), len(tracks)))
+            tracks.insert(anchor, track)
         else:
             tracks.append(track)
         return replace(self, tracks=tuple(tracks))

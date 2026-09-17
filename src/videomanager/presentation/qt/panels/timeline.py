@@ -1190,24 +1190,21 @@ class Timeline(QWidget):
         self._drag_motion(point)
 
     def _target_reorder_track(self, y: float) -> int:
-        if not (0 <= self._drag_track < len(self._project.tracks)):
+        """Posição da pilha sob o ponteiro, para qualquer espécie de trilha.
+
+        A ordem é livre: vídeo e adicionais trocam de prioridade conforme a
+        posição, e o áudio pode ficar onde for mais cômodo de ver.
+        """
+        count = len(self._project.tracks)
+        if not (0 <= self._drag_track < count):
             return -1
-        moving_kind = self._project.tracks[self._drag_track].kind
-        valid_indices = [
-            i for i, t in enumerate(self._project.tracks) if t.kind is moving_kind
-        ]
-        if not valid_indices:
-            return self._drag_track
-
-        for i in valid_indices:
-            rect = self._lane_rect(i)
+        for index in range(count):
+            rect = self._lane_rect(index)
             if rect.top() <= y < rect.bottom() + TRACK_GAP:
-                return i
-
-        first = valid_indices[0]
-        if y < self._lane_rect(first).top():
-            return first
-        return valid_indices[-1]
+                return index
+        if y < self._lane_rect(0).top():
+            return 0
+        return count - 1
 
     def _past_slack(self, point: QPointF) -> bool:
         """Se o ponteiro já andou o bastante para isto ser um arrasto.
