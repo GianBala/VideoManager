@@ -76,6 +76,10 @@ Da esquerda para a direita:
    do cursor.
 3. **Apagar à esquerda** (`Q`) — remove o trecho do bloco antes do cursor.
 4. **Apagar à direita** (`W`) — remove o trecho do bloco depois do cursor.
+
+   Os três agem sobre o bloco **selecionado** e ficam habilitados só quando o
+   cursor está dentro dele; o estado acompanha o cursor também durante a
+   reprodução, então dá para tocar, pausar no ponto e cortar.
 5. Lixeira **Excluir bloco** (`Del`).
 6. Contador de trilhas/blocos/duração total do projeto.
 7. Nome do bloco selecionado.
@@ -95,7 +99,10 @@ Da esquerda para a direita:
 - **Arrastar as pontas (alças)** de um bloco — ajusta o corte daquele lado,
   com o mesmo imã.
 - **Clique simples** no vazio da trilha ou na régua de tempo — move o cursor
-  de reprodução para ali.
+  de reprodução para ali. Na trilha vazia a seleção é desfeita; **na régua ela
+  é mantida**, para posicionar o corte do bloco escolhido (por exemplo, um
+  áudio abaixo de um vídeo). Barras de rolagem e divisórias também não
+  desfazem a seleção.
 - **Botão direito** — abre o menu de contexto (ver abaixo), relativo ao que
   está sob o cursor.
 - **Botão do meio, arrastando** — paneia a vista horizontalmente.
