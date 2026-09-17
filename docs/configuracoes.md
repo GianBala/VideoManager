@@ -31,7 +31,7 @@ O diálogo tem três abas.
 
 | Campo | O que faz |
 |---|---|
-| **Embutir a capa no arquivo** | Grava a miniatura da mídia como capa do arquivo baixado. |
+| **Embutir a capa no arquivo** | Grava a miniatura da mídia como capa do arquivo baixado. Em formatos que não aceitam capa (`.webm`, `.wav`), o arquivo é entregue sem ela e o log da tarefa registra o aviso — o download não falha por isso. |
 | **Gravar metadados** | Título, autor, data etc., quando o extrator os fornece. |
 | **Baixar legendas em arquivo separado** | Salva um `.srt` ao lado do vídeo. |
 | **Embutir legendas no arquivo** | Grava a legenda dentro do próprio arquivo de vídeo. |

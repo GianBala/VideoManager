@@ -95,6 +95,14 @@ Essas opções não ficam na aba Download — são preferências gerais, ajustad
 uma vez em **Configurações** e aplicadas a todo download seguinte. Ver
 [`configuracoes.md`](configuracoes.md).
 
+## YouTube e runtime JavaScript
+
+O YouTube só libera todos os formatos para quem resolve os desafios JavaScript
+da página. O pacote traz o **Deno** para isso; rodando do código-fonte (ou num
+pacote gerado com `VM_BUNDLE_DENO=0`), vale o Deno ou o Node instalado no
+sistema. Sem nenhum deles a análise ainda funciona, mas algumas qualidades
+podem não aparecer.
+
 ## Acompanhando o download
 
 Depois de **Adicionar à fila**, o progresso aparece na

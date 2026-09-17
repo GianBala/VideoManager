@@ -122,3 +122,31 @@ def test_patch_runtime_universal_extract_and_run(tmp_path) -> None:
 
     # Segunda chamada deve reconhecer que já está patcheado
     assert patch_runtime(test_file) is True
+
+
+class TestRuntimeJavaScript:
+    """O yt-dlp precisa de Deno ou Node para liberar os formatos do YouTube."""
+
+    def _vendor(self, tmp_path, monkeypatch):
+        from videomanager.infrastructure.system import binaries
+        monkeypatch.setattr(binaries, "vendor_dir", lambda: tmp_path)
+        return binaries
+
+    def test_deno_empacotado_vem_antes_do_sistema(self, tmp_path, monkeypatch) -> None:
+        binaries = self._vendor(tmp_path, monkeypatch)
+        deno = tmp_path / binaries.exe_name("deno")
+        deno.write_bytes(b"")
+        deno.chmod(0o755)
+        monkeypatch.setattr(binaries.shutil, "which", lambda name: f"/sistema/{name}")
+        assert binaries.find_js_runtime() == ("deno", deno)
+
+    def test_node_do_sistema_serve_quando_nao_ha_deno(self, tmp_path, monkeypatch) -> None:
+        binaries = self._vendor(tmp_path, monkeypatch)
+        monkeypatch.setattr(binaries.shutil, "which", lambda name: "/sistema/node" if name == "node" else None)
+        name, path = binaries.find_js_runtime()
+        assert name == "node" and path.name == "node"
+
+    def test_sem_runtime_nenhum(self, tmp_path, monkeypatch) -> None:
+        binaries = self._vendor(tmp_path, monkeypatch)
+        monkeypatch.setattr(binaries.shutil, "which", lambda name: None)
+        assert binaries.find_js_runtime() is None

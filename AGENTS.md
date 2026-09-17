@@ -134,6 +134,10 @@ Veja [testes](docs/clean-architecture/testes.md) para detalhes e limites.
 Os builds PyInstaller acontecem no sistema de destino. Os scripts podem baixar
 dependências/binários e recriar build/dist. `VM_BUNDLE_FFMPEG=0` dispensa
 embutir ffmpeg; nesse caso as ferramentas devem estar disponíveis no ambiente.
+`VM_BUNDLE_DENO=0` dispensa o Deno que o yt-dlp usa no YouTube (vale então
+Deno/Node do sistema). O ícone do .exe sai de `packaging/make_icon.py`.
+`VideoManager --diagnose-url URL --report ARQ` refaz a análise pela janela no
+pacote; o log fica em `platformdirs.user_log_dir`.
 
 `--smoke-test` verifica janela, fontes, prévia e exportação curta, sem consultar
 dispositivo físico de áudio. `packaging/smoke_run.sh` exige conclusão com prazo
