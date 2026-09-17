@@ -19,12 +19,20 @@ cabem no painel.
 
 No acervo de mídia à esquerda:
 
-- **Importar** abre o seletor de arquivos (vídeo, foto ou áudio).
-  Também é possível **arrastar arquivos direto para a aba**.
+- **Importar** abre o seletor de arquivos (vídeo, foto ou áudio). Arquivos
+  arrastados para o acervo ou para outra área da aba também são importados.
+  **Importar não coloca nada na edição**: a mídia fica no acervo.
 - A lista do acervo mostra tudo já importado nesta sessão de edição.
-- **Inserir no cursor** — coloca a mídia na posição atual. Sem destino explícito,
-  prefere uma trilha compatível, visível e com som habilitado quando necessário;
-  cria outra se não houver espaço. Arrastar para uma trilha respeita esse destino.
+- **Arrastar um cartão do acervo até a linha do tempo** coloca a mídia na
+  trilha e no instante em que ela for solta, com o mesmo ímã dos blocos. Um
+  bloco fantasma mostra onde ela vai cair. Se a trilha sob o ponteiro não
+  aceitar a mídia, ou se ela cair em cima de outro bloco, nasce uma trilha nova
+  ali — nada do que já está na edição é empurrado. Várias mídias entram em
+  sequência. Arrastar arquivos do sistema direto para a linha do tempo importa
+  e coloca no ponto de soltura. Tudo isso é um único passo de desfazer.
+- **Inserir no cursor** (ou duplo clique no cartão) — coloca a mídia na posição
+  atual, numa trilha compatível, visível e com som habilitado quando necessário;
+  cria outra se não houver espaço.
 
 Fotos entram na **trilha de vídeo**, como um vídeo: ajustam-se à tela (ampliadas
 ou reduzidas, sem deformar), podem formar corte e transição com o vídeo vizinho
