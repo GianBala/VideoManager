@@ -195,6 +195,14 @@ trilha de vídeo, e não o container. Blocos de vídeo recebem `tpad` clone de a
 1 s no grafo, para projetos antigos cujo bloco passa do fim do vídeo não
 mostrarem preto no fim.
 
+Imagem e texto têm entrada e corte arredondados para fechar um quadro
+(`_whole_frames`). Um bloco de 4,27 s a 30 q/s tem seu último tique em
+4,2667 s, mas `-loop 1 -t 4.27` para em 4,2333 s e `trim=duration=4.27` trunca
+128,1 quadros para 128: sem quadro, o `overlay` deixa passar só o fundo, e a
+foto sumia no último quadro antes da volta do loop — na prévia e no arquivo
+exportado. O ramo de vídeo não mostrava isso porque o `tpad` segura o último
+quadro dele. A janela `enable` continua limitando o que aparece.
+
 Parar incrementa a geração, encerra alimentação e solicita descarte dos processos.
 Callbacks agendados para uma reprodução antiga não podem parar a reprodução
 nova. A janela de tela cheia observa a mesma prévia e seus controles.
