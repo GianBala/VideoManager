@@ -175,6 +175,7 @@ def probe_file(path: Path, tools: FFmpegTools, *, control: ProcessControl | None
                 language=(raw.get("tags") or {}).get("language"),
                 rotation=_display_rotation(raw),
                 attached_picture=bool((raw.get('disposition') or {}).get('attached_pic')),
+                duration=_stream_duration(raw),
             )
         )
 
@@ -185,6 +186,20 @@ def probe_file(path: Path, tools: FFmpegTools, *, control: ProcessControl | None
         size=_int(container.get("size")),
         streams=tuple(streams),
     )
+
+
+def _stream_duration(raw: dict) -> float | None:
+    """Duração da trilha: o campo do MP4 ou, no MKV, a etiqueta DURATION."""
+    value = _float(raw.get("duration"))
+    if value:
+        return value
+    tag = next((v for k, v in (raw.get("tags") or {}).items() if str(k).upper() == "DURATION"), None)
+    try:
+        hours, minutes, seconds = str(tag).split(":")
+        total = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    except (ValueError, TypeError):
+        return None
+    return total if total > 0 else None
 
 
 def _display_rotation(raw: dict) -> float:
