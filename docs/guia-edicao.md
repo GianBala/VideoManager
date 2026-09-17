@@ -106,7 +106,11 @@ Da esquerda para a direita:
 - **Botão direito** — abre o menu de contexto (ver abaixo), relativo ao que
   está sob o cursor.
 - **Botão do meio, arrastando** — paneia a vista horizontalmente.
-- **Roda do mouse** — desloca verticalmente pelas trilhas.
+- **Roda do mouse** — desloca verticalmente pelas trilhas. A régua de tempo e a
+  cabeça da agulha ficam **fixas no topo**: com mais trilhas do que cabem, as
+  trilhas rolam por baixo da régua e uma barra vertical aparece ao lado.
+  Arrastar um bloco ou o cabeçalho de uma trilha até a borda de cima ou de
+  baixo rola sozinho, para alcançar trilhas fora da vista.
 - **Shift + roda** — desloca a vista horizontalmente sem mudar o zoom.
 - **Ctrl + roda** — zoom, centrado na posição do ponteiro. Ctrl prevalece
   quando Shift também estiver pressionado.
