@@ -64,7 +64,9 @@ def embed_thumbnail(destination: Path, tools: FFmpegTools,
             else:
                 command += ["-i", str(thumbnail), "-map", "0", "-map", "1", "-c", "copy",
                             "-c:v:1", "mjpeg", "-disposition:v:1", "attached_pic", "-movflags", "+faststart"]
-            command += ["-map_metadata", "-1", "-map_chapters", "-1", str(output)]
+            # Metadados e capítulos continuam: com "-1" o remux da capa
+            # desfazia o "-map_metadata 0" da conversão.
+            command += ["-map_metadata", "0", "-map_chapters", "0", str(output)]
             result = control.run(command, timeout=1800)
             control.check()
             if result.returncode == 0 and output.is_file() and output.stat().st_size:

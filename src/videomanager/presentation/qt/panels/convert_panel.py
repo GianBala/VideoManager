@@ -38,6 +38,7 @@ from videomanager.domain.targets import AUDIO_TARGETS
 from videomanager.domain.targets import VIDEO_CONTAINERS
 from videomanager.domain.media import AudioTarget
 from videomanager.domain.media import LocalMedia
+from videomanager.domain.compatibility import container_accepts_video
 from videomanager.domain.media import VideoTarget
 from videomanager.application.media.conversion_description import describe_target
 from videomanager.domain.estimator import estimate_convert_size
@@ -247,7 +248,6 @@ class ConvertPanel(QWidget):
         self._container = QComboBox()
         for value in VIDEO_CONTAINERS:
             self._container.addItem(f".{value}", value)
-        self._container.currentIndexChanged.connect(self._update_plan)
         self._add_row(form, strings.LABEL_CONTAINER, self._container)
 
         self._video_codec = QComboBox()
@@ -255,6 +255,10 @@ class ConvertPanel(QWidget):
             self._video_codec.addItem(label, value)
         self._video_codec.currentIndexChanged.connect(self._update_plan)
         self._add_row(form, strings.LABEL_CODEC, self._video_codec)
+        # Conectado depois de o seletor de codec existir: a troca de container
+        # decide quais codecs continuam oferecidos.
+        self._container.currentIndexChanged.connect(self._on_container_changed)
+        self._sync_codec_choices()
 
         self._resize = QComboBox()
         for value, label in _RESIZE_OPTIONS:
@@ -271,6 +275,27 @@ class ConvertPanel(QWidget):
         self._form = form
         self._on_mode_changed()
         return group
+
+    def _on_container_changed(self) -> None:
+        self._sync_codec_choices()
+        self._update_plan()
+
+    def _sync_codec_choices(self) -> None:
+        """Desliga os codecs que o container escolhido não aceita.
+
+        H.264 e HEVC em .webm eram oferecidos e só falhavam na fila, com o erro
+        cru do ffmpeg. Se o codec atual deixa de caber, volta para "Copiar", que
+        o plano descreve antes de converter — nada é trocado sem aparecer.
+        """
+        container = self._container.currentData() or "mp4"
+        model = self._video_codec.model()
+        for index in range(self._video_codec.count()):
+            item = model.item(index)
+            if item is not None:
+                item.setEnabled(container_accepts_video(container, self._video_codec.itemData(index)))
+        current = self._video_codec.currentData() or "copy"
+        if not container_accepts_video(container, current):
+            self._video_codec.setCurrentIndex(self._video_codec.findData("copy"))
 
     def _add_row(self, form: QFormLayout, text: str, field: QWidget) -> QLabel:
         label = QLabel(text)
@@ -419,6 +444,15 @@ class ConvertPanel(QWidget):
             if 0 <= row < len(self._media):
                 self._media.pop(row)
         self._update_remove_button()
+        self._update_plan()
+
+    def apply_settings(self, settings: Settings) -> None:
+        """Adota as preferências recém-salvas pelo diálogo de configurações.
+
+        Sem isto a aba seguia com o objeto antigo: trocar o encoder de placa ou
+        a pasta de downloads só valia na conversão depois de reiniciar.
+        """
+        self._settings = settings
         self._update_plan()
 
     def clear_files(self) -> None:
