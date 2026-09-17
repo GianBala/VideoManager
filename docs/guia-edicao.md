@@ -26,9 +26,16 @@ No acervo de mídia à esquerda:
   prefere uma trilha compatível, visível e com som habilitado quando necessário;
   cria outra se não houver espaço. Arrastar para uma trilha respeita esse destino.
 
-Fotos entram em **Adicionais**. Em montagens somente de fotos, **Slideshow**
-sugere a tela pelas dimensões das imagens, limitada a 1920 pixels no maior lado.
-A escolha é explícita; imagens decorativas não mudam automaticamente a tela.
+Fotos entram na **trilha de vídeo**, como um vídeo: ajustam-se à tela (ampliadas
+ou reduzidas, sem deformar), podem formar corte e transição com o vídeo vizinho
+e aceitam posição, escala, rotação, opacidade e animação a partir desse tamanho.
+Uma foto numa trilha de vídeo acima de outra funciona como sobreposição
+(logotipo, moldura). Velocidade não se aplica a fotos. **Adicionais** ficam com
+textos e filtros.
+
+Em montagens somente de fotos, **Slideshow** sugere a tela pelas dimensões das
+imagens, limitada a 1920 pixels no maior lado. A escolha é explícita; fotos não
+mudam automaticamente a tela.
 
 Com a linha do tempo vazia, a prévia mostra: *"Importe vídeos, fotos ou
 áudios para montar a edição. Você também pode arrastar os arquivos para
@@ -156,8 +163,8 @@ Dissolve, Wipe e Slide não desapareçam por misturar duas cópias do mesmo quad
 O movimento permanece contínuo nas extremidades e o áudio original não é
 duplicado durante essa passagem.
 
-Marque **Afetar itens adicionais** para incluir filtros, imagens e textos no
-efeito. Um item que termina exatamente no corte desaparece com o vídeo da
+Marque **Afetar itens adicionais** para incluir filtros e textos das trilhas de
+Adicionais **acima** da transição no efeito. Um item que termina exatamente no corte desaparece com o vídeo da
 esquerda; um que começa ali aparece com o vídeo da direita; um item que continua
 pelos dois lados permanece visível sem piscar. Deixe desmarcado quando títulos,
 logotipos ou filtros devam ficar estáveis acima da transição. A opção também
@@ -176,9 +183,17 @@ de campo ou outro comando. Dentro do campo, os atalhos de edição do texto
 continuam disponíveis. Alterar a resolução de saída mantendo a proporção
 preserva tamanho e posição relativos do texto, incluindo contorno e animação.
 
-Projetos são salvos em `.vmp` versão 2. A versão atual abre v1 e v2; aplicativos
-antigos não abrem v2. Ao salvar sobre v1, uma cópia `.vmp.v1.bak` conserva o
-arquivo original, com numeração se necessário. Guarde também as mídias externas.
+Projetos são salvos em `.vmp` versão 3. A versão atual abre v1, v2 e v3;
+aplicativos antigos não abrem v3. Ao salvar sobre v1 ou v2, uma cópia
+`.vmp.v1.bak` ou `.vmp.v2.bak` conserva o arquivo original, com numeração se
+necessário. Guarde também as mídias externas.
+
+Ao abrir um projeto v1 ou v2, fotos que estavam em trilhas de Adicionais passam
+para trilhas de vídeo na mesma posição da pilha — a trilha inteira, se só tinha
+fotos, ou uma trilha de vídeo nova logo acima, se também tinha textos ou
+filtros. A escala é convertida para a foto continuar do mesmo tamanho e no mesmo
+lugar. Única diferença conhecida: numa transição com **Afetar itens adicionais**
+marcado, essas fotos deixam de participar do efeito e ficam estáveis por cima.
 
 ### Menu de contexto (botão direito)
 

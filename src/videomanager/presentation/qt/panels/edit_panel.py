@@ -2198,7 +2198,7 @@ class EditPanel(QWidget):
         if index is None:
             kind = (
                 TrackKind.ADDITIONAL
-                if clip.is_additional
+                if clip.is_overlay
                 else (TrackKind.VIDEO if reference.has_video else TrackKind.AUDIO)
             )
             self._project = self._project.with_track(kind)
@@ -2214,7 +2214,7 @@ class EditPanel(QWidget):
         if index is None:
             kind = (
                 TrackKind.ADDITIONAL
-                if clip.is_additional
+                if clip.is_overlay
                 else TrackKind.VIDEO
                 if clip.is_transition or clip.has_image
                 else TrackKind.AUDIO
@@ -2654,7 +2654,7 @@ class EditPanel(QWidget):
         if index is None:
             kind = (
                 TrackKind.ADDITIONAL
-                if pasted.is_additional
+                if pasted.is_overlay
                 else TrackKind.VIDEO
                 if pasted.is_transition or pasted.has_image
                 else TrackKind.AUDIO
@@ -2908,7 +2908,7 @@ class EditPanel(QWidget):
         visual_tracks = [
             t
             for t in self._project.tracks
-            if t.visible and t.kind is TrackKind.ADDITIONAL
+            if t.visible and t.kind is not TrackKind.AUDIO
         ]
         clips = tuple(
             c
@@ -4023,7 +4023,7 @@ class EditPanel(QWidget):
             self._timeline.set_position(visible_position, follow=False)
             self._update_time_labels()
             has_overlays = any(
-                t.visible and t.kind is TrackKind.ADDITIONAL and any(
+                t.visible and t.kind is not TrackKind.AUDIO and any(
                     c.overlay_type != "filter"
                     and (c.overlay_type in ("image", "text") or c.is_image)
                     and c.contains(visible_position)
@@ -4188,6 +4188,12 @@ class EditPanel(QWidget):
         montagem inteira herdar o nome de uma foto sobreposta.
         """
         for track in reversed(self._project.video_tracks):
+            # Foto não dá formato à saída: numa trilha que começa com uma
+            # imagem, o nome e o container vêm do primeiro vídeo.
+            videos = [c for c in track.sorted_clips() if not c.is_image and not c.is_transition]
+            if videos:
+                return videos[0]
+        for track in reversed(self._project.video_tracks):
             if track.clips:
                 return track.sorted_clips()[0]
         clips = self._project.clips
@@ -4310,7 +4316,9 @@ class EditPanel(QWidget):
             if clip is not None and clip.detached
             else strings.EDIT_GAIN_TIP
         )
-        self._speed_btn.setEnabled(clip is not None and clip.overlay_type != "filter")
+        # Foto não tem relógio de mídia: velocidade só esticaria a duração, e a
+        # composição a ignora.
+        self._speed_btn.setEnabled(clip is not None and clip.overlay_type != "filter" and not clip.is_image)
         self._speed_btn.setToolTip(strings.EDIT_SPEED_TIP)
 
         self._refresh_clip_actions()

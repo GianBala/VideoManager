@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import threading
 import math
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -35,6 +36,7 @@ from typing import TYPE_CHECKING
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.keyframe import ClipTransform
+from videomanager.domain.geometry import image_base_size, natural_image_size
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import interpolate_keyframes
 from videomanager.domain.timing import source_time, available_duration, frame_index, last_frame_time
@@ -303,7 +305,19 @@ class Clip:
 
     @property
     def is_additional(self) -> bool:
+        """Bloco sem relógio de mídia próprio: imagem, texto, filtro, transição.
+
+        Decide o que vale para o tempo do bloco — sem ``in_point``, fim livre,
+        sem som, fora do corte rápido. **Não** decide a trilha: imagem é
+        adicional neste sentido e mesmo assim vive na trilha de vídeo (ver
+        :attr:`is_overlay`).
+        """
         return self.overlay_type in ("image", "text", "filter", "transition") or self.is_image
+
+    @property
+    def is_overlay(self) -> bool:
+        """Texto e filtro: o que vive nas trilhas de Adicionais."""
+        return self.overlay_type in ("text", "filter")
 
     @property
     def is_transition(self) -> bool:
@@ -1223,6 +1237,71 @@ class Project:
             tracks=tuple(replace(t, clips=t.sorted_clips()) for t in self.tracks),
         )
 
+    def with_images_in_video_tracks(self, *, legacy_scale: bool) -> Project:
+        """Leva imagens de trilhas de Adicionais para trilhas de vídeo.
+
+        Uma trilha de adicionais só com imagens vira trilha de vídeo, com a
+        mesma identidade e posição na pilha. Uma trilha mista ganha, logo acima,
+        uma trilha de vídeo com as imagens; como blocos da mesma trilha nunca se
+        sobrepõem no tempo, a ordem entre eles não muda o resultado.
+
+        ``legacy_scale`` converte a escala de projetos gravados antes do
+        formato 3, em que a imagem aparecia no tamanho natural: o fator é o que
+        leva o tamanho novo (ajustado à tela) de volta ao antigo, eixo a eixo e
+        também nos quadros-chave. Assim a foto continua do mesmo tamanho e no
+        mesmo lugar.
+        """
+        if not any(t.kind is TrackKind.ADDITIONAL and any(c.is_image for c in t.clips) for t in self.tracks):
+            return self
+        videos = sum(1 for t in self.tracks if t.kind is TrackKind.VIDEO)
+
+        def video_name() -> str:
+            nonlocal videos
+            videos += 1
+            return f"{TrackKind.VIDEO.value.capitalize()} {videos}"
+
+        tracks: list[Track] = []
+        for track in self.tracks:
+            images = tuple(
+                self._with_natural_image_scale(c) if legacy_scale else c
+                for c in track.clips if c.is_image
+            ) if track.kind is TrackKind.ADDITIONAL else ()
+            if not images:
+                tracks.append(track)
+                continue
+            others = tuple(c for c in track.clips if not c.is_image)
+            if others:
+                tracks.append(Track(kind=TrackKind.VIDEO, clips=images, name=video_name(),
+                                    muted=track.muted, visible=track.visible))
+                tracks.append(replace(track, clips=others))
+            else:
+                default = re.fullmatch(rf"{TrackKind.ADDITIONAL.value.capitalize()} \d+", track.name or "")
+                tracks.append(replace(track, kind=TrackKind.VIDEO, clips=images,
+                                      name=video_name() if default or not track.name else track.name))
+        return replace(self, tracks=tuple(tracks))
+
+    def _with_natural_image_scale(self, clip: Clip) -> Clip:
+        media = clip.media
+        new_w, new_h = image_base_size(media.width, media.height, self.width, self.height)
+        old_w, old_h = natural_image_size(media.width, media.height, self.width, self.height)
+        fx, fy = old_w / new_w, old_h / new_h
+        if abs(fx - 1) < 1e-9 and abs(fy - 1) < 1e-9:
+            return clip
+
+        def exact(value: float) -> float:
+            # O compositor escreve a escala com seis casas e trunca o tamanho
+            # nas animações; 400/1440 viraria 399,999 px e perderia dois pixels.
+            # Arredondar para cima nas mesmas seis casas nunca fica abaixo do
+            # tamanho antigo, e o excesso é menor que um milésimo de pixel.
+            return math.ceil(round(value * 1e6, 3)) / 1e6
+
+        sx, sy = exact(clip.scale_x * fx), exact(clip.scale_y * fy)
+        return replace(
+            clip, scale_x=sx, scale_y=sy, scale=(sx + sy) / 2,
+            keyframes=tuple(replace(k, scale_x=exact(k.scale_x * fx), scale_y=exact(k.scale_y * fy))
+                            for k in clip.keyframes),
+        )
+
     def without_empty_tracks(self, keep: int = 2) -> Project:
         """Descarta trilhas vazias, mantendo um mínimo para trabalhar."""
         used = [t for t in self.tracks if t.clips]
@@ -1234,10 +1313,11 @@ class Project:
 def accepts(kind: TrackKind, clip: Clip) -> bool:
     """Se um bloco pode viver numa trilha desta espécie.
 
-    Adicionais (textos, filtros e imagens) vivem exclusivamente em trilhas
-    de adicionais. Áudio não sobe para trilha de vídeo (não há o que mostrar)
-    e imagem ou vídeo não descem para trilha de áudio (o som deles, quando
-    existe, é separado por "separar áudio").
+    Textos e filtros vivem exclusivamente em trilhas de adicionais. Imagem é
+    parte da trilha de vídeo, como nos editores de referência, e pode formar
+    corte e transição com um vídeo vizinho. Áudio não sobe para trilha de vídeo
+    (não há o que mostrar) e imagem ou vídeo não descem para trilha de áudio (o
+    som deles, quando existe, é separado por "separar áudio").
 
     Quem decide é o **bloco**, não a mídia dele: o bloco criado por "separar
     áudio" vem de um arquivo com imagem e mesmo assim é áudio. Enquanto isso
@@ -1247,8 +1327,8 @@ def accepts(kind: TrackKind, clip: Clip) -> bool:
     if clip.is_transition:
         return kind is TrackKind.VIDEO
     if kind is TrackKind.ADDITIONAL:
-        return clip.is_additional
-    if clip.is_additional:
+        return clip.is_overlay
+    if clip.is_overlay:
         return False
     if kind is TrackKind.VIDEO:
         return clip.has_image
@@ -1277,11 +1357,8 @@ def new_project(media: MediaRef | None = None) -> Project:
         return project
 
     clip = Clip(media=media, start=0.0, duration=media.natural_duration)
-    if media.kind is MediaKind.IMAGE:
-        project = project.with_track(TrackKind.ADDITIONAL)
-        index = 0
-    else:
-        index = 0 if media.has_video else 1
+    # Imagem entra na trilha de vídeo, como um vídeo.
+    index = 0 if media.has_video else 1
     # A tela sai da mesma regra que vale do segundo arquivo em diante, e não de
     # uma conta própria do começo: duas contas para a mesma decisão acabam
     # discordando, e nenhum leitor saberia qual delas manda.
@@ -1310,22 +1387,15 @@ def auto_canvas(project: Project) -> Project:
     Sem imagem nenhuma, volta ao padrão: é o que faz a próxima importação
     definir a tela de novo, em vez de herdar a de um material que já saiu.
     """
-    visible = [
+    # Só vídeo decide a tela. Fotos agora vivem na trilha de vídeo, e contá-las
+    # aqui levaria uma apresentação de fotos grandes a uma tela de 6000 px.
+    videos = [
         clip
-        for track in project.video_tracks
+        for track in (*project.video_tracks, *project.additional_tracks)
         if track.visible
         for clip in track.clips
-        if clip.has_image and clip.media
+        if clip.has_image and clip.media and clip.media.kind is MediaKind.VIDEO
     ]
-    if not visible:
-        visible = [
-            clip
-            for track in project.additional_tracks
-            if track.visible
-            for clip in track.clips
-            if clip.has_image and clip.media and clip.media.kind is MediaKind.VIDEO
-        ]
-    videos = [c for c in visible if c.media.kind is MediaKind.VIDEO] or visible
     sized = [c.media for c in videos if c.media.width and c.media.height]
     if not sized:
         return project.with_output_canvas(DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_FPS)

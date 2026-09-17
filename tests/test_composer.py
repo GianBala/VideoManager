@@ -1029,11 +1029,12 @@ class TestVelocidadeEFiltros:
         )
         graph_export = build_graph(proj)
         export_filters = ";".join(graph_export.filters)
-        assert "scale=400:300" in export_filters
+        # Ajustada à tela como vídeo: 400×300 ocupa a altura de 1080.
+        assert "scale=1440:1080" in export_filters
 
         cmd_preview = frame_command(proj, 1.0, (960, 540), TOOLS)
         cmd_str = " ".join(cmd_preview)
-        assert "scale=200:150" in cmd_str
+        assert "scale=720:540" in cmd_str
 
     def test_keyframe_rotation_and_scale_expressions(self) -> None:
         from videomanager.domain.keyframe import Keyframe
