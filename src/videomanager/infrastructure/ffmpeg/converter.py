@@ -61,6 +61,7 @@ from videomanager.domain.compatibility import _CONTAINER_VIDEO_FALLBACK as _CONT
 from videomanager.domain.compatibility import _CONTAINER_AUDIO_FALLBACK as _CONTAINER_AUDIO_FALLBACK
 from videomanager.domain.compatibility import can_copy_audio as can_copy_audio
 from videomanager.domain.compatibility import needs_scaling as needs_scaling
+from videomanager.domain.compatibility import is_portrait
 from videomanager.domain.compatibility import _container_accepts as _container_accepts
 from videomanager.domain.compatibility import needs_video_reencode as needs_video_reencode
 from videomanager.domain.compatibility import needs_audio_reencode as needs_audio_reencode
@@ -94,6 +95,9 @@ _AUDIO_ENCODERS = {
 
 # Nomes de codec que o ffprobe reporta, por codec pedido. Usado para decidir se
 # a cópia direta é possível.
+
+# PCM de origem com mais de 16 bits: o WAV de saída sobe para 24.
+_HIGH_RES_PCM = ("pcm_s24", "pcm_s32", "pcm_f32", "pcm_f64")
 
 _VIDEO_ENCODERS = {
     "h264": "libx264",
@@ -171,6 +175,7 @@ def probe_file(path: Path, tools: FFmpegTools, *, control: ProcessControl | None
                 language=(raw.get("tags") or {}).get("language"),
                 rotation=_display_rotation(raw),
                 attached_picture=bool((raw.get('disposition') or {}).get('attached_pic')),
+                duration=_stream_duration(raw),
             )
         )
 
@@ -181,6 +186,20 @@ def probe_file(path: Path, tools: FFmpegTools, *, control: ProcessControl | None
         size=_int(container.get("size")),
         streams=tuple(streams),
     )
+
+
+def _stream_duration(raw: dict) -> float | None:
+    """Duração da trilha: o campo do MP4 ou, no MKV, a etiqueta DURATION."""
+    value = _float(raw.get("duration"))
+    if value:
+        return value
+    tag = next((v for k, v in (raw.get("tags") or {}).items() if str(k).upper() == "DURATION"), None)
+    try:
+        hours, minutes, seconds = str(tag).split(":")
+        total = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    except (ValueError, TypeError):
+        return None
+    return total if total > 0 else None
 
 
 def _display_rotation(raw: dict) -> float:
@@ -272,6 +291,10 @@ def build_audio_args(
         encoder = _AUDIO_ENCODERS.get(target.codec)
         if encoder is None:
             raise ConversionError(f"Formato de áudio não suportado: {target.codec}")
+        if encoder == "pcm_s16le" and media.audio and media.audio.codec.lower().startswith(_HIGH_RES_PCM):
+            # WAV é anunciado como "sem perda": uma origem de 24 bits ou
+            # ponto flutuante reduzida a 16 bits perdia resolução em silêncio.
+            encoder = "pcm_s24le"
         args += ["-c:a", encoder]
         if not target.is_lossless:
             args += ["-b:a", f"{target.bitrate}k"]
@@ -284,6 +307,29 @@ def build_audio_args(
     return args
 
 
+# Legendas que o MKV aceita copiadas. ``mov_text`` (a legenda do MP4) fica de
+# fora: copiá-la para MKV é recusado pelo muxer, e convertê-la mudaria o que o
+# usuário pediu como cópia.
+_MKV_COPYABLE_SUBTITLES = {
+    "subrip", "srt", "ass", "ssa", "webvtt", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle",
+}
+
+
+def _count(media: LocalMedia, kind: str) -> int:
+    return sum(1 for stream in media.streams if stream.kind == kind)
+
+
+def _mkv_extra_streams(media: LocalMedia) -> tuple[str, ...]:
+    """Legendas e anexos (fontes do ASS) que uma saída MKV pode manter."""
+    extras: list[str] = []
+    subtitles = [s for s in media.streams if s.kind == "subtitle"]
+    if subtitles and all(s.codec.lower() in _MKV_COPYABLE_SUBTITLES for s in subtitles):
+        extras.append("s")
+    if _count(media, "attachment"):
+        extras.append("t")
+    return tuple(extras)
+
+
 def build_video_args(
     media: LocalMedia, target: VideoTarget, destination: Path, tools: FFmpegTools
 ) -> list[str]:
@@ -293,25 +339,18 @@ def build_video_args(
             f"“{media.path.name}” não tem trilha de vídeo. Use a conversão para áudio."
         )
 
-    args = [
-        tools.ffmpeg_str,
-        "-nostdin",
-        "-hide_banner",
-        "-y",
-        "-i", str(media.path),
-        "-map", "0:v:0",
-    ]
-    if media.has_audio:
-        args += ["-map", "0:a:0"]
-
     codec = resolved_video_codec(media, target)
     device_args: list[str] = []
     video_encoder_args: list[str] = []
     filters: list[str] = []
 
     if needs_scaling(media, target):
-        # -2 mantém a largura par: codecs H.264/HEVC exigem dimensões pares.
-        filters.append(f"scale=-2:{target.height}")
+        # -2 mantém o outro lado par: codecs H.264/HEVC exigem dimensões pares.
+        # A resolução pedida é o lado curto, que num retrato é a largura.
+        if is_portrait(media):
+            filters.append(f"scale={target.height}:-2")
+        else:
+            filters.append(f"scale=-2:{target.height}")
 
     if codec == "copy":
         video_encoder_args = ["-c:v", "copy"]
@@ -341,16 +380,30 @@ def build_video_args(
         "-y",
         *device_args,
         "-i", str(media.path),
-        "-map", "0:v:0",
+        # "V" maiúsculo exclui capas (attached_pic): com "v", um arquivo cuja
+        # capa vinha antes do vídeo virava um vídeo de um quadro só.
+        "-map", "0:V:0",
     ]
+    extras = _mkv_extra_streams(media) if target.container == "mkv" else ()
     if media.has_audio:
-        args += ["-map", "0:a:0"]
+        # O MKV guarda qualquer faixa: todas as de áudio seguem. Os outros
+        # containers ficam com a primeira, e a descrição avisa.
+        args += ["-map", "0:a?" if target.container == "mkv" and _count(media, "audio") > 1 else "0:a:0"]
+    for kind in extras:
+        args += ["-map", f"0:{kind}?"]
 
     args += video_encoder_args
     if filters:
         args += ["-vf", ",".join(filters)]
     if codec != "copy" and target.fps:
         args += ["-r", str(target.fps)]
+    if target.container in ("mp4", "mov") and (codec == "hevc" or (
+            codec == "copy" and media.video is not None and media.video.codec.lower() == "hevc")):
+        # Sem a etiqueta hvc1 o HEVC em MP4 não abre no QuickTime, em aparelhos
+        # Apple nem no app Filmes e TV do Windows; o ffmpeg grava hev1.
+        args += ["-tag:v", "hvc1"]
+    for kind in extras:
+        args += [f"-c:{kind}", "copy"]
 
     if media.has_audio:
         audio_codec = resolved_audio_codec(media, target)
@@ -577,7 +630,12 @@ class Converter:
         kwargs["stderr"] = subprocess.PIPE
 
         try:
-            process = subprocess.Popen(args, text=True, bufsize=1, **kwargs)
+            # UTF-8 explícito: o padrão do Windows é cp1252, e o ffmpeg imprime
+            # título e descrição em UTF-8. Um caractere fora da tabela matava a
+            # thread que drena o stderr; o cano enchia e o ffmpeg parava para
+            # sempre, segurando a fila de processamento, que tem uma vaga só.
+            process = subprocess.Popen(args, text=True, bufsize=1, encoding="utf-8",
+                                       errors="replace", **kwargs)
         except OSError as exc:
             render_target.unlink(missing_ok=True)
             self._outputs.abort(self._destination, lease=self._lease)

@@ -499,7 +499,7 @@ def test_fim_do_audio_continua_video_e_relogio_monotonico(panel, monkeypatch):
     _clock_project(panel)
     panel._timeline.set_position(1)
     now = [10.0]
-    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.time.monotonic', lambda: now[0])
+    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.playback_clock', lambda: now[0])
     panel._on_audio_stopped()
     assert panel._playing
     now[0] = 12
@@ -522,7 +522,7 @@ def test_pausa_e_retomada_seguem_frame_exibido_sem_deriva_acumulada(panel, monke
     monkeypatch.setattr(panel, '_ensure_tools', lambda: object())
     monkeypatch.setattr(panel, '_prime_playback', lambda: None)
     monkeypatch.setattr(panel, '_start_frames', lambda seconds: (17, True))
-    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.time.monotonic', lambda: now[0])
+    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.playback_clock', lambda: now[0])
     resumed = []
     def start(audio, project, seconds, tools, **kw):
         resumed.append(seconds)
@@ -551,7 +551,7 @@ def test_velocidade_de_clipe_nao_antecipa_fim(panel, monkeypatch):
     panel._clock_position = 3.8
     panel._clock_started = 10
     now = [10.0]
-    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.time.monotonic', lambda: now[0])
+    monkeypatch.setattr('videomanager.presentation.qt.panels.edit_panel.playback_clock', lambda: now[0])
     panel._on_tick()
     assert panel._playing
     panel._shown_frame = 119/30
@@ -904,3 +904,71 @@ def test_camadas_atrasadas_descartadas_apos_seek_selecao_e_edicao(panel):
     panel._preview.set_active_clip(None, 1920, 1080)
     panel._on_interaction_ready(987, images)
     assert panel._preview._interaction_layers is None
+
+
+def _video_sobre_audio(panel):
+    """Vídeo em cima, áudio embaixo começando depois: o caso do corte no som."""
+    video = MediaRef(Path('/m/video.mp4'), MediaKind.VIDEO, duration=20, width=320, height=180)
+    som = MediaRef(Path('/m/som.mp3'), MediaKind.AUDIO, duration=20, has_audio=True, channels=2)
+    clip_v, clip_a = Clip(video, 0, 10), Clip(som, 2, 8)
+    project = replace(panel._project, tracks=(Track(TrackKind.VIDEO, clips=(clip_v,)),
+                                               Track(TrackKind.AUDIO, clips=(clip_a,))))
+    panel.install_project(project, None, [], {})
+    return clip_v, clip_a
+
+
+def test_botoes_de_corte_acompanham_a_agulha_movida_pela_reproducao(panel):
+    """Com o áudio selecionado e a agulha fora dele, a tesoura fica desligada.
+
+    Tocar e pausar dentro do áudio anda a agulha sem passar pela busca, e os
+    botões ficavam desligados até o usuário clicar num vídeo e voltar no áudio
+    — o único caminho que recalculava o estado deles.
+    """
+    _, clip_a = _video_sobre_audio(panel)
+    panel._timeline.set_position(1)
+    panel._timeline.select(clip_a.clip_id)
+    assert not panel._split_button.isEnabled()
+    panel._timeline.set_position(5)  # o que o relógio da reprodução faz
+    assert panel._split_button.isEnabled()
+    assert panel._trim_left_button.isEnabled() and panel._trim_right_button.isEnabled()
+    panel._split_here()
+    cortado = [c for c in panel._project.tracks[1].clips]
+    assert len(cortado) == 2 and len(panel._project.tracks[0].clips) == 1
+
+
+def test_clicar_na_regua_move_a_agulha_sem_perder_a_selecao(panel):
+    """A régua é onde se posiciona o corte; desselecionar ali fazia a tesoura
+    cair no bloco de cima — o vídeo — em vez do áudio escolhido."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from videomanager.presentation.qt.panels.timeline import RULER_HEIGHT
+
+    clip_v, clip_a = _video_sobre_audio(panel)
+    timeline = panel._timeline
+    timeline.resize(900, 300)
+    timeline.set_view(0, 10)
+    timeline.select(clip_a.clip_id)
+    pos = QPointF(timeline._x_of(6), RULER_HEIGHT / 2)
+    for kind in (QMouseEvent.Type.MouseButtonPress, QMouseEvent.Type.MouseButtonRelease):
+        event = QMouseEvent(kind, pos, pos, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                            Qt.KeyboardModifier.NoModifier)
+        (timeline.mousePressEvent if kind == QMouseEvent.Type.MouseButtonPress else timeline.mouseReleaseEvent)(event)
+    assert timeline.selected == clip_a.clip_id
+    assert abs(panel._position - 6) < 0.05
+    panel._split_here()
+    assert len(panel._project.tracks[1].clips) == 2
+    assert len(panel._project.tracks[0].clips) == 1
+
+
+def test_barra_de_rolagem_e_divisoria_nao_desselecionam(panel):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    _, clip_a = _video_sobre_audio(panel)
+    panel._timeline.select(clip_a.clip_id)
+    pos = QPointF(2, 2)
+    event = QMouseEvent(QMouseEvent.Type.MouseButtonPress, pos, pos, Qt.MouseButton.LeftButton,
+                        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    panel.eventFilter(panel._scroll, event)
+    panel.eventFilter(panel._split_view.handle(1), event)
+    assert panel._timeline.selected == clip_a.clip_id

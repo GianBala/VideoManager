@@ -20,6 +20,7 @@ from videomanager.application.ports.rendering import collect_text_assets
 from videomanager.application.ports.rendering import TextRasterizer
 from videomanager.application.ports.processing import MediaCatalog
 from videomanager.application.ports.processing import OutputStore
+from videomanager.domain.compatibility import container_accepts_video
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,9 @@ class ProcessingService:
         cache = probed or {}
         # A trilha de vídeo inferior define a referência principal da montagem.
         ordered = [c for t in reversed(project.video_tracks) if t.visible for c in t.sorted_clips()]
+        # Fotos agora estão nas trilhas de vídeo; o nome da saída continua vindo
+        # de um vídeo quando há algum.
+        ordered = [c for c in ordered if not c.is_image] + [c for c in ordered if c.is_image]
         ordered += list(project.clips)
         source = next((c.media.path for c in ordered if c.overlay_type not in ('text', 'filter', 'transition')
                        and self.catalog.exists(c.media.path)), None)
@@ -92,8 +96,12 @@ class ProcessingService:
 
     def convert(self, media: LocalMedia, target: AudioTarget | VideoTarget, *,
                 same_folder: bool, fallback: Path) -> tuple[Job, bool]:
-        if isinstance(target, VideoTarget) and not media.has_video:
+        if isinstance(target, VideoTarget) and (not media.has_video or media.video_is_cover):
+            # Uma capa embutida (MP3, M4A, FLAC) aparece como trilha de vídeo,
+            # mas convertê-la gerava um "vídeo" de um quadro só.
             raise ConversionError('não tem trilha de vídeo')
+        if isinstance(target, VideoTarget) and not container_accepts_video(target.container, target.video_codec):
+            raise ConversionError(f'{target.video_codec.upper()} não cabe em .{target.container}')
         if isinstance(target, AudioTarget) and not media.has_audio:
             raise ConversionError('não tem trilha de áudio')
         directory = media.path.parent if same_folder else fallback

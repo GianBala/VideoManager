@@ -22,6 +22,9 @@ from videomanager.application.media.preview import PreviewFrameInbox
 from dataclasses import replace
 
 from videomanager.infrastructure.ffmpeg.preview import FramePump
+from videomanager.infrastructure.ffmpeg.preview import jpeg_frames
+from videomanager.infrastructure.system.binaries import lower_priority
+from videomanager.infrastructure.system.binaries import subprocess_kwargs
 from videomanager.infrastructure.ffmpeg.preview import filmstrip_frames
 from videomanager.infrastructure.ffmpeg.preview import frame_from_command
 from videomanager.infrastructure.ffmpeg.preview import render_waveform
@@ -259,6 +262,66 @@ class KeyframeWorker(QRunnable):
             emit_safely(self.signals.done)
 
 
+class ScrubCacheWorker(QRunnable):
+    """Compõe um trecho em JPEG pequeno para o cache da agulha, sem pressa.
+
+    Roda com prioridade baixa e entrega os quadros em lotes, para a interface
+    guardar sem ser acordada a cada um.
+    """
+
+    _BATCH = 12
+
+    def __init__(self, command: list[str], first_index: int, token: int) -> None:
+        super().__init__()
+        self._command = command
+        self._first_index = first_index
+        self._token = token
+        self._guard = _Interruption()
+        self.signals = PreviewSignals()
+
+    def cancel(self) -> None:
+        self._guard.cancel()
+
+    @Slot()
+    def run(self) -> None:
+        process = None
+        try:
+            if self._guard.cancelled:
+                return
+            kwargs = subprocess_kwargs()
+            kwargs["stderr"] = subprocess.DEVNULL
+            process = subprocess.Popen(self._command, **kwargs)
+            self._guard.register(process)
+            lower_priority(process)
+            batch: list[bytes] = []
+            index = self._first_index
+            assert process.stdout is not None
+            for image in jpeg_frames(process.stdout.read):
+                if self._guard.cancelled:
+                    return
+                batch.append(image)
+                if len(batch) >= self._BATCH:
+                    emit_safely(self.signals.scrub_frames, self._token, index, batch)
+                    index += len(batch)
+                    batch = []
+            if batch and not self._guard.cancelled:
+                emit_safely(self.signals.scrub_frames, self._token, index, batch)
+        except (VideoManagerError, OSError, subprocess.SubprocessError):
+            pass  # o cache é um atalho: sem ele, a agulha pede o quadro exato
+        finally:
+            if process is not None:
+                if process.poll() is None:
+                    process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.SubprocessError:
+                    process.kill()
+                if process.stdout is not None:
+                    process.stdout.close()
+            self._guard.release()
+            emit_safely(self.signals.done)
+
+
 class PlaybackWorker(QRunnable):
     """Reprodução da prévia: um quadro por sinal, no ritmo do relógio.
 
@@ -291,9 +354,26 @@ class PlaybackWorker(QRunnable):
             self._gate.set()
         self.signals = PreviewSignals()
 
-    def start_playback(self) -> None:
-        """Libera um fluxo previamente carregado sem abrir outro processo."""
+    def start_playback(self, at: float | None = None) -> None:
+        """Libera um fluxo previamente carregado sem abrir outro processo.
+
+        ``at`` marca o instante de ``playback_clock`` do primeiro quadro: a
+        emenda do loop, que entra quando o fluxo atual termina, e a espera pelo
+        som no play, que solta a imagem no instante em que o som começou.
+        """
+        if at is not None:
+            self._pump.start_at(at)
         self._gate.set()
+
+    def hold_start(self) -> None:
+        """Segura o primeiro quadro até ``start_playback(at=...)``."""
+        self._pump.hold_start()
+
+    def clock_position(self, now: float | None = None) -> float | None:
+        return self._pump.clock_position(now)
+
+    def set_clock_offset(self, seconds: float) -> None:
+        self._pump.set_clock_offset(seconds)
 
     def cancel(self) -> None:
         self._cancelled = True

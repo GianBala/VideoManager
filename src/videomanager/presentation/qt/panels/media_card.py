@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager.application.formatting import DASH
+from videomanager.application.formatting import format_duration
 from videomanager.domain.formats import MediaInfo
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
@@ -101,9 +102,12 @@ class MediaCard(QFrame):
 
         # DASH é o "não informado" do humanize: numa transmissão ao vivo, que não
         # tem duração, a linha ficava com um travessão solto entre os pontos.
+        # A duração é formatada aqui: o domínio não conhece a apresentação, e o
+        # antigo ``MediaInfo.duration_label`` saiu dele na migração — o cartão
+        # continuava a lê-lo e a análise terminava sem mostrar nada.
         pieces = [
             piece
-            for piece in (media.uploader, media.duration_label, media.extractor)
+            for piece in (media.uploader, format_duration(media.duration), media.extractor)
             if piece and piece != DASH
         ]
         if media.is_live:

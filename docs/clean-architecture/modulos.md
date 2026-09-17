@@ -28,6 +28,7 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [domain/geometry.py](../../src/videomanager/domain/geometry.py) | Dimensão base de imagem para transformações consistentes. |
 | [domain/media.py](../../src/videomanager/domain/media.py) | LocalMedia/LocalStream e alvos AudioTarget/VideoTarget, sem inspeção externa. |
 | [domain/preview.py](../../src/videomanager/domain/preview.py) | RawFrame RGB24, limites de fps, ajuste de dimensões e instantes de miniaturas. |
+| [domain/scrub.py](../../src/videomanager/domain/scrub.py) | Assinatura do que compõe um instante e trechos de assinatura constante, para validar quadros guardados. |
 | [domain/project.py](../../src/videomanager/domain/project.py) | Project, Track, Clip, MediaRef e operações imutáveis: cortes, trilhas, transforms, tela, IDs e duração. |
 | [domain/render_cost.py](../../src/videomanager/domain/render_cost.py) | Estimativa calibrada de memória da interpolação a partir dos clipes e dimensões. |
 | [domain/selection.py](../../src/videomanager/domain/selection.py) | VideoRequest/AudioRequest e escolhas de container/qualidade de download. |
@@ -55,6 +56,7 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [application/media/downloads.py](../../src/videomanager/application/media/downloads.py) | DownloadService: valida URL e coordena análise e planejamento pelo gateway. |
 | [application/media/export_description.py](../../src/videomanager/application/media/export_description.py) | Descrição da exportação de projeto, incluindo áudio, qualidade e interpolação. |
 | [application/media/preview.py](../../src/videomanager/application/media/preview.py) | PreviewRequest e normalização de tempo, tamanho, fps, token e recursos. |
+| [application/media/scrub.py](../../src/videomanager/application/media/scrub.py) | ScrubFrameCache: quadros JPEG por índice e assinatura, teto de memória, obsoletos e faltantes. |
 | [application/media/processing.py](../../src/videomanager/application/media/processing.py) | ExportOptions e ProcessingService: valida escolhas, define alvos, prepara texto e reserva saída. |
 | [application/media/trim_description.py](../../src/videomanager/application/media/trim_description.py) | Descrição do recorte e seu modo. |
 | [application/ports/downloads.py](../../src/videomanager/application/ports/downloads.py) | DownloadGateway e DownloadPlan para análise e planejamento substituíveis. |
@@ -95,10 +97,12 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [infrastructure/storage/project_json.py](../../src/videomanager/infrastructure/storage/project_json.py) | Esquema .vmp versão 1, caminhos, validação, IDs, mídias ausentes e escrita atômica. |
 | [infrastructure/storage/projects.py](../../src/videomanager/infrastructure/storage/projects.py) | JsonProjectRepository adapta o serializador à porta de projetos. |
 | [infrastructure/storage/settings.py](../../src/videomanager/infrastructure/storage/settings.py) | Persistência de Preferences, defaults de diretórios do sistema e resolução de pasta de downloads. |
-| [infrastructure/system/binaries.py](../../src/videomanager/infrastructure/system/binaries.py) | Localiza/provisiona ffmpeg/ffprobe, valida binários e prepara ambiente de subprocessos. |
+| [infrastructure/system/binaries.py](../../src/videomanager/infrastructure/system/binaries.py) | Localiza/provisiona ffmpeg/ffprobe, localiza o runtime JavaScript (Deno/Node), valida binários e prepara ambiente de subprocessos. |
+| [infrastructure/system/logs.py](../../src/videomanager/infrastructure/system/logs.py) | Log em arquivo com rotação e registro de exceções não tratadas (slots Qt e threads). |
 | [infrastructure/system/memory.py](../../src/videomanager/infrastructure/system/memory.py) | Consulta de memória disponível em Linux/Windows para planejamento externo. |
 | [infrastructure/system/process.py](../../src/videomanager/infrastructure/system/process.py) | ProcessControl: execução registrada, cancelamento, timeout e encerramento. |
 | [infrastructure/yt_dlp/downloader.py](../../src/videomanager/infrastructure/yt_dlp/downloader.py) | Instância de YoutubeDL por tarefa, hooks, progresso, logs, cancelamento e resultado. |
+| [infrastructure/yt_dlp/extras.py](../../src/videomanager/infrastructure/yt_dlp/extras.py) | Opção `js_runtimes` conforme o ambiente e capa tolerante (`TolerantEmbedThumbnailPP`) que não derruba o download. |
 | [infrastructure/yt_dlp/formats.py](../../src/videomanager/infrastructure/yt_dlp/formats.py) | Normaliza dados brutos dos extratores, classifica presença de streams e monta FormatMatrix. |
 | [infrastructure/yt_dlp/gateway.py](../../src/videomanager/infrastructure/yt_dlp/gateway.py) | Implementa DownloadGateway combinando probe e política de planejamento. |
 | [infrastructure/yt_dlp/probe.py](../../src/videomanager/infrastructure/yt_dlp/probe.py) | Executa análise de URL, traduz erros e constrói MediaInfo/PlaylistInfo. |

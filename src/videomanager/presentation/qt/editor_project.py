@@ -129,11 +129,11 @@ class EditorProject(QObject):
         self._start([], project_path=path)
         return True
 
-    def import_files(self, paths: list[Path], *, insert: bool = False) -> None:
+    def import_files(self, paths: list[Path], *, insert: bool = False, placement=None) -> None:
         if paths:
-            self._start(paths, insert=insert)
+            self._start(paths, insert=insert, placement=placement)
 
-    def _start(self, paths, *, project_path=None, insert=False) -> None:
+    def _start(self, paths, *, project_path=None, insert=False, placement=None) -> None:
         p = self.panel
         tools = p.ensure_tools()
         if tools is None and project_path is None:
@@ -141,6 +141,9 @@ class EditorProject(QObject):
         self.cancel_pending()
         p.stop_playback()
         self.path, self.insert, self.expected = project_path, insert, p.editor.session.snapshot()
+        # Destino de arquivos soltos na linha do tempo: (trilha, posição da
+        # trilha nova, instante). Aplicado quando a leitura termina.
+        self.placement = placement
         worker = self._runtime.media_worker(self.token, tools, paths, project_path=project_path,
                              known={ref.path: ref for ref in p.media_references})
         self.worker = worker
@@ -190,7 +193,7 @@ class EditorProject(QObject):
                 QMessageBox.warning(p, strings.DIALOG_WARNING_TITLE,
                                     strings.EDIT_MISSING_MEDIA.format(files=names))
         else:
-            p.accept_import(result, insert=self.insert)
+            p.accept_import(result, insert=self.insert, placement=self.placement)
             if result.rejected:
                 QMessageBox.warning(p, strings.DIALOG_WARNING_TITLE,
                                     strings.EDIT_IMPORT_REJECTED + "\n\n" + "\n".join(result.rejected))

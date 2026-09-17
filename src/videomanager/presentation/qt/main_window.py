@@ -824,6 +824,7 @@ class MainWindow(QMainWindow):
         self._settings = dialog.result_settings()
         self._save_settings()
         self._queue.apply_settings(self._settings)
+        self._convert.apply_settings(self._settings)
         self._edit.apply_settings(self._settings)
         self._dest.setText(self._settings.download_dir)
         if self._settings.theme != previous_theme:

@@ -507,3 +507,63 @@ def test_descricao_do_pedido_e_legivel() -> None:
     pedido = VideoRequest(video=info.matrix.video[0], container="mp4")
     plano = plan_container(info.matrix, pedido.video, None, "mp4")
     assert ".mp4" in describe_request(pedido, plano)
+
+
+class TestExtrasDoAmbiente:
+    """Runtime JavaScript e capa: peças externas que não podem derrubar a tarefa."""
+
+    def test_runtime_encontrado_vai_para_analise_e_download(self, monkeypatch) -> None:
+        from videomanager.infrastructure.yt_dlp import extras, probe
+        monkeypatch.setattr(extras, "find_js_runtime", lambda: ("node", Path("/opt/node")))
+        esperado = {"node": {"path": str(Path("/opt/node"))}}
+        assert TestOpcoesBase()._opts()["js_runtimes"] == esperado
+        assert probe._probe_opts(Settings(), flat_playlist=True)["js_runtimes"] == esperado
+        # O parser real aceita o formato.
+        yt_dlp.YoutubeDL({"quiet": True, "js_runtimes": esperado})
+
+    def test_sem_runtime_mantem_o_padrao_do_ytdlp(self, monkeypatch) -> None:
+        from videomanager.infrastructure.yt_dlp import extras
+        monkeypatch.setattr(extras, "find_js_runtime", lambda: None)
+        assert "js_runtimes" not in TestOpcoesBase()._opts()
+
+    def test_capa_sai_das_opcoes_para_ser_registrada_tolerante(self) -> None:
+        from videomanager.infrastructure.yt_dlp.extras import split_thumbnail_postprocessor
+        opts = TestOpcoesBase()._opts()
+        restante, argumentos = split_thumbnail_postprocessor(opts)
+        assert argumentos == {"already_have_thumbnail": False}
+        assert "EmbedThumbnail" not in [pp["key"] for pp in restante["postprocessors"]]
+        assert "EmbedThumbnail" in [pp["key"] for pp in opts["postprocessors"]]
+
+    def test_capa_em_container_sem_suporte_nao_falha_o_download(self, tmp_path) -> None:
+        from videomanager.infrastructure.yt_dlp.extras import TolerantEmbedThumbnailPP
+        video = tmp_path / "video.webm"
+        video.write_bytes(b"conteudo")
+        capa = tmp_path / "video.jpg"
+        capa.write_bytes(b"\xff\xd8\xff\xe0jpeg")
+        ydl = yt_dlp.YoutubeDL({"quiet": True, "logger": _SemSaida()})
+        pp = TolerantEmbedThumbnailPP(ydl, already_have_thumbnail=False)
+        assert pp.PP_NAME == "EmbedThumbnail"
+        info = {"filepath": str(video), "ext": "webm", "__files_to_move": {},
+                "thumbnails": [{"filepath": str(capa), "url": "x"}]}
+        convertida = tmp_path / "video.png"  # o yt-dlp converte antes de recusar
+        convertida.write_bytes(b"png")
+        apagar, devolvido = pp.run(info)
+        assert devolvido is info
+        assert str(capa) in apagar and str(convertida) in apagar
+        assert str(video) not in apagar
+        assert video.read_bytes() == b"conteudo"
+
+
+class _SemSaida:
+    def debug(self, msg): pass
+    def info(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): pass
+
+
+def test_erro_sem_traducao_nomeia_a_etapa() -> None:
+    from yt_dlp.utils import DownloadError
+    from videomanager.infrastructure.yt_dlp.probe import _translate_error
+    erro = DownloadError("ERROR: Postprocessing: algo estranho")
+    assert str(_translate_error(erro)) == "Falha ao analisar a URL: Postprocessing: algo estranho"
+    assert str(_translate_error(erro, "baixar")) == "Falha ao baixar: Postprocessing: algo estranho"

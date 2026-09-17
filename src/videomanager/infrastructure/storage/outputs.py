@@ -1,8 +1,13 @@
 """Reservas com propriedade explícita e publicação atômica no mesmo volume."""
+import time
 from pathlib import Path
 from videomanager.application.errors import ConversionError
 from videomanager.application.ports.output import OutputLease
 from .output_paths import output_path
+
+
+_REPLACE_ATTEMPTS = 6
+_REPLACE_WAIT = 0.25
 
 
 class FileOutputStore:
@@ -45,4 +50,15 @@ class FileOutputStore:
     ):
         if not self.owns(destination, lease):
             raise ConversionError('O destino reservado foi alterado por outra operação.')
-        temporary.replace(destination)
+        # Antivírus, indexador e OneDrive abrem o arquivo recém-criado por um
+        # instante; no Windows a troca falha com "arquivo em uso" (WinError 32)
+        # e a conversão inteira terminava em erro. Algumas tentativas curtas
+        # resolvem sem mascarar um bloqueio de verdade.
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                temporary.replace(destination)
+                return
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(_REPLACE_WAIT * (attempt + 1))

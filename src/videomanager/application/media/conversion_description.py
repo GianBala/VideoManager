@@ -49,4 +49,11 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
         parts.append(f"{target.height}p")
     if target.fps:
         parts.append(f"{target.fps:g} fps")
+    if target.container != "mkv":
+        # Só o MKV guarda todas as faixas; nos outros a saída leva o primeiro
+        # vídeo e o primeiro áudio. Dizer antes evita descobrir depois.
+        if sum(1 for stream in media.streams if stream.kind == "audio") > 1:
+            parts.append("somente a 1ª faixa de áudio")
+        if any(stream.kind == "subtitle" for stream in media.streams):
+            parts.append("legendas não incluídas")
     return " · ".join(parts)

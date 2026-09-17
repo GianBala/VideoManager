@@ -96,7 +96,7 @@ def test_extras_box_text_and_filter_insertion(qapp: QApplication, dummy_tools: F
         panel.shutdown()
 
 
-def test_image_inserted_into_additional_track(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+def test_image_inserted_into_video_track(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
@@ -109,10 +109,11 @@ def test_image_inserted_into_additional_track(qapp: QApplication, dummy_tools: F
         panel._pool.append(img_ref)
         panel._insert_media_ref(img_ref)
 
-        assert len(panel._project.additional_tracks) >= 1
-        add_clip = panel._project.additional_tracks[0].clips[0]
+        # Imagem é parte da trilha de vídeo; nenhuma trilha de Adicionais nasce.
+        assert not panel._project.additional_tracks
+        add_clip = panel._project.video_tracks[0].clips[0]
         assert add_clip.media.kind is MediaKind.IMAGE
-        assert add_clip.is_additional is True
+        assert add_clip.is_additional is True and add_clip.is_overlay is False
     finally:
         panel.shutdown()
 
@@ -2106,19 +2107,20 @@ def test_clip_properties_widget_animated_clip_sync() -> None:
 
     widget = _ClipPropertiesWidget()
     widget.load_clip(clip, 1920, 1080)
-    assert widget._spin_w.value() == 1200
-    assert widget._spin_h.value() == 800
+    # Ajustada à tela: 1200×800 ocupa a altura de 1080.
+    assert widget._spin_w.value() == 1620
+    assert widget._spin_h.value() == 1080
 
     # Move o cursor para o meio da animação
     widget.set_playhead_position(0.3)
     widget._whole_animation.setChecked(True)
-    assert widget._spin_w.value() == 1200
-    assert widget._spin_h.value() == 800
+    assert widget._spin_w.value() == 1620
+    assert widget._spin_h.value() == 1080
 
-    # Altera a largura para 600
+    # Altera a largura para 810, metade do tamanho base
     changes_emitted: list[dict] = []
     widget.property_changed.connect(lambda cid, ch: changes_emitted.append(ch))
-    widget._spin_w.setValue(600)
+    widget._spin_w.setValue(810)
 
     assert changes_emitted
     last_ch = changes_emitted[-1]
