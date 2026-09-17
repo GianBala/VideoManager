@@ -802,7 +802,7 @@ class Project:
         tracks[index] = track
         return replace(self, tracks=tuple(tracks))
 
-    def with_track(self, kind: TrackKind, name: str = "") -> Project:
+    def with_track(self, kind: TrackKind, name: str = "", *, index: int | None = None) -> Project:
         """Acrescenta uma trilha vazia, num lugar previsível da pilha.
 
         Adicionais entram no topo absoluto. Vídeo entra logo acima da trilha de
@@ -816,7 +816,10 @@ class Project:
         """
         track = Track(kind=kind, name=name or _default_name(self, kind))
         tracks = list(self.tracks)
-        if kind is TrackKind.ADDITIONAL:
+        if index is not None:
+            # Posição escolhida pelo gesto (soltar mídia entre trilhas).
+            tracks.insert(max(0, min(index, len(tracks))), track)
+        elif kind is TrackKind.ADDITIONAL:
             tracks.insert(0, track)
         elif kind is TrackKind.VIDEO:
             anchor = next((i for i, t in enumerate(tracks) if t.kind is TrackKind.VIDEO),
@@ -1189,6 +1192,32 @@ class Project:
             if c.is_transition and c.transition_left_id == clip_id else c
             for c in t.clips)) for t in result.tracks))
         return result.tidy().with_normalized_transitions()
+
+    def with_dropped_clip(self, clip: Clip, track_index: int, new_track_index: int) -> tuple[Project, int]:
+        """Coloca um bloco novo onde o usuário soltou a mídia, sem mexer em nada.
+
+        Se a trilha sob o ponteiro aceita o bloco e o vão ali comporta a duração
+        dele, o bloco fica no instante pedido — encostado na borda do vão quando
+        não cabe inteiro a partir dali. Se não — trilha de outra espécie, soltura
+        em cima de um bloco, vão curto —, nasce uma trilha da espécie certa em
+        ``new_track_index``, com o bloco no instante pedido. Os blocos que já
+        estavam na edição nunca são empurrados.
+
+        Devolve o projeto e o índice da trilha que recebeu o bloco.
+        """
+        if 0 <= track_index < len(self.tracks) and accepts(self.tracks[track_index].kind, clip):
+            floor, ceiling = self.tracks[track_index].free_range(clip.start)
+            if ceiling - floor >= clip.duration - 1e-9:
+                start = min(max(floor, clip.start), ceiling - clip.duration)
+                return self.with_clip(track_index, replace(clip, start=max(0.0, start))), track_index
+        kind = (
+            TrackKind.ADDITIONAL if clip.is_overlay
+            else TrackKind.VIDEO if clip.has_image or clip.is_transition
+            else TrackKind.AUDIO
+        )
+        index = max(0, min(new_track_index, len(self.tracks)))
+        project = self.with_track(kind, index=index)
+        return project.with_clip(index, clip), index
 
     def detached_audio(self, clip_id: int) -> Project:
         """Separa o som de um bloco de vídeo numa trilha de áudio própria.

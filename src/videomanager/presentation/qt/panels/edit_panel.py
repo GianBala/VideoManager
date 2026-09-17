@@ -257,7 +257,7 @@ class EditPanel(QWidget):
     def refresh_project_label(self):
         self._update_project_label()
 
-    def accept_import(self, result, *, insert=False):
+    def accept_import(self, result, *, insert=False, placement=None):
         self._probed.update(result.probed)
         for ref in result.references:
             self._pool_thumbnails.pop(ref.path, None)
@@ -267,7 +267,10 @@ class EditPanel(QWidget):
         self._refresh_pool()
         if result.references:
             self._media_list.setCurrentRow(self._pool.index(result.references[-1]))
-            if insert:
+            if placement is not None:
+                track_index, new_track_index, start = placement
+                self._drop_references(list(result.references), track_index, new_track_index, start)
+            elif insert:
                 self._remember()
                 for reference in result.references:
                     self._place(reference)
@@ -1679,6 +1682,7 @@ class EditPanel(QWidget):
         self._timeline.track_visibility_clicked.connect(self._toggle_track_visibility)
         self._timeline.track_reordered.connect(self._on_track_reordered)
         self._timeline.menu_requested.connect(self._show_menu)
+        self._timeline.media_dropped.connect(self._on_media_dropped)
         self._timeline.view_changed.connect(self._on_view_changed)
         area_row.addWidget(self._timeline, 1)
         self._timeline_vbar = QScrollBar(Qt.Orientation.Vertical)
@@ -1979,7 +1983,9 @@ class EditPanel(QWidget):
             Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()
         ]
         if paths:
-            self.import_files(paths, insert=True)
+            # Fora da linha do tempo, soltar arquivos só os traz ao acervo; o
+            # lugar na edição é escolhido arrastando a mídia até uma trilha.
+            self.import_files(paths, insert=False)
             event.acceptProposedAction()
 
     def import_media_dialog(self) -> None:
@@ -1990,10 +1996,40 @@ class EditPanel(QWidget):
             self, strings.EDIT_IMPORT, str(Path.home()), strings.EDIT_FILE_FILTER
         )
         if paths:
-            self.import_files([Path(p) for p in paths], insert=True)
+            # Importar não põe nada na edição: a mídia vai para o acervo e dali
+            # é arrastada até a trilha e o instante desejados.
+            self.import_files([Path(p) for p in paths], insert=False)
 
-    def import_files(self, paths: list[Path], *, insert: bool = False) -> None:
-        self._project_actions.import_files(paths, insert=insert)
+    def import_files(self, paths: list[Path], *, insert: bool = False, placement=None) -> None:
+        self._project_actions.import_files(paths, insert=insert, placement=placement)
+
+    def _on_media_dropped(self, payload, track_index: int, new_track_index: int, start: float) -> None:
+        """Mídia solta na linha do tempo: do acervo, coloca; do sistema, importa e coloca."""
+        if payload and isinstance(payload[0], dict):
+            by_path = {str(ref.path): ref for ref in self._pool}
+            references = [by_path[item["path"]] for item in payload if item.get("path") in by_path]
+            self._drop_references(references, track_index, new_track_index, start)
+            return
+        paths = [Path(path) for path in payload or ()]
+        if paths:
+            self.import_files(paths, insert=False, placement=(track_index, new_track_index, start))
+
+    def _drop_references(self, references: list[MediaRef], track_index: int, new_track_index: int,
+                         start: float) -> None:
+        """Põe as mídias em sequência a partir do ponto de soltura, num passo de desfazer."""
+        if not references:
+            return
+        was_empty = self._project.is_empty
+        self._remember()
+        last = None
+        for reference in references:
+            clip = Clip(media=reference, start=max(0.0, start), duration=reference.natural_duration)
+            self._project, track_index = self._project.with_dropped_clip(clip, track_index, new_track_index)
+            # A seguinte vai logo depois, na mesma trilha quando couber.
+            placed = self._project.find(clip.clip_id)[1]
+            start, new_track_index, last = placed.end, track_index, placed
+        self._timeline.select(last.clip_id)
+        self._after_edit(refit=was_empty)
 
     def _create_thumbnail_for(self, reference: MediaRef) -> QIcon:
         if reference.path in self._pool_thumbnails:

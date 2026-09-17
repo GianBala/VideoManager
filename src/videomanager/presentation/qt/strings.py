@@ -188,11 +188,11 @@ CONVERT_NO_FILES = "Escolha ao menos um arquivo."
 # --- editor de vídeo ---------------------------------------------------------
 EDIT_IMPORT = "Importar mídia…"
 EDIT_IMPORT_TIP = (
-    "Traz vídeos, áudios e imagens para a edição. Você também pode "
-    "arrastar arquivos direto da área de trabalho para cá."
+    "Traz vídeos, áudios e imagens para o acervo. Depois arraste a mídia até "
+    "a trilha e o instante desejados na linha do tempo."
 )
 EDIT_IMPORT_REJECTED = "Estes arquivos foram ignorados:"
-EDIT_POOL_TIP = "Mídias já importadas nesta edição"
+EDIT_POOL_TIP = "Mídias já importadas nesta edição · arraste uma delas até a linha do tempo"
 EDIT_MEDIA_POOL_TITLE = "Mídia do projeto"
 EDIT_MEDIA_EMPTY = "Arraste mídias para cá\nou clique em “+ Importar”"
 EDIT_MEDIA_REMOVE = "Deletar  (Del)"
@@ -248,8 +248,8 @@ EDIT_INSERT_TIP = (
     "uma trilha nova é criada."
 )
 EDIT_EMPTY = (
-    "Importe vídeos, fotos ou áudios para montar a edição.\n"
-    "Você também pode arrastar os arquivos para cá."
+    "Importe vídeos, fotos ou áudios e arraste-os do acervo\n"
+    "até a linha do tempo para montar a edição."
 )
 EDIT_COLLAPSE = "Retrair prévia"
 EDIT_EXPAND = "Expandir prévia"
