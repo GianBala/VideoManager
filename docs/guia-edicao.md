@@ -19,16 +19,34 @@ cabem no painel.
 
 No acervo de mídia à esquerda:
 
-- **Importar** abre o seletor de arquivos (vídeo, foto ou áudio).
-  Também é possível **arrastar arquivos direto para a aba**.
-- A lista do acervo mostra tudo já importado nesta sessão de edição.
-- **Inserir no cursor** — coloca a mídia na posição atual. Sem destino explícito,
-  prefere uma trilha compatível, visível e com som habilitado quando necessário;
-  cria outra se não houver espaço. Arrastar para uma trilha respeita esse destino.
+- **Importar** abre o seletor de arquivos (vídeo, foto ou áudio). Arquivos
+  arrastados para o acervo ou para outra área da aba também são importados.
+  **Importar não coloca nada na edição**: a mídia fica no acervo.
+- A lista do acervo mostra tudo já importado nesta sessão de edição. A
+  miniatura de um vídeo é o quadro do **meio** dele, que representa o conteúdo
+  melhor que o primeiro (quase sempre preto ou um título). Arquivos exportados
+  e convertidos também recebem como capa o quadro do meio.
+- **Arrastar um cartão do acervo até a linha do tempo** coloca a mídia na
+  trilha e no instante em que ela for solta, com o mesmo ímã dos blocos. Um
+  bloco fantasma mostra onde ela vai cair. Se a trilha sob o ponteiro não
+  aceitar a mídia, ou se ela cair em cima de outro bloco, nasce uma trilha nova
+  ali — nada do que já está na edição é empurrado. Várias mídias entram em
+  sequência. Arrastar arquivos do sistema direto para a linha do tempo importa
+  e coloca no ponto de soltura. Tudo isso é um único passo de desfazer.
+- **Inserir no cursor** (ou duplo clique no cartão) — coloca a mídia na posição
+  atual, numa trilha compatível, visível e com som habilitado quando necessário;
+  cria outra se não houver espaço.
 
-Fotos entram em **Adicionais**. Em montagens somente de fotos, **Slideshow**
-sugere a tela pelas dimensões das imagens, limitada a 1920 pixels no maior lado.
-A escolha é explícita; imagens decorativas não mudam automaticamente a tela.
+Fotos entram na **trilha de vídeo**, como um vídeo: ajustam-se à tela (ampliadas
+ou reduzidas, sem deformar), podem formar corte e transição com o vídeo vizinho
+e aceitam posição, escala, rotação, opacidade e animação a partir desse tamanho.
+Uma foto numa trilha de vídeo acima de outra funciona como sobreposição
+(logotipo, moldura). Velocidade não se aplica a fotos. **Adicionais** ficam com
+textos e filtros.
+
+Em montagens somente de fotos, **Slideshow** sugere a tela pelas dimensões das
+imagens, limitada a 1920 pixels no maior lado. A escolha é explícita; fotos não
+mudam automaticamente a tela.
 
 Com a linha do tempo vazia, a prévia mostra: *"Importe vídeos, fotos ou
 áudios para montar a edição. Você também pode arrastar os arquivos para
@@ -45,6 +63,11 @@ apresenta versões completas conforme ficam prontas. A indicação de carregamen
 termina quando a versão final chega (ver
 [`arquitetura.md`](arquitetura.md)).
 
+Arrastar a agulha responde na hora: em segundo plano, com prioridade baixa, a
+prévia guarda versões menores dos quadros em volta da agulha, e é uma delas que
+aparece durante o arrasto. Ao parar ou soltar, chega o quadro exato. Depois de
+uma edição, só o trecho afetado volta a ser preparado.
+
 Abaixo da imagem, a barra de transporte:
 
 | Controle | Atalho | Ação |
@@ -57,6 +80,13 @@ Abaixo da imagem, a barra de transporte:
 | Avançar 1s | — | avança um segundo |
 | Ir ao fim | — | vai para o fim da edição |
 | ◁ keyframe / keyframe ▷ | — | pula para o ponto de corte rápido mais próximo, antes/depois do cursor |
+
+Com **Loop** marcado, a reprodução volta ao começo sem corte: um pouco antes do
+fim, imagem e som do começo já ficam prontos, e o som é emendado na mesma saída
+de áudio. A volta acontece no fim do que se vê e se ouve (o mesmo fim do arquivo
+exportado). Um bloco de vídeo nunca termina em preto por causa de sobra no
+arquivo: blocos novos duram exatamente a trilha de vídeo, e os de projetos
+antigos seguram o último quadro.
 
 Ao lado, um botão de mudo e um controle de volume regulam **apenas a prévia**
 (não afetam o volume dos blocos nem o resultado exportado).
@@ -76,6 +106,10 @@ Da esquerda para a direita:
    do cursor.
 3. **Apagar à esquerda** (`Q`) — remove o trecho do bloco antes do cursor.
 4. **Apagar à direita** (`W`) — remove o trecho do bloco depois do cursor.
+
+   Os três agem sobre o bloco **selecionado** e ficam habilitados só quando o
+   cursor está dentro dele; o estado acompanha o cursor também durante a
+   reprodução, então dá para tocar, pausar no ponto e cortar.
 5. Lixeira **Excluir bloco** (`Del`).
 6. Contador de trilhas/blocos/duração total do projeto.
 7. Nome do bloco selecionado.
@@ -95,17 +129,30 @@ Da esquerda para a direita:
 - **Arrastar as pontas (alças)** de um bloco — ajusta o corte daquele lado,
   com o mesmo imã.
 - **Clique simples** no vazio da trilha ou na régua de tempo — move o cursor
-  de reprodução para ali.
+  de reprodução para ali. Na trilha vazia a seleção é desfeita; **na régua ela
+  é mantida**, para posicionar o corte do bloco escolhido (por exemplo, um
+  áudio abaixo de um vídeo). Barras de rolagem e divisórias também não
+  desfazem a seleção.
 - **Botão direito** — abre o menu de contexto (ver abaixo), relativo ao que
   está sob o cursor.
 - **Botão do meio, arrastando** — paneia a vista horizontalmente.
-- **Roda do mouse** — desloca verticalmente pelas trilhas.
+- **Roda do mouse** — desloca verticalmente pelas trilhas. A régua de tempo e a
+  cabeça da agulha ficam **fixas no topo**: com mais trilhas do que cabem, as
+  trilhas rolam por baixo da régua e uma barra vertical aparece ao lado.
+  Arrastar um bloco ou o cabeçalho de uma trilha até a borda de cima ou de
+  baixo rola sozinho, para alcançar trilhas fora da vista.
 - **Shift + roda** — desloca a vista horizontalmente sem mudar o zoom.
 - **Ctrl + roda** — zoom, centrado na posição do ponteiro. Ctrl prevalece
   quando Shift também estiver pressionado.
 - **Duplo clique num bloco** — enquadra aquele bloco na largura visível.
 - **Clique no "M" do cabeçalho de uma trilha** — muda/desmuda a trilha
   inteira.
+- **Arrastar o cabeçalho de uma trilha** — muda a posição dela na pilha, para
+  qualquer lugar e com qualquer espécie (vídeo, adicionais ou áudio). Entre
+  trilhas de vídeo e de adicionais, **a que está mais acima aparece por cima**
+  na prévia e na exportação: um texto numa trilha abaixo de um vídeo fica
+  coberto por ele, e um filtro só age sobre o que está abaixo da trilha dele.
+  A posição do áudio não muda o som, só a organização.
 
 Um clique isolado nunca conta como edição: só a partir de alguns pixels de
 arrasto é que a ação entra na pilha de desfazer — selecionar um bloco sem
@@ -139,8 +186,8 @@ Dissolve, Wipe e Slide não desapareçam por misturar duas cópias do mesmo quad
 O movimento permanece contínuo nas extremidades e o áudio original não é
 duplicado durante essa passagem.
 
-Marque **Afetar itens adicionais** para incluir filtros, imagens e textos no
-efeito. Um item que termina exatamente no corte desaparece com o vídeo da
+Marque **Afetar itens adicionais** para incluir filtros e textos das trilhas de
+Adicionais **acima** da transição no efeito. Um item que termina exatamente no corte desaparece com o vídeo da
 esquerda; um que começa ali aparece com o vídeo da direita; um item que continua
 pelos dois lados permanece visível sem piscar. Deixe desmarcado quando títulos,
 logotipos ou filtros devam ficar estáveis acima da transição. A opção também
@@ -159,9 +206,17 @@ de campo ou outro comando. Dentro do campo, os atalhos de edição do texto
 continuam disponíveis. Alterar a resolução de saída mantendo a proporção
 preserva tamanho e posição relativos do texto, incluindo contorno e animação.
 
-Projetos são salvos em `.vmp` versão 2. A versão atual abre v1 e v2; aplicativos
-antigos não abrem v2. Ao salvar sobre v1, uma cópia `.vmp.v1.bak` conserva o
-arquivo original, com numeração se necessário. Guarde também as mídias externas.
+Projetos são salvos em `.vmp` versão 3. A versão atual abre v1, v2 e v3;
+aplicativos antigos não abrem v3. Ao salvar sobre v1 ou v2, uma cópia
+`.vmp.v1.bak` ou `.vmp.v2.bak` conserva o arquivo original, com numeração se
+necessário. Guarde também as mídias externas.
+
+Ao abrir um projeto v1 ou v2, fotos que estavam em trilhas de Adicionais passam
+para trilhas de vídeo na mesma posição da pilha — a trilha inteira, se só tinha
+fotos, ou uma trilha de vídeo nova logo acima, se também tinha textos ou
+filtros. A escala é convertida para a foto continuar do mesmo tamanho e no mesmo
+lugar. Única diferença conhecida: numa transição com **Afetar itens adicionais**
+marcado, essas fotos deixam de participar do efeito e ficam estáveis por cima.
 
 ### Menu de contexto (botão direito)
 

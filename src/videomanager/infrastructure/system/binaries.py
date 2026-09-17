@@ -147,6 +147,29 @@ def subprocess_kwargs() -> dict:
     return kwargs
 
 
+_BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+
+
+def lower_priority(process: subprocess.Popen) -> None:
+    """Rebaixa um processo de fundo para não disputar CPU com a interface.
+
+    Serve ao preenchimento do cache da agulha: ele pode rodar por minutos, e
+    quem está editando ou tocando a prévia vem primeiro. Falhar aqui não é
+    motivo para interromper o trabalho.
+    """
+    try:
+        if is_windows():
+            import ctypes
+            handle = ctypes.windll.kernel32.OpenProcess(0x0200, False, process.pid)  # SET_INFORMATION
+            if handle:
+                ctypes.windll.kernel32.SetPriorityClass(handle, _BELOW_NORMAL_PRIORITY_CLASS)
+                ctypes.windll.kernel32.CloseHandle(handle)
+        else:
+            os.setpriority(os.PRIO_PROCESS, process.pid, 10)
+    except (OSError, AttributeError):
+        pass
+
+
 # Teto de threads de decodificação para o que serve à **prévia**. O padrão do
 # ffmpeg é uma thread por núcleo, e numa máquina de vinte núcleos montar vinte
 # threads para devolver um quadro custa mais do que decodificá-lo. Medido, dez
@@ -220,6 +243,25 @@ def find_tools() -> FFmpegTools | None:
     found = _look_in_path()
     if found:
         return FFmpegTools(found[0], found[1], "sistema")
+    return None
+
+
+def find_js_runtime() -> tuple[str, Path] | None:
+    """Runtime JavaScript para o yt-dlp resolver os desafios do YouTube.
+
+    Sem um, o yt-dlp cai num cliente sem JavaScript e parte dos formatos some.
+    O Deno empacotado vem primeiro, pelo mesmo motivo do ffmpeg: o pacote tem de
+    funcionar num computador sem nada instalado. Depois valem Deno e Node do
+    ``PATH`` — o yt-dlp só habilita o Deno sozinho, então o Node instalado era
+    ignorado mesmo estando ali.
+    """
+    bundled = vendor_dir() / exe_name("deno")
+    if _usable(bundled):
+        return "deno", bundled
+    for name in ("deno", "node"):
+        found = shutil.which(name)
+        if found:
+            return name, Path(found)
     return None
 
 

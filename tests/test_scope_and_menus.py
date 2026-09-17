@@ -258,16 +258,16 @@ def test_timeline_track_reordering_target_detection(qapp: QApplication, dummy_to
         y_track_1 = timeline._lane_rect(1).center().y()
         assert timeline._target_reorder_track(y_track_1) == 1
 
-        # Passando por cima da trilha 2 (Áudio): limita ao slot de vídeo mais próximo (trilha 1)
+        # A ordem é livre: o vídeo pode descer abaixo da trilha de áudio.
         y_track_2 = timeline._lane_rect(2).center().y()
-        assert timeline._target_reorder_track(y_track_2) == 1
+        assert timeline._target_reorder_track(y_track_2) == 2
 
-        # Passando acima do topo: limita ao primeiro slot de vídeo (trilha 0)
+        # Acima do topo: primeira posição
         assert timeline._target_reorder_track(0.0) == 0
 
-        # Arrastando a trilha de áudio (trilha 2): limitada apenas à zona de áudio
+        # A trilha de áudio também sobe para qualquer posição
         timeline._drag_track = 2
-        assert timeline._target_reorder_track(0.0) == 2
+        assert timeline._target_reorder_track(0.0) == 0
     finally:
         panel.shutdown()
 

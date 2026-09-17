@@ -21,8 +21,21 @@ Por exemplo, `start=12`, `in_point=30`, `duration=4`, `speed=2` ocupa
 
 As trilhas são armazenadas na ordem visual, de cima para baixo. O compositor
 percorre vídeo de baixo para cima para construir fundo e sobreposições.
+A ordem é livre: vídeo, adicionais e áudio podem estar intercalados, e a
+prioridade visual é só a posição. `Project.with_track` põe adicionais no topo,
+vídeo logo acima da trilha de vídeo mais alta (ou antes do primeiro áudio) e
+áudio no fim; o cabeçalho arrastado aceita qualquer posição. Uma transição que
+afeta adicionais só leva as trilhas de adicionais **acima** da trilha dela.
 Texto, filtro e transição têm referência sintética: ela não deve ser sondada
 como arquivo. Uma imagem importada continua tendo um arquivo real.
+
+Imagem vive na trilha de vídeo (`accepts`); Adicionais guardam texto e filtro
+(`Clip.is_overlay`). `Clip.is_additional` continua valendo para o **tempo** do
+bloco — sem `in_point`, fim livre, sem som, fora do corte rápido — e inclui a
+imagem. O tamanho base de toda imagem vem de `geometry.image_base_size`, que a
+ajusta à tela como vídeo; compositor, prévia e propriedades usam só essa função.
+`auto_canvas` ignora fotos: adotar o formato delas é a escolha explícita de
+`slideshow_canvas`.
 
 ### Transições pertencem ao corte
 
@@ -151,16 +164,25 @@ que ainda pode emitir callbacks.
 
 ## Formato .vmp
 
-`infrastructure/storage/project_json.py` escreve JSON versão 2 e lê versões 1 e 2.
+`infrastructure/storage/project_json.py` escreve JSON versão 3 e lê versões 1 a 3.
 `projects.py` o expõe pela porta `ProjectRepository`. A versão 2 permite pontos
 de suporte assinados e grava `text_reference_width` / `text_reference_height`.
+A versão 3 põe imagens na trilha de vídeo ajustadas à tela. Ao ler v1 ou v2,
+`Project.with_images_in_video_tracks(legacy_scale=True)` move as imagens das
+trilhas de Adicionais e converte a escala pela razão entre
+`natural_image_size` (regra antiga) e `image_base_size`, eixo a eixo e nos
+quadros-chave, arredondando para cima em seis casas — a mesma precisão com que
+o compositor escreve a escala, para o truncamento das animações não perder
+pixels. Um v3 é reaberto sem migração. Imagens migradas deixam de entrar em
+transições com `transition_affects_additionals`.
 Essas dimensões conservam a escala relativa do texto quando a resolução muda;
 `Project.for_render` deriva escalas sem modificar o documento nem seus ativos.
 
-Ao substituir um documento v1, o repositório cria uma cópia dos bytes originais
-em `.vmp.v1.bak`, numerada se já existir, antes de escrever v2. Binários antigos
-não abrem v2. Reverter o aplicativo exige usar a cópia v1; não se deve reduzir
-a versão no JSON e apagar os pontos que preservam a animação.
+Ao substituir um documento de versão anterior, o repositório cria uma cópia dos
+bytes originais em `.vmp.v1.bak` ou `.vmp.v2.bak`, numerada se já existir, antes
+de escrever v3. Binários antigos não abrem a versão nova. Reverter o aplicativo
+exige usar a cópia; não se deve reduzir a versão no JSON, porque a escala das
+imagens e os pontos que preservam a animação já estão no formato novo.
 
 O projeto referencia mídias externas. Caminhos relativos são resolvidos em
 relação ao arquivo de projeto; mover só o `.vmp` não move os vídeos.

@@ -49,6 +49,9 @@ from videomanager.domain.project import TrackKind
 from videomanager.domain.project import TransitionContext
 from videomanager.infrastructure.ffmpeg.trimmer import encode_audio_args
 from videomanager.domain.timing import format_span
+from videomanager.domain.timing import frame_index
+from videomanager.domain.timing import frame_time
+from videomanager.domain.timing import last_frame_time
 from videomanager.infrastructure.ffmpeg.trimmer import tail_args
 
 from videomanager.domain.composition import Composition as Composition
@@ -116,6 +119,8 @@ class _Piece:
     duration: float
     track_index: int
     track_muted: bool = False
+    # Quadro parado da prévia (ver ``_still_seek``).
+    still: bool = False
 
 
 def _pieces(
@@ -125,12 +130,15 @@ def _pieces(
     *,
     want_video: bool = True,
     want_audio: bool = True,
+    still: bool = False,
 ) -> list[_Piece]:
     """Blocos que aparecem na janela pedida, na ordem de composição.
 
     A ordem é a de baixo para cima: a trilha de vídeo mais baixa é o fundo e as
     de cima passam por cima dela. Em seguida vêm as trilhas de adicionais
     (sobreposições, textos, filtros) no topo visual.
+
+    ``still`` é o quadro parado da prévia (ver ``_still_seek``).
     """
     end = None if span is None else at + span
     visual_tracks = [
@@ -180,9 +188,88 @@ def _pieces(
                     duration=finish - begin,
                     track_index=track_index,
                     track_muted=track.muted,
+                    still=(still and clip.media is not None and clip.media.kind is MediaKind.VIDEO
+                           and bool(clip.media.fps)),
                 )
             )
     return pieces
+
+
+# Teto de quadros compostos antes do instante pedido, no fim de um arquivo
+# (ver ``_still_lead``): meio segundo de composição é o preço máximo aceitável
+# para um quadro parado.
+_STILL_LEAD_LIMIT = 0.5
+
+
+def _still_lead(project: Project, at: float) -> int:
+    """Quadros a compor **antes** do instante, quando ele cai no último quadro.
+
+    A grade da taxa declarada não descreve o fim do arquivo: um GIF de 128
+    quadros que declara 30 q/s anda de 33,4 ms, e seu último quadro começa
+    37 ms antes do que a grade diz — mais de um quadro. Buscar ali não achava
+    quadro nenhum e a tela ficava preta no fim do vídeo. Compondo desde alguns
+    quadros antes, o fluxo tem quadro, o ``tpad`` segura o último e ele chega ao
+    instante pedido.
+
+    Só no último quadro do arquivo: no meio dele a busca direta acha quadro, e
+    recuar a janela faria o ffmpeg decodificar desde o keyframe anterior sempre
+    que houvesse um keyframe no caminho (medido: 93 → 125 ms por quadro).
+    """
+    lead = 0
+    for track in project.tracks:
+        if track.kind is TrackKind.AUDIO or not track.visible:
+            continue
+        for clip in track.clips:
+            media = clip.media
+            if (not clip.contains(at) or media is None or media.kind is not MediaKind.VIDEO
+                    or not media.fps or not media.duration):
+                continue
+            last = frame_time(max(0, frame_index(media.duration, media.fps) - 1), media.fps)
+            if clip.source_time(at) >= last - 1e-9:
+                lead = max(lead, math.ceil(project.fps / media.fps) + 1)
+    return min(lead, math.ceil(project.fps * _STILL_LEAD_LIMIT))
+
+
+def _still_window(project: Project, at: float, lead: int) -> tuple[float, int]:
+    """Começo da janela do quadro parado e quantos quadros até o instante.
+
+    A janela nunca recua para antes do fim de um bloco que já terminou: abrir
+    um arquivo que não aparece no instante pedido custaria uma busca por nada.
+    """
+    fps = project.fps
+    index = frame_index(at, fps)
+    first = max(0, index - lead)
+    for track in project.tracks:
+        if track.kind is TrackKind.AUDIO or not track.visible:
+            continue
+        for clip in track.clips:
+            if frame_time(first, fps) < clip.end <= at + 1e-9:
+                first = max(first, math.ceil(clip.end * fps - 1e-6))
+    first = min(first, index)
+    return frame_time(first, fps), index - first
+
+
+def _still_seek(piece: _Piece) -> tuple[float, float]:
+    """Busca no arquivo e margem de descarte do quadro parado de um vídeo.
+
+    O ``-ss`` exato descarta todo quadro que começa antes do pedido: com a
+    agulha no meio de um quadro vinha o **seguinte** e, dentro do último quadro
+    de um bloco, nenhum — a prévia ficava preta no fim do vídeo e em cada corte
+    (fácil de ver com zoom máximo). Recuar a busca não serve: um pedido um pouco
+    antes de um keyframe faz o ffmpeg decodificar desde o keyframe anterior —
+    medido, +32 ms por quadro com GOP de 2 s, e muito mais em 4K.
+
+    As duas funções do ``-ss`` são separadas. A busca vai a um quarto de quadro
+    **depois** do começo do quadro que contém o instante, sem descarte
+    (``-noaccurate_seek``), então o keyframe do próprio quadro vale; a cadeia
+    descarta o que chegar antes de meio quadro atrás do ponto buscado. Esse
+    quadro chega em −¼ de quadro, e o anterior em −1¼: as margens absorvem o
+    arredondamento dos tempos do arquivo (e o passo irregular de um GIF). A
+    normalização da cadeia (``PTS-STARTPTS``) põe o quadro no instante pedido.
+    """
+    step = 1.0 / piece.clip.media.fps
+    begin = frame_time(frame_index(piece.seek, piece.clip.media.fps), piece.clip.media.fps)
+    return begin + 0.25 * step, 0.5 * step
 
 
 def _input_args(
@@ -213,6 +300,9 @@ def _input_args(
             "-t", f"{piece.duration:.6f}",
             "-i", str(clip.media.path),
         ]
+    if piece.still:
+        seek, _margin = _still_seek(piece)
+        return ["-noaccurate_seek", "-ss", f"{seek:.6f}", "-i", str(clip.media.path)]
     return ["-ss", f"{piece.seek:.6f}", "-i", str(clip.media.path)]
 
 
@@ -554,6 +644,9 @@ def _video_chain(
         return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
 
     steps = []
+    if piece.still:
+        _seek, margin = _still_seek(piece)
+        steps.append(f"select='gte(t,{-margin:.6f})'")
     if abs(clip.speed - 1.0) > 1e-9:
         steps.append(f"trim=duration={piece.duration * clip.speed:.6f}")
         inv = 1.0 / clip.speed
@@ -676,6 +769,7 @@ def _video_chain(
         steps.append("format=rgba")
         steps.append("setsar=1")
         steps = _alpha_before_dynamic_scale(steps)
+        steps += _tail_hold(clip)
         return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
 
     if _rate_first(piece, project, fps, interpolate):
@@ -689,7 +783,27 @@ def _video_chain(
         f"pad={project.width}:{project.height}:(ow-iw)/2:(oh-ih)/2:color=black@0"
     )
     steps.append("setsar=1")
+    steps += _tail_hold(clip)
     return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
+
+
+# Quanto um bloco de vídeo pode segurar o último quadro quando a trilha de vídeo
+# acaba antes do bloco. Cobre a sobra comum do container (AAC, 23,976 fps) em
+# projetos gravados antes de o bloco durar a trilha de vídeo; uma parte só de
+# áudio de verdade, mais longa que isto, continua preta como no arquivo.
+_TAIL_HOLD_SECONDS = 1.0
+
+
+def _tail_hold(clip: Clip) -> list[str]:
+    """Segura o último quadro de um bloco de vídeo em vez de deixar preto.
+
+    Os quadros clonados passam do fim do bloco, mas a janela ``enable`` do
+    ``overlay`` não os desenha fora dele: só preenchem o vão entre o fim da
+    trilha de vídeo e o fim do bloco.
+    """
+    if clip.media is None or clip.media.kind is not MediaKind.VIDEO:
+        return []
+    return [f"tpad=stop_mode=clone:stop_duration={_TAIL_HOLD_SECONDS:.3f}"]
 
 
 def _rate_first(
@@ -849,6 +963,11 @@ def _transition_additional_pieces(
     next_input = first_input
     for track_index, track in reversed(tuple(enumerate(project.tracks))):
         if not track.visible or track.kind is not TrackKind.ADDITIONAL:
+            continue
+        # Com a ordem livre, uma trilha de adicionais pode estar **abaixo** da
+        # trilha da transição. Ela não passa por cima do efeito e não pode
+        # entrar nos lados dele: seria desenhada acima do vídeo que a cobre.
+        if track_index >= context.track_index:
             continue
         for clip in track.sorted_clips():
             if clip.is_transition or not clip.has_image:
@@ -1346,6 +1465,7 @@ def build_graph(
     text_assets: dict[int, Path] | None = None,
     canonical_size: tuple[int, int] | None = None,
     transparent: bool = False,
+    still: bool = False,
 ) -> Graph:
     """Traduz o projeto num grafo de filtros do ffmpeg.
 
@@ -1356,7 +1476,7 @@ def build_graph(
     """
     project = project.for_render()
     fps = fps or project.fps
-    pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio)
+    pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio, still=still)
     duration = span if span is not None else max(_MIN_CANVAS, project.export_duration - at)
 
     inputs: list[str] = []
@@ -1776,15 +1896,24 @@ def frame_command(
     crescendo a cada bloco acrescentado.
     """
     width, height = size
+    fps = project.fps
+    lead = 0
+    if project.duration > 0 and fps:
+        # A agulha pode ir até o fim exato da edição, onde nenhum bloco está
+        # mais visível; ali a tela mostra o último quadro, como os editores. O
+        # instante vai para a grade de quadros, a mesma que a reprodução mostra.
+        at = frame_time(frame_index(min(at, last_frame_time(project.duration, fps)), fps), fps)
+        at, lead = _still_window(project, at, _still_lead(project, at))
     preview_project = _preview_project(project, size)
     graph = build_graph(
         preview_project,
         at=at,
-        span=1.0 / max(1.0, project.fps),
+        span=(lead + 1) / max(1.0, fps),
         want_audio=False,
         text_assets=text_assets,
         canonical_size=(project.width, project.height),
         transparent=transparent,
+        still=True,
     )
     args = [
         tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error",
@@ -1792,7 +1921,9 @@ def frame_command(
     ]
     filters = list(graph.filters)
     if graph.video_label:
-        filters.append(f"{graph.video_label}scale={width}:{height}[out]")
+        # Da janela composta sai só o quadro do instante pedido.
+        skip = f"trim=start_frame={lead}," if lead else ""
+        filters.append(f"{graph.video_label}{skip}scale={width}:{height}[out]")
         args += ["-filter_complex", ";".join(filters), "-map", "[out]"]
     else:
         # Projeto sem imagem no instante pedido: um quadro preto diz isso melhor
@@ -1804,6 +1935,46 @@ def frame_command(
     return args + [
         "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"
     ]
+
+
+def scrub_command(
+    project: Project,
+    at: float,
+    span: float,
+    size: tuple[int, int],
+    tools: FFmpegTools,
+    *,
+    fps: float,
+    text_assets: dict[int, Path] | None = None,
+    quality: int = 5,
+) -> list[str]:
+    """Quadros de um trecho, pequenos e em JPEG, para o cache da agulha.
+
+    É o grafo da reprodução, só que limitado ao trecho e com saída MJPEG: o
+    ffmpeg codifica em C e em várias threads, e cada quadro de ~640 px ocupa
+    algumas dezenas de KB em vez dos 700 KB do RGB cru. O quadro ``k`` mostra
+    o instante ``at + k / fps``.
+    """
+    width, height = size
+    count = max(1, int(round(span * fps)))
+    preview_project = _preview_project(project, size)
+    graph = build_graph(
+        preview_project,
+        at=at,
+        span=span,
+        fps=float(fps),
+        want_audio=False,
+        text_assets=text_assets,
+        canonical_size=(project.width, project.height),
+    )
+    args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error", *_limited_inputs(graph.inputs)]
+    if graph.video_label:
+        filters = [*graph.filters, f"{graph.video_label}scale={width}:{height},format=yuvj420p[out]"]
+        args += ["-filter_complex", ";".join(filters), "-map", "[out]"]
+    else:
+        args += ["-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r={fps}:d={max(span, 0.1):.3f}",
+                 "-vf", "format=yuvj420p"]
+    return args + ["-frames:v", str(count), "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", str(quality), "pipe:1"]
 
 
 def playback_command(
@@ -1856,23 +2027,33 @@ def audio_command(
     sample_rate: int = SAMPLE_RATE,
     channels: int = CHANNELS,
     text_assets: dict[int, Path] | None = None,
+    until: float | None = None,
 ) -> list[str] | None:
     """Comando que produz a mixagem em PCM, a partir de ``at``.
 
     ``None`` quando não há som a tocar — o que a interface usa para não abrir
     processo nenhum, em vez de tocar silêncio.
+
+    ``until`` completa com silêncio e corta a mixagem exatamente no fim do loop
+    da prévia: o trecho seguinte é emendado quando este acaba, e um som que
+    terminasse antes do fim da edição faria a volta ao começo chegar cedo.
     """
     graph = build_graph(project, at=at, span=None, want_video=False, text_assets=text_assets)
     if not graph.audio_label:
         return None
+    filters = list(graph.filters)
+    label = graph.audio_label
+    if until is not None and until > at:
+        filters.append(f"{label}apad,atrim=end={until - at:.6f}[loopmix]")
+        label = "[loopmix]"
     return [
         tools.ffmpeg_str,
         "-nostdin",
         "-hide_banner",
         "-v", "error",
         *graph.inputs,
-        "-filter_complex", ";".join(graph.filters),
-        "-map", graph.audio_label,
+        "-filter_complex", ";".join(filters),
+        "-map", label,
         "-f", "s16le",
         "-acodec", "pcm_s16le",
         "-ar", str(sample_rate),

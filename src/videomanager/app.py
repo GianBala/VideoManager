@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -183,6 +185,28 @@ def _smoke_check(app: QApplication, window: MainWindow) -> None:
     try:
         if 'Carlito' not in QFontDatabase.families():
             raise RuntimeError('Fonte Carlito ausente do pacote.')
+        # Download: o solver JavaScript do YouTube é lido como recurso, não
+        # importado, e o mutagen só é carregado ao embutir a capa. Nenhum dos
+        # dois falha ao abrir o pacote — só no primeiro download.
+        from yt_dlp.extractor.youtube.jsc._builtin.vendor import load_script
+        if not load_script('yt.solver.core.js'):
+            raise RuntimeError('Scripts do solver JavaScript do yt-dlp ausentes do pacote.')
+        import importlib
+        importlib.import_module('mutagen')
+        from videomanager.infrastructure.system.binaries import find_js_runtime
+        runtime = find_js_runtime()
+        print(f'VM_SMOKE_JS_RUNTIME: {runtime[0] if runtime else "nenhum"}', flush=True)
+        # O cache da agulha guarda quadros em JPEG e depende do plugin de imagem
+        # do Qt; sem ele o arrasto cai no quadro exato sem avisar.
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+        from PySide6.QtGui import QImage
+        probe = QImage(8, 8, QImage.Format.Format_RGB32)
+        probe.fill(0xFF3366)
+        encoded = QByteArray()
+        buffer = QBuffer(encoded)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not probe.save(buffer, 'JPG') or QImage.fromData(bytes(encoded.data()), 'JPG').isNull():
+            raise RuntimeError('Suporte a JPEG do Qt ausente do pacote.')
         tools = find_tools()
         if tools is None:
             raise RuntimeError('FFmpeg/ffprobe ausentes; provisione ou inclua no PATH.')
@@ -210,6 +234,92 @@ def _smoke_check(app: QApplication, window: MainWindow) -> None:
         app.exit(code)
 
 
+class _CapturedRecords(logging.Handler):
+    """Guarda os avisos emitidos durante o diagnóstico para o relatório."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.lines: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self.lines.append(f"{record.levelname} {record.name}: {self.format(record)}")
+        except Exception:  # noqa: BLE001 - o relatório não pode derrubar o diagnóstico
+            pass
+
+
+def _diagnose_url(app: QApplication, window: MainWindow, url: str, report: Path | None,
+                  timeout: float = 120.0) -> None:
+    """Refaz, no próprio pacote, o caminho de analisar uma URL pela janela.
+
+    Existe porque a análise funcionava a partir do código-fonte e não no
+    executável do Windows, onde não há console para ver o que falhou. Passa pelo
+    mesmo ``MainWindow._analyze`` que o botão usa — worker, pool e slots que
+    montam cartão e qualidades —, já que um erro dentro de um slot também deixa
+    a tela sem opções e sem mensagem. Diálogos modais viram linhas do relatório.
+    """
+    import yt_dlp
+    from PySide6.QtWidgets import QMessageBox
+
+    captured = _CapturedRecords()
+    logging.getLogger().addHandler(captured)
+    dialogs: list[str] = []
+
+    def record_dialog(*args, **_kwargs):
+        dialogs.append(" | ".join(str(a) for a in args[1:3]))
+        return QMessageBox.StandardButton.Ok
+
+    QMessageBox.warning = record_dialog  # type: ignore[method-assign]
+    QMessageBox.critical = record_dialog  # type: ignore[method-assign]
+    began = time.monotonic()
+
+    def finish() -> None:
+        media = window._media  # noqa: SLF001 - diagnóstico da própria janela
+        lines = [
+            f"url: {url}",
+            f"empacotado: {bool(getattr(sys, 'frozen', False))}",
+            f"yt-dlp: {yt_dlp.version.__version__}",
+            f"tempo: {time.monotonic() - began:.1f} s",
+            f"midia: {media.title if media else None}",
+            f"formatos: {len(media.matrix.video) + len(media.matrix.audio) if media else 0}",
+            f"miniatura: {bool(media and media.thumbnail_url)}",
+            f"botao_fila_habilitado: {window._add_button.isEnabled()}",  # noqa: SLF001
+            *(f"dialogo: {text}" for text in dialogs),
+            *captured.lines,
+        ]
+        text = "\n".join(lines) + "\n"
+        ok = media is not None and window._add_button.isEnabled()  # noqa: SLF001
+        text += "VM_DIAGNOSE_OK\n" if ok else "VM_DIAGNOSE_FAILED\n"
+        if report is not None:
+            report.write_text(text, encoding="utf-8")
+        logging.getLogger(__name__).info("Diagnóstico de URL:\n%s", text)
+        print(text, flush=True)
+        window.close()
+        app.exit(0 if ok else 1)
+
+    def poll() -> None:
+        busy = window._probe_worker is not None  # noqa: SLF001
+        if busy and time.monotonic() - began < timeout:
+            QTimer.singleShot(100, poll)
+            return
+        if busy:
+            dialogs.append(f"análise não terminou em {timeout:.0f} s")
+        # Os slots de conclusão rodam na mesma volta do laço; espera o cartão.
+        QTimer.singleShot(1500, finish)
+
+    window._url.setText(url)  # noqa: SLF001
+    window._analyze()  # noqa: SLF001
+    QTimer.singleShot(100, poll)
+
+
+def _argument(name: str) -> str | None:
+    if name in sys.argv:
+        index = sys.argv.index(name)
+        if index + 1 < len(sys.argv):
+            return sys.argv[index + 1]
+    return None
+
+
 def main() -> int:
     # Antes de tocar no Qt: se falta biblioteca do sistema, a criação do
     # QApplication aborta o processo e não sobra chance de explicar nada.
@@ -218,13 +328,22 @@ def main() -> int:
         print(problem, file=sys.stderr)
         return 1
 
+    from videomanager.infrastructure.system.logs import configure_file_logging
+
+    configure_file_logging()
     smoke = '--smoke-test' in sys.argv
-    app, window = build_app(audio_enabled=not smoke)
+    diagnose_url = _argument('--diagnose-url')
+    headless = smoke or diagnose_url is not None
+    app, window = build_app(audio_enabled=not headless)
     window.show()
     # O provisionamento do ffmpeg pode abrir diálogo; roda depois de a janela
     # aparecer, para que o diálogo tenha um pai visível a que se ancorar.
     if smoke:
         QTimer.singleShot(0, lambda: _smoke_check(app, window))
+    elif diagnose_url is not None:
+        report = _argument('--report')
+        QTimer.singleShot(0, window.bootstrap)
+        QTimer.singleShot(0, lambda: _diagnose_url(app, window, diagnose_url, Path(report) if report else None))
     else:
         QTimer.singleShot(0, window.bootstrap)
     return app.exec()

@@ -204,16 +204,18 @@ def estimate_convert_size(
             if media.size:
                 return media.size
             if duration > 0:
-                w = media.video.width if media.video else 1920
-                h = media.video.height if media.video else 1080
-                fps = media.video.fps if media.video else 30.0
+                w = (media.video.width if media.video else None) or 1920
+                h = (media.video.height if media.video else None) or 1080
+                fps = (media.video.fps if media.video else None) or 30.0
                 v_rate = estimate_video_bitrate(w, h, fps, "h264")
                 return int(((v_rate + 160.0) * 1000 / 8) * duration * 1.015)
             return 0
 
-        orig_w = media.video.width if media.video else 1920
-        orig_h = media.video.height if media.video else 1080
-        orig_fps = media.video.fps if media.video else 30.0
+        # O ffprobe omite dimensões em alguns arquivos (streams quebrados, HLS);
+        # sem o padrão a conta levantava TypeError dentro do plano da aba.
+        orig_w = (media.video.width if media.video else None) or 1920
+        orig_h = (media.video.height if media.video else None) or 1080
+        orig_fps = (media.video.fps if media.video else None) or 30.0
 
         if target.height and orig_h:
             target_h = target.height

@@ -8,6 +8,7 @@ mostrar um traceback nem uma mensagem em inglês vinda do extrator.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from videomanager.application.errors import DrmProtectedError
 from videomanager.application.errors import NoFormatsError
 from videomanager.application.errors import ProbeError
 from videomanager.application.errors import UnsupportedUrlError
+from videomanager.infrastructure.yt_dlp.extras import js_runtime_opts
 from videomanager.infrastructure.yt_dlp.formats import build_matrix
 from videomanager.domain.formats import MediaInfo
 from videomanager.domain.formats import PlaylistEntry
@@ -27,11 +29,17 @@ from videomanager.domain.formats import SubtitleTrack
 from videomanager.infrastructure.storage.settings import Settings
 
 
+_LOG = logging.getLogger(__name__)
+
+
 class _QuietLogger:
     """Silencia o yt-dlp e guarda as mensagens para diagnóstico.
 
     Sem isto, o yt-dlp escreve no stdout — que num aplicativo empacotado com
     ``--windowed`` no Windows não existe, e a escrita pode falhar.
+
+    Avisos e erros também seguem para o ``logging``: no pacote sem console é o
+    arquivo de log que mostra por que uma análise falhou.
     """
 
     def __init__(self) -> None:
@@ -45,9 +53,11 @@ class _QuietLogger:
 
     def warning(self, msg: str) -> None:
         self.messages.append(f"aviso: {msg}")
+        _LOG.warning("yt-dlp: %s", msg)
 
     def error(self, msg: str) -> None:
         self.messages.append(f"erro: {msg}")
+        _LOG.error("yt-dlp: %s", msg)
 
 
 def _probe_opts(settings: Settings, *, flat_playlist: bool) -> dict[str, Any]:
@@ -61,6 +71,7 @@ def _probe_opts(settings: Settings, *, flat_playlist: bool) -> dict[str, Any]:
         # inviável para um canal com centenas. Listamos superficialmente e só
         # analisamos em detalhe o que o usuário marcar.
         "extract_flat": "in_playlist" if flat_playlist else False,
+        **js_runtime_opts(),
     }
     if settings.cookies_file and Path(settings.cookies_file).is_file():
         opts["cookiefile"] = str(Path(settings.cookies_file).resolve())
@@ -89,8 +100,13 @@ _LOGIN_HINTS = (
 )
 
 
-def _translate_error(exc: Exception) -> ProbeError:
-    """Converte um erro do yt-dlp em algo que o usuário consiga agir sobre."""
+def _translate_error(exc: Exception, action: str = "analisar a URL") -> ProbeError:
+    """Converte um erro do yt-dlp em algo que o usuário consiga agir sobre.
+
+    ``action`` nomeia a etapa na mensagem sem tradução conhecida: o download
+    reaproveita esta tradução, e um erro de pós-processamento aparecia como
+    falha de análise de uma URL que já tinha sido analisada.
+    """
     message = str(exc)
     lowered = message.lower()
 
@@ -128,7 +144,7 @@ def _translate_error(exc: Exception) -> ProbeError:
     # Sem tradução conhecida: entrega a mensagem original, limpa do prefixo que o
     # yt-dlp acrescenta. Uma mensagem técnica é melhor que uma genérica.
     cleaned = re.sub(r"^ERROR:\s*", "", message).strip()
-    return ProbeError(f"Falha ao analisar a URL: {cleaned}")
+    return ProbeError(f"Falha ao {action}: {cleaned}")
 
 
 def _subtitle_tracks(info: dict[str, Any]) -> tuple[SubtitleTrack, ...]:

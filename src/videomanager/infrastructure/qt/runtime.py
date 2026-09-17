@@ -12,12 +12,14 @@ from videomanager import APP_NAME
 from videomanager.application.media.preview import prepare_preview
 from videomanager.infrastructure.ffmpeg import hardware, composer
 from videomanager.infrastructure.system import binaries
+from videomanager.infrastructure.system import memory
 from videomanager.infrastructure.storage.settings import Settings
 from .audio import AudioPreview
 from .workers.queue import JobQueue
 from .workers.media_worker import MediaWorker
 from .workers.function_worker import FunctionWorker
 from .workers.preview_worker import FrameWorker, PlaybackWorker, FilmstripWorker, WaveformWorker, KeyframeWorker, InteractionWorker
+from .workers.preview_worker import ScrubCacheWorker
 from .workers.engine_worker import FFmpegSetupWorker, EngineUpdateWorker, is_packaged
 from .workers.hwaccel_worker import HardwareProbeWorker
 from .workers.probe_worker import ProbeWorker
@@ -103,6 +105,21 @@ class DesktopRuntime:
             autostart=autostart,
         )
 
+    def scrub_cache_worker(self, project, seconds, span, size, tools, token, *, fps, first_index,
+                           text_assets=None):
+        request = prepare_preview(project, seconds, size, token, fps=fps, text_assets=text_assets)
+        command = composer.scrub_command(request.project, request.seconds, span, request.size, tools,
+                                         fps=fps, text_assets=dict(request.text_assets))
+        return ScrubCacheWorker(command, first_index, token)
+
+    def scrub_cache_budget(self) -> int:
+        """Memória para o cache da agulha: até 512 MB, e no máximo 15% da livre."""
+        available = memory.available_bytes()
+        ceiling = 512 * 1024 * 1024
+        if available is None:
+            return ceiling // 2
+        return max(64 * 1024 * 1024, min(ceiling, int(available * 0.15)))
+
     def audio_output(self, parent=None):
         return AudioPreview(parent, enabled=self._audio_enabled)
 
@@ -114,17 +131,26 @@ class DesktopRuntime:
         tools,
         *,
         text_assets = None,
+        until = None,
     ):
         if not output.available:
             output.stop()
             return
         rate, channels = output.target_format
+        extra = {} if until is None else {"until": until}
         command = composer.audio_command(project, seconds, tools, sample_rate=rate,
-                                         channels=channels, text_assets=text_assets)
+                                         channels=channels, text_assets=text_assets, **extra)
         if command is not None:
             output.start(command, seconds, pcm_format=(rate, channels))
         else:
             output.stop()
+
+    def queue_audio(self, output, project, seconds, tools, *, text_assets=None, until=None) -> bool:
+        """Prepara o próximo trecho de som na mesma placa (emenda do loop)."""
+        rate, channels = output.target_format
+        command = composer.audio_command(project, seconds, tools, sample_rate=rate, channels=channels,
+                                         text_assets=text_assets, until=until)
+        return command is not None and output.queue_next(command, seconds)
 
     def find_tools(self):
         return binaries.find_tools()

@@ -25,7 +25,9 @@ from videomanager.domain.project import TrackKind
 from videomanager.domain.project import next_clip_id
 from videomanager.domain.project import reserve_project_ids
 
-PROJECT_VERSION = 2
+# 3: imagens vivem na trilha de vídeo e se ajustam à tela. Ao abrir 1 ou 2, as
+# imagens das trilhas de Adicionais migram com a escala convertida.
+PROJECT_VERSION = 3
 
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
@@ -455,6 +457,11 @@ def _project_from_dict(
         text_reference_width=int(data.get("text_reference_width", width)),
         text_reference_height=int(data.get("text_reference_height", height)),
     ).with_normalized_transitions()
+    if version < 3:
+        # Só arquivos anteriores ao formato 3: um v3 gravado pelo aplicativo
+        # nunca tem imagem em Adicionais, e reabri-lo precisa devolver
+        # exatamente a mesma montagem.
+        project = project.with_images_in_video_tracks(legacy_scale=True)
     return project, missing_files
 
 
@@ -465,7 +472,7 @@ def save_project(project: Project, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = project_to_dict(project, base_dir=path.parent)
         text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
-        _backup_v1(path)
+        _backup_previous_version(path)
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
                                          prefix=f".{path.name}-", suffix=".tmp", delete=False) as handle:
             tmp_path = Path(handle.name)
@@ -484,8 +491,12 @@ def save_project(project: Project, path: Path) -> None:
                 pass
 
 
-def _backup_v1(path: Path) -> None:
-    """Preserva o original antes da primeira migração, sem sobrescrever cópias."""
+def _backup_previous_version(path: Path) -> None:
+    """Preserva o original antes de gravá-lo num formato mais novo.
+
+    Binários antigos não abrem o formato novo; a cópia ``.vN.bak`` é o caminho
+    de volta. Nunca sobrescreve uma cópia existente.
+    """
     if not path.is_file():
         return
     original = path.read_bytes()
@@ -493,12 +504,15 @@ def _backup_v1(path: Path) -> None:
         old = json.loads(original)
     except (ValueError, UnicodeDecodeError):
         return
-    if not isinstance(old, dict) or old.get('version', 1) != 1:
+    if not isinstance(old, dict):
+        return
+    version = old.get('version', 1)
+    if type(version) is not int or version >= PROJECT_VERSION:
         return
     number = 0
     while True:
         suffix = '' if number == 0 else f'.{number}'
-        backup = path.with_name(path.name + '.v1.bak' + suffix)
+        backup = path.with_name(path.name + f'.v{version}.bak' + suffix)
         try:
             handle = backup.open('xb')
         except FileExistsError:

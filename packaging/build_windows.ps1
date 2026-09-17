@@ -32,10 +32,13 @@ if ($env:VM_BUNDLE_FFMPEG -ne "0") {
 
 Write-Host "==> empacotando"
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+# Depois da limpeza: o .ico vive em build\ e o spec só o usa se existir.
+& $py packaging\make_icon.py
+if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar o icone" }
 & $py -m PyInstaller --noconfirm --clean packaging\videomanager.spec
 if ($LASTEXITCODE -ne 0) { throw "Falha no empacotamento" }
 
-& (Join-Path $PSScriptRoot "smoke_windows.ps1") -Executable ".\dist\VideoManager\VideoManager.exe"
+& (Join-Path $PSScriptRoot "smoke_windows.ps1") -Executable ".\dist\VideoManager\VideoManager.exe" -Icon ".\build\videomanager.ico"
 
 Write-Host ""
 Write-Host "pronto: dist\VideoManager\VideoManager.exe"

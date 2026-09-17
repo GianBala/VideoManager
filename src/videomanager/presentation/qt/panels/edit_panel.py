@@ -29,7 +29,7 @@ som, um computador que não dá conta perde quadros e continua no tempo certo.
 from __future__ import annotations
 
 import itertools
-import time
+import math
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -51,6 +51,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QAbstractSlider,
     QAbstractSpinBox,
     QApplication,
     QButtonGroup,
@@ -69,19 +70,21 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
     QScrollBar,
     QSlider,
     QSpinBox,
     QSplitter,
+    QSplitterHandle,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from videomanager.application.media.preview import PreviewFrameInbox, PreviewResultKey
+from videomanager.application.media.preview import PreviewFrameInbox, PreviewResultKey, playback_clock
 from videomanager.application.media.interaction import interaction_plan
+from videomanager.application.media.scrub import ScrubFrameCache
+from videomanager.domain.scrub import render_signature, signature_at, signature_segments
 from videomanager.domain.project import slideshow_canvas
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.domain.export_policy import simple_trim
@@ -159,6 +162,33 @@ _ZOOM_FACTOR = 1.6
 _TICK_MS = 40
 _MAX_DRIFT = 0.35
 _RESYNC_COOLDOWN = 1.5
+# Diferença entre imagem e som abaixo da qual o relógio da imagem fica como
+# está. O relógio do som anda em degraus de cerca de 10 ms (o período da placa);
+# corrigir abaixo disso seria perseguir o degrau.
+_CLOCK_TOLERANCE = 0.015
+# Quanto a imagem espera o som começar a sair no play. Passado isso ela sai
+# mesmo assim: uma placa travada não pode prender a prévia parada.
+_AUDIO_START_TIMEOUT = 0.5
+# Com Loop marcado, quanto antes do fim a imagem e o som do começo já começam a
+# ser preparados: abrir o ffmpeg e chegar ao primeiro quadro leva de 150 a
+# 500 ms, e é esse tempo que aparecia como corte na volta.
+_LOOP_LEAD = 1.5
+# Cache da agulha (ver ``application.media.scrub``). Os quadros guardados são
+# pequenos de propósito: aparecem enquanto a mão arrasta, e o quadro exato, no
+# tamanho da prévia, chega quando ela para.
+_SCRUB_WIDTH, _SCRUB_HEIGHT = 640, 360
+_SCRUB_MAX_FPS = 30.0
+# Só preenche depois de um tempo sem edição, busca ou reprodução.
+_SCRUB_FILL_IDLE_MS = 700
+_SCRUB_NEXT_MS = 30
+# Parada da mão que já pede o quadro exato, sem esperar soltar.
+_SCRUB_SETTLE_MS = 120
+_SCRUB_CHUNK_SECONDS = 20
+_SCRUB_FRAME_ESTIMATE = 40_000
+_SCRUB_MAX_RADIUS_SECONDS = 180
+# Quanto o relógio pode passar do fim esperando a emenda do som chegar à placa
+# antes de desistir e reabrir do zero.
+_LOOP_GRACE = 0.5
 
 # Miniaturas por bloco. O teto existe porque um bloco largo não fica mais
 # compreensível com quarenta imagens do que com doze, e cada uma é uma chamada
@@ -256,7 +286,7 @@ class EditPanel(QWidget):
     def refresh_project_label(self):
         self._update_project_label()
 
-    def accept_import(self, result, *, insert=False):
+    def accept_import(self, result, *, insert=False, placement=None):
         self._probed.update(result.probed)
         for ref in result.references:
             self._pool_thumbnails.pop(ref.path, None)
@@ -266,7 +296,10 @@ class EditPanel(QWidget):
         self._refresh_pool()
         if result.references:
             self._media_list.setCurrentRow(self._pool.index(result.references[-1]))
-            if insert:
+            if placement is not None:
+                track_index, new_track_index, start = placement
+                self._drop_references(list(result.references), track_index, new_track_index, start)
+            elif insert:
                 self._remember()
                 for reference in result.references:
                     self._place(reference)
@@ -275,6 +308,9 @@ class EditPanel(QWidget):
     def install_project(self, project, path, references, probed, *, reset=True):
         self._generation += 1
         self._end_edit_groups()
+        self._cancel_scrub_fill()
+        self._scrub_cache = None
+        self._cache_shown_for = None
         self._stop_playback()
         self._cancel_primed_playback()
         self._background.cancel_all()
@@ -347,6 +383,13 @@ class EditPanel(QWidget):
         # fundo, aparecem preenchendo e podem esperar.
         self._runner = WorkerRunner(_bounded_pool(self, _LIVE_WORKERS))
         self._background = WorkerRunner(_bounded_pool(self, _BACKGROUND_WORKERS))
+        # Cache da agulha: um ffmpeg de cada vez, com prioridade baixa, numa fila
+        # só dele — nunca disputa vaga com quadro, reprodução ou miniaturas.
+        self._scrub_runner = WorkerRunner(_bounded_pool(self, 1))
+        self._scrub_cache: ScrubFrameCache | None = None
+        self._scrub_job: tuple[int, object, list] | None = None
+        # Instante do quadro guardado que está na tela, enquanto o exato não vem.
+        self._cache_shown_for: float | None = None
         self._colors = palette(settings.theme)
 
         self._processing = processing
@@ -399,10 +442,29 @@ class EditPanel(QWidget):
         # Quando ainda não houve tempo de preparar o vídeo, o áudio espera o
         # primeiro quadro. Começar o som durante a abertura do FFmpeg deixaria
         # a imagem atrasada justamente no caminho de contingência.
-        self._pending_audio: tuple[object, float, object, object] | None = None
+        self._pending_audio: tuple[object, float, object, object, float | None] | None = None
+        # Emenda do loop: fluxo de imagem do começo já carregado e se o som do
+        # começo já está na fila da placa.
+        self._loop_worker = None
+        self._loop_token = 0
+        self._loop_armed = False
+        self._loop_audio_queued = False
+        # O primeiro quadro do começo já foi mostrado: quadros atrasados do fluxo
+        # que terminou não podem mais cobri-lo.
+        self._loop_video_live = False
+        # Imagem pronta, segurada até o som começar (ver ``_hold_video``).
+        self._hold_next_video = False
+        self._video_held = False
+        self._held_origin = 0.0
+        self._held_since = 0.0
         self._fullscreen: FullscreenPreview | None = None
         self._syncing = False
         self._shown_frame = 0.0
+        # Fluxo dono do quadro na tela. O desvio só é medido contra um quadro do
+        # fluxo atual: antes do primeiro, ``_shown_frame`` ainda é o do ponto
+        # anterior (um clique longe seguido de play) e reabriria à toa o fluxo
+        # que está chegando.
+        self._shown_token = 0
         self._clock_position = 0.0
         self._clock_started: float | None = None
         self._resynced_at = 0.0
@@ -433,6 +495,15 @@ class EditPanel(QWidget):
         self._view_timer.setSingleShot(True)
         self._view_timer.setInterval(_VIEW_SETTLE_MS)
         self._view_timer.timeout.connect(self._refresh_backdrop)
+
+        self._scrub_fill_timer = QTimer(self)
+        self._scrub_fill_timer.setSingleShot(True)
+        self._scrub_fill_timer.setInterval(_SCRUB_FILL_IDLE_MS)
+        self._scrub_fill_timer.timeout.connect(self._start_scrub_fill)
+        self._scrub_settle_timer = QTimer(self)
+        self._scrub_settle_timer.setSingleShot(True)
+        self._scrub_settle_timer.setInterval(_SCRUB_SETTLE_MS)
+        self._scrub_settle_timer.timeout.connect(self._settle_scrub)
 
         self._prefs_timer = QTimer(self)
         self._prefs_timer.setSingleShot(True)
@@ -1589,6 +1660,7 @@ class EditPanel(QWidget):
         self._loop = QCheckBox(strings.EDIT_LOOP)
         self._loop.setToolTip(strings.EDIT_LOOP_TIP)
         self._loop.setChecked(False)
+        self._loop.toggled.connect(self._on_loop_toggled)
         row.addWidget(self._loop)
 
         row.addSpacing(6)
@@ -1649,23 +1721,26 @@ class EditPanel(QWidget):
 
         column.addLayout(self._build_toolbar())
 
-        # A linha do tempo cresce com o número de trilhas, e a partir de certo
-        # ponto ela empurraria a exportação para fora da vista. Numa área de
-        # rolagem, ela para de crescer e passa a rolar — como em qualquer editor
-        # com mais trilhas do que tela.
-        self._timeline_area = QScrollArea()
-        self._timeline_area.setWidgetResizable(True)
-        self._timeline_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        # Com mais trilhas do que tela, as trilhas rolam **dentro** da linha do
+        # tempo, com a barra ao lado. Numa área de rolagem em volta do widget a
+        # régua e a cabeça da agulha rolavam junto e sumiam da vista, e não havia
+        # onde pegar o cursor nem ler o tempo.
+        self._timeline_area = QWidget()
+        self._timeline_area.setProperty("role", "plain")
         # Sem teto: quem decide quanto das trilhas fica à vista é o divisor. O
         # piso garante uma trilha de cada espécie inteira.
         self._timeline_area.setMinimumHeight(_TIMELINE_MIN_HEIGHT)
-        self._timeline_area.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        area_row = QHBoxLayout(self._timeline_area)
+        area_row.setContentsMargins(0, 0, 0, 0)
+        area_row.setSpacing(0)
 
         self._timeline = Timeline(self._colors)
         self._timeline.setToolTip(strings.EDIT_TIMELINE_HINT)
         self._timeline.scrubbed.connect(self._on_scrub)
+        self._timeline.scrub_finished.connect(self._on_scrub_finished)
+        # Tocar e pausar anda a agulha sem passar por ``_on_scrub``; sem isto
+        # a tesoura ficava com o estado de antes do play até outro clique.
+        self._timeline.position_changed.connect(lambda _seconds: self._refresh_clip_actions())
         self._timeline.edit_started.connect(self._begin_timeline_edit)
         self._timeline.edit_finished.connect(self._on_edit_finished)
         self._timeline.edit_cancelled.connect(self._on_edit_cancelled)
@@ -1676,10 +1751,15 @@ class EditPanel(QWidget):
         self._timeline.track_visibility_clicked.connect(self._toggle_track_visibility)
         self._timeline.track_reordered.connect(self._on_track_reordered)
         self._timeline.menu_requested.connect(self._show_menu)
+        self._timeline.media_dropped.connect(self._on_media_dropped)
         self._timeline.view_changed.connect(self._on_view_changed)
-        self._timeline_area.setWidget(self._timeline)
-        bar = self._timeline_area.verticalScrollBar()
-        self._timeline.vertical_scroll_requested.connect(lambda delta: bar.setValue(round(bar.value() + delta)))
+        area_row.addWidget(self._timeline, 1)
+        self._timeline_vbar = QScrollBar(Qt.Orientation.Vertical)
+        self._timeline_vbar.setVisible(False)
+        self._timeline_vbar.valueChanged.connect(self._timeline.set_scroll)
+        self._timeline.scroll_changed.connect(self._timeline_vbar.setValue)
+        self._timeline.scroll_range_changed.connect(self._on_timeline_scroll_range)
+        area_row.addWidget(self._timeline_vbar)
         column.addWidget(self._timeline_area)
 
         self._scroll = QScrollBar(Qt.Orientation.Horizontal)
@@ -1687,6 +1767,14 @@ class EditPanel(QWidget):
         column.addWidget(self._scroll)
 
         return box
+
+    def _on_timeline_scroll_range(self, maximum: int, page: int) -> None:
+        bar = self._timeline_vbar
+        bar.setRange(0, maximum)
+        bar.setPageStep(page)
+        bar.setSingleStep(max(1, VIDEO_TRACK_HEIGHT // 2))
+        bar.setValue(self._timeline.scroll)
+        bar.setVisible(maximum > 0)
 
     def _build_toolbar(self) -> QHBoxLayout:
         """Barra curta de propósito.
@@ -1932,6 +2020,20 @@ class EditPanel(QWidget):
         return self._project.fps
 
     @property
+    def _loop_end(self) -> float:
+        """Onde o loop volta: o fim do que se vê e se ouve, como no arquivo.
+
+        Até o fim do **último quadro**, e não da edição: uma edição de 4,27 s a
+        30 q/s tem o último quadro começando em 4,2667 s, e voltar em 4,27
+        deixava esse quadro 3 ms na tela — uma piscada na volta. O som ganha o
+        mesmo tanto de silêncio, que não se ouve.
+        """
+        end = self._project.export_duration or self._duration
+        if self._has_video and self._fps > 0 and end > 0:
+            return math.ceil(end * self._fps - 1e-6) / self._fps
+        return end
+
+    @property
     def _position(self) -> float:
         return self._timeline.position
 
@@ -1964,7 +2066,9 @@ class EditPanel(QWidget):
             Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()
         ]
         if paths:
-            self.import_files(paths, insert=True)
+            # Fora da linha do tempo, soltar arquivos só os traz ao acervo; o
+            # lugar na edição é escolhido arrastando a mídia até uma trilha.
+            self.import_files(paths, insert=False)
             event.acceptProposedAction()
 
     def import_media_dialog(self) -> None:
@@ -1975,10 +2079,40 @@ class EditPanel(QWidget):
             self, strings.EDIT_IMPORT, str(Path.home()), strings.EDIT_FILE_FILTER
         )
         if paths:
-            self.import_files([Path(p) for p in paths], insert=True)
+            # Importar não põe nada na edição: a mídia vai para o acervo e dali
+            # é arrastada até a trilha e o instante desejados.
+            self.import_files([Path(p) for p in paths], insert=False)
 
-    def import_files(self, paths: list[Path], *, insert: bool = False) -> None:
-        self._project_actions.import_files(paths, insert=insert)
+    def import_files(self, paths: list[Path], *, insert: bool = False, placement=None) -> None:
+        self._project_actions.import_files(paths, insert=insert, placement=placement)
+
+    def _on_media_dropped(self, payload, track_index: int, new_track_index: int, start: float) -> None:
+        """Mídia solta na linha do tempo: do acervo, coloca; do sistema, importa e coloca."""
+        if payload and isinstance(payload[0], dict):
+            by_path = {str(ref.path): ref for ref in self._pool}
+            references = [by_path[item["path"]] for item in payload if item.get("path") in by_path]
+            self._drop_references(references, track_index, new_track_index, start)
+            return
+        paths = [Path(path) for path in payload or ()]
+        if paths:
+            self.import_files(paths, insert=False, placement=(track_index, new_track_index, start))
+
+    def _drop_references(self, references: list[MediaRef], track_index: int, new_track_index: int,
+                         start: float) -> None:
+        """Põe as mídias em sequência a partir do ponto de soltura, num passo de desfazer."""
+        if not references:
+            return
+        was_empty = self._project.is_empty
+        self._remember()
+        last = None
+        for reference in references:
+            clip = Clip(media=reference, start=max(0.0, start), duration=reference.natural_duration)
+            self._project, track_index = self._project.with_dropped_clip(clip, track_index, new_track_index)
+            # A seguinte vai logo depois, na mesma trilha quando couber.
+            placed = self._project.find(clip.clip_id)[1]
+            start, new_track_index, last = placed.end, track_index, placed
+        self._timeline.select(last.clip_id)
+        self._after_edit(refit=was_empty)
 
     def _create_thumbnail_for(self, reference: MediaRef) -> QIcon:
         if reference.path in self._pool_thumbnails:
@@ -2008,8 +2142,14 @@ class EditPanel(QWidget):
             if tools is not None:
                 token = next(self._tokens)
                 self._pool_tokens[reference.path] = token
+                # Vídeo mostra o quadro do **meio**: o primeiro costuma ser
+                # preto ou um título. Uma tira de uma célula sobre a duração
+                # inteira pede exatamente esse instante (``filmstrip_times``).
+                # Imagem fica em 0: ``-ss`` num JPEG lido como image2 não
+                # devolve quadro nenhum.
+                end = (reference.duration or 0.0) if reference.kind is MediaKind.VIDEO else 0.0
                 worker = self._runtime.filmstrip_worker(
-                    reference.path, 0.0, 0.0, 1, (96, 54), tools, token
+                    reference.path, 0.0, end, 1, (96, 54), tools, token
                 )
                 worker.signals.strip.connect(
                     lambda tok, idx, frame, ref=reference: self._on_pool_thumb_ready(ref, frame, token=tok)
@@ -2183,7 +2323,7 @@ class EditPanel(QWidget):
         if index is None:
             kind = (
                 TrackKind.ADDITIONAL
-                if clip.is_additional
+                if clip.is_overlay
                 else (TrackKind.VIDEO if reference.has_video else TrackKind.AUDIO)
             )
             self._project = self._project.with_track(kind)
@@ -2199,7 +2339,7 @@ class EditPanel(QWidget):
         if index is None:
             kind = (
                 TrackKind.ADDITIONAL
-                if clip.is_additional
+                if clip.is_overlay
                 else TrackKind.VIDEO
                 if clip.is_transition or clip.has_image
                 else TrackKind.AUDIO
@@ -2378,6 +2518,7 @@ class EditPanel(QWidget):
 
     def _begin_timeline_edit(self) -> None:
         self._end_edit_groups()
+        self._cancel_scrub_fill()
         self._session.begin_edit()
 
     def _on_properties_changed(self, clip_id: int, changes: dict) -> None:
@@ -2493,6 +2634,7 @@ class EditPanel(QWidget):
             self._live_timer.start()
         self._update_preview_overlay_clips()
         self._update_project_label()
+        self._schedule_scrub_fill()
         self.changed.emit()
 
     def _on_clip_moved(self, clip_id: int, track_index: int, start: float) -> None:
@@ -2639,7 +2781,7 @@ class EditPanel(QWidget):
         if index is None:
             kind = (
                 TrackKind.ADDITIONAL
-                if pasted.is_additional
+                if pasted.is_overlay
                 else TrackKind.VIDEO
                 if pasted.is_transition or pasted.has_image
                 else TrackKind.AUDIO
@@ -2785,6 +2927,7 @@ class EditPanel(QWidget):
             return
         if self._overlay_drag_session != clip_id:
             self._end_edit_groups()
+            self._cancel_scrub_fill()
             self._session.begin_edit()
             self._overlay_drag_session = clip_id
         active = self._preview._active_clip
@@ -2893,7 +3036,7 @@ class EditPanel(QWidget):
         visual_tracks = [
             t
             for t in self._project.tracks
-            if t.visible and t.kind is TrackKind.ADDITIONAL
+            if t.visible and t.kind is not TrackKind.AUDIO
         ]
         clips = tuple(
             c
@@ -3234,7 +3377,12 @@ class EditPanel(QWidget):
         # quando o quadro parado terminar serializa os dois, e o play depois
         # de uma busca passa a esperar uma composição inteira antes de
         # começar — que é a demora que se sente ao apertar play.
-        self._prime_playback()
+        #
+        # Com a agulha sendo arrastada, não: cada pausa da mão abria o fluxo do
+        # projeto inteiro dali até o fim, para ser morto no movimento seguinte
+        # ocupando a segunda vaga. A pré-carga vem quando o arrasto termina.
+        if not self._timeline.is_scrubbing:
+            self._prime_playback()
 
     def _start_frame(self) -> None:
         tools = self._ensure_tools()
@@ -3283,7 +3431,7 @@ class EditPanel(QWidget):
                    and (self._wanted is None or self._wanted == self._rendered))
         if self._wanted is not None and not current:
             self._start_frame()
-        elif current and self._frame_error_token != token:
+        elif current and self._frame_error_token != token and not self._timeline.is_scrubbing:
             self._prime_playback()
 
     def _on_preview_failed(self, token: int, message: str) -> None:
@@ -3304,7 +3452,14 @@ class EditPanel(QWidget):
             return
         current = True
         gesture = False
-        if token == self._play_token and self._playing:
+        # O fluxo do começo do loop sai no instante exato do fim, e a troca de
+        # dono só acontece no tique seguinte (até 40 ms depois). Os quadros dele
+        # entram já, senão o primeiro do começo se perdia e o último do fim
+        # ficava parado na tela.
+        loop_frame = self._playing and self._loop_token != 0 and token == self._loop_token
+        if (token == self._play_token and self._playing) or loop_frame:
+            if not loop_frame and self._loop_video_live:
+                return
             current = getattr(self, "_playback_project", self._project) is self._project
         else:
             key = self._frame_key
@@ -3318,6 +3473,11 @@ class EditPanel(QWidget):
                 gesture = (self._session.editing or self._overlay_drag_session >= 0
                            or self._properties_session >= 0 or self._typing_session >= 0)
                 if key.revision != self._frame_revision and not gesture:
+                    return
+                if self._cache_shown_for is not None and key.seconds != self._wanted:
+                    # A tela já mostra o quadro guardado de um instante mais
+                    # novo: o exato de um ponto anterior do arrasto voltaria no
+                    # tempo.
                     return
                 # Arrastar a agulha pede um quadro por evento, e o instante
                 # pedido já mudou quando o anterior fica pronto. Exigir
@@ -3342,13 +3502,17 @@ class EditPanel(QWidget):
         else:
             self._defer_loading_hint()
         self._shown_frame = frame.seconds
+        self._cache_shown_for = None
         self._preview.set_position(frame.seconds)
         self._show_frame(frame)
+        self._shown_token = token
+        if loop_frame:
+            self._loop_video_live = True
         if current:
             self._prepare_interaction()
         if token == self._play_token and self._playing and self._clock_started is None:
             self._clock_position = frame.seconds
-            self._clock_started = time.monotonic()
+            self._clock_started = playback_clock()
 
     def _show_frame(self, frame: object) -> None:
         pixmap = pixmap_from_frame(frame.data, frame.width, frame.height)
@@ -3604,9 +3768,148 @@ class EditPanel(QWidget):
     def _on_scrub(self, seconds: float) -> None:
         self._stop_playback()
         self._timeline.set_position(seconds)
-        self._request_frame()
+        if self._show_cached_frame(self._position) and self._timeline.is_scrubbing:
+            # O quadro guardado já está na tela; o exato só quando a mão parar.
+            self._scrub_settle_timer.start()
+        else:
+            self._request_frame()
         self._update_time_labels()
         self._refresh_clip_actions()
+
+    # ------------------------------------------------------------------
+    # Cache da agulha
+    # ------------------------------------------------------------------
+
+    def _scrub_fps(self) -> float:
+        return min(_SCRUB_MAX_FPS, float(preview_fps(self._project.fps)))
+
+    def _scrub_size(self) -> tuple[int, int]:
+        return fit_size(self._project.width, self._project.height, _SCRUB_WIDTH, _SCRUB_HEIGHT)
+
+    def _show_cached_frame(self, seconds: float) -> bool:
+        """Mostra o quadro guardado deste instante, se houver um válido."""
+        cache = self._scrub_cache
+        if cache is None or self._closed or self._project.is_empty:
+            return False
+        if cache.size != self._scrub_size() or abs(cache.fps - self._scrub_fps()) > 1e-9:
+            return False
+        index = cache.index_of(seconds)
+        data = cache.get(index, render_signature(self._project, cache.seconds_of(index)))
+        if data is None:
+            return False
+        image = QImage.fromData(data, "JPG")
+        if image.isNull():
+            return False
+        pixmap = QPixmap.fromImage(image)
+        self._wanted = seconds
+        self._cache_shown_for = seconds
+        self._shown_frame = seconds
+        self._preview.set_position(seconds)
+        if self._on_fullscreen:
+            self._fullscreen.set_frame(pixmap)
+        else:
+            self._preview.set_frame_pixmap(pixmap)
+            self._update_preview_overlay_clips()
+        return True
+
+    def _settle_scrub(self) -> None:
+        if not self._playing and self._cache_shown_for is not None:
+            self._request_frame()
+
+    def _on_scrub_finished(self) -> None:
+        self._scrub_settle_timer.stop()
+        if self._playing or self._project.is_empty:
+            return
+        if self._cache_shown_for is not None or self._rendered != self._position:
+            self._request_frame()
+        else:
+            self._prime_playback()
+        self._schedule_scrub_fill()
+
+    def _schedule_scrub_fill(self, delay: int = _SCRUB_FILL_IDLE_MS) -> None:
+        if not self._closed and hasattr(self, "_scrub_fill_timer"):
+            self._scrub_fill_timer.start(delay)
+
+    def _cancel_scrub_fill(self) -> None:
+        if hasattr(self, "_scrub_fill_timer"):
+            self._scrub_fill_timer.stop()
+        job, self._scrub_job = self._scrub_job, None
+        if job is not None:
+            job[1].cancel()
+
+    def _start_scrub_fill(self) -> None:
+        """Compõe em segundo plano o trecho sem quadro guardado mais perto da agulha."""
+        if self._closed or self._project.is_empty or self._scrub_job is not None:
+            return
+        if (self._playing or self._session.editing or self._overlay_drag_session >= 0
+                or self._timeline.is_scrubbing):
+            self._schedule_scrub_fill()
+            return
+        tools = self._ensure_tools()
+        if tools is None:
+            return
+        fps, size = self._scrub_fps(), self._scrub_size()
+        cache = self._scrub_cache
+        if cache is None or cache.size != size or abs(cache.fps - fps) > 1e-9:
+            cache = self._scrub_cache = ScrubFrameCache(fps, size, self._runtime.scrub_cache_budget())
+        duration = self._project.export_duration
+        if duration <= 0:
+            return
+        total = int(math.ceil(duration * fps - 1e-6))
+        segments = signature_segments(self._project, 0.0, duration)
+        cache.discard_stale(segments)
+        focus = min(cache.index_of(self._position), max(0, total - 1))
+        per_frame = cache.average_frame_bytes or _SCRUB_FRAME_ESTIMATE
+        # Só o que cabe no orçamento em volta da agulha: preencher além disso
+        # descartaria na hora os quadros mais distantes, e o trabalho recomeçaria
+        # sem fim.
+        radius = min(int(_SCRUB_MAX_RADIUS_SECONDS * fps),
+                     max(int(fps), cache.budget_bytes // max(1, per_frame) // 2))
+        gaps = cache.missing(segments, max(0, focus - radius), min(total, focus + radius))
+        if not gaps:
+            return
+
+        def distance(gap: tuple[int, int]) -> int:
+            first, last = gap
+            return 0 if first <= focus < last else min(abs(first - focus), abs(last - 1 - focus))
+
+        first, last = min(gaps, key=distance)
+        chunk = int(_SCRUB_CHUNK_SECONDS * fps)
+        if first <= focus < last:
+            start = max(first, focus - int(fps))
+        elif first > focus:
+            start = first
+        else:
+            start = max(first, last - chunk)
+        end = min(last, start + chunk)
+        token = next(self._tokens)
+        worker = self._runtime.scrub_cache_worker(
+            self._project, cache.seconds_of(start), (end - start) / fps, size, tools, token,
+            fps=fps, first_index=start, text_assets=self.editor.text_assets(self._project),
+        )
+        worker.signals.scrub_frames.connect(self._on_scrub_frames)
+        worker.signals.done.connect(lambda token=token: self._on_scrub_fill_done(token))
+        self._scrub_job = (token, worker, segments)
+        self._scrub_runner.start(worker, worker.signals.done)
+
+    def _on_scrub_frames(self, token: int, first_index: int, images: object) -> None:
+        job, cache = self._scrub_job, self._scrub_cache
+        if job is None or job[0] != token or cache is None:
+            return
+        segments = job[2]
+        focus = cache.index_of(self._position)
+        for offset, data in enumerate(images):
+            index = first_index + offset
+            # A assinatura é a do projeto que o trabalho compôs, e não a atual:
+            # um quadro de trecho editado no meio do caminho nasce obsoleto.
+            signature = signature_at(segments, cache.seconds_of(index))
+            if signature is not None:
+                cache.put(index, signature, data, focus_index=focus)
+
+    def _on_scrub_fill_done(self, token: int) -> None:
+        if self._scrub_job is not None and self._scrub_job[0] == token:
+            self._scrub_job = None
+            self._schedule_scrub_fill(_SCRUB_NEXT_MS)
 
     def _seek_to(self, seconds: float) -> None:
         if self._project.is_empty:
@@ -3756,6 +4059,10 @@ class EditPanel(QWidget):
         tools = self._ensure_tools()
         if tools is None or self._project.is_empty:
             return
+        # Tocar vem antes de preencher o cache: a CPU é da reprodução.
+        self._cancel_scrub_fill()
+        self._scrub_settle_timer.stop()
+        self._cache_shown_for = None
         self._end_edit_groups()
         self._invalidate_interaction()
         if self._at_last_frame(seconds):
@@ -3777,27 +4084,40 @@ class EditPanel(QWidget):
         tools = self._ensure_tools()
         if tools is None:
             return
+        self._cancel_loop_arm()
         self._live_timer.stop()
         self._playback_project = self._project
         self._pending_audio = None
         self._clock_position = seconds
         self._clock_started = None
-        started = self._start_frames(seconds)
+        self._video_held = False
+        self._held_origin = seconds
+        self._hold_next_video = bool(getattr(self._audio, "available", False))
+        try:
+            started = self._start_frames(seconds)
+        finally:
+            self._hold_next_video = False
         text_assets = self.editor.text_assets(self._project)
+        # Com Loop, o som vai até o fim exato do loop, completado com silêncio:
+        # é no fim dele que o trecho do começo é emendado.
+        until = self._loop_end if self._loop.isChecked() else None
         if started is None or started[1]:
-            self._clock_started = time.monotonic()
+            self._clock_started = playback_clock()
             self._runtime.play_audio(
                 self._audio,
                 self._project,
                 seconds,
                 tools,
                 text_assets=text_assets,
+                until=until,
             )
+            if self._video_held and not self._audio.playing:
+                self._release_held_video(playback_clock())
         else:
             # O caminho sem pré-carga continua correto: som e relógio só
             # começam quando a imagem também pode começar, sem salto inicial.
             self._audio.stop()
-            self._pending_audio = (self._project, seconds, tools, text_assets)
+            self._pending_audio = (self._project, seconds, tools, text_assets, until)
 
     def _restart_stream(self) -> None:
         """Refaz o fluxo com a composição nova, sem sair da reprodução.
@@ -3877,16 +4197,23 @@ class EditPanel(QWidget):
         if pending is None:
             return
         self._pending_audio = None
-        project, seconds, tools, text_assets = pending
+        project, seconds, tools, text_assets, until = pending
         self._clock_position = seconds
-        self._clock_started = time.monotonic()
+        self._clock_started = playback_clock()
         self._runtime.play_audio(
             self._audio,
             project,
             seconds,
             tools,
             text_assets=text_assets,
+            until=until,
         )
+        if self._video_held:
+            if self._audio.playing:
+                # O prazo de espera conta da abertura do som, não da imagem.
+                self._held_since = playback_clock()
+            else:
+                self._release_held_video(playback_clock())
 
     def _on_playback_worker_done(self, token: int) -> None:
         if token == self._primed_token:
@@ -3915,6 +4242,7 @@ class EditPanel(QWidget):
             self._primed_ready = False
             self._play_token = token
             self._playback = worker
+            self._hold_video(worker)
             worker.start_playback()
             return token, ready
 
@@ -3931,11 +4259,153 @@ class EditPanel(QWidget):
         worker.signals.done.connect(
             lambda token=self._play_token: self._on_playback_worker_done(token)
         )
+        self._hold_video(worker)
         self._runner.start(worker, worker.signals.done)
         self._playback = worker
         return self._play_token, False
 
+    def _hold_video(self, worker) -> None:
+        """No play com som, a imagem espera o som começar a sair.
+
+        Abrir a mixagem e a placa leva de 100 a 150 ms a mais que soltar a
+        imagem já pronta. Sem esperar, a imagem saía na frente e o acerto pelo
+        som (``_sync_video_clock``) a fazia parar duas vezes logo depois do
+        play. Parada antes de começar ela não engasga: a tela já mostra esse
+        mesmo quadro desde a pausa.
+        """
+        if not self._hold_next_video or not hasattr(worker, "hold_start"):
+            return
+        worker.hold_start()
+        self._video_held = True
+        self._held_since = playback_clock()
+
+    def _release_held_video(self, now: float, position: float | None = None) -> None:
+        """Solta a imagem segurada, ancorada no instante em que o som começou."""
+        if position is not None:
+            heard = position - self._held_origin
+            if heard <= 1e-6 and now - self._held_since < _AUDIO_START_TIMEOUT:
+                return  # a placa ainda não tocou nada
+            at = now - max(0.0, heard)
+        else:
+            at = now
+        self._video_held = False
+        if self._playback is not None:
+            self._playback.start_playback(at=at)
+
+    def _arm_loop(self, end: float) -> None:
+        """Prepara a volta ao começo enquanto o fim ainda está tocando.
+
+        A imagem do começo abre atrás da comporta, como a pré-carga do play, e o
+        som do começo entra na fila da placa para tocar logo depois do trecho
+        atual. Na virada nada é aberto: só se solta o que já está pronto.
+        """
+        self._loop_armed = True
+        tools = self._ensure_tools()
+        if tools is None:
+            return
+        text_assets = self.editor.text_assets(self._project)
+        if self._has_video:
+            token = next(self._tokens)
+            worker = self._runtime.playback_worker(
+                self._project, 0.0, self._preview_size(), tools, token,
+                fps=preview_fps(self._fps), text_assets=text_assets, autostart=False,
+            )
+            worker.signals.frame.connect(self._on_frame)
+            if hasattr(worker.signals, "failed"):
+                worker.signals.failed.connect(self._on_preview_failed)
+            worker.signals.done.connect(lambda token=token: self._on_loop_worker_done(token))
+            self._loop_worker, self._loop_token = worker, token
+            self._runner.start(worker, worker.signals.done)
+            at = self._loop_video_moment(end)
+            if at is not None:
+                # Liberado já, com hora marcada: o primeiro quadro do começo sai
+                # quando o relógio da imagem atual chega ao fim, e não no tique
+                # que percebe a volta.
+                worker.start_playback(at=at)
+        if self._audio.playing:
+            self._loop_audio_queued = bool(self._runtime.queue_audio(
+                self._audio, self._project, 0.0, tools, text_assets=text_assets, until=end,
+            ))
+
+    def _loop_video_moment(self, end: float) -> float | None:
+        """Instante de ``playback_clock`` em que o relógio da imagem atual chega a ``end``."""
+        clock = getattr(self._playback, "clock_position", None)
+        if clock is None:
+            return None
+        now = playback_clock()
+        shown = clock(now)
+        if shown is None:
+            return None
+        return now + max(0.0, end - shown)
+
+    def _sync_video_clock(self, reference: float, now: float) -> None:
+        """Acerta o relógio da imagem pelo da reprodução, sem reabrir o fluxo.
+
+        A imagem conta o tempo pelo computador e o som pelo que a placa
+        consumiu, e os dois se afastam. Antes, uma diferença abaixo de
+        ``_MAX_DRIFT`` ficava para sempre — medido: imagem 77 ms à frente do
+        som, o bastante para a volta do loop, que segue o som, parar a imagem
+        por um instante. O ajuste é repassado ao fluxo, que o aplica entre
+        quadros (ver ``FramePump.set_clock_offset``).
+        """
+        playback = self._playback
+        clock = getattr(playback, "clock_position", None)
+        if clock is None:
+            return
+        shown = clock(now)
+        if shown is None:
+            return
+        delta = shown - reference
+        playback.set_clock_offset(delta if abs(delta) > _CLOCK_TOLERANCE else 0.0)
+
+    def _swap_loop_video(self) -> None:
+        """Na volta, a imagem preparada assume no lugar da que acabou."""
+        worker, token = self._loop_worker, self._loop_token
+        self._loop_worker, self._loop_token = None, 0
+        self._loop_armed = False
+        self._loop_audio_queued = False
+        self._loop_video_live = False
+        # A imagem recomeça junto com o relógio; sem isto o desvio de quem
+        # estava no fim seria corrigido reabrindo o fluxo que acabou de entrar.
+        self._resynced_at = 0.0
+        if self._playback is not None:
+            self._playback.cancel()
+            self._playback = None
+        if worker is None:
+            if self._has_video:
+                self._start_frames(0.0)
+            return
+        self._play_token = token
+        self._playback = worker
+        worker.start_playback()
+
+    def _cancel_loop_arm(self) -> None:
+        worker = self._loop_worker
+        self._loop_worker, self._loop_token = None, 0
+        self._loop_armed = False
+        self._loop_video_live = False
+        if worker is not None:
+            worker.cancel()
+        if self._loop_audio_queued:
+            self._loop_audio_queued = False
+            self._audio.cancel_next()
+
+    def _on_loop_worker_done(self, token: int) -> None:
+        if token == self._loop_token:
+            self._loop_worker, self._loop_token = None, 0
+            self._loop_video_live = False
+        self._on_playback_done(token)
+
+    def _on_loop_toggled(self, _checked: bool) -> None:
+        # O som em andamento foi aberto com ou sem o tamanho do loop; ligar ou
+        # desligar no meio da reprodução o reabre com a regra certa.
+        if not self._playing:
+            return
+        self._cancel_loop_arm()
+        self._restart_stream()
+
     def _loop_playback(self) -> None:
+        self._cancel_loop_arm()
         self._tick.stop()
         self._live_timer.stop()
         self._audio.stop()
@@ -3952,29 +4422,55 @@ class EditPanel(QWidget):
             return
         # O término do som não encerra imagens, vãos ou trilhas mais longas.
         self._clock_position = max(self._position, self._audio.position)
-        self._clock_started = time.monotonic()
+        self._clock_started = playback_clock()
         self._on_tick()
 
     def _on_tick(self) -> None:
         if not self._playing:
             return
-        now = time.monotonic()
+        now = playback_clock()
+        if self._video_held:
+            if self._audio.playing:
+                self._release_held_video(now, self._audio.position)
+            elif self._pending_audio is None:
+                self._release_held_video(now)
+            # Com som pendente, ele só abre no primeiro quadro pronto
+            # (``_on_playback_primed``): soltar agora era soltar antes dele.
         position = self._position
+        looping = self._loop.isChecked()
+        end = self._loop_end if looping else self._duration
         if self._audio.playing:
             position = self._audio.position
+            if self._loop_audio_queued and position < self._position - end / 2:
+                # O som já emendou no começo; a imagem vai junto.
+                self._swap_loop_video()
             self._clock_position, self._clock_started = position, now
             drift = abs(self._shown_frame - position)
-            if (self._has_video and drift > _MAX_DRIFT
-                    and position - self._resynced_at > _RESYNC_COOLDOWN):
+            # Com o começo do loop já na tela e o som ainda no fim, a distância
+            # é a volta, não um desvio.
+            if (self._has_video and not self._loop_video_live and self._shown_token == self._play_token
+                    and drift > _MAX_DRIFT and position - self._resynced_at > _RESYNC_COOLDOWN):
                 self._resynced_at = position
                 self._start_frames(position)
+            else:
+                self._sync_video_clock(position, now)
         elif self._clock_started is not None:
             position = self._clock_position + now - self._clock_started
+            if looping and self._loop_armed and end > 0 and position >= end - 1e-8:
+                # Sem som, o relógio é o do sistema: a volta acontece aqui.
+                position -= end
+                self._clock_position, self._clock_started = position, now
+                self._swap_loop_video()
+            self._sync_video_clock(position, now)
         self._timeline.set_position(min(self._duration, position))
         self._update_time_labels()
+        if looping and end > 0 and not self._loop_armed and 0 < end - position <= _LOOP_LEAD:
+            self._arm_loop(end)
         # Duração é da saída: velocidade de outro clipe não encurta este fim.
-        if self._duration > 0 and position >= self._duration - 1e-8:
-            if self._loop.isChecked():
+        if end > 0 and position >= end - 1e-8:
+            if looping:
+                if self._loop_audio_queued and position < end + _LOOP_GRACE:
+                    return  # a emenda do som ainda não chegou à placa
                 self._loop_playback()
             else:
                 self._stop_playback()
@@ -3993,6 +4489,8 @@ class EditPanel(QWidget):
         # visível antes de desmontar os fluxos impede o próximo play de reabrir
         # num instante anterior e parecer que o vídeo voltou.
         visible_position = self._shown_frame if self._has_video else self._position
+        self._cancel_loop_arm()
+        self._video_held = False
         self._tick.stop()
         self._live_timer.stop()
         self._pending_audio = None
@@ -4008,7 +4506,7 @@ class EditPanel(QWidget):
             self._timeline.set_position(visible_position, follow=False)
             self._update_time_labels()
             has_overlays = any(
-                t.visible and t.kind is TrackKind.ADDITIONAL and any(
+                t.visible and t.kind is not TrackKind.AUDIO and any(
                     c.overlay_type != "filter"
                     and (c.overlay_type in ("image", "text") or c.is_image)
                     and c.contains(visible_position)
@@ -4028,6 +4526,8 @@ class EditPanel(QWidget):
                 self._prime_playback()
             self._update_preview_overlay_clips()
             self._prepare_interaction()
+            # Pausado, a CPU volta a sobrar para preencher o cache da agulha.
+            self._schedule_scrub_fill()
         self._refresh_play_button()
 
     def _refresh_play_button(self) -> None:
@@ -4173,6 +4673,12 @@ class EditPanel(QWidget):
         montagem inteira herdar o nome de uma foto sobreposta.
         """
         for track in reversed(self._project.video_tracks):
+            # Foto não dá formato à saída: numa trilha que começa com uma
+            # imagem, o nome e o container vêm do primeiro vídeo.
+            videos = [c for c in track.sorted_clips() if not c.is_image and not c.is_transition]
+            if videos:
+                return videos[0]
+        for track in reversed(self._project.video_tracks):
             if track.clips:
                 return track.sorted_clips()[0]
         clips = self._project.clips
@@ -4212,6 +4718,9 @@ class EditPanel(QWidget):
         self.commit_pending_edits()
         self._stop_playback()
         self._cancel_primed_playback()
+        self._cancel_scrub_fill()
+        self._scrub_runner.cancel_all()
+        self._scrub_cache = None
         for clip_id in list(self._strip_workers):
             self._cancel_strip(clip_id)
         self._project_actions.cancel_pending()
@@ -4253,7 +4762,10 @@ class EditPanel(QWidget):
                             return super().eventFilter(obj, event)
 
                         # Se for um controle interativo de propriedades (botão, spinbox, tab, input, slider, etc.)
-                        if isinstance(obj, (QAbstractButton, QAbstractSpinBox, QLineEdit, QComboBox, QSlider, QTabBar)):
+                        # Barras de rolagem e divisórias só navegam ou redimensionam:
+                        # desselecionar ali mudava o alvo da tesoura sem o usuário ver.
+                        if isinstance(obj, (QAbstractButton, QAbstractSpinBox, QLineEdit, QComboBox,
+                                            QAbstractSlider, QTabBar, QSplitterHandle)):
                             return super().eventFilter(obj, event)
 
                         # Clique fora das trilhas e de controles interativos: desseleciona
@@ -4292,7 +4804,9 @@ class EditPanel(QWidget):
             if clip is not None and clip.detached
             else strings.EDIT_GAIN_TIP
         )
-        self._speed_btn.setEnabled(clip is not None and clip.overlay_type != "filter")
+        # Foto não tem relógio de mídia: velocidade só esticaria a duração, e a
+        # composição a ignora.
+        self._speed_btn.setEnabled(clip is not None and clip.overlay_type != "filter" and not clip.is_image)
         self._speed_btn.setToolTip(strings.EDIT_SPEED_TIP)
 
         self._refresh_clip_actions()

@@ -76,8 +76,9 @@ class TestMidia:
 
     def test_trilha_so_aceita_o_que_ela_mostra(self) -> None:
         assert accepts(TrackKind.VIDEO, clip(VIDEO))
-        assert not accepts(TrackKind.VIDEO, clip(FOTO))
-        assert accepts(TrackKind.ADDITIONAL, clip(FOTO))
+        # Imagem é parte da trilha de vídeo; Adicionais ficam com texto e filtro.
+        assert accepts(TrackKind.VIDEO, clip(FOTO))
+        assert not accepts(TrackKind.ADDITIONAL, clip(FOTO))
         assert not accepts(TrackKind.VIDEO, clip(SOM))
         assert accepts(TrackKind.AUDIO, clip(SOM))
         # O som de um vídeo só desce para a trilha de áudio por "separar áudio".
@@ -141,9 +142,14 @@ class TestTela:
         projeto = auto_canvas(montado(clip(VIDEO), clip(enorme, start=10.0)))
         assert (projeto.width, projeto.height) == (1920, 1080)
 
-    def test_so_fotos_definem_a_tela(self) -> None:
+    def test_so_fotos_nao_definem_a_tela_sozinhas(self) -> None:
+        # Com as fotos na trilha de vídeo, adotar o formato delas continua sendo
+        # uma escolha explícita (``slideshow_canvas``, botão da interface): uma
+        # apresentação de fotos de 6000 px não pode virar a tela da edição.
+        from videomanager.domain.project import slideshow_canvas
         projeto = auto_canvas(montado(clip(FOTO)))
-        assert (projeto.width, projeto.height) == (800, 600)
+        assert (projeto.width, projeto.height) == (1920, 1080)
+        assert slideshow_canvas(projeto) == (800, 600)
 
     def test_edicao_vazia_volta_ao_padrao(self) -> None:
         # É o que faz a próxima importação definir a tela, em vez de herdar a de
@@ -680,7 +686,7 @@ class TestOrdemDasTrilhas:
 
         c_foto = clip(FOTO, start=0.0, duration=5.0)
         c_text = clip(FOTO, start=2.0, duration=3.0, overlay_type="text", text_content="Olá")
-        assert accepts(TrackKind.ADDITIONAL, c_foto)
+        assert accepts(TrackKind.VIDEO, c_foto) and not accepts(TrackKind.ADDITIONAL, c_foto)
         assert accepts(TrackKind.ADDITIONAL, c_text)
 
         # Teste de velocidade
@@ -916,7 +922,8 @@ def test_slideshow_e_explicito_e_nao_usa_logo_para_mudar_video():
     p = new_project(photo)
     assert (p.width, p.height) == (1920, 1080)
     assert slideshow_canvas(p) == (1440, 1920)
-    mixed = p.with_clip(1, Clip(MediaRef(Path('/m/video.mp4'), MediaKind.VIDEO, width=1920, height=1080), 0, 3))
+    # A foto agora está na trilha de vídeo 0; o vídeo entra depois dela.
+    mixed = p.with_clip(0, Clip(MediaRef(Path('/m/video.mp4'), MediaKind.VIDEO, width=1920, height=1080), 10, 3))
     assert slideshow_canvas(mixed) is None
 
 

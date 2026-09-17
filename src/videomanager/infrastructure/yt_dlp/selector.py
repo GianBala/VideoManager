@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from videomanager.application.capabilities import FFmpegTools
+from videomanager.infrastructure.yt_dlp.extras import js_runtime_opts
 from videomanager.infrastructure.yt_dlp.formats import video_family_filter
 from videomanager.application.formatting import format_bitrate
 from videomanager.domain.formats import AudioChoice
@@ -231,6 +232,7 @@ def _base_opts(
         "no_warnings": False,
         "noprogress": True,
         "consoletitle": False,
+        **js_runtime_opts(),
     }
 
     if settings.rate_limit_kbps > 0:
