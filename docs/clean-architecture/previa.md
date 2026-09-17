@@ -23,6 +23,19 @@ recente pendente; pedidos intermediários são substituídos.
 Isso impede que uma busca lenta para o segundo 5 apareça depois da busca para
 o segundo 20.
 
+O quadro parado mostra o quadro que **contém** o instante, como a reprodução e
+o cache. O `-ss` exato descarta todo quadro que começa antes do pedido: com a
+agulha no meio de um quadro vinha o seguinte e, dentro do último quadro de um
+bloco, nenhum — preto no fim do vídeo e em cada corte, fácil de ver com zoom
+máximo. Por isso `frame_command` compõe com `still=True`: cada vídeo é aberto
+com `-noaccurate_seek` a ¼ de quadro depois do começo do quadro que contém o
+instante, e a cadeia descarta o que vier antes de ½ quadro atrás desse ponto
+(`_still_seek`). Recuar a busca, em vez disso, faria o ffmpeg decodificar desde
+o keyframe anterior sempre que a agulha caísse num keyframe (+32 ms por quadro
+com GOP de 2 s). Instantes no fim exato da edição ou depois dele mostram o
+último quadro. Reprodução e exportação continuam com a busca exata, e as
+transições já compunham o quadro certo pelo próprio recorte.
+
 ### Cache da agulha
 
 Um quadro exato custa um ffmpeg (perto de 100 ms no Windows), o que limitava o
