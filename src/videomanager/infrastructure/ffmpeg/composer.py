@@ -195,6 +195,60 @@ def _pieces(
     return pieces
 
 
+# Teto de quadros compostos antes do instante pedido, no fim de um arquivo
+# (ver ``_still_lead``): meio segundo de composição é o preço máximo aceitável
+# para um quadro parado.
+_STILL_LEAD_LIMIT = 0.5
+
+
+def _still_lead(project: Project, at: float) -> int:
+    """Quadros a compor **antes** do instante, quando ele cai no último quadro.
+
+    A grade da taxa declarada não descreve o fim do arquivo: um GIF de 128
+    quadros que declara 30 q/s anda de 33,4 ms, e seu último quadro começa
+    37 ms antes do que a grade diz — mais de um quadro. Buscar ali não achava
+    quadro nenhum e a tela ficava preta no fim do vídeo. Compondo desde alguns
+    quadros antes, o fluxo tem quadro, o ``tpad`` segura o último e ele chega ao
+    instante pedido.
+
+    Só no último quadro do arquivo: no meio dele a busca direta acha quadro, e
+    recuar a janela faria o ffmpeg decodificar desde o keyframe anterior sempre
+    que houvesse um keyframe no caminho (medido: 93 → 125 ms por quadro).
+    """
+    lead = 0
+    for track in project.tracks:
+        if track.kind is TrackKind.AUDIO or not track.visible:
+            continue
+        for clip in track.clips:
+            media = clip.media
+            if (not clip.contains(at) or media is None or media.kind is not MediaKind.VIDEO
+                    or not media.fps or not media.duration):
+                continue
+            last = frame_time(max(0, frame_index(media.duration, media.fps) - 1), media.fps)
+            if clip.source_time(at) >= last - 1e-9:
+                lead = max(lead, math.ceil(project.fps / media.fps) + 1)
+    return min(lead, math.ceil(project.fps * _STILL_LEAD_LIMIT))
+
+
+def _still_window(project: Project, at: float, lead: int) -> tuple[float, int]:
+    """Começo da janela do quadro parado e quantos quadros até o instante.
+
+    A janela nunca recua para antes do fim de um bloco que já terminou: abrir
+    um arquivo que não aparece no instante pedido custaria uma busca por nada.
+    """
+    fps = project.fps
+    index = frame_index(at, fps)
+    first = max(0, index - lead)
+    for track in project.tracks:
+        if track.kind is TrackKind.AUDIO or not track.visible:
+            continue
+        for clip in track.clips:
+            if frame_time(first, fps) < clip.end <= at + 1e-9:
+                first = max(first, math.ceil(clip.end * fps - 1e-6))
+    first = min(first, index)
+    return frame_time(first, fps), index - first
+
+
 def _still_seek(piece: _Piece) -> tuple[float, float]:
     """Busca no arquivo e margem de descarte do quadro parado de um vídeo.
 
@@ -1842,15 +1896,19 @@ def frame_command(
     crescendo a cada bloco acrescentado.
     """
     width, height = size
-    if project.duration > 0 and project.fps:
+    fps = project.fps
+    lead = 0
+    if project.duration > 0 and fps:
         # A agulha pode ir até o fim exato da edição, onde nenhum bloco está
-        # mais visível; ali a tela mostra o último quadro, como os editores.
-        at = min(at, last_frame_time(project.duration, project.fps))
+        # mais visível; ali a tela mostra o último quadro, como os editores. O
+        # instante vai para a grade de quadros, a mesma que a reprodução mostra.
+        at = frame_time(frame_index(min(at, last_frame_time(project.duration, fps)), fps), fps)
+        at, lead = _still_window(project, at, _still_lead(project, at))
     preview_project = _preview_project(project, size)
     graph = build_graph(
         preview_project,
         at=at,
-        span=1.0 / max(1.0, project.fps),
+        span=(lead + 1) / max(1.0, fps),
         want_audio=False,
         text_assets=text_assets,
         canonical_size=(project.width, project.height),
@@ -1863,7 +1921,9 @@ def frame_command(
     ]
     filters = list(graph.filters)
     if graph.video_label:
-        filters.append(f"{graph.video_label}scale={width}:{height}[out]")
+        # Da janela composta sai só o quadro do instante pedido.
+        skip = f"trim=start_frame={lead}," if lead else ""
+        filters.append(f"{graph.video_label}{skip}scale={width}:{height}[out]")
         args += ["-filter_complex", ";".join(filters), "-map", "[out]"]
     else:
         # Projeto sem imagem no instante pedido: um quadro preto diz isso melhor

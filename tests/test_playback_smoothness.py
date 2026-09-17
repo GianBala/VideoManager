@@ -391,6 +391,14 @@ class TestVoltaDoLoop:
         panel._on_frame(51, _frame(1 / 30))
         assert shown == [0.0, 1 / 30]
 
+    @pytest.mark.parametrize(("duração", "fim"), [(4.27, 4.3), (4.0, 4.0)])
+    def test_volta_espera_o_ultimo_quadro_terminar(self, harness, duração, fim) -> None:
+        # Uma edição de 4,27 s a 30 q/s tem o último quadro começando em
+        # 4,2667 s: voltar em 4,27 deixava esse quadro 3 ms na tela, o que se
+        # vê como uma piscada na volta.
+        harness.install(duração)
+        assert harness.panel._loop_end == pytest.approx(fim)
+
     def test_volta_e_agendada_pelo_relogio_da_imagem(self, harness) -> None:
         panel, now = harness.panel, harness.now
         harness.audio.available = False
