@@ -80,10 +80,22 @@ obsoletos não liberam nem substituem o pedido vigente.
 
 ## Reprodução e relógio
 
-`FramePump` mantém a saída de vídeo no pipe limitado. `PreviewFrameInbox`
-conserva somente o último quadro e uma notificação pendente na fila Qt. Se a
-interface ficar ocupada, os quadros intermediários são substituídos sem acumular
-imagens RGB. O sinal do worker leva a caixa; o painel retira o snapshot imutável.
+`FramePump` mantém a saída de vídeo no pipe limitado. Depois do play, uma thread
+lê quadros adiante numa fila curta (até 10 quadros e 32 MB); o laço de ritmo
+retira cada um na hora dele. Uma demora do ffmpeg — abrir o decodificador do
+bloco seguinte num corte, uma transição pesada — é paga com quadros já prontos,
+em vez de aparecer como imagem parada. Cheia, a fila segura a leitura e o pipe
+segura o ffmpeg. Atrasado mais de três quadros e com quadros na fila, o ritmo
+descarta em vez de despejar uma rajada. `PreviewFrameInbox` conserva somente o
+último quadro e uma notificação pendente na fila Qt. Se a interface ficar
+ocupada, os quadros intermediários são substituídos sem acumular imagens RGB. O
+sinal do worker leva a caixa; o painel retira o snapshot imutável.
+
+O ritmo e todos os instantes trocados entre painel e fluxo usam
+`playback_clock` (`application/media/preview.py`), que é `perf_counter`. No
+Windows até o Python 3.12, `monotonic` anda em degraus de 15,6 ms: medida por
+ele, a espera de cada quadro errava até um degrau, e a imagem saía em dente de
+serra (intervalos de 25 a 48 ms num fluxo de 33 ms) o tempo todo.
 
 Enquanto a prévia está pausada, o controller pode abrir o comando de reprodução
 e manter seu primeiro quadro atrás de uma comporta. O clique em play reutiliza
@@ -97,10 +109,26 @@ chave de projeto, instante, tamanho ou fps deixou de corresponder.
 `infrastructure/qt/audio.py` recebe PCM do ffmpeg e alimenta `QAudioSink`
 por blocos, com fila limitada e sobra parcial controlada. Quando há dispositivo
 de áudio, sua posição é a referência temporal; a imagem acompanha esse relógio.
-Sem áudio disponível, a interface usa relógio monotônico, iniciado com a
+Sem áudio disponível, a interface usa `playback_clock`, iniciado com a
 liberação do primeiro quadro. Taxas fracionárias, como 29,97 fps, permanecem
 fracionárias no comando e na entrega. Terminar o áudio não encerra um vídeo
-mais longo; o relógio monotônico continua do último instante do áudio.
+mais longo; o relógio continua do último instante do áudio.
+
+A cada tique, `_sync_video_clock` compara o relógio do fluxo
+(`clock_position`) com o da reprodução e repassa a diferença
+(`set_clock_offset`). Abaixo de 15 ms nada muda: é o degrau do relógio da placa.
+Nos primeiros 0,35 s, ou acima de 0,25 s, o fluxo corrige de uma vez; no meio,
+no máximo 3 ms por quadro, sem salto visível. Diferenças acima de 0,35 s ainda
+reabrem o fluxo no instante do som, mas só depois de o fluxo atual ter mostrado
+um quadro: antes disso a tela ainda exibe o ponto anterior.
+
+No play com som, a imagem pronta é segurada (`hold_start`) até a posição da
+placa começar a andar. Abrir a mixagem e a placa leva de 100 a 150 ms a mais que
+soltar a imagem; sem esperar, ela saía na frente e o acerto a fazia parar duas
+vezes logo depois do play. A soltura é ancorada no instante em que o som
+começou (`start_playback(at=…)`), não no tique que percebeu. Sem trilha
+audível, a imagem sai no primeiro quadro; com a placa parada por 0,5 s, sai
+mesmo assim.
 
 Se o usuário pedir play antes de a pré-carga terminar, o áudio espera o sinal de
 primeiro quadro pronto. No pause, a interface preserva o último quadro realmente
@@ -124,10 +152,14 @@ andamento é aberto com `audio_command(until=fim)`, que completa com silêncio e
 corta exatamente no fim, para a emenda cair no instante certo. Quando o trecho
 atual acaba, `_pump` troca para a fila preparada sem parar a placa e registra a
 fronteira em `_segments`: `position` passa a contar a partir de 0. Ao ver o
-relógio voltar, o painel libera a imagem preparada (`_swap_loop_video`). Sem
-som, a volta é feita no relógio monotônico. Se a preparação falhar, vale o
-caminho antigo de reabrir do zero. Editar, buscar, parar ou alternar o Loop
-cancela o que foi preparado.
+relógio voltar, o painel passa a ele o controle (`_swap_loop_video`). A imagem
+do começo, porém, é solta já ao armar, com hora marcada para quando o relógio
+da imagem atual chega ao fim; os quadros dela são aceitos antes da troca, e
+quadros atrasados do fluxo que acabou não a cobrem. Esperar o tique que percebe
+a volta deixava o último quadro parado e descartava o primeiro do começo:
+147 ms de imagem parada, medidos. Sem som, a volta é feita em `playback_clock`.
+Se a preparação falhar, vale o caminho antigo de reabrir do zero. Editar,
+buscar, parar ou alternar o Loop cancela o que foi preparado.
 
 A sondagem guarda a duração de cada trilha; um bloco novo de vídeo dura a
 trilha de vídeo, e não o container. Blocos de vídeo recebem `tpad` clone de até
@@ -186,6 +218,9 @@ a destruição da instância pode apagar o diretório antes da leitura.
 Testes medem bytes, quadros e PCM, além de gestos, busca, texto e tela cheia.
 A fixture `isolated_audio` desliga a consulta ao dispositivo nos testes Qt;
 ela não simula o compositor nem os arquivos de mídia.
+`tests/test_playback_smoothness.py` fixa a resolução do relógio, a fila adiantada
+diante de uma demora do ffmpeg, a hora marcada, a espera pelo som, o acerto do
+relógio e a volta do loop agendada.
 
 O benchmark registra primeira prévia e busca com uma mídia sintética fixa.
 Essas medidas não substituem avaliar sincronismo audível, fluidez de projetos

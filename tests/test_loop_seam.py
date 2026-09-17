@@ -132,7 +132,7 @@ def test_virada_do_loop_usa_a_imagem_pronta_sem_reabrir(monkeypatch) -> None:
                              processing=build_processing_service(), runtime=runtime)
     monkeypatch.setattr(panel._runner, "start", lambda *args: None)
     now = [100.0]
-    monkeypatch.setattr(module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(module, "playback_clock", lambda: now[0])
     try:
         video = MediaRef(Path("/m/v.mp4"), MediaKind.VIDEO, duration=4, width=320, height=180, fps=30)
         panel.install_project(replace(panel._project, tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0, 4),)),)),

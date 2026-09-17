@@ -1,9 +1,23 @@
 """Pedidos de prévia independentes de comandos e da representação gráfica."""
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 from ...domain.project import Project
 from ...domain.preview import RawFrame, preview_fps
+
+
+def playback_clock() -> float:
+    """Relógio da reprodução da prévia, em segundos.
+
+    Um só para o painel e para o fluxo de quadros, que trocam instantes entre si
+    (a hora marcada da volta do loop, o acerto pelo som). É ``perf_counter`` e
+    não ``monotonic`` porque, no Windows até o Python 3.12, ``monotonic`` anda
+    em degraus de 15,6 ms: o ritmo dos quadros medido por ele errava a espera
+    de cada quadro em até um degrau, e a imagem andava aos trancos — intervalos
+    de 25 a 42 ms num fluxo de 33 ms, o tempo todo.
+    """
+    return time.perf_counter()
 
 
 class PreviewFrameInbox:
