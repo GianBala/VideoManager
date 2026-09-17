@@ -354,9 +354,26 @@ class PlaybackWorker(QRunnable):
             self._gate.set()
         self.signals = PreviewSignals()
 
-    def start_playback(self) -> None:
-        """Libera um fluxo previamente carregado sem abrir outro processo."""
+    def start_playback(self, at: float | None = None) -> None:
+        """Libera um fluxo previamente carregado sem abrir outro processo.
+
+        ``at`` marca o instante de ``playback_clock`` do primeiro quadro: a
+        emenda do loop, que entra quando o fluxo atual termina, e a espera pelo
+        som no play, que solta a imagem no instante em que o som começou.
+        """
+        if at is not None:
+            self._pump.start_at(at)
         self._gate.set()
+
+    def hold_start(self) -> None:
+        """Segura o primeiro quadro até ``start_playback(at=...)``."""
+        self._pump.hold_start()
+
+    def clock_position(self, now: float | None = None) -> float | None:
+        return self._pump.clock_position(now)
+
+    def set_clock_offset(self, seconds: float) -> None:
+        self._pump.set_clock_offset(seconds)
 
     def cancel(self) -> None:
         self._cancelled = True
