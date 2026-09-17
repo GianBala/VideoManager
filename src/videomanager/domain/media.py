@@ -42,6 +42,9 @@ class LocalStream:
     language: str | None = None
     rotation: float = 0.0
     attached_picture: bool = False
+    # Duração da própria trilha, quando o arquivo informa. Pode ser menor que a
+    # do container: o AAC costuma sobrar alguns quadros além do vídeo.
+    duration: float | None = None
 
 
 @dataclass(frozen=True)
