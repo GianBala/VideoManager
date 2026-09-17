@@ -676,12 +676,15 @@ def test_scroll_executa_apenas_acao_aprovada(mod, action, touchpad):
     from PySide6.QtGui import QWheelEvent
     timeline = Timeline(DARK)
     timeline.resize(900, 350)
-    timeline.set_project(Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(
-        Clip(None, 0, 60, overlay_type='text', text_content='Teste'),)),)))
+    # Trilhas de sobra para haver o que rolar: a roda rola as trilhas dentro da
+    # linha do tempo, com a régua parada.
+    timeline.set_project(Project(tracks=tuple(Track(TrackKind.ADDITIONAL, clips=(
+        Clip(None, 0, 60, overlay_type='text', text_content='Teste'),)) for _ in range(12))))
     timeline.set_view(10, 20)
+    timeline.set_scroll(timeline.max_scroll // 2)
     view = timeline.view
     vertical = []
-    timeline.vertical_scroll_requested.connect(vertical.append)
+    timeline.scroll_changed.connect(vertical.append)
     event = QWheelEvent(QPointF(450, 40), QPointF(450, 40),
                         QPoint(0, 40) if touchpad else QPoint(),
                         QPoint() if touchpad else QPoint(0, 120),
