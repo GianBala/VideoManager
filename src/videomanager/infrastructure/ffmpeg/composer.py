@@ -272,6 +272,22 @@ def _still_seek(piece: _Piece) -> tuple[float, float]:
     return begin + 0.25 * step, 0.5 * step
 
 
+def _whole_frames(duration: float, fps: float) -> float:
+    """``duration`` arredondada para cima até fechar um quadro.
+
+    Vale para a entrada e para o corte de uma imagem ou de um texto. Um bloco
+    de 4,27 s a 30 q/s tem seu último tique em 4,2667 s, mas ``-loop 1 -t 4.27``
+    para em 4,2333 s e ``trim=duration=4.27`` trunca 128,1 quadros para 128 —
+    os dois descartam justamente esse tique, e a foto sumia no último quadro
+    antes da volta do loop. O ramo de vídeo não mostrava o problema porque o
+    ``tpad`` segura o último quadro dele. A janela ``enable`` do ``overlay``
+    continua limitando o que aparece, então o quadro a mais não se vê.
+    """
+    if fps <= 0:
+        return duration
+    return math.ceil(duration * fps - 1e-6) / fps
+
+
 def _input_args(
     piece: _Piece,
     fps: float,
@@ -288,7 +304,7 @@ def _input_args(
         return [
             "-loop", "1",
             "-framerate", f"{fps:.6f}",
-            "-t", f"{piece.duration:.6f}",
+            "-t", f"{_whole_frames(piece.duration, fps):.6f}",
             "-i", str(path),
         ]
     if clip.media.kind is MediaKind.IMAGE:
@@ -297,7 +313,7 @@ def _input_args(
         return [
             "-loop", "1",
             "-framerate", f"{fps:.6f}",
-            "-t", f"{piece.duration:.6f}",
+            "-t", f"{_whole_frames(piece.duration, fps):.6f}",
             "-i", str(clip.media.path),
         ]
     if piece.still:
@@ -498,7 +514,7 @@ def _video_chain(
     clip = piece.clip
     is_overlay = clip.overlay_type in ("image", "text") or clip.is_image
     if is_overlay:
-        steps = [f"trim=duration={piece.duration:.6f}"]
+        steps = [f"trim=duration={_whole_frames(piece.duration, fps):.6f}"]
         if piece.offset > 0:
             steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
         else:

@@ -99,3 +99,54 @@ def test_bloco_antigo_mais_longo_que_o_video_nao_termina_preto(ffmpeg, tmp_path)
     tail = frames[21]
     assert len(tail) == 160 * 90 * 3
     assert tail[(45 * 160 + 80) * 3] > 200
+
+
+def test_entrada_e_corte_de_uma_imagem_cobrem_o_ultimo_quadro() -> None:
+    """A imagem precisa existir no último tique do bloco.
+
+    Um bloco de 4,27 s a 30 q/s tem seu último quadro em 4,2667 s, mas
+    ``-loop 1 -t 4.27`` para em 4,2333 s e ``trim=duration=4.27`` trunca 128,1
+    quadros para 128. Sem quadro, o ``overlay`` deixa passar só o fundo: a foto
+    sumia no último quadro antes da volta do loop.
+    """
+    from videomanager.infrastructure.ffmpeg.composer import build_graph
+
+    foto = MediaRef(Path("/m/foto.png"), MediaKind.IMAGE, width=320, height=180)
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(foto, 0, 4.27),)),),
+                      width=160, height=90, fps=30.0)
+    graph = build_graph(project, want_audio=False)
+    assert graph.inputs[graph.inputs.index("-t") + 1] == "4.300000"
+    chain = next(f for f in graph.filters if f.startswith("[0:v]"))
+    assert "trim=duration=4.300000" in chain
+    # E o bloco continua aparecendo só até o fim dele.
+    assert "lt(t,4.270000)" in " ".join(graph.filters)
+
+
+@pytest.mark.ffmpeg
+def test_imagem_por_cima_continua_no_ultimo_quadro(ffmpeg, tmp_path) -> None:
+    """O mesmo, no pixel: o último quadro antes da volta ainda tem a foto."""
+    from videomanager.infrastructure.ffmpeg.composer import playback_command
+    from videomanager.domain.timing import last_frame_time
+    from videomanager.infrastructure.system.binaries import subprocess_kwargs
+
+    tools, run = ffmpeg
+    fundo, foto = tmp_path / "fundo.mp4", tmp_path / "foto.png"
+    run("-f", "lavfi", "-i", "color=c=white:s=160x90:r=30", "-frames:v", "129", "-c:v", "libx264", fundo)
+    run("-f", "lavfi", "-i", "color=c=red:s=40x40", "-frames:v", "1", foto)
+    video = MediaRef(fundo, MediaKind.VIDEO, duration=4.27, width=160, height=90, fps=30)
+    imagem = MediaRef(foto, MediaKind.IMAGE, width=40, height=40)
+    project = Project(
+        tracks=(
+            Track(TrackKind.VIDEO, clips=(Clip(imagem, 0, 4.27, x=0.5, y=0.5),)),
+            Track(TrackKind.VIDEO, clips=(Clip(video, 0, 4.27),)),
+        ),
+        width=160, height=90, fps=30.0,
+    )
+    size, começo = (160, 90), last_frame_time(project.duration, project.fps) - 3 / 30
+    fluxo = subprocess.run(playback_command(project, começo, size, tools, fps=30), timeout=60,
+                           **subprocess_kwargs()).stdout
+    quadro = 160 * 90 * 3
+    assert len(fluxo) // quadro >= 4, "a reprodução do fim entregou poucos quadros"
+    último = fluxo[(len(fluxo) // quadro - 1) * quadro:]
+    centro = último[(45 * 160 + 80) * 3:(45 * 160 + 80) * 3 + 3]
+    assert centro[0] > 150 and centro[1] < 100, f"a foto sumiu no último quadro (centro {tuple(centro)})"
