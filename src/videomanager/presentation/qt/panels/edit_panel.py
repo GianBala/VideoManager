@@ -160,6 +160,13 @@ _ZOOM_FACTOR = 1.6
 _TICK_MS = 40
 _MAX_DRIFT = 0.35
 _RESYNC_COOLDOWN = 1.5
+# Com Loop marcado, quanto antes do fim a imagem e o som do começo já começam a
+# ser preparados: abrir o ffmpeg e chegar ao primeiro quadro leva de 150 a
+# 500 ms, e é esse tempo que aparecia como corte na volta.
+_LOOP_LEAD = 1.5
+# Quanto o relógio pode passar do fim esperando a emenda do som chegar à placa
+# antes de desistir e reabrir do zero.
+_LOOP_GRACE = 0.5
 
 # Miniaturas por bloco. O teto existe porque um bloco largo não fica mais
 # compreensível com quarenta imagens do que com doze, e cada uma é uma chamada
@@ -403,7 +410,13 @@ class EditPanel(QWidget):
         # Quando ainda não houve tempo de preparar o vídeo, o áudio espera o
         # primeiro quadro. Começar o som durante a abertura do FFmpeg deixaria
         # a imagem atrasada justamente no caminho de contingência.
-        self._pending_audio: tuple[object, float, object, object] | None = None
+        self._pending_audio: tuple[object, float, object, object, float | None] | None = None
+        # Emenda do loop: fluxo de imagem do começo já carregado e se o som do
+        # começo já está na fila da placa.
+        self._loop_worker = None
+        self._loop_token = 0
+        self._loop_armed = False
+        self._loop_audio_queued = False
         self._fullscreen: FullscreenPreview | None = None
         self._syncing = False
         self._shown_frame = 0.0
@@ -1593,6 +1606,7 @@ class EditPanel(QWidget):
         self._loop = QCheckBox(strings.EDIT_LOOP)
         self._loop.setToolTip(strings.EDIT_LOOP_TIP)
         self._loop.setChecked(False)
+        self._loop.toggled.connect(self._on_loop_toggled)
         row.addWidget(self._loop)
 
         row.addSpacing(6)
@@ -1949,6 +1963,11 @@ class EditPanel(QWidget):
     @property
     def _fps(self) -> float:
         return self._project.fps
+
+    @property
+    def _loop_end(self) -> float:
+        """Onde o loop volta: o fim do que se vê e se ouve, como no arquivo."""
+        return self._project.export_duration or self._duration
 
     @property
     def _position(self) -> float:
@@ -3834,6 +3853,7 @@ class EditPanel(QWidget):
         tools = self._ensure_tools()
         if tools is None:
             return
+        self._cancel_loop_arm()
         self._live_timer.stop()
         self._playback_project = self._project
         self._pending_audio = None
@@ -3841,6 +3861,9 @@ class EditPanel(QWidget):
         self._clock_started = None
         started = self._start_frames(seconds)
         text_assets = self.editor.text_assets(self._project)
+        # Com Loop, o som vai até o fim exato do loop, completado com silêncio:
+        # é no fim dele que o trecho do começo é emendado.
+        until = self._loop_end if self._loop.isChecked() else None
         if started is None or started[1]:
             self._clock_started = time.monotonic()
             self._runtime.play_audio(
@@ -3849,12 +3872,13 @@ class EditPanel(QWidget):
                 seconds,
                 tools,
                 text_assets=text_assets,
+                until=until,
             )
         else:
             # O caminho sem pré-carga continua correto: som e relógio só
             # começam quando a imagem também pode começar, sem salto inicial.
             self._audio.stop()
-            self._pending_audio = (self._project, seconds, tools, text_assets)
+            self._pending_audio = (self._project, seconds, tools, text_assets, until)
 
     def _restart_stream(self) -> None:
         """Refaz o fluxo com a composição nova, sem sair da reprodução.
@@ -3934,7 +3958,7 @@ class EditPanel(QWidget):
         if pending is None:
             return
         self._pending_audio = None
-        project, seconds, tools, text_assets = pending
+        project, seconds, tools, text_assets, until = pending
         self._clock_position = seconds
         self._clock_started = time.monotonic()
         self._runtime.play_audio(
@@ -3943,6 +3967,7 @@ class EditPanel(QWidget):
             seconds,
             tools,
             text_assets=text_assets,
+            until=until,
         )
 
     def _on_playback_worker_done(self, token: int) -> None:
@@ -3992,7 +4017,80 @@ class EditPanel(QWidget):
         self._playback = worker
         return self._play_token, False
 
+    def _arm_loop(self, end: float) -> None:
+        """Prepara a volta ao começo enquanto o fim ainda está tocando.
+
+        A imagem do começo abre atrás da comporta, como a pré-carga do play, e o
+        som do começo entra na fila da placa para tocar logo depois do trecho
+        atual. Na virada nada é aberto: só se solta o que já está pronto.
+        """
+        self._loop_armed = True
+        tools = self._ensure_tools()
+        if tools is None:
+            return
+        text_assets = self.editor.text_assets(self._project)
+        if self._has_video:
+            token = next(self._tokens)
+            worker = self._runtime.playback_worker(
+                self._project, 0.0, self._preview_size(), tools, token,
+                fps=preview_fps(self._fps), text_assets=text_assets, autostart=False,
+            )
+            worker.signals.frame.connect(self._on_frame)
+            if hasattr(worker.signals, "failed"):
+                worker.signals.failed.connect(self._on_preview_failed)
+            worker.signals.done.connect(lambda token=token: self._on_loop_worker_done(token))
+            self._loop_worker, self._loop_token = worker, token
+            self._runner.start(worker, worker.signals.done)
+        if self._audio.playing:
+            self._loop_audio_queued = bool(self._runtime.queue_audio(
+                self._audio, self._project, 0.0, tools, text_assets=text_assets, until=end,
+            ))
+
+    def _swap_loop_video(self) -> None:
+        """Na volta, a imagem preparada assume no lugar da que acabou."""
+        worker, token = self._loop_worker, self._loop_token
+        self._loop_worker, self._loop_token = None, 0
+        self._loop_armed = False
+        self._loop_audio_queued = False
+        # A imagem recomeça junto com o relógio; sem isto o desvio de quem
+        # estava no fim seria corrigido reabrindo o fluxo que acabou de entrar.
+        self._resynced_at = 0.0
+        if self._playback is not None:
+            self._playback.cancel()
+            self._playback = None
+        if worker is None:
+            if self._has_video:
+                self._start_frames(0.0)
+            return
+        self._play_token = token
+        self._playback = worker
+        worker.start_playback()
+
+    def _cancel_loop_arm(self) -> None:
+        worker = self._loop_worker
+        self._loop_worker, self._loop_token = None, 0
+        self._loop_armed = False
+        if worker is not None:
+            worker.cancel()
+        if self._loop_audio_queued:
+            self._loop_audio_queued = False
+            self._audio.cancel_next()
+
+    def _on_loop_worker_done(self, token: int) -> None:
+        if token == self._loop_token:
+            self._loop_worker, self._loop_token = None, 0
+        self._on_playback_done(token)
+
+    def _on_loop_toggled(self, _checked: bool) -> None:
+        # O som em andamento foi aberto com ou sem o tamanho do loop; ligar ou
+        # desligar no meio da reprodução o reabre com a regra certa.
+        if not self._playing:
+            return
+        self._cancel_loop_arm()
+        self._restart_stream()
+
     def _loop_playback(self) -> None:
+        self._cancel_loop_arm()
         self._tick.stop()
         self._live_timer.stop()
         self._audio.stop()
@@ -4017,8 +4115,13 @@ class EditPanel(QWidget):
             return
         now = time.monotonic()
         position = self._position
+        looping = self._loop.isChecked()
+        end = self._loop_end if looping else self._duration
         if self._audio.playing:
             position = self._audio.position
+            if self._loop_audio_queued and position < self._position - end / 2:
+                # O som já emendou no começo; a imagem vai junto.
+                self._swap_loop_video()
             self._clock_position, self._clock_started = position, now
             drift = abs(self._shown_frame - position)
             if (self._has_video and drift > _MAX_DRIFT
@@ -4027,11 +4130,20 @@ class EditPanel(QWidget):
                 self._start_frames(position)
         elif self._clock_started is not None:
             position = self._clock_position + now - self._clock_started
+            if looping and self._loop_armed and end > 0 and position >= end - 1e-8:
+                # Sem som, o relógio é o do sistema: a volta acontece aqui.
+                position -= end
+                self._clock_position, self._clock_started = position, now
+                self._swap_loop_video()
         self._timeline.set_position(min(self._duration, position))
         self._update_time_labels()
+        if looping and end > 0 and not self._loop_armed and 0 < end - position <= _LOOP_LEAD:
+            self._arm_loop(end)
         # Duração é da saída: velocidade de outro clipe não encurta este fim.
-        if self._duration > 0 and position >= self._duration - 1e-8:
-            if self._loop.isChecked():
+        if end > 0 and position >= end - 1e-8:
+            if looping:
+                if self._loop_audio_queued and position < end + _LOOP_GRACE:
+                    return  # a emenda do som ainda não chegou à placa
                 self._loop_playback()
             else:
                 self._stop_playback()
@@ -4050,6 +4162,7 @@ class EditPanel(QWidget):
         # visível antes de desmontar os fluxos impede o próximo play de reabrir
         # num instante anterior e parecer que o vídeo voltou.
         visible_position = self._shown_frame if self._has_video else self._position
+        self._cancel_loop_arm()
         self._tick.stop()
         self._live_timer.stop()
         self._pending_audio = None

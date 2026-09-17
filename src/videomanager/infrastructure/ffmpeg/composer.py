@@ -1882,23 +1882,33 @@ def audio_command(
     sample_rate: int = SAMPLE_RATE,
     channels: int = CHANNELS,
     text_assets: dict[int, Path] | None = None,
+    until: float | None = None,
 ) -> list[str] | None:
     """Comando que produz a mixagem em PCM, a partir de ``at``.
 
     ``None`` quando não há som a tocar — o que a interface usa para não abrir
     processo nenhum, em vez de tocar silêncio.
+
+    ``until`` completa com silêncio e corta a mixagem exatamente no fim do loop
+    da prévia: o trecho seguinte é emendado quando este acaba, e um som que
+    terminasse antes do fim da edição faria a volta ao começo chegar cedo.
     """
     graph = build_graph(project, at=at, span=None, want_video=False, text_assets=text_assets)
     if not graph.audio_label:
         return None
+    filters = list(graph.filters)
+    label = graph.audio_label
+    if until is not None and until > at:
+        filters.append(f"{label}apad,atrim=end={until - at:.6f}[loopmix]")
+        label = "[loopmix]"
     return [
         tools.ffmpeg_str,
         "-nostdin",
         "-hide_banner",
         "-v", "error",
         *graph.inputs,
-        "-filter_complex", ";".join(graph.filters),
-        "-map", graph.audio_label,
+        "-filter_complex", ";".join(filters),
+        "-map", label,
         "-f", "s16le",
         "-acodec", "pcm_s16le",
         "-ar", str(sample_rate),

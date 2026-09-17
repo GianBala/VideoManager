@@ -114,17 +114,26 @@ class DesktopRuntime:
         tools,
         *,
         text_assets = None,
+        until = None,
     ):
         if not output.available:
             output.stop()
             return
         rate, channels = output.target_format
+        extra = {} if until is None else {"until": until}
         command = composer.audio_command(project, seconds, tools, sample_rate=rate,
-                                         channels=channels, text_assets=text_assets)
+                                         channels=channels, text_assets=text_assets, **extra)
         if command is not None:
             output.start(command, seconds, pcm_format=(rate, channels))
         else:
             output.stop()
+
+    def queue_audio(self, output, project, seconds, tools, *, text_assets=None, until=None) -> bool:
+        """Prepara o próximo trecho de som na mesma placa (emenda do loop)."""
+        rate, channels = output.target_format
+        command = composer.audio_command(project, seconds, tools, sample_rate=rate, channels=channels,
+                                         text_assets=text_assets, until=until)
+        return command is not None and output.queue_next(command, seconds)
 
     def find_tools(self):
         return binaries.find_tools()
