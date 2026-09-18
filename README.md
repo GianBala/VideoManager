@@ -22,18 +22,31 @@ Usa **yt-dlp** para extração e **ffmpeg** para processamento.
   Filmora tornaram padrão:
   - **Várias trilhas** de vídeo (com fotos), adicionais e áudio, em qualquer
     ordem — entre vídeo e adicionais, a de cima sobrepõe as de baixo.
-  - **Importar** vídeos, fotos e áudios para dentro da edição, arrastando ou
-    pelo botão.
+  - **Importar** vídeos, fotos e áudios para o **acervo** (arrastando ou pelo
+    botão) e **arrastar a mídia** até a trilha e o instante desejados, com um
+    bloco fantasma mostrando onde ela vai cair.
   - **Arrastar os blocos** no tempo e entre trilhas, com imantação nas pontas
-    dos vizinhos e no cursor; alças para ajustar o corte de cada um.
-  - **Volume por bloco em decibéis** e **mudo por trilha ou por bloco**.
+    dos vizinhos, nos quadros-chave e no cursor; alças para ajustar o corte de
+    cada um. A régua e a agulha ficam fixas no topo enquanto as trilhas rolam.
+  - **Volume por bloco em decibéis**, **velocidade por bloco** (0,1× a 10×) e
+    **mudo por trilha ou por bloco**.
   - **Separar o áudio** de um vídeo para uma trilha própria, e mexer nele
     sozinho.
-  - **Copiar e colar** blocos, dividir no cursor, excluir, desfazer e refazer.
+  - **Transições** entre dois cortes (Fade, Dissolve, Wipe, Slide), **texto**,
+    **filtros** e **fundo verde (chroma key)**.
+  - **Animação por quadros-chave** de posição, escala, rotação e opacidade, com
+    curvas de aceleração e efeitos rápidos de entrada, editável direto na prévia
+    ou por campos numéricos na aba **Propriedades**.
+  - **Copiar e colar** blocos, dividir no cursor, excluir, desfazer e refazer;
+    cada gesto é um único passo de desfazer.
   - **Prévia retrátil** e **tela cheia** (tecla `F` ou duplo clique), com a
     barra de controles esmaecendo por inatividade.
   - Reprodução **com o som da mixagem** — todas as trilhas somadas, com os
-    volumes e mudos aplicados — e navegação **quadro a quadro**.
+    volumes e mudos aplicados —, **loop sem corte** e navegação **quadro a
+    quadro**. Arrastar a agulha responde na hora.
+  - **Proporção e tela** do projeto (16:9, 4:3, 9:16, 1:1, 21:9) e projetos
+    `.vmp` com **Salvar** e **Salvar como**.
+  - **Exportar** em MP4, MKV, WebM, MOV ou **GIF animado**.
 
   O que está na tela é a composição de verdade: o mesmo grafo do ffmpeg que
   exporta o arquivo desenha a prévia. E enquanto a edição for só um recorte de
@@ -75,8 +88,14 @@ Sem ele o Qt falha com *“Could not load the Qt platform plugin xcb”*.
 
 ```bash
 .venv/bin/python -m pytest -q          # offline, inclui integração local com ffmpeg
+.venv/bin/python -m pytest -q -m "not network and not ffmpeg"  # sem as integrações demoradas
 .venv/bin/python -m pytest -m network  # testes que acessam a internet
 ```
+
+Rodando pelo código-fonte, vale o `ffmpeg` do sistema, e o aplicativo funciona
+com as versões 6 a 9 (os pacotes trazem a 7.1); a CI cobre 6.1, 7.1 e 9.0.
+Ensaios opt-in de fluidez, gestos e áudio ficam em `scripts/` — ver
+[testes](docs/clean-architecture/testes.md#ensaios-opt-in-do-editor).
 
 ## Empacotar
 
@@ -209,6 +228,10 @@ esse **mesmo grafo serve três usos**: exportar o arquivo, desenhar o quadro
 parado da prévia e alimentar a reprodução. A consequência é a que importa —
 trilha sobreposta, vão preto, volume em decibéis e mudo aparecem na tela como
 vão aparecer no resultado, em vez de só na hora de exportar.
+
+Animações seguem a mesma regra: os quadros-chave viram expressões que o ffmpeg
+avalia a cada quadro (escala, rotação, posição e opacidade), e por isso a prévia
+e o arquivo exportado se movem igual.
 
 O som segue o mesmo caminho: o compositor produz a mixagem em PCM e um
 `QAudioSink` toca. Um player de arquivo não daria conta, porque uma edição com

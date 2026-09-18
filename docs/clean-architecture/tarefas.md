@@ -101,7 +101,11 @@ O processamento grava num temporário exclusivo ao lado do destino.
 `mkstemp` impede colisão do arquivo serial com outras operações; o exportador
 paralelo usa um diretório temporário próprio. A capa é incorporada
 nesse temporário, quando aplicável. Só então o adaptador confere a reserva e
-publica por substituição atômica.
+publica por substituição atômica. No Windows, antivírus, indexador e OneDrive
+abrem o arquivo recém-criado por um instante e a troca falha com "arquivo em
+uso" (`PermissionError`); a publicação repete até seis vezes, com espera
+crescente a partir de 0,25 s, antes de propagar o erro — um bloqueio de verdade
+continua falhando, e a conversão não termina em erro por uma trombada passageira.
 
 Cancelamento e publicação são ordenados pelo mesmo lock do executor:
 

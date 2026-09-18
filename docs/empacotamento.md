@@ -15,7 +15,23 @@ Os três scripts seguem a mesma sequência: instalam as dependências (inclusive
 gerado sobre suíte vermelha), baixam o `ffmpeg` a embutir, empacotam com o
 `.spec` do projeto e, por fim, **abrem o executável gerado** para confirmar
 que ele realmente sobe — ver [`smoke_run.sh`](#conferindo-que-o-pacote-abre)
-abaixo.
+abaixo. Cada etapa de comando nativo confere o código de saída e interrompe o
+script na falha.
+
+### Testes antes do pacote
+
+As integrações com o `ffmpeg` são a parte mais lenta da suíte. Nos scripts de
+Linux o padrão é o **modo rápido**: `pytest -m "not ffmpeg and not network"`, que
+ainda cobre domínio, aplicação, interface e arquitetura, e deixa as integrações
+demoradas para a CI. `VM_FAST_TESTS=0` roda tudo (menos a rede):
+
+```bash
+VM_FAST_TESTS=0 ./packaging/build_appimage.sh    # também vale para build_linux.sh
+```
+
+`build_windows.ps1` sempre roda a suíte completa. Um pacote gerado no modo
+rápido não substitui a CI, que roda o conjunto inteiro com três versões do
+ffmpeg (ver [testes](clean-architecture/testes.md#integração-contínua)).
 
 ## `build_linux.sh` / `build_windows.ps1`
 
@@ -63,6 +79,12 @@ VM_BUNDLE_FFMPEG=0 ./packaging/build_appimage.sh  # sem ffmpeg embutido: ~290 MB
 
 Sem compilação cruzada aqui também: um AppImage x86_64 precisa ser gerado
 numa máquina x86_64.
+
+`scripts/generate_appimage.sh` faz o mesmo de ponta a ponta num só comando —
+cria o `.venv`, instala as dependências, testa, baixa os binários, empacota,
+monta o AppDir, gera o AppImage e calcula o SHA-256 — para quem parte de um
+clone limpo. Aceita `--skip-tests`, `--skip-deps`, `--no-bundle-ffmpeg` e
+`--reuse-dist`, e obedece a `VM_FAST_TESTS` como os scripts de `packaging/`.
 
 ## `fetch_binaries.py`
 
@@ -115,8 +137,17 @@ explícitos:
 - **Ícone do executável** (`icon=`): `packaging/make_icon.py` gera
   `build/videomanager.ico` a partir de `resources/videomanager.png` com o Qt,
   em nove tamanhos de 16 a 256 px. Sem `icon=` o `.exe` saía com o ícone
-  padrão do PyInstaller. O Explorer guarda ícones em cache: se o desenho antigo
-  persistir, renomeie o executável ou rode `ie4uinit.exe -show`.
+  padrão do PyInstaller — e o spec só aplica o ícone se o arquivo existir, então
+  **o `.ico` precisa ser gerado antes do PyInstaller** (o `build_windows.ps1` e a
+  CI fazem isso). Todas as entradas são bitmap clássico (DIB de 32 bits com
+  máscara), inclusive a de 256 px: o shell do Windows lê PNG dentro de um
+  `.ico`, mas as APIs antigas (GDI+, `System.Drawing`, diálogos e utilitários
+  que ainda as usam) não, e devolviam o desenho esticado ou ruído colorido. O
+  arquivo fica com cerca de 400 KB. No pacote em pasta (`VM_ONEFILE=0`), o
+  `.ico` também vai solto na raiz, ao lado do `.exe` — não em `_internal` —,
+  para um atalho feito à mão apontar direto para ele; o arquivo único não tem
+  "ao lado". O Explorer guarda ícones em cache: se o desenho antigo persistir,
+  renomeie o executável ou rode `ie4uinit.exe -show`.
 
 ## Conferindo que o pacote abre
 
@@ -133,7 +164,9 @@ argumento `--smoke-test`, com perfil temporário e prazo padrão de 30 segundos.
 Exige código de saída zero e o marcador `VM_SMOKE_OK`: janela montada, fonte
 Carlito carregada, prévia de texto renderizada e vídeo de 1 segundo exportado
 e inspecionado. Também confere que os scripts do solver JavaScript do yt-dlp e
-o mutagen estão no pacote, e informa o runtime JavaScript encontrado
+o mutagen estão no pacote, que o Qt do pacote grava e lê JPEG (o cache de
+quadros da agulha depende do plugin de imagem, e sem ele o arrasto cairia no
+quadro exato sem avisar) e informa o runtime JavaScript encontrado
 (`VM_SMOKE_JS_RUNTIME`). Um processo que apenas continua aberto não passa no
 teste.
 
@@ -185,14 +218,23 @@ de um slot e, sem console, não deixava rastro.
 
 O aplicativo grava log com rotação em `videomanager.log`, na pasta de logs do
 usuário (`%LOCALAPPDATA%\VideoManager\Logs` no Windows), incluindo exceções não
-tratadas em slots e threads. A CI gera o pacote no Windows e guarda o artefato
-por sete dias.
+tratadas em slots e threads (o caminho no Linux e o que ele guarda estão em
+[instalação](instalacao.md#onde-fica-o-registro-de-execução)).
+
+A CI gera o pacote do Windows como o build local — provisiona ffmpeg e Deno,
+gera o `.ico` antes do PyInstaller e roda `smoke_windows.ps1` com `-Icon`, para
+o ícone do `.exe` ser conferido — e guarda o `VideoManager.exe` (arquivo único)
+por sete dias. O pacote em pasta do Linux é gerado com `VM_BUNDLE_FFMPEG=0` e
+aprovado por `smoke_run.sh`.
 
 Em Linux, `VM_DIST_DIR` e `VM_BUILD_DIR` permitem escolher diretórios separados
 para PyInstaller e AppImage. O build não precisa apagar todo o `dist` existente.
 O AppImage gera um arquivo `.sha256` após passar no diagnóstico. O download do
-runtime só atualiza o cache quando termina com sucesso e o patch trabalha numa
-cópia; auto-extração não é garantia de suporte a toda distribuição Linux.
+runtime só atualiza o cache quando termina com sucesso e o patch de
+auto-extração (`packaging/patch_runtime.py`, só para runtimes x86_64 compatíveis)
+trabalha numa cópia; se ele não puder ser aplicado, o build avisa e o AppImage
+ainda roda com `APPIMAGE_EXTRACT_AND_RUN=1` onde não houver FUSE.
+Auto-extração não é garantia de suporte a toda distribuição Linux.
 
 As evidências da migração estão no [checkup final](clean-architecture/validacao-final.md).
 

@@ -7,20 +7,33 @@ que trocar de aba nunca esconda o que está em andamento.
 
 ## Barra de menu
 
+Os menus **Arquivo** e **Ferramentas** acompanham a aba à vista: só aparecem os
+comandos que fazem sentido nela, e os atalhos de uma aba ficam desligados nas
+outras (`Ctrl+O`, por exemplo, adiciona arquivos na aba Convert e abre um
+projeto na aba Editar).
+
 - **&Arquivo**
-  - **Abrir pasta de destino** — abre no gerenciador de arquivos do sistema a
-    pasta configurada para onde os resultados vão.
-  - **Sair** — fecha o aplicativo (atalho padrão de encerrar do sistema
+  - Na aba **Download**: **Abrir pasta de downloads…** (abre no gerenciador de
+    arquivos do sistema a pasta configurada) e **Sair**.
+  - Na aba **Convert**: **Adicionar arquivos para conversão…** (`Ctrl+O`),
+    **Remover arquivos selecionados**, **Limpar lista de conversão**, **Abrir
+    pasta de destino…** e **Sair**. Remover e Limpar ficam desabilitados
+    quando não há o que remover.
+  - Na aba **Editar**: **Novo projeto** (`Ctrl+N`), **Abrir projeto…**
+    (`Ctrl+O`), **Salvar projeto** (`Ctrl+S`), **Salvar projeto como…**
+    (`Ctrl+Shift+S`), **Importar mídia…** (`Ctrl+I`) e **Exportar vídeo…**
+    (`Ctrl+E`) — ver o [guia do editor](guia-edicao.md#projetos).
+  - **Sair** fecha o aplicativo (atalho padrão de encerrar do sistema
     operacional).
 - **&Ferramentas**
   - **Configurações…** — abre o diálogo descrito em
-    [`configuracoes.md`](configuracoes.md).
-  - **Atualizar engine (yt-dlp)…** — atualiza o yt-dlp embutido. Fica
-    **desabilitado** em builds empacotadas (AppImage, pasta do Windows), com
-    uma dica explicando o motivo: nesses casos o yt-dlp vem embutido junto do
-    aplicativo e é atualizado numa nova versão do próprio Video Manager, não
-    separadamente.
-- **Ajuda**
+    [`configuracoes.md`](configuracoes.md). Está em todas as abas.
+  - **Atualizar motor de download (yt-dlp)…** — só na aba Download; atualiza o
+    yt-dlp. Fica **desabilitado** em builds empacotadas (AppImage, pacote do
+    Windows), com uma dica explicando o motivo: nesses casos o yt-dlp vem
+    embutido junto do aplicativo e é atualizado numa nova versão do próprio
+    Video Manager, não separadamente.
+- **A&juda**
   - **Sobre** — mostra a versão do aplicativo e a versão do yt-dlp em uso.
 
 ## As três abas

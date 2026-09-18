@@ -23,6 +23,15 @@ recente pendente; pedidos intermediários são substituídos.
 Isso impede que uma busca lenta para o segundo 5 apareça depois da busca para
 o segundo 20.
 
+Falha, cancelamento e "sem quadro" são resultados distintos: os workers emitem
+`failed` (token e um diagnóstico traduzido) e `cancelled` (token), além de
+`frame` e `done`, e `done` sai sempre — é por ele que o `WorkerRunner` solta a
+referência. O stderr do ffmpeg é drenado por uma thread própria, com teto de
+8 KiB, para o pipe nunca bloquear o stdout, e a mensagem mostrada nunca contém
+caminho, comando ou URL: distingue apenas mídia ilegível, efeito que o ffmpeg
+instalado não aplica e falha genérica. Um `failed` ou `cancelled` de um pedido
+obsoleto não libera nem substitui o pedido vigente.
+
 O quadro parado mostra o quadro que **contém** o instante, como a reprodução e
 o cache. O `-ss` exato descarta todo quadro que começa antes do pedido: com a
 agulha no meio de um quadro vinha o seguinte e, dentro do último quadro de um
@@ -194,7 +203,8 @@ pré-carga, e chama `AudioPreview.queue_next` com a mixagem do começo. O som em
 andamento é aberto com `audio_command(until=fim)`, que completa com silêncio e
 corta exatamente no fim, para a emenda cair no instante certo. Quando o trecho
 atual acaba, `_pump` troca para a fila preparada sem parar a placa e registra a
-fronteira em `_segments`: `position` passa a contar a partir de 0. Ao ver o
+fronteira em `_segments`: `position` passa a contar a partir de 0.
+
 O fim do loop é o fim do **último quadro**, não o da edição: uma edição de
 4,27 s a 30 q/s tem o último quadro começando em 4,2667 s, e voltar em 4,27
 deixava esse quadro 3 ms na tela — o que se vê como uma piscada na volta
@@ -236,6 +246,27 @@ Filmstrip e waveform são trabalho de fundo, separado da reprodução.
 A quantidade de miniaturas é limitada e depende do espaço visual.
 A forma de onda também tem largura máxima. A extração de miniaturas pode usar
 uma passagem quando isso reduz o trabalho de decodificação.
+
+Toda miniatura — a isolada do acervo e as da tira de uma trilha — passa por
+`_fit_filter`, que encaixa o quadro na célula com
+`force_original_aspect_ratio=decrease` e completa o resto com preto. A saída é
+`rawvideo`, então o tamanho tem de ser exatamente o pedido (15552 bytes para
+96×54 em `rgb24`): encolher sem completar deixaria o buffer aberto e o quadro
+seria descartado como incompleto. Sem esse encaixe uma foto em pé aparecia
+achatada na largura de um quadro 16:9. O canal alfa é multiplicado ao RGB por
+`geq` antes do preenchimento — o `pad` só preenche a moldura nova, e o que já
+estava transparente dentro da imagem guardava o RGB que o decodificador deixou
+sob alfa 0. Foi `geq`, e não um `overlay` sobre uma segunda fonte `color`, porque
+o `geq` opera quadro a quadro: duas correntes precisariam ser sincronizadas, e na
+tira de miniaturas o brilho saía cada vez mais errado sem nenhum erro. `render_frame`
+omite `-ss` quando o instante é zero: no demuxer `image2` (o de um JPEG detectado
+pelo conteúdo, comum em arquivo baixado) `-ss 0` avança para a próxima imagem da
+sequência, que não existe, e o comando devolvia zero bytes sem aviso.
+
+A miniatura de um vídeo no acervo pede o quadro do **meio** da duração, que
+representa o conteúdo melhor que o primeiro (quase sempre preto ou um título);
+imagem continua sem busca. A capa embutida em arquivos convertidos e exportados
+pelo editor também é o quadro do meio.
 
 Pedidos equivalentes de waveform reutilizam o trabalho; novas janelas cancelam
 as anteriores. A prévia não guarda cache próprio de imagens: as camadas vêm do

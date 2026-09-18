@@ -37,6 +37,85 @@ ajusta à tela como vídeo; compositor, prévia e propriedades usam só essa fun
 `auto_canvas` ignora fotos: adotar o formato delas é a escolha explícita de
 `slideshow_canvas`.
 
+Foto e sequência temporal se distinguem pela **estrutura do contêiner**
+(`LocalMedia.is_image`: codec de imagem em demuxer estático, sem áudio), e não
+pelo codec: um MJPEG em AVI é vídeo. A sondagem também guarda a duração de cada
+trilha, porque o container pode ser mais longo que a imagem (AAC com sobra, 23,976
+fps); um bloco novo de vídeo dura o que tem imagem. A conversão entre tempo da
+edição e tempo da origem (`source_time`, `timeline_time`, `available_duration`),
+com a velocidade, fica em `domain/timing.py` e é a única fonte dessa aritmética
+para `Clip`, `Project.resized` e `Project.split`.
+
+### Trilhas, nomes e soltura de mídia
+
+`Project.with_track` cria uma trilha vazia num lugar previsível (adicionais no
+topo, vídeo acima do vídeo mais alto, áudio no fim) ou no `index` que o gesto
+pediu. O nome padrão usa o **primeiro número livre** entre os nomes no padrão
+"Espécie N": apagar "Vídeo 2" de três trilhas e criar outra devolve "Vídeo 2".
+Nomes escolhidos pelo usuário não entram na conta.
+
+`Project.with_dropped_clip(clip, track_index, new_track_index)` recebe o bloco
+já montado e o lugar da soltura. Se a trilha sob o ponteiro aceita o bloco e o
+vão comporta a duração, ele fica no instante pedido (encostado na borda do vão
+quando não cabe inteiro a partir dali). Senão nasce uma trilha da espécie certa
+em `new_track_index` — adicionais para texto/filtro, vídeo para imagem e
+transição, áudio para o resto. Nada que já estava na edição é empurrado. A
+apresentação decide o que soltar e onde (cartão do acervo, arquivo do sistema);
+o domínio só aplica a regra, e cada soltura é um único passo de desfazer.
+
+### Quadros-chave e animação
+
+`domain/keyframe.py` define `ClipTransform` (x, y, `scale_x`, `scale_y`,
+rotação e opacidade) e `Keyframe`, que é um `ClipTransform` mais um
+`time_offset` local ao bloco e uma curva. As curvas são `linear`, `ease_in`,
+`ease_out`, `ease_in_out` e `hold`; uma curva desconhecida vira `linear` e a
+opacidade é limitada a 0–1 na construção.
+
+- `Clip.keyframes` é uma tupla ordenada. Sem pontos, vale a transformação base do
+  bloco (`base_transform`); com um, o valor é constante; entre dois, vale a
+  interpolação (`interpolate_keyframes`). Antes do primeiro e depois do último
+  ponto, vale o valor do ponto mais próximo.
+- `resolve_segment_easing` escolhe a curva de cada trecho: a do quadro de
+  chegada prevalece sobre a de partida, `hold` em qualquer ponta vence, e
+  `ease_out` seguido de `ease_in` vira `ease_in_out`. A rotação percorre o
+  menor caminho angular, exceto quando a diferença chega a uma volta inteira.
+- `time_offset` pode ser **negativo ou passar da duração**: são pontos de suporte
+  que sobram de um corte e mantêm a curva original avaliada. `visible_keyframes`
+  devolve só os que estão na janela do bloco — é o que as ferramentas de
+  navegação, a timeline e o ímã enxergam. Dividir e aparar conservam os suportes,
+  então os dois lados de um corte continuam avaliando a mesma curva.
+- `Clip.with_edited_transform` é o ponto único de edição. Sem pontos, altera a
+  base do bloco. Com pontos, cria ou atualiza o quadro-chave do **quadro** do
+  instante (`whole_animation=False`) ou desloca/escala toda a curva
+  (`whole_animation=True`, respeitando os limites de escala de 0,05 a 10 e de
+  opacidade de 0 a 1). Em ambos os casos a pose base do bloco acompanha o
+  instante editado.
+- `create_preset_keyframes` gera os presets de entrada (deslizar, fade, zoom e
+  giro) a partir da transformação-alvo e de uma duração; a apresentação a limita
+  a 0,6 s ou ao último quadro do bloco.
+
+O compositor traduz a sequência em expressões do ffmpeg avaliadas a cada quadro
+(`_keyframe_expr`, ver [processamento](processamento.md#animação-no-grafo)), e a
+prévia usa o mesmo grafo. O corte rápido depende disso: velocidade, opacidade e
+quadros-chave diferentes do padrão tiram a edição de `simple_trim`.
+
+### Tela, proporção e taxa
+
+`Project.width`, `height` e `fps` são a tela de saída. `auto_canvas` a deduz do
+maior **vídeo** e da maior taxa (com teto); `with_output_canvas` a troca
+preservando a referência do texto quando há texto. A escolha que o usuário faz —
+proporção, tela e taxa — é uma **preferência do painel**, como o corte rápido:
+`EditPanel` a guarda em `_aspect_choice`, `_canvas_choice` e `_rate_choice`,
+aplica-a ao projeto por `with_output_canvas` e não a coloca no histórico, para
+Ctrl+Z não devolver uma tela que o controle não mostra. Ao abrir um projeto, a
+escolha é reconstruída a partir da tela gravada.
+
+`application/formatting.format_aspect_ratio` nomeia a proporção (16:9, 4:3, 9:16,
+1:1 e 21:9 com tolerância; qualquer outra vira a razão reduzida, como `5:4`, ou a decimal, como `2.18:1`, quando a razão não reduz a números pequenos). É ela
+que filtra a lista de telas quando uma proporção é escolhida e que atualiza a
+proporção quando uma tela é escolhida. O diálogo de exportação repete a lógica
+sobre a mesma tabela de telas predefinidas.
+
 ### Transições pertencem ao corte
 
 Uma transição não é uma camada livre nem um terceiro vídeo. O marcador vive na
@@ -104,6 +183,22 @@ puras de `Project`, instala o resultado pela sessão e atualiza seleção,
 timeline, propriedades e prévia. Não possui outra cópia mutável do projeto.
 `Timeline` desenha e emite intenções; não grava arquivos nem executa ffmpeg.
 
+Na timeline, a régua e a cabeça da agulha ficam fixas no topo, e as trilhas
+rolam num viewport recortado abaixo delas, com barra vertical sincronizada;
+clique e *hit test* descontam a rolagem, e nada sob a régua recebe clique.
+Arrastar um bloco ou o cabeçalho de uma trilha até a borda rola sozinho.
+Clicar na régua só move a agulha, sem desfazer a seleção — assim a tesoura
+continua com o alvo escolhido, inclusive num bloco de áudio sob um de vídeo. A
+timeline avisa **toda** mudança da agulha (busca ou reprodução), e os botões de
+dividir e aparar são recalculados a cada aviso; os comandos exigem um alvo
+elegível sob a agulha, em vez de cortar outro bloco. A roda rola as trilhas,
+`Shift` desloca no tempo e `Ctrl` dá zoom.
+
+Os gestos de edição — arrastar um bloco, uma alça ou o objeto na prévia —
+abrem uma transação (`begin_edit`) e terminam em `commit_edit`; Escape, perda
+da captura do mouse ou ocultar a área a cancelam e restauram o estado inicial.
+Um clique que não move nada não consome histórico.
+
 Transformações animadas editam o instante atual por padrão; o escopo global é
 uma escolha explícita. Split e trim conservam pontos de suporte fora do clipe,
 inclusive tempos locais negativos, para preservar a curva de interpolação.
@@ -148,10 +243,16 @@ por APIs públicas como `accept_import`, `install_project`,
 
 ## Salvar sem perder edições
 
-1. O controller escolhe o caminho e captura `SessionSnapshot`.
+1. O controller fecha os agrupamentos de histórico em aberto
+   (`commit_pending_edits`), escolhe o caminho e captura `SessionSnapshot`.
+   **Salvar como** é o mesmo caminho com `choose_path=True`: o seletor de
+   arquivo abre sempre.
 2. `FunctionWorker` chama `EditorService.write_snapshot` na pool serial.
 3. O repositório escreve aquele projeto. A sessão não muda nessa thread.
-4. O sinal chega à thread principal; `accept_saved` marca o snapshot gravado.
+4. O sinal chega à thread principal; `accept_saved(snapshot, path)` marca o
+   snapshot gravado **e** passa a sessão para o caminho novo, mantendo histórico
+   e estado. Se a geração da sessão mudou desde a captura, a confirmação é
+   ignorada.
 5. O rótulo do projeto é recalculado.
 
 Se o usuário editou A para B após a captura, salvar A deixa B marcado como

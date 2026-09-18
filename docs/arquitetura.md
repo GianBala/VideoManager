@@ -24,12 +24,15 @@ esses limites e a ausência de ciclos.
 | Download | DownloadService e política de container/qualidade | YtDlpGateway, probe, seletor, Downloader. |
 | Converter/exportar | ProcessingService e pedidos tipados | Converter, compositor, trimmer e FileOutputStore. |
 | Fila | JobService com identidade de tentativa | JobQueue, pools e receptores Qt. |
-| Prévia/texto/áudio | PreviewRequest e porta de rasterização | Compositor, FramePump, QtTextRasterizer e AudioPreview. |
+| Prévia/texto/áudio | PreviewRequest, PreviewResultKey, InteractionPlan, ScrubFrameCache e porta de rasterização | Compositor, FramePump, workers de quadro/camadas/cache, QtTextRasterizer e AudioPreview. |
 
 O editor tem modelos imutáveis e histórico de snapshots. A timeline desenha
 e emite intenções; o controller aplica operações dos modelos e atualiza a
-sessão da aplicação. Workers produzem resultados, aceitos na thread principal
-apenas quando pertencem à operação atual.
+sessão da aplicação, agrupando cada gesto numa transação de histórico. Workers
+produzem resultados, aceitos na thread principal apenas quando pertencem à
+operação atual. Animações são quadros-chave do domínio, traduzidos pelo
+compositor em expressões do ffmpeg — a mesma tradução serve à prévia e ao
+arquivo exportado.
 
 Conversões locais usam uma vaga na fila; downloads têm concorrência configurável.
 Prévia e trabalhos de fundo usam pools próprias. Saídas de conversão/exportação

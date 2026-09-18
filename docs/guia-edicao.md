@@ -11,19 +11,56 @@ a linha do tempo é livre — arraste para dar mais espaço a quem
 precisar dele naquele momento; **"Retrair prévia"** é só o atalho para o
 extremo mais pedido (linha do tempo ocupando quase tudo).
 
+A barra do topo traz, da esquerda para a direita: **Novo**, **Abrir…**,
+**Salvar** e **Salvar como…**; o nome do projeto, com um asterisco enquanto há
+alterações não salvas; **Slideshow**, **Proporção** e **Tela** (ver
+[Exportando a edição](#exportando-a-edição) para o que cada uma decide);
+**Retrair prévia**, **Tela cheia** e **Exportar**.
+
 A coluna de Adicionais já abre com a largura da aba Propriedades, e abrir a
 aba devolve essa largura a uma coluna que tenha sido estreitada, quando a
 janela tem espaço para isso. Em janelas estreitas, a barra horizontal na base
 da aba permite alcançar as colunas laterais. Propriedades também oferece
 rolagem quando seus campos não cabem no painel.
 
+## Projetos
+
+Um projeto é um arquivo `.vmp`: a montagem (trilhas, blocos, ajustes) e o
+caminho das mídias, sem os bytes delas. Mover só o `.vmp` não move os vídeos;
+caminhos relativos são resolvidos a partir da pasta do projeto.
+
+| Comando | Atalho | O que faz |
+|---|---|---|
+| **Novo** | `Ctrl+N` | Esvazia a edição (pergunta antes de descartar alterações). |
+| **Abrir…** | `Ctrl+O` | Abre um `.vmp`; mídias que sumiram são listadas, e a montagem é preservada. |
+| **Salvar** | `Ctrl+S` | Grava no arquivo atual, ou pergunta onde, se o projeto ainda não tem um. |
+| **Salvar como…** | `Ctrl+Shift+S` | Grava uma cópia em outro `.vmp` e passa a editar essa cópia, com o histórico de desfazer e o estado atual da edição intactos. |
+
+Os mesmos comandos, mais **Importar mídia…** (`Ctrl+I`) e **Exportar vídeo…**
+(`Ctrl+E`), estão no menu **Arquivo** enquanto a aba Editar está à vista. Salvar
+e Salvar como funcionam mesmo com o cursor num campo de texto; antes de gravar,
+o editor fecha os agrupamentos de desfazer em andamento, para o arquivo conter
+o que está na tela.
+
+Projetos são salvos em `.vmp` versão 3. A versão atual abre v1, v2 e v3;
+aplicativos antigos não abrem v3. Ao salvar sobre v1 ou v2, uma cópia
+`.vmp.v1.bak` ou `.vmp.v2.bak` conserva o arquivo original, com numeração se
+necessário. Guarde também as mídias externas.
+
+Ao abrir um projeto v1 ou v2, fotos que estavam em trilhas de Adicionais passam
+para trilhas de vídeo na mesma posição da pilha — a trilha inteira, se só tinha
+fotos, ou uma trilha de vídeo nova logo acima, se também tinha textos ou
+filtros. A escala é convertida para a foto continuar do mesmo tamanho e no mesmo
+lugar. Única diferença conhecida: numa transição com **Afetar itens adicionais**
+marcado, essas fotos deixam de participar do efeito e ficam estáveis por cima.
+
 ## Importando mídia
 
 No acervo de mídia à esquerda:
 
-- **Importar** abre o seletor de arquivos (vídeo, foto ou áudio). Arquivos
-  arrastados para o acervo ou para outra área da aba também são importados.
-  **Importar não coloca nada na edição**: a mídia fica no acervo.
+- **Importar** (ou `Ctrl+I`) abre o seletor de arquivos (vídeo, foto ou áudio).
+  Arquivos arrastados para o acervo ou para outra área da aba também são
+  importados. **Importar não coloca nada na edição**: a mídia fica no acervo.
 - A lista do acervo mostra tudo já importado nesta sessão de edição. A
   miniatura de um vídeo é o quadro do **meio** dele, que representa o conteúdo
   melhor que o primeiro (quase sempre preto ou um título). Arquivos exportados
@@ -113,13 +150,19 @@ Da esquerda para a direita:
    cursor está dentro dele; o estado acompanha o cursor também durante a
    reprodução, então dá para tocar, pausar no ponto e cortar.
 5. Lixeira **Excluir bloco** (`Del`).
-6. Contador de trilhas/blocos/duração total do projeto.
-7. Nome do bloco selecionado.
-8. **Volume do bloco** — spinbox em decibéis; só habilitado quando o bloco
-   tem som próprio ajustável (um bloco de vídeo com o áudio já separado para
-   outra trilha não tem mais volume próprio ali).
-9. Zoom: **−** / **+** / **Ver tudo** (enquadra o projeto inteiro na largura
-   visível).
+6. **+ Vídeo**, **+ Áudio** e **+ Adicionais** — criam uma trilha nova do tipo.
+   A de vídeo entra acima da trilha de vídeo mais alta; a de adicionais, no
+   topo; a de áudio, no fim. O número do nome é o primeiro livre entre os
+   "Vídeo N" existentes: apagar a "Vídeo 2" e criar outra devolve "Vídeo 2",
+   e um nome que você escolheu não entra na conta.
+7. Contador de trilhas/blocos/duração total do projeto.
+8. Nome do bloco selecionado.
+9. **Volume do bloco** (`🔊`) — abre um painel com o ganho em decibéis; só fica
+   habilitado quando o bloco tem som próprio ajustável (um bloco de vídeo com
+   o áudio já separado para outra trilha não tem mais volume próprio ali).
+10. **Velocidade do bloco** (`⚡`) — ver [Velocidade e volume do bloco](#velocidade-e-volume-do-bloco).
+11. Zoom: **−** / **+** / **Ver tudo** (enquadra o projeto inteiro na largura
+    visível).
 
 ### Gestos com o mouse
 
@@ -197,34 +240,93 @@ fica disponível nas propriedades do marcador e é salva no projeto.
 Com duas passagens simultâneas habilitadas, a da trilha de vídeo mais alta
 controla cada adicional, preservando sua posição na pilha e sem duplicar o efeito.
 
-### Texto e animação
+### Adicionais: texto, filtros e transições
 
-Ao mudar posição, escala, rotação ou opacidade de um clipe animado, o editor
-altera o instante atual. Marque **Editar toda a animação** para ajustar a curva
-inteira. Cortar ou aparar preserva a interpolação do trecho restante.
+A coluna à direita do acervo tem uma aba por tipo de item. Cada um vira um
+bloco numa trilha de **Adicionais** (ou, no caso da transição, na trilha de
+vídeo, sobre o corte):
+
+- **Texto** — conteúdo, fonte, tamanho, negrito e itálico, cor e contorno.
+- **Filtros** — Preto e Branco, Sépia, Alto Contraste, Vinheta e Inversão. Um
+  filtro age sobre tudo que está **abaixo** da trilha dele.
+- **Transições** — Fade, Fade para Preto, Fade para Branco, Dissolve, Wipe e
+  Slide (esquerda/direita), com duração de 0,2 a 5 s (padrão 1 s) e a opção
+  **Afetar itens adicionais** descrita acima. O botão **+ Inserir Transição**
+  usa o corte escolhido pelo bloco selecionado; sem cortes encostados, a aba
+  avisa que é preciso encostar dois clipes de vídeo na mesma trilha.
+- **Propriedades** — aparece ao escolher **Propriedades** no menu do botão
+  direito sobre um bloco, e se fecha pelo ✕ do título. É a edição numérica
+  precisa do bloco selecionado (ver a seguir).
+
+### Propriedades e animação
+
+A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
+
+- **Transformação** — posição X/Y e largura/altura em pixels da tela do projeto,
+  **Travar proporção**, escala (0,05× a 10×), rotação (0° a 360°, com atalhos
+  para 0°, 90°, 180° e 270°) e **Opacidade** (0 a 100 %). Os mesmos ajustes
+  podem ser feitos direto na prévia, arrastando o objeto e suas alças —
+  inclusive a de rotação, acima da caixa de seleção. Um objeto arrastado ou
+  digitado aparece na hora; o quadro completo do compositor chega logo depois.
+- **Fundo Verde (Chroma Key)** — remove uma cor do bloco (verde padrão, verde
+  de estúdio, azul ou qualquer outra pelo seletor), com **Tolerância** e
+  **Suavização**.
+- **Animação / Quadros-chave** — anima posição, escala, rotação e opacidade ao
+  longo do bloco:
+  - **◀ ◇ ▶** vão ao quadro-chave anterior, adicionam ou removem um quadro-chave
+    no cursor e vão ao próximo. Cada quadro-chave é um losango na parte de
+    baixo do bloco, na linha do tempo — amarelo, ou azul quando o cursor está
+    sobre ele —, e o ímã da linha do tempo também os reconhece.
+  - Num bloco ainda **sem** quadros-chave, mudar um valor vale para o bloco
+    inteiro. Num bloco animado, altera **só o instante atual**, criando ou
+    atualizando o quadro-chave dali. Marque **Editar toda a animação** para
+    aplicar o ajuste à curva inteira, inclusive aos pontos que sustentam a
+    curva depois de um corte.
+  - **Interpolação** escolhe a curva do quadro-chave selecionado: Linear, Suave
+    ao Entrar (*ease in*), Suave ao Sair (*ease out*), Suave Completo (*ease
+    in-out*) ou Degrau (*hold*). Em cada trecho vale a curva do quadro-chave de
+    chegada; o Degrau em qualquer das duas pontas mantém o valor até o ponto
+    seguinte.
+  - **Efeito Rápido** troca os quadros-chave do bloco por uma entrada pronta,
+    que dura até 0,6 s a partir do começo do bloco (menos, se ele for mais
+    curto): deslizar de baixo, de cima, da direita ou da esquerda, surgir com
+    fade, surgir com zoom ou girar e entrar. **Remover Animações** apaga todos
+    os quadros-chave.
+
+  A rotação segue o caminho angular mais curto entre dois pontos. Dividir ou
+  aparar um bloco preserva a curva: o trecho que sobra continua avaliando a
+  animação original, com pontos de suporte fora da janela visível.
+
+O que a prévia mostra e o que o arquivo exportado contém coincide também para
+animação: o compositor traduz os quadros-chave em expressões que o ffmpeg avalia
+a cada quadro (escala, rotação, posição e opacidade).
+
+### Texto
 
 A digitação é agrupada no histórico do projeto até 1,2 s sem escrever, troca
 de campo ou outro comando. Dentro do campo, os atalhos de edição do texto
-continuam disponíveis. Alterar a resolução de saída mantendo a proporção
-preserva tamanho e posição relativos do texto, incluindo contorno e animação.
+continuam disponíveis. Um texto apagado por completo continua vazio — o editor
+não o troca por "Texto", e a caixa de seleção tem o mesmo tamanho do que sai no
+arquivo. Alterar a resolução de saída mantendo a proporção preserva tamanho e
+posição relativos do texto, incluindo contorno e animação.
 
-Projetos são salvos em `.vmp` versão 3. A versão atual abre v1, v2 e v3;
-aplicativos antigos não abrem v3. Ao salvar sobre v1 ou v2, uma cópia
-`.vmp.v1.bak` ou `.vmp.v2.bak` conserva o arquivo original, com numeração se
-necessário. Guarde também as mídias externas.
+### Velocidade e volume do bloco
 
-Ao abrir um projeto v1 ou v2, fotos que estavam em trilhas de Adicionais passam
-para trilhas de vídeo na mesma posição da pilha — a trilha inteira, se só tinha
-fotos, ou uma trilha de vídeo nova logo acima, se também tinha textos ou
-filtros. A escala é convertida para a foto continuar do mesmo tamanho e no mesmo
-lugar. Única diferença conhecida: numa transição com **Afetar itens adicionais**
-marcado, essas fotos deixam de participar do efeito e ficam estáveis por cima.
+Os botões **🔊 dB** e **⚡ velocidade**, na barra da linha do tempo, abrem um
+painel curto para o bloco selecionado. A velocidade vai de 0,1× a 10×, com
+atalhos (0,5×, 1×, 1,5×, 2×, 4×); o bloco encurta ou alonga na trilha. Se a
+nova duração passaria por cima do bloco seguinte, a velocidade é recusada com
+**um** aviso por sessão do painel — mova o vizinho ou escolha outro valor. O
+áudio separado de um vídeo acelerado acompanha a mesma velocidade. Fotos não
+têm velocidade.
 
 ### Menu de contexto (botão direito)
 
 O conteúdo muda conforme o alvo sob o cursor:
 
 **Sobre um bloco:**
+- **Propriedades**
+- *separador*
 - Dividir (`S`)
 - Apagar à esquerda (`Q`) / Apagar à direita (`W`) — só aparecem habilitados
   quando o corte ali é possível
@@ -260,9 +362,9 @@ consumo.
 Válidos sempre que o foco não estiver dentro de um campo de texto, número ou
 combo:
 
-Salvar, salvar como, abrir, novo projeto, exportar e F11 continuam disponíveis
-mesmo com um campo em edição. Letras simples e copiar/colar/desfazer respeitam
-o campo que possui o foco.
+Salvar, salvar como, abrir, novo projeto, importar, exportar e F11 continuam
+disponíveis mesmo com um campo em edição. Letras simples e
+copiar/colar/desfazer respeitam o campo que possui o foco.
 
 | Tecla | Ação |
 |---|---|
@@ -270,9 +372,13 @@ o campo que possui o foco.
 | `,` / `.` | Quadro anterior/próximo |
 | `S` / `Ctrl+B` | Dividir no cursor |
 | `Q` / `W` | Apagar à esquerda/à direita do cursor |
-| `Del` | Excluir bloco selecionado |
+| `Del` / `Backspace` | Excluir bloco selecionado |
 | `Ctrl+C` / `Ctrl+V` | Copiar/colar bloco |
 | `Ctrl+Z` / `Ctrl+Shift+Z` ou `Ctrl+Y` | Desfazer/refazer |
+| `Ctrl+N` / `Ctrl+O` | Novo projeto / abrir projeto |
+| `Ctrl+S` / `Ctrl+Shift+S` | Salvar / salvar como |
+| `Ctrl+I` | Importar mídia para o acervo |
+| `Ctrl+E` | Abrir a janela de exportação |
 | `F` / `F11` | Tela cheia |
 | setas (com foco na linha do tempo) | andam quadro a quadro; `Shift`+seta anda 1 segundo |
 | `Home` / `End` (idem) | vão para o início/fim |
@@ -285,8 +391,8 @@ reaparece a qualquer movimento, e nunca some enquanto o ponteiro está sobre
 ela ou uma posição está sendo arrastada.
 
 Controles da barra: Play/Pause, quadro anterior/próximo, tempo decorrido,
-barra de posição (um clique salta direto para o ponto clicado), tempo total,
-mudo + volume, e **Sair** (ou tecla `Esc`).
+barra de posição (um clique salta direto para o ponto clicado, e arrastar
+acompanha o ponteiro), tempo total, mudo + volume, e **Sair** (ou tecla `Esc`).
 
 Atalhos exclusivos da tela cheia: `Espaço` play/pause; `←`/`,` e `→`/`.`
 quadro a quadro; `↑`/`↓` sobem/descem o volume em 5.
@@ -298,14 +404,27 @@ código-fonte, vale o que estiver instalado — e com o ffmpeg 6 (o do Ubuntu
 24.04) uma transição que atravessa um adicional **com filtro** perde esse
 adicional durante a transição. A partir do ffmpeg 7 funciona.
 
-Use **Exportar**, no topo do editor, para abrir as opções de saída. A tela do
-projeto pode ser escolhida no seletor **Tela**, também no topo:
+Use **Exportar** (`Ctrl+E`), no topo do editor, para abrir as opções de saída.
+A **Proporção** e a **Tela** do projeto também podem ser escolhidas nos
+seletores do topo — são as mesmas escolhas da janela de exportação, e valem
+para a prévia e para o arquivo. Elas são uma preferência de saída, como o corte
+rápido, e não uma alteração da montagem: não entram no histórico de desfazer.
+A tela resultante é gravada no `.vmp`, e ao abrir um projeto a escolha volta
+como estava.
 
-- **Tela** — tamanhos predefinidos (4K, 1440p, 1080p, 720p, 480p, e variantes
-  verticais/quadradas) ou **"Automática · segue o material"**, que usa o
-  maior bloco do projeto para decidir o tamanho (ver
-  [`arquitetura.md`](arquitetura.md#projectpy--composerpy-o-editor)).
-- **Taxa** — 24/25/30/50/60 fps, ou **Automática**. Com GIF escolhido,
+- **Proporção** — **Automática** (a da tela que o material produz, mostrada
+  entre parênteses), 16:9, 4:3, 9:16 (vertical), 1:1 (quadrado) ou 21:9
+  (ultrawide). Escolher uma proporção restringe a lista de **Tela** aos
+  tamanhos dela, e os blocos são encaixados sem deformar; escolher uma tela
+  atualiza a proporção. Voltar a "Automática" solta também a tela.
+- **Tela** — tamanhos predefinidos por proporção (16:9: 4K, 1440p, 1080p, 720p,
+  480p; 9:16: 1080×1920 e 720×1280; 4:3: 1440×1080, 960×720 e 640×480; 1:1:
+  1080×1080 e 720×720; 21:9: 2560×1080), mais os tamanhos das mídias do acervo,
+  ou **"Automática · segue o material"**, que usa o maior **vídeo** do projeto
+  para decidir o tamanho — fotos não definem a tela quando há vídeo (ver
+  [Editor e projetos](clean-architecture/editor.md)).
+- **Taxa** — 24/25/30/50/60 fps e as taxas das mídias do acervo, ou
+  **Automática** (a maior taxa entre os vídeos, com teto). Com GIF escolhido,
   entram também 10, 12,5, 20 e 25 — taxas que cabem certo na forma como o GIF
   guarda a duração de cada quadro.
 - **Formato de vídeo** — MP4, MKV, WebM, MOV ou **GIF animado**. O GIF sai em
@@ -316,16 +435,24 @@ projeto pode ser escolhida no seletor **Tela**, também no topo:
   segundo: numa edição de 4 s isso é a diferença entre 1,1 MB e 14,9 MB (na
   tela do projeto, em 1080p a 30 q/s). Escolher tela ou taxa na mão continua
   valendo, e o tamanho estimado ao lado acompanha a escolha.
-- **Interpolar movimento** — gera quadros de verdade para blocos abaixo da
-  taxa da tela, em vez de só duplicar o quadro anterior. Fica desabilitado
-  quando nenhum bloco está abaixo da taxa escolhida. É uma opção cara — o
-  aviso ao lado mostra o custo estimado de memória antes de confirmar, e a
-  **prévia nunca usa interpolação** (ela é rápida demais para caber no ritmo
-  da reprodução; só aparece no arquivo exportado).
+- **Interpolar movimento** — gera quadros de verdade para blocos de vídeo
+  abaixo da taxa da tela, em vez de só duplicar o quadro anterior; a conta usa
+  a taxa do arquivo já multiplicada pela velocidade do bloco, e fotos não
+  contam. Fica desabilitado quando nenhum bloco está abaixo da taxa escolhida.
+  É uma opção cara — o aviso ao lado mostra o custo estimado de memória antes
+  de confirmar, e a **prévia nunca usa interpolação** (ela é rápida demais para
+  caber no ritmo da reprodução; só aparece no arquivo exportado).
 - **Corte rápido (sem recodificar)** — só fica disponível quando a edição
-  ainda é um recorte de um único arquivo, na ordem, sem volume alterado e sem
-  trilha sobreposta. Nesse caso, exportar é instantâneo: os dados são
-  copiados como estão, sem qualidade perdida.
+  ainda é um recorte de um único arquivo, na ordem e sem lacunas nem
+  sobreposição entre os blocos, na tela e na taxa do próprio arquivo, sem
+  volume, velocidade, opacidade, animação, posição, escala, rotação ou chroma
+  key alterados, sem mudo e sem trilha sobreposta. Qualquer um desses efeitos
+  tira a edição do corte rápido, em vez de a exportação copiar os dados e
+  descartá-lo sem avisar. Quando o corte rápido está valendo, exportar é
+  instantâneo: os dados são copiados como estão, sem qualidade perdida, e os
+  campos de formato e codec passam a mostrar o container e o codec da origem
+  ("Copiar sem recodificar (h264)"), desabilitados; as escolhas de
+  recodificação voltam ao desmarcar. GIF nunca usa o corte rápido.
 - **"Salvar na mesma pasta do arquivo original"** — mesmo padrão da aba
   Convert.
 
