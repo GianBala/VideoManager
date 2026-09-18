@@ -47,6 +47,7 @@ from videomanager.domain.project import MediaKind
 from videomanager.domain.project import Project
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import TransitionContext
+from videomanager.infrastructure.ffmpeg.lastframe import last_frame_start
 from videomanager.infrastructure.ffmpeg.trimmer import encode_audio_args
 from videomanager.domain.timing import format_span
 from videomanager.domain.timing import frame_index
@@ -121,6 +122,9 @@ class _Piece:
     track_muted: bool = False
     # Quadro parado da prévia (ver ``_still_seek``).
     still: bool = False
+    # Instante real em que o último quadro do arquivo começa, lido dele mesmo
+    # (ver ``lastframe``). Só vem preenchido quando a agulha cai nesse quadro.
+    tail_start: float | None = None
 
 
 def _pieces(
@@ -131,6 +135,7 @@ def _pieces(
     want_video: bool = True,
     want_audio: bool = True,
     still: bool = False,
+    tails: dict[int, float] | None = None,
 ) -> list[_Piece]:
     """Blocos que aparecem na janela pedida, na ordem de composição.
 
@@ -190,32 +195,25 @@ def _pieces(
                     track_muted=track.muted,
                     still=(still and clip.media is not None and clip.media.kind is MediaKind.VIDEO
                            and bool(clip.media.fps)),
+                    tail_start=(tails or {}).get(clip.clip_id) if still else None,
                 )
             )
     return pieces
 
 
-# Teto de quadros compostos antes do instante pedido, no fim de um arquivo
-# (ver ``_still_lead``): meio segundo de composição é o preço máximo aceitável
-# para um quadro parado.
+# Teto de quadros compostos antes do instante pedido quando o fim do arquivo
+# não pôde ser lido (ver ``_still_tails``): meio segundo de composição é o preço
+# máximo aceitável para um quadro parado.
 _STILL_LEAD_LIMIT = 0.5
 
 
-def _still_lead(project: Project, at: float) -> int:
-    """Quadros a compor **antes** do instante, quando ele cai no último quadro.
+def _tail_clips(project: Project, at: float) -> list[Clip]:
+    """Blocos em que a agulha caiu no **último quadro** do arquivo de origem.
 
-    A grade da taxa declarada não descreve o fim do arquivo: um GIF de 128
-    quadros que declara 30 q/s anda de 33,4 ms, e seu último quadro começa
-    37 ms antes do que a grade diz — mais de um quadro. Buscar ali não achava
-    quadro nenhum e a tela ficava preta no fim do vídeo. Compondo desde alguns
-    quadros antes, o fluxo tem quadro, o ``tpad`` segura o último e ele chega ao
-    instante pedido.
-
-    Só no último quadro do arquivo: no meio dele a busca direta acha quadro, e
-    recuar a janela faria o ffmpeg decodificar desde o keyframe anterior sempre
-    que houvesse um keyframe no caminho (medido: 93 → 125 ms por quadro).
+    É a situação em que a grade da taxa declarada não basta: ela diz onde o
+    quadro começaria se todos tivessem a mesma duração, e num GIF eles não têm.
     """
-    lead = 0
+    achados = []
     for track in project.tracks:
         if track.kind is TrackKind.AUDIO or not track.visible:
             continue
@@ -226,7 +224,40 @@ def _still_lead(project: Project, at: float) -> int:
                 continue
             last = frame_time(max(0, frame_index(media.duration, media.fps) - 1), media.fps)
             if clip.source_time(at) >= last - 1e-9:
-                lead = max(lead, math.ceil(project.fps / media.fps) + 1)
+                achados.append(clip)
+    return achados
+
+
+def _still_tails(project: Project, at: float, tools: FFmpegTools) -> dict[int, float]:
+    """Instante real do último quadro de cada bloco sob a agulha, quando legível.
+
+    Com esse instante a busca vai direto nele, qualquer que seja a duração do
+    quadro — um GIF pode segurar o último por segundos. A leitura é uma por
+    arquivo (ver ``lastframe``).
+    """
+    tails: dict[int, float] = {}
+    for clip in _tail_clips(project, at):
+        inicio = last_frame_start(clip.media.path, clip.media.duration or 0.0, tools)
+        if inicio is not None:
+            tails[clip.clip_id] = inicio
+    return tails
+
+
+def _still_lead(project: Project, at: float, tails: dict[int, float]) -> int:
+    """Quadros a compor **antes** do instante, quando o fim não pôde ser lido.
+
+    Sem o instante real do último quadro resta estimar: compondo desde alguns
+    quadros antes, o fluxo tem quadro, o ``tpad`` segura o último e ele chega ao
+    instante pedido. Só vale no último quadro do arquivo: no meio dele a busca
+    direta acha quadro, e recuar a janela faria o ffmpeg decodificar desde o
+    keyframe anterior sempre que houvesse um keyframe no caminho (medido:
+    93 → 125 ms por quadro).
+    """
+    lead = 0
+    for clip in _tail_clips(project, at):
+        if clip.clip_id in tails:
+            continue
+        lead = max(lead, math.ceil(project.fps / clip.media.fps) + 1)
     return min(lead, math.ceil(project.fps * _STILL_LEAD_LIMIT))
 
 
@@ -268,6 +299,10 @@ def _still_seek(piece: _Piece) -> tuple[float, float]:
     normalização da cadeia (``PTS-STARTPTS``) põe o quadro no instante pedido.
     """
     step = 1.0 / piece.clip.media.fps
+    if piece.tail_start is not None:
+        # Lido do arquivo: vale para qualquer duração de quadro, inclusive a
+        # pausa de segundos com que um GIF costuma terminar.
+        return piece.tail_start + 0.25 * step, 0.5 * step
     begin = frame_time(frame_index(piece.seek, piece.clip.media.fps), piece.clip.media.fps)
     return begin + 0.25 * step, 0.5 * step
 
@@ -1482,6 +1517,7 @@ def build_graph(
     canonical_size: tuple[int, int] | None = None,
     transparent: bool = False,
     still: bool = False,
+    tails: dict[int, float] | None = None,
 ) -> Graph:
     """Traduz o projeto num grafo de filtros do ffmpeg.
 
@@ -1492,7 +1528,8 @@ def build_graph(
     """
     project = project.for_render()
     fps = fps or project.fps
-    pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio, still=still)
+    pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio, still=still,
+                     tails=tails)
     duration = span if span is not None else max(_MIN_CANVAS, project.export_duration - at)
 
     inputs: list[str] = []
@@ -1965,13 +2002,14 @@ def frame_command(
     """
     width, height = size
     fps = project.fps
-    lead = 0
+    lead, tails = 0, {}
     if project.duration > 0 and fps:
         # A agulha pode ir até o fim exato da edição, onde nenhum bloco está
         # mais visível; ali a tela mostra o último quadro, como os editores. O
         # instante vai para a grade de quadros, a mesma que a reprodução mostra.
         at = frame_time(frame_index(min(at, last_frame_time(project.duration, fps)), fps), fps)
-        at, lead = _still_window(project, at, _still_lead(project, at))
+        tails = _still_tails(project, at, tools)
+        at, lead = _still_window(project, at, _still_lead(project, at, tails))
     preview_project = _preview_project(project, size)
     graph = build_graph(
         preview_project,
@@ -1982,6 +2020,7 @@ def frame_command(
         canonical_size=(project.width, project.height),
         transparent=transparent,
         still=True,
+        tails=tails,
     )
     args = [
         tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error",
