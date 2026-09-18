@@ -231,6 +231,16 @@ _RATE_PRESETS = (24.0, 25.0, 30.0, 50.0, 60.0)
 _CANVAS_BOX_WIDTH = 300
 _RATE_BOX_WIDTH = 210
 
+# Largura com que a coluna de Adicionais nasce, e à qual volta ao abrir a aba
+# Propriedades se estiver mais estreita. É a da aba Propriedades, a mais larga
+# da coluna: medido no Windows com a fonte da aplicação, o conteúdo pede 370 px
+# e a moldura, a margem e a barra de rolagem vertical mais 18, e as quatro abas
+# pedem 367. Nascendo no mínimo (260) e crescendo a 340, a aba abria rolando
+# para o lado, com os campos cortados e a aba Texto escondida atrás das setas.
+# Numa tela de 1920 px a imagem da prévia continua do mesmo tamanho: a área dela
+# segue mais larga que a imagem 16:9 que cabe na altura.
+_EXTRAS_WIDTH = 400
+
 # Vagas de ffmpeg da aba (ver o construtor). Números pequenos e de propósito: o
 # que limita aqui não é o processador, é a memória — cada worker decodifica
 # vídeo, e o material que se edita costuma ser o mais pesado que a máquina tem.
@@ -248,6 +258,18 @@ _VOLUME_ZOOM_GAP = 72
 # Em quantos passos uma seta da barra de navegação atravessa a janela visível.
 # Dez dá um passo curto o bastante para ajustar e longo o bastante para andar.
 _SCROLL_STEPS = 10
+
+
+class _ExtrasColumn(QWidget):
+    """Coluna de Adicionais, que sugere ao divisor a largura da aba Propriedades.
+
+    O divisor dá a cada coluna fixa a largura sugerida por ela quando se dispõe
+    pela primeira vez; depois disso, quem decide é o usuário, arrastando.
+    """
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        hint = super().sizeHint()
+        return QSize(max(hint.width(), _EXTRAS_WIDTH), hint.height())
 
 
 def _bounded_pool(parent: QObject, threads: int) -> QThreadPool:
@@ -757,7 +779,7 @@ class EditPanel(QWidget):
         return box
 
     def _build_extras_box(self) -> QWidget:
-        box = QWidget()
+        box = _ExtrasColumn()
         box.setProperty("role", "plain")
         box.setMinimumWidth(260)
         layout = QVBoxLayout(box)
@@ -2501,9 +2523,9 @@ class EditPanel(QWidget):
         self._properties_widget.load_clip(clip, self._project.width, self._project.height, fps=self._project.fps, text_ratio=self._project.text_ratio)
         self._extras_tabs.setCurrentWidget(self._properties_widget)
         sizes = self._top_splitter.sizes()
-        if len(sizes) >= 3 and sizes[1] < 340:
-            diff = 340 - sizes[1]
-            sizes[1] = 340
+        if len(sizes) >= 3 and sizes[1] < _EXTRAS_WIDTH:
+            diff = _EXTRAS_WIDTH - sizes[1]
+            sizes[1] = _EXTRAS_WIDTH
             sizes[2] = max(200, sizes[2] - diff)
             self._top_splitter.setSizes(sizes)
 
