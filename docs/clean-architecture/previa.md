@@ -38,14 +38,19 @@ transições já compunham o quadro certo pelo próprio recorte.
 
 No **último quadro de um arquivo** a grade da taxa declarada não descreve o que
 existe: um GIF de 128 quadros declarando 30 q/s anda de 33,4 ms, e seu último
-quadro começa 37 ms antes do que a grade diz — mais de um quadro, e a tela
-ficava preta no fim. Só nesse caso (`_still_lead`) a composição começa alguns
-quadros antes e o comando entrega o do instante (`trim=start_frame`): o fluxo
-tem quadro, o `tpad` segura o último e ele chega onde a agulha está. O recuo
-acompanha a taxa da fonte (um vídeo de 10 q/s numa tela de 30 recua mais) e tem
-teto de meio segundo de composição; a janela nunca passa para antes do fim de um
-bloco que já terminou, para não abrir arquivo à toa. Fora do último quadro nada
-muda, e o custo por quadro continua o mesmo.
+quadro começa 37 ms antes do que a grade diz — e um GIF pode segurar o último
+por segundos. O instante em que esse quadro começa é lido do próprio arquivo
+(`ffmpeg/lastframe.py`, uma leitura por arquivo) e a busca vai direto nele.
+Quando não dá para ler, a composição começa alguns quadros antes
+(`_still_lead`) e o comando entrega o do instante (`trim=start_frame`): o fluxo
+tem quadro e o `tpad` segura o último. A janela nunca passa para antes do fim
+de um bloco que já terminou, para não abrir arquivo à toa.
+
+A composição é feita no **instante exato da agulha**, sem arredondar para a
+grade de quadros do projeto — inclusive a janela acima, que termina
+exatamente nele. É nesse instante que a caixa de seleção calcula a animação de
+um bloco; compor no começo do quadro fazia uma imagem animada sair até 8 px
+fora da caixa. Só o fim da edição é ajustado, para o último quadro.
 
 ### Cache da agulha
 
