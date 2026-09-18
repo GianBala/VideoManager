@@ -58,6 +58,37 @@ Quando a combinação exige substituição de stream ou container, a política
 produz o aviso exibido antes da execução. Conversão de áudio explicitamente
 solicitada é representada por `AudioRequest`.
 
+### Ambiente que o pedido não descreve
+
+`infrastructure/yt_dlp/extras.py` reúne ajustes que dependem da máquina, e não
+do pedido, e que tanto a análise (`probe.py`) quanto o download (`selector.py`)
+aplicam:
+
+- **Runtime JavaScript.** O YouTube só libera todos os formatos a quem resolve
+  os desafios JavaScript da página. `js_runtime_opts` passa ao yt-dlp o
+  `js_runtimes` do que `binaries.find_js_runtime` achar — o Deno do pacote
+  primeiro (o pacote tem de funcionar num computador sem nada instalado), depois
+  Deno e Node do `PATH`. O yt-dlp só habilitava o Deno do `PATH` sozinho: o Deno
+  empacotado e o Node instalado ficavam de fora, e parte dos formatos sumia. Os
+  scripts do solver (`yt-dlp-ejs`) vêm do extra `yt-dlp[default]` e são lidos
+  como recurso, não importados — por isso o `.spec` os coleta explicitamente.
+- **Capa que não derruba o download.** O `EmbedThumbnail` do yt-dlp levanta erro
+  para container sem suporte (`webm`, `wav`) e para ogg/opus/flac sem o
+  `mutagen`, e como roda depois de o arquivo estar pronto o erro transformava um
+  download bem-sucedido em tarefa falha, com o arquivo esquecido na pasta
+  temporária. `split_thumbnail_postprocessor` tira o `EmbedThumbnail` das
+  opções e o `Downloader` registra `TolerantEmbedThumbnailPP`, que registra o
+  aviso, devolve as sobras (capa convertida, arquivo `temp`) para a limpeza e
+  segue. Ele entra por último, como na linha de comando do yt-dlp: a capa depois
+  de legendas e metadados, que reescrevem o container. A capa é cosmética; perder
+  o vídeo por ela, não.
+- **Mensagens.** `_translate_error` recebe o nome da etapa: um erro sem tradução
+  diz "Falha ao baixar" no download e "Falha ao analisar a URL" na análise, em
+  vez de apresentar um erro de pós-processamento como falha de uma URL que já
+  tinha sido analisada. O `_QuietLogger` da análise também encaminha avisos e
+  erros do yt-dlp ao `logging`, e portanto ao arquivo de log — no pacote sem
+  console, é ele que mostra por que uma análise falhou.
+
 ## Progresso, término e cancelamento
 
 `Downloader` converte hooks do yt-dlp em `Progress` e devolve

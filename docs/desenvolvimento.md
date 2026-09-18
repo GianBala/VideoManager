@@ -34,13 +34,20 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 .venv/bin/python -m pytest -q -m "not network and not ffmpeg"
 .venv/bin/python -m pytest -m network
 .venv/bin/python -m pytest tests/test_selector.py -k formato
-.venv/bin/python -m pyflakes src/videomanager tests scripts/benchmark_architecture.py
+.venv/bin/python -m pyflakes src/videomanager tests scripts
 git diff --check
 ```
 
 A suíte padrão não acessa a rede. Inclui Qt offscreen e mídia local marcada
 ffmpeg. Testes de hardware podem ser ignorados se a máquina não o oferece.
 Não confunda ignorado com aprovado.
+
+O ffmpeg do usuário vai da versão 6 à 9, e alguns comportamentos mudam entre
+elas (opção de grafo em arquivo, `pix_fmt` do VP9, agendamento das transições).
+Rode a suíte com a versão que você tem e lembre que a CI cobre 6.1, 7.1 e 9.0;
+um teste que dependa de comportamento posterior à 6 declara
+`_exige_ffmpeg(tools, 7)` em vez de falhar. Veja
+[processamento](clean-architecture/processamento.md#versões-do-ffmpeg).
 
 As fixtures `desktop_app` e `isolated_audio` são explícitas; testes internos
 não iniciam Qt. Para operações assíncronas, use `wait_until`, que processa
@@ -50,6 +57,15 @@ para rodar o núcleo em ambiente contendo apenas Python e pytest.
 Ausência de exceção não prova correção de mídia. Meça duração, streams,
 codecs, volume, quadros e texto. `tests/test_integration.py` reúne exemplos
 de validação por saída real.
+
+Em interação Qt, teste com **eventos reais** (`QTest`, `sendEvent`), e não
+chamando os handlers: o arrasto do acervo passou nos testes que chamavam
+`mimeData` e os handlers da timeline direto, e não funcionava no aplicativo. Ao
+mexer em fluidez, tempo ou gestos, meça no painel real e compare com a mesma
+medição no commit anterior (um `git worktree` serve) antes de concluir que algo
+regrediu ou melhorou — os ensaios opt-in em `scripts/` fazem isso (ver
+[testes](clean-architecture/testes.md#ensaios-opt-in-do-editor)). Para corrigir
+um defeito, escreva antes o teste que o reproduz e confira que ele falha.
 
 ## Fixtures de extratores
 
@@ -90,6 +106,13 @@ e dependências corretas. Não construir `MainWindow` sem injetar seus serviços
 O diagnóstico `python -m videomanager --smoke-test` verifica janela, fontes,
 prévia e vídeo exportado e encerra sozinho. Não consulta dispositivo de áudio;
 ffmpeg/ffprobe continuam necessários.
+
+`python -m videomanager --diagnose-url URL --report relatorio.txt` refaz a
+análise de uma URL pela janela e grava o resultado (mídia, formatos, botão de
+enfileirar, diálogos e avisos). O aplicativo também grava `videomanager.log`,
+com rotação, na pasta de logs do usuário (`platformdirs.user_log_dir`), incluindo
+exceções não tratadas em slots do Qt e em threads — é o único rastro de um
+defeito que só aparece no pacote do Windows, que roda sem console.
 
 ## Convenções
 

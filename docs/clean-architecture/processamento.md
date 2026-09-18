@@ -32,6 +32,45 @@ streams podem ser copiados e quando escala, codec ou container exigem
 recodificação. O backend traduz essa decisão em argumentos. Descrições em
 `application/media/conversion_description.py` explicam o resultado esperado.
 
+### Regras da conversão local
+
+Estas regras saíram de um checkup da conversão e têm teste em
+`tests/test_conversion_checkup.py`:
+
+- **Codec × container.** `container_accepts_video` diz se um codec escolhido
+  cabe no container. A aba desabilita os que não cabem (H.264 e HEVC em `.webm`)
+  e, se o atual deixa de caber, volta para "Copiar"; `ProcessingService.convert`
+  recusa a combinação antes de enfileirar, em vez de deixar o erro cru do ffmpeg
+  aparecer na fila. HEVC em MP4/MOV sai com a etiqueta `hvc1`, sem a qual não
+  abre no QuickTime, em aparelhos Apple nem no app Filmes e TV.
+- **Só vídeo de verdade.** O mapa é `0:V:0` (V maiúsculo exclui `attached_pic`),
+  e `LocalMedia.video_is_cover` reconhece a capa embutida de áudio: sem isso um
+  MP3 com capa "convertia" para um vídeo de um quadro.
+- **Faixas extras.** O MKV mantém todas as faixas de áudio, os anexos (fontes
+  de ASS) e as legendas — estas só quando todas são de um formato que ele aceita
+  copiado; `mov_text` (a legenda do MP4) fica de fora. Os outros containers
+  levam o primeiro vídeo e o primeiro áudio, e a
+  descrição do plano avisa ("somente a 1ª faixa de áudio", "legendas não
+  incluídas").
+- **Resolução é o lado curto.** `display_size` aplica a rotação dos metadados;
+  720p num vídeo retrato reduz a largura (`scale=720:-2`), e um vídeo gravado de
+  lado é reconhecido como retrato.
+- **WAV.** Só copia PCM que o muxer grava como está (`pcm_s16le`, `pcm_u8`;
+  big-endian é recusado), e uma origem de 24 bits, 32 bits ou ponto flutuante
+  sai em `pcm_s24le` — "sem perda" continua valendo.
+- **Capa.** O remux que embute a capa mantém metadados e capítulos
+  (`-map_metadata 0 -map_chapters 0`).
+- **Processo.** O stderr do ffmpeg é lido em UTF-8 com `errors="replace"`: em
+  cp1252 (o padrão do Windows) um caractere fora da tabela matava a thread que
+  drena o cano, o cano enchia e o ffmpeg parava para sempre, segurando a única
+  vaga da fila local.
+- **Destino.** `FFmpegCatalog.writable` testa criar um arquivo na pasta
+  (`os.access` só olha o atributo somente-leitura no Windows), e a publicação
+  repete a troca algumas vezes quando o Windows a recusa por arquivo em uso
+  (antivírus, indexador, OneDrive).
+- **Estimativa.** Dimensões ausentes no ffprobe (streams quebrados, HLS) usam o
+  padrão em vez de levantar `TypeError`.
+
 ## Exportar uma edição
 
 `export` começa com `project.for_export()`, removendo da visão de exportação
@@ -94,6 +133,16 @@ Corte exato recodifica para representar a marca solicitada.
 Transformações, mudo, alteração de volume, adicionais e composição de trilhas
 podem impedir a cópia direta, mesmo quando o vídeo parece um recorte simples.
 
+`domain/export_policy.simple_trim` é a única fonte dessa decisão, e cada estado
+que a cópia não saberia representar tira a edição do caminho de cópia: mais de
+uma mídia, mídia ausente, mudo ou ganho, áudio separado, **velocidade,
+opacidade ou quadros-chave**, tela ou taxa diferentes das do arquivo, várias
+trilhas de vídeo com conteúdo, adicionais, posição/escala/rotação/chroma
+diferentes do padrão, trilha oculta ou muda, **lacuna no começo ou entre
+blocos** e blocos fora da ordem da origem. Antes, velocidade, opacidade,
+animação e lacunas eram aceitos e o arquivo saía sem o efeito pedido, sem
+aviso. GIF nunca é corte rápido: copiar os dados produziria o vídeo de entrada.
+
 ## Um compositor para todos os consumidores
 
 `infrastructure/ffmpeg/composer.py` traduz o projeto em `Graph`, depois em
@@ -108,8 +157,27 @@ compartilhado preserva as mesmas regras de montagem entre prévia e saída.
   no grafo sem depender de widgets.
 - Ajuste comum de fps não implica interpolação de movimento. `minterpolate`
   só entra quando solicitado e elegível.
+- Quadros-chave viram expressões avaliadas pelo ffmpeg a cada quadro (ver
+  [Animação no grafo](#animação-no-grafo)).
 
-Nas transições, o compositor lê as alças de mídia ao redor do ponto de saída do
+Os consumidores do mesmo grafo são: `export_args` (arquivo; `gif_args` para GIF),
+`frame_command` (quadro parado, com `still=True`), `scrub_command` (trecho de
+até 20 s em MJPEG para o cache da agulha), `interaction_commands` (fundo, objeto
+e frente para o arrasto na prévia), `playback_command` (fluxo de reprodução) e
+`audio_command` (PCM, com `until` para a emenda do loop). Veja
+[prévia](previa.md) para o ciclo de cada um.
+
+Nas transições, cada lado é montado pelo mesmo `_compose_video_piece` das
+camadas normais, no relógio da timeline: conserva transformação, opacidade e
+animação que o bloco tinha fora do corte. O alfa entra pré-multiplicado na
+interpolação do `xfade`, a área externa de cada camada fica transparente (o
+preto é só do canvas, então uma tarja superior não apaga o que está embaixo) e
+os filtros usam intervalo semiaberto, para dois filtros consecutivos não
+deixarem um quadro extra na fronteira. Quando duas passagens alcançam a mesma
+trilha, a da trilha de vídeo mais alta controla o adicional uma única vez,
+conservando sua posição na pilha.
+
+O compositor lê as alças de mídia ao redor do ponto de saída do
 clipe esquerdo e do ponto de entrada do direito. Sem alça suficiente, mantém o
 quadro limite; a duração visual escolhida não é encurtada silenciosamente. O
 vídeo usa `xfade`. O áudio anexado só usa `acrossfade` de potência constante
@@ -141,6 +209,33 @@ onda apenas aumentaria o volume sem criar uma passagem audível.
 
 O compositor recebe um mapa de ID de clipe para PNG de texto. Não importa Qt
 nem consulta renderizador global. Veja [prévia e texto](previa.md).
+
+### Animação no grafo
+
+`_keyframe_expr` converte os `Keyframe` de uma propriedade (`x`, `y`, `scale_x`,
+`scale_y`, `rotation`, `opacity`) numa expressão `if(lt(t, …), …)` aninhada, no
+relógio da timeline: o `time_offset` de cada ponto é somado à origem do bloco no
+fluxo (`_clip_stream_origin`). Cada trecho usa a curva resolvida por
+`resolve_segment_easing` — linear, τ², (2−τ)·τ, por partes para in-out, zero
+para *hold* —, a rotação toma o menor caminho angular, e uma propriedade que não
+varia vira um número literal, sem expressão.
+
+- **Escala:** `scale=w=…:h=…:eval=frame`, com dimensões pares e mínimo de 2 px.
+- **Rotação:** `rotate` cujo envelope (`ow`/`oh`) é dimensionado pela **maior
+  escala** da animação (`max_diag`); sem isso os cantos seriam cortados nos
+  ângulos intermediários.
+- **Opacidade:** `geq` multiplica o alfa. O quadro entra em RGBA antes do
+  redimensionamento dinâmico, e `_alpha_before_dynamic_scale` adianta o `geq`
+  (levando o `chromakey` junto, que grava o alfa em vez de multiplicá-lo) para
+  antes do `scale=…:eval=frame`: o `geq` fixa as dimensões do link quando é
+  configurado, e depois de um `scale` que muda por quadro ele congelava justamente
+  o tamanho que devia variar. O preset `zoom_in`, que anima escala e opacidade
+  juntas, saía do arquivo com a imagem no tamanho do primeiro quadro-chave,
+  enquanto a prévia — que monta um grafo por quadro — mostrava o movimento certo.
+- **Posição:** expressões nas coordenadas do `overlay`
+  (`x='round((expr)*W-w/2)'`), arredondadas como o Qt arredonda a geometria das
+  alças (`_image_overlay_geometry`). `tests/test_preview_overlay_alignment.py`
+  compara pixel a pixel contra a saída real do ffmpeg.
 
 ## Hardware, memória e exportação paralela
 
@@ -177,7 +272,11 @@ duas decisões dependem dele:
   (`-filter_complex_script`) saiu no ffmpeg 8; a nova (`-/filter_complex`, a
   forma genérica "o valor vem deste arquivo") entrou no 7. `command_assets`
   escolhe conforme a versão; usar a errada faz o ffmpeg recusar o comando
-  inteiro.
+  inteiro. O arquivo é criado por `mkstemp` **para aquela chamada** e removido
+  quando o processo consumidor sai, seja qual for o desfecho — nunca por
+  varredura de extensão na pasta —, e o exportador serial, o paralelo e a
+  montagem final passam pelo mesmo `filter_script`. Antes, cada exportação de
+  grafo longo deixava um `.filter_script` órfão ao lado do destino.
 - **`-pix_fmt` no VP9.** A composição chega com alfa, e do ffmpeg 9 em diante o
   `libvpx-vp9` recusa esse quadro em vez de convertê-lo: a exportação `.webm`
   terminava sem escrever nada. O formato agora é fixado como já era no x264 e
@@ -201,6 +300,12 @@ em `tests/contracts/test_outputs.py`.
 
 Mudanças no grafo devem ser verificadas pela saída. Uma string de comando
 esperada não demonstra que a imagem, duração ou mixagem está correta.
+
+Quando um trecho paralelo falha, a mensagem é a linha da cauda do stderr que
+contém uma marca de falha (`error`, `invalid`, `failed`, `unable`, `cannot`,
+`killed`, `out of memory`…). O ffmpeg despeja estatísticas ao encerrar mesmo
+quando morre — "CPB properties: bitrate max/min/avg: 0/0/0" era a última linha —,
+então, sem nenhuma marca, valem as duas últimas linhas com conteúdo.
 
 Na junção final da exportação paralela, áudio e vídeo já foram limitados pelo
 grafo do projeto. O remux copia todos os pacotes sem `-shortest`: a diferença
