@@ -85,7 +85,7 @@ Cada sistema gera o seu próprio pacote — o PyInstaller não faz compilação 
 ```bash
 ./packaging/build_appimage.sh  # Linux  -> dist/Video_Manager-<versão>-<arch>.AppImage
 ./packaging/build_linux.sh     # Linux  -> dist/VideoManager/
-.\packaging\build_windows.ps1  # Windows -> dist\VideoManager\
+.\packaging\build_windows.ps1  # Windows -> dist\VideoManager.exe (arquivo único)
 ```
 
 Os scripts rodam os testes, baixam o `ffmpeg` para embutir, empacotam e por fim

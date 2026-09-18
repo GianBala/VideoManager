@@ -46,8 +46,15 @@ criado; depois disso já é tarde para explicar qualquer coisa.
 
 ### Windows
 
-`dist\VideoManager\VideoManager.exe`, gerado por `build_windows.ps1`. Também é
-uma pasta autocontida — não há instalador.
+`dist\VideoManager.exe`, gerado por `build_windows.ps1`, é um arquivo único que
+funciona sozinho: copie-o para onde quiser e execute — não há instalador nem
+pasta ao lado. Ele traz Python, Qt, yt-dlp, ffmpeg e Deno dentro de si.
+
+O custo é o início: o Windows extrai tudo para uma pasta temporária a cada
+abertura (cerca de 3 s), e a janela leva cerca de 5 s para aparecer.
+Para um pacote que abre mais rápido, gere a pasta com `VM_ONEFILE=0`
+(`dist\VideoManager\`); nesse formato o `.exe` só funciona com a subpasta
+`_internal` ao lado dele. Detalhes em [`empacotamento.md`](empacotamento.md).
 
 ## Rodar a partir do código-fonte
 

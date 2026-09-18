@@ -82,11 +82,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Falha ao gerar o icone.' }
           pyinstaller --noconfirm packaging/videomanager.spec
           if ($LASTEXITCODE -ne 0) { throw 'Falha no empacotamento.' }
-          .\packaging\smoke_windows.ps1 -Executable '.\dist\VideoManager\VideoManager.exe' -Icon '.\build\videomanager.ico'
+          .\packaging\smoke_windows.ps1 -Executable '.\dist\VideoManager.exe' -Icon '.\build\videomanager.ico'
       - name: Guardar pacote Windows validado
         if: runner.os == 'Windows' && matrix.python == '3.12'
         uses: actions/upload-artifact@v4
         with:
           name: VideoManager-Windows
-          path: dist/VideoManager/
+          path: dist/VideoManager.exe
           retention-days: 7
