@@ -22,7 +22,7 @@ O diálogo tem três abas.
 
 | Campo | O que faz |
 |---|---|
-| **Downloads simultâneos** | De 1 a 10 — quantos downloads a fila processa ao mesmo tempo. Não afeta conversões nem exportações de edição, que têm sua própria fila local de uma tarefa por vez (ver [`arquitetura.md`](arquitetura.md#filas-e-concorrência)). |
+| **Downloads simultâneos** | De 1 a 10 — quantos downloads a fila processa ao mesmo tempo. Não afeta conversões nem exportações de edição, que têm sua própria fila local de uma tarefa por vez (ver [tarefas e concorrência](clean-architecture/tarefas.md#adaptador-qt)). |
 | **Fragmentos simultâneos por download** | De 1 a 16 — paralelismo dentro de **um** download (streams fragmentados, como HLS/DASH). |
 | **Limite de banda** | Em KB/s; `0` = sem limite. |
 | **Ler cookies do navegador** | "Não usar cookies" ou a lista de navegadores suportados pelo yt-dlp instalados na máquina. Necessário para vídeos com restrição de idade, privados, de assinantes/membros, e para as resoluções mais altas do BiliBili — nesses casos o site exige uma sessão conectada, e esta opção reaproveita os cookies já salvos naquele navegador em vez de pedir login dentro do app. |

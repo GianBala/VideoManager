@@ -19,18 +19,22 @@ O plano e as evidências da migração estão em documentos próprios.
 - Convert: inspeção local assíncrona → alvo de áudio/vídeo → reserva de saída
   → processamento ffmpeg na fila.
 - Editar: acervo → projeto imutável com trilhas e clipes → cortes, transforms,
-  volume, velocidade, texto, filtros, chroma key e transições → prévia/exportação.
+  animação por quadros-chave, volume, velocidade, texto, filtros, chroma key e
+  transições → prévia/exportação (MP4, MKV, WebM, MOV ou GIF animado). Importar
+  só leva a mídia ao acervo; ela vai à trilha por arrasto ou por "Inserir no
+  cursor". Proporção, tela e taxa são preferências do painel, fora do histórico.
 - A fila é comum às abas e fica oculta no editor para ampliar a área de trabalho.
 - O .vmp é JSON versão 3, com leitura de v1 e v2; referencia mídias externas,
   sem embutir seus bytes. Salvar sobre v1/v2 preserva `.vmp.v1.bak`/`.vmp.v2.bak`.
   Imagens vivem na trilha de vídeo, ajustadas à tela; ao abrir v1/v2 elas saem
-  das trilhas de Adicionais com a escala convertida.
+  das trilhas de Adicionais com a escala convertida. "Salvar como" grava outro
+  `.vmp` e a sessão passa a apontar para ele, com o histórico intacto.
 
 ## Estrutura e direção de dependências
 
 | Local em src/videomanager | Responsabilidade |
 | --- | --- |
-| `domain/` | Modelos imutáveis, regras de edição, formatos, compatibilidade, tempo e estimativas. |
+| `domain/` | Modelos imutáveis, regras de edição, quadros-chave, formatos, compatibilidade, tempo e estimativas. |
 | `application/editor/` | Sessão, histórico, snapshots, abrir/importar/salvar. |
 | `application/jobs/` | Pedidos tipados e transições de tarefas por tentativa. |
 | `application/media/` | Preparação de conversão/exportação/download/prévia e descrições. |
@@ -62,6 +66,13 @@ atuais e suas responsabilidades.
   Operações preservam identidades ao transformar objetos.
 - `EditorSession` possui projeto, caminho, ponto salvo e histórico de 60 estados.
   Workers recebem snapshots; a thread principal aceita resultados por geração/revisão.
+  Cada gesto (arrastar bloco, alça ou objeto) é uma transação
+  (`begin_edit`/`commit_edit`/`cancel_edit`): um gesto, um desfazer.
+- Resultados de prévia só chegam à tela no contexto que os pediu
+  (`PreviewResultKey`: geração, revisão, instante, tamanho e taxa). O quadro
+  parado mostra o quadro que contém o instante da agulha; o cache de quadros da
+  agulha (`domain/scrub` + `application/media/scrub`) só responde durante o
+  arrasto, e o quadro exato chega quando a mão para.
 - `JobService` possui transições. Eventos levam a identidade da tentativa;
   término é aceito uma vez. Widgets observam Job, sem alterar seus estados.
 - A fila Qt separa downloads configuráveis de processamento local com uma vaga.
@@ -92,7 +103,10 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 PYTHONPATH=src .venv/bin/python scripts/validate_audio.py
 # Resposta da agulha com e sem o cache de quadros:
 PYTHONPATH=src .venv/bin/python scripts/validate_scrub.py
-.venv/bin/python -m pyflakes src/videomanager tests scripts/benchmark_architecture.py
+# Gestos na prévia e responsividade do editor (Qt e ffmpeg reais, sem áudio):
+QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_preview_gestures.py
+QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_editor_responsiveness.py
+.venv/bin/python -m pyflakes src/videomanager tests scripts
 git diff --check
 ```
 
@@ -100,7 +114,10 @@ Em Windows, use `.venv\Scripts`. O extra dev contém pytest e pyflakes.
 A suíte padrão exclui rede e inclui integração local ffmpeg e Qt offscreen.
 Fixtures Qt são explícitas; domínio e aplicação não inicializam QApplication.
 Hardware indisponível pode causar skip. O teste arquitetural verifica imports,
-ciclos e carregamento interno sem site-packages.
+ciclos e carregamento interno sem site-packages. O ffmpeg do usuário vai da 6 à
+9 e algumas opções mudam entre elas (`command_assets` escolhe a do grafo em
+arquivo; o VP9 exige `-pix_fmt`); testes que dependem de comportamento posterior
+à 6 declaram `_exige_ffmpeg(tools, 7)`. A CI cobre 6.1, 7.1 e 9.0.
 
 `tests/fixtures/` contém respostas sanitizadas de extratores.
 `scripts/benchmark_architecture.py` compara inicialização, prévia, busca e
@@ -122,6 +139,9 @@ Veja [testes](docs/clean-architecture/testes.md) para detalhes e limites.
 - I/O demorado deve rodar em workers. Não instalar respostas de operações antigas.
 - Use `infrastructure.system.binaries.subprocess_kwargs()` para ferramentas.
 - Teste mudanças de mídia medindo duração, streams, codecs, volume e quadros.
+- Em interação Qt, teste com eventos reais (`QTest`, `sendEvent`), não chamando
+  handlers. Em fluidez e tempo, meça no painel real e compare com o commit
+  anterior antes de concluir que algo regrediu ou melhorou.
 - Não versione cookies, cabeçalhos, URLs assinadas ou dados de sessão.
 - Não adicione `Co-Authored-By` a commits, PRs, tags ou changelogs, conforme
   a convenção histórica registrada em CLAUDE.md.
@@ -136,7 +156,10 @@ Veja [testes](docs/clean-architecture/testes.md) para detalhes e limites.
 ```
 
 Os builds PyInstaller acontecem no sistema de destino. Os scripts podem baixar
-dependências/binários e recriar build/dist. No Windows o resultado é um único
+dependências/binários e recriar build/dist. Nos scripts de Linux os testes rodam
+em modo rápido por padrão (`-m "not ffmpeg and not network"`); `VM_FAST_TESTS=0`
+inclui as integrações com ffmpeg, e `build_windows.ps1` sempre roda a suíte
+completa. No Windows o resultado é um único
 `dist\VideoManager.exe`, que funciona sozinho mas extrai tudo para `%TEMP%` a
 cada abertura (~3 s de extração e janela em ~5 s; o `--smoke-test` inteiro leva
 ~8 s, contra ~2 s da pasta); `VM_ONEFILE=0` gera a pasta `dist\VideoManager\`,
@@ -144,7 +167,9 @@ que abre na hora e só funciona com `_internal` ao lado. No Linux é sempre past
 (o AppImage a envelopa). `VM_BUNDLE_FFMPEG=0` dispensa
 embutir ffmpeg; nesse caso as ferramentas devem estar disponíveis no ambiente.
 `VM_BUNDLE_DENO=0` dispensa o Deno que o yt-dlp usa no YouTube (vale então
-Deno/Node do sistema). O ícone do .exe sai de `packaging/make_icon.py`.
+Deno/Node do sistema). O ícone do .exe sai de `packaging/make_icon.py` (bitmap
+clássico em todos os tamanhos; no pacote em pasta o `.ico` também vai solto ao
+lado do `.exe`) e precisa existir antes do PyInstaller.
 `VideoManager --diagnose-url URL --report ARQ` refaz a análise pela janela no
 pacote; o log fica em `platformdirs.user_log_dir`.
 

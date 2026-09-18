@@ -124,8 +124,12 @@ aceito na thread principal. A regra sobre qual versão foi salva é a mesma.
 | [Catálogo de módulos](modulos.md) | Papel de cada módulo e pontos de entrada para alterações. |
 | [Como evoluir o projeto](evolucao.md) | Mudanças atravessando camadas, diagnóstico e distribuição. |
 | [Testes](testes.md) | Ambientes, fronteiras, testes reais e medições reproduzíveis. |
-| [Checkup final](validacao-final.md) | Regressões corrigidas e validação de mídia, áudio, GPU e distribuição. |
-| [Registro da migração](migracao.md) | Etapas implementadas e evidências disponíveis. |
+| [Checkup final](validacao-final.md) | Regressões corrigidas e validação de mídia, áudio, GPU e distribuição na conclusão da migração. |
+| [Registro da migração](migracao.md) | Etapas implementadas e evidências disponíveis na conclusão da migração. |
+
+Os dois últimos são **registros datados** (7 e 8 de setembro de 2026): guardam
+o que foi medido naquele momento e não são atualizados a cada mudança. O estado
+atual do código é o dos capítulos acima.
 
 ## Contratos que devem continuar verdadeiros
 
@@ -134,7 +138,11 @@ snapshots e pedidos, e não alteram widgets ou o projeto atual. Eventos antigos
 não podem sobrescrever uma edição, análise ou tentativa nova. Comandos e
 dicionários das ferramentas ficam nos adaptadores. Prévia e exportação usam
 o mesmo compositor. Uma saída cancelada antes da publicação não deve aparecer
-como arquivo concluído.
+como arquivo concluído. Um gesto de edição é uma única transação de histórico,
+e um resultado de prévia só chega à tela no contexto que o pediu (geração,
+revisão, instante, tamanho e taxa). O que está na tela durante um gesto é a
+composição real, e o cache de quadros da agulha nunca substitui o quadro exato
+quando a mão para.
 
 Esses contratos têm testes de aplicação, contratos e arquitetura, além da
 integração real. Eles importam mais do que reproduzir pastas mecanicamente.

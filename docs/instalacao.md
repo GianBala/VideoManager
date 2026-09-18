@@ -69,9 +69,13 @@ PYTHONPATH=src .venv/bin/python -m videomanager
 No Windows, troque `.venv/bin/` por `.venv\Scripts\`.
 
 Dependências principais (de `pyproject.toml`): `PySide6>=6.6`,
-`yt-dlp>=2025.1.1` (sem teto de versão — extratores quebram quando as
+`yt-dlp[default]>=2025.1.1` (sem teto de versão — extratores quebram quando as
 plataformas mudam do lado delas, então o yt-dlp precisa poder ser atualizado a
-qualquer momento) e `platformdirs>=4.0`. Python 3.10 ou mais novo.
+qualquer momento) e `platformdirs>=4.0`. Python 3.10 ou mais novo. O extra
+`default` do yt-dlp traz o que o download usa além do núcleo: os scripts do
+solver JavaScript do YouTube (`yt-dlp-ejs`), o `mutagen` (capa em opus, ogg e
+flac), certificados, `brotli` e `websockets`. O YouTube ainda precisa de um
+runtime JavaScript — ver [Aba Download](guia-download.md#youtube-e-runtime-javascript).
 
 ## O ffmpeg
 
@@ -91,6 +95,12 @@ acontece à toa.
 A build usada é a variante **GPL**, porque o projeto depende de três encoders
 que só existem nela: `libx264`, `libx265` e `libmp3lame`.
 
+Os pacotes trazem o ffmpeg 7.1. Rodando pelo código-fonte, vale o que estiver
+no sistema, e o aplicativo funciona com as versões 6 a 9 — o que muda entre
+elas é tratado na hora (ver [versões do ffmpeg](clean-architecture/processamento.md#versões-do-ffmpeg)).
+Uma limitação conhecida do ffmpeg 6, o do Ubuntu 24.04: uma transição que
+atravessa um adicional com filtro perde esse adicional durante a passagem.
+
 ## Onde ficam as preferências
 
 As configurações do usuário (pasta de download, qualidade padrão, tema,
@@ -102,3 +112,19 @@ etc.) são salvas em `settings.json`:
 Um arquivo corrompido ou de uma versão futura nunca impede o app de abrir: a
 leitura cai para os padrões em qualquer falha, e chaves desconhecidas são
 ignoradas.
+
+## Onde fica o registro de execução
+
+O aplicativo grava um log com rotação (1 MB por arquivo, três cópias antigas)
+em `videomanager.log`, na pasta de logs do usuário:
+
+- **Linux:** `~/.local/state/VideoManager/log/` (ou o equivalente do
+  `platformdirs` na sua distribuição)
+- **Windows:** `%LOCALAPPDATA%\VideoManager\Logs`
+
+Ele existe porque o pacote do Windows roda sem console: avisos do yt-dlp,
+exceções dentro de slots do Qt e de threads de trabalho iam para um `stderr`
+que ninguém vê. Não guarda cookies, cabeçalhos nem URLs assinadas. Ao relatar um
+defeito que só acontece no pacote, este arquivo é o primeiro lugar a olhar; e
+`VideoManager --diagnose-url URL --report relatorio.txt` refaz a análise de uma
+URL dentro do pacote e grava o resultado (ver [empacotamento](empacotamento.md#diagnóstico-de-análise-de-url)).
