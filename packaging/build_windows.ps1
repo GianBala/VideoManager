@@ -1,4 +1,6 @@
-# Gera o pacote para Windows em dist\VideoManager\.
+# Gera o pacote para Windows: um único dist\VideoManager.exe, que funciona
+# sozinho. Com VM_ONEFILE=0 gera a pasta dist\VideoManager\ em vez disso: abre
+# bem mais rápido, mas o .exe só funciona com a subpasta _internal ao lado.
 #
 # Precisa rodar no Windows: o PyInstaller não faz compilação cruzada, então o
 # pacote de Linux tem de ser gerado no Linux, com build_linux.sh.
@@ -38,7 +40,8 @@ if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar o icone" }
 & $py -m PyInstaller --noconfirm --clean packaging\videomanager.spec
 if ($LASTEXITCODE -ne 0) { throw "Falha no empacotamento" }
 
-& (Join-Path $PSScriptRoot "smoke_windows.ps1") -Executable ".\dist\VideoManager\VideoManager.exe" -Icon ".\build\videomanager.ico"
+$exe = if ($env:VM_ONEFILE -eq "0") { "dist\VideoManager\VideoManager.exe" } else { "dist\VideoManager.exe" }
+& (Join-Path $PSScriptRoot "smoke_windows.ps1") -Executable ".\$exe" -Icon ".\build\videomanager.ico" -Python $py
 
 Write-Host ""
-Write-Host "pronto: dist\VideoManager\VideoManager.exe"
+Write-Host "pronto: $exe"

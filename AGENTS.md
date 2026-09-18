@@ -136,7 +136,12 @@ Veja [testes](docs/clean-architecture/testes.md) para detalhes e limites.
 ```
 
 Os builds PyInstaller acontecem no sistema de destino. Os scripts podem baixar
-dependências/binários e recriar build/dist. `VM_BUNDLE_FFMPEG=0` dispensa
+dependências/binários e recriar build/dist. No Windows o resultado é um único
+`dist\VideoManager.exe`, que funciona sozinho mas extrai tudo para `%TEMP%` a
+cada abertura (~3 s de extração e janela em ~5 s; o `--smoke-test` inteiro leva
+~8 s, contra ~2 s da pasta); `VM_ONEFILE=0` gera a pasta `dist\VideoManager\`,
+que abre na hora e só funciona com `_internal` ao lado. No Linux é sempre pasta
+(o AppImage a envelopa). `VM_BUNDLE_FFMPEG=0` dispensa
 embutir ffmpeg; nesse caso as ferramentas devem estar disponíveis no ambiente.
 `VM_BUNDLE_DENO=0` dispensa o Deno que o yt-dlp usa no YouTube (vale então
 Deno/Node do sistema). O ícone do .exe sai de `packaging/make_icon.py`.

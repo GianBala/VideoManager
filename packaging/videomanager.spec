@@ -1,10 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 """Especificação do PyInstaller.
 
-Gera um pacote em pasta (``--onedir``), não um arquivo único. A escolha é
-deliberada: o modo arquivo único descompacta tudo num diretório temporário a cada
-abertura, o que com PySide6 e os ~180 MB de ffmpeg custa vários segundos de espera
-em cada início. Em pasta, abre instantaneamente.
+O formato do pacote depende do sistema:
+
+* **Windows: um único ``VideoManager.exe``** (``--onefile``). Funciona sozinho,
+  copiado para qualquer lugar: bibliotecas, Qt, ffmpeg e dados vão dentro do
+  arquivo. O preço é que o modo arquivo único descompacta tudo num diretório
+  temporário a cada abertura. Medido com ffmpeg, ffprobe e Deno embutidos (~500 MB
+  extraídos, dos quais ~350 MB são esses três), o diagnóstico ``--smoke-test``
+  levou ~8 s, contra ~2 s do pacote em pasta. ``VM_ONEFILE=0`` gera a pasta
+  ``dist/VideoManager/``, que abre na hora mas só funciona com a subpasta
+  ``_internal`` ao lado do ``.exe``.
+* **Linux: pasta** (``--onedir``). O AppImage, que já é o arquivo único do Linux,
+  envelopa essa pasta (``build_appimage.sh``) e a extrai uma vez, não a cada uso.
 
 Não há compilação cruzada: cada sistema gera o seu próprio pacote. Rode
 ``build_linux.sh`` no Linux e ``build_windows.ps1`` no Windows.
@@ -16,6 +24,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(SPECPATH).parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
+
+# Arquivo único só no Windows; ver o cabeçalho. No Linux o AppImage depende da
+# pasta, então a variável não tem efeito lá.
+_ONEFILE = sys.platform == "win32" and os.environ.get("VM_ONEFILE", "1") != "0"
 
 from videomanager.infrastructure.system.binaries import exe_name
 from videomanager.infrastructure.system.binaries import platform_key  # noqa: E402
@@ -160,34 +172,51 @@ pyz = PYZ(a.pure)
 _ICON = REPO_ROOT / "build" / "videomanager.ico"
 _icon_arg = str(_ICON) if sys.platform == "win32" and _ICON.is_file() else None
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    [],
-    exclude_binaries=True,
-    name="VideoManager",
-    debug=False,
-    strip=False,
-    upx=False,
-    # Sem console: no Windows um console preto apareceria atrás da janela.
-    console=False,
-    icon=_icon_arg,
-)
+if _ONEFILE:
+    # Tudo dentro do próprio .exe: bibliotecas, ffmpeg e dados seguem no arquivo
+    # e são extraídos para uma pasta temporária a cada abertura.
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        name="VideoManager",
+        debug=False,
+        strip=False,
+        upx=False,
+        # Sem console: no Windows um console preto apareceria atrás da janela.
+        console=False,
+        icon=_icon_arg,
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="VideoManager",
+        debug=False,
+        strip=False,
+        upx=False,
+        console=False,
+        icon=_icon_arg,
+    )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    name="VideoManager",
-)
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=False,
+        name="VideoManager",
+    )
 
-# O .ico também solto na raiz do pacote, ao lado do executável: um atalho feito
-# à mão pode apontar para ele quando o Windows guardou o ícone antigo daquele
-# caminho. Como dado do PyInstaller ele iria para ``_internal``, que é pasta de
-# implementação; por isso a cópia vem depois da montagem.
-if _icon_arg:
-    import shutil
+    # O .ico também solto na raiz do pacote, ao lado do executável: um atalho feito
+    # à mão pode apontar para ele quando o Windows guardou o ícone antigo daquele
+    # caminho. Como dado do PyInstaller ele iria para ``_internal``, que é pasta de
+    # implementação; por isso a cópia vem depois da montagem.
+    if _icon_arg:
+        import shutil
 
-    shutil.copy2(_icon_arg, Path(DISTPATH) / "VideoManager" / "videomanager.ico")
+        shutil.copy2(_icon_arg, Path(DISTPATH) / "VideoManager" / "videomanager.ico")
