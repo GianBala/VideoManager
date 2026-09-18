@@ -53,11 +53,6 @@ a = Analysis(
     datas=[
         (str(REPO_ROOT / "src" / "videomanager" / "resources"), "resources"),
         *collect_data_files("yt_dlp", includes=["**/*.js"]),
-        # O .ico também solto ao lado do executável: um atalho feito à mão pode
-        # apontar para ele, e o mesmo vale para quem fixa o programa em algum
-        # lugar que não lê o ícone de dentro do .exe.
-        *([(str(REPO_ROOT / "build" / "videomanager.ico"), ".")]
-          if (REPO_ROOT / "build" / "videomanager.ico").is_file() else []),
     ],
     # Os extratores do yt-dlp são carregados dinamicamente; sem coletá-los
     # explicitamente, o pacote reconhece só uma fração dos sites.
@@ -187,3 +182,12 @@ coll = COLLECT(
     upx=False,
     name="VideoManager",
 )
+
+# O .ico também solto na raiz do pacote, ao lado do executável: um atalho feito
+# à mão pode apontar para ele quando o Windows guardou o ícone antigo daquele
+# caminho. Como dado do PyInstaller ele iria para ``_internal``, que é pasta de
+# implementação; por isso a cópia vem depois da montagem.
+if _icon_arg:
+    import shutil
+
+    shutil.copy2(_icon_arg, Path(DISTPATH) / "VideoManager" / "videomanager.ico")
