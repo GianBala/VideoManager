@@ -7,7 +7,7 @@ sistema.
 ```bash
 ./packaging/build_linux.sh       # Linux   -> dist/VideoManager/
 ./packaging/build_appimage.sh    # Linux   -> dist/Video_Manager-<versão>-<arch>.AppImage
-.\packaging\build_windows.ps1    # Windows -> dist\VideoManager\
+.\packaging\build_windows.ps1    # Windows -> dist\VideoManager.exe (arquivo único)
 ```
 
 Os três scripts seguem a mesma sequência: instalam as dependências (inclusive
@@ -19,11 +19,32 @@ abaixo.
 
 ## `build_linux.sh` / `build_windows.ps1`
 
-Geram uma pasta autocontida (`dist/VideoManager/`) com o executável e tudo que
-ele precisa — Python embutido, Qt, yt-dlp e (por padrão) o `ffmpeg`.
+`build_linux.sh` gera uma pasta autocontida (`dist/VideoManager/`) com o
+executável e tudo que ele precisa — Python embutido, Qt, yt-dlp e (por padrão) o
+`ffmpeg`.
 
 ```bash
 VENV=.venv ./packaging/build_linux.sh   # variável opcional: outro caminho de venv
+```
+
+`build_windows.ps1` gera um **único arquivo**, `dist\VideoManager.exe`, com o
+mesmo conteúdo dentro: ele funciona sozinho, copiado para qualquer lugar. O
+preço é que o PyInstaller extrai tudo para uma pasta temporária (`%TEMP%\_MEI…`)
+a cada abertura. Medido nesta máquina, com ffmpeg, ffprobe e Deno embutidos
+(arquivo de 208 MB, ~500 MB extraídos), o diagnóstico `--smoke-test` levou ~8 s
+do clique à saída, contra ~2 s do pacote em pasta: a extração termina em ~3 s, a
+janela aparece em ~5,4 s e o resto é o próprio diagnóstico (prévia e exportação
+de 1 s). Sem ffmpeg e Deno (`VM_BUNDLE_FFMPEG=0
+VM_BUNDLE_DENO=0`, arquivo de 70 MB) levou ~5 s. A pasta temporária é apagada ao
+fechar; se o processo for encerrado à força, ela fica para trás e pode ser
+removida à mão.
+
+`VM_ONEFILE=0` gera, no Windows, a pasta `dist\VideoManager\` no lugar do
+arquivo único: abre na hora, mas o `.exe` só funciona com a subpasta `_internal`
+ao lado. No Linux a variável não tem efeito: o AppImage envelopa a pasta.
+
+```powershell
+$env:VM_ONEFILE = "0"; .\packaging\build_windows.ps1   # pasta, em vez de arquivo único
 ```
 
 ## `build_appimage.sh` (Linux)
@@ -142,9 +163,12 @@ máquina sem FUSE, ainda roda assim:
 O build Windows executa `packaging/smoke_windows.ps1` e exige código zero
 antes de anunciar sucesso. O diagnóstico cria a janela, carrega fontes, gera
 uma prévia com texto e exporta mídia de um segundo. O script encerra o processo
-se ele ultrapassar o prazo. Depois confere arquivos que o diagnóstico em
-execução não alcança: scripts do solver, `deno.exe` (salvo com
-`VM_BUNDLE_DENO=0`) e, com `-Icon`, se o ícone do executável é o do aplicativo.
+se ele ultrapassar o prazo (120 s por padrão: o arquivo único extrai tudo antes
+de abrir). Depois confere o que o diagnóstico em execução não alcança: scripts
+do solver, `deno.exe` (salvo com `VM_BUNDLE_DENO=0`) e, com `-Icon`, se o ícone
+do executável é o do aplicativo. No arquivo único, a lista de entradas vem do
+próprio `.exe`, lida com o PyInstaller (parâmetro `-Python`, `python` por
+padrão); no pacote em pasta, dos arquivos em `_internal`.
 
 ### Diagnóstico de análise de URL
 

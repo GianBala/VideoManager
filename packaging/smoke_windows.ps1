@@ -1,9 +1,13 @@
 # O diagnóstico precisa terminar com sucesso; abrir a janela não basta.
 param(
     [Parameter(Mandatory=$true)][string]$Executable,
-    [int]$TimeoutSeconds = 60,
+    # O arquivo unico extrai tudo para uma pasta temporaria antes de abrir: cerca
+    # de 8 s numa maquina rapida (o pacote em pasta leva 2 s), e uma de CI e mais lenta.
+    [int]$TimeoutSeconds = 120,
     # .ico usado no build; quando informado, o ícone do .exe precisa ser ele.
-    [string]$Icon = ""
+    [string]$Icon = "",
+    # Python com PyInstaller, usado para listar o conteudo do arquivo unico.
+    [string]$Python = "python"
 )
 $ErrorActionPreference = "Stop"
 $process = Start-Process -FilePath $Executable -ArgumentList '--smoke-test' -PassThru
@@ -21,13 +25,29 @@ try {
     $process.Dispose()
 }
 
-# Conferencias de arquivo que o diagnostico em execucao nao alcanca.
-$internal = Join-Path (Split-Path -Parent $Executable) "_internal"
-$solver = Join-Path $internal "yt_dlp\extractor\youtube\jsc\_builtin\vendor\yt.solver.core.js"
-if (-not (Test-Path $solver)) {
+# Conferencias de arquivo que o diagnostico em execucao nao alcanca. O pacote em
+# pasta (VM_ONEFILE=0) as tem em _internal; o arquivo unico, dentro do proprio
+# .exe, e ai a lista de entradas vem do PyInstaller.
+$package = Split-Path -Parent (Resolve-Path $Executable).Path
+$internal = Join-Path $package "_internal"
+$onefile = -not (Test-Path $internal)
+$solverEntry = "yt_dlp\extractor\youtube\jsc\_builtin\vendor\yt.solver.core.js"
+$denoEntry = "vendor\win64\deno.exe"
+if ($onefile) {
+    $entries = & $Python -c "import sys; from PyInstaller.archive.readers import CArchiveReader; print('\n'.join(CArchiveReader(sys.argv[1]).toc))" (Resolve-Path $Executable).Path
+    if ($LASTEXITCODE -ne 0) {
+        throw "Nao foi possivel listar o conteudo do arquivo unico (PyInstaller disponivel em '$Python'?)."
+    }
+    $hasSolver = $entries -contains $solverEntry
+    $hasDeno = $entries -contains $denoEntry
+} else {
+    $hasSolver = Test-Path (Join-Path $internal $solverEntry)
+    $hasDeno = Test-Path (Join-Path $internal $denoEntry)
+}
+if (-not $hasSolver) {
     throw "Scripts do solver JavaScript do yt-dlp ausentes do pacote."
 }
-if ($env:VM_BUNDLE_DENO -ne "0" -and -not (Test-Path (Join-Path $internal "vendor\win64\deno.exe"))) {
+if ($env:VM_BUNDLE_DENO -ne "0" -and -not $hasDeno) {
     throw "deno.exe ausente do pacote (use VM_BUNDLE_DENO=0 para dispensar)."
 }
 if ($Icon) {
@@ -47,10 +67,13 @@ if ($Icon) {
     }
     Write-Host 'VM_SMOKE_ICON_OK'
 }
-# O .ico tambem solto ao lado do executavel: e para onde um atalho feito a mao
-# pode apontar quando o Windows guardou o icone antigo daquele caminho.
-$icoNoPacote = Join-Path (Split-Path -Parent (Resolve-Path $Executable).Path) 'videomanager.ico'
-if (-not (Test-Path $icoNoPacote)) {
-    throw "O pacote nao traz videomanager.ico ao lado do executavel."
+# Pacote em pasta: o .ico tambem solto ao lado do executavel, para onde um atalho
+# feito a mao pode apontar quando o Windows guardou o icone antigo daquele caminho.
+# O arquivo unico nao tem "ao lado": e um .exe sozinho, com o icone embutido.
+if (-not $onefile) {
+    $icoNoPacote = Join-Path $package 'videomanager.ico'
+    if (-not (Test-Path $icoNoPacote)) {
+        throw "O pacote nao traz videomanager.ico ao lado do executavel."
+    }
 }
-Write-Host 'VM_SMOKE_BUNDLE_OK: solver JavaScript, Deno e icone conferidos'
+Write-Host 'VM_SMOKE_BUNDLE_OK: solver JavaScript e Deno conferidos'
