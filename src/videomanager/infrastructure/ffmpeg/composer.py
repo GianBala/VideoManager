@@ -264,20 +264,25 @@ def _still_lead(project: Project, at: float, tails: dict[int, float]) -> int:
 def _still_window(project: Project, at: float, lead: int) -> tuple[float, int]:
     """Começo da janela do quadro parado e quantos quadros até o instante.
 
+    A janela conta a partir do próprio instante pedido, e não da grade de
+    quadros: o último quadro dela cai **exatamente** em ``at``. Com a grade, uma
+    imagem animada saía desenhada no começo do quadro enquanto a caixa de
+    seleção seguia o instante da agulha, e as duas se desencontravam em até
+    8 px (a escala e a posição já tinham andado).
+
     A janela nunca recua para antes do fim de um bloco que já terminou: abrir
     um arquivo que não aparece no instante pedido custaria uma busca por nada.
     """
     fps = project.fps
-    index = frame_index(at, fps)
-    first = max(0, index - lead)
+    start = max(0.0, at - lead / fps)
     for track in project.tracks:
         if track.kind is TrackKind.AUDIO or not track.visible:
             continue
         for clip in track.clips:
-            if frame_time(first, fps) < clip.end <= at + 1e-9:
-                first = max(first, math.ceil(clip.end * fps - 1e-6))
-    first = min(first, index)
-    return frame_time(first, fps), index - first
+            if start < clip.end <= at + 1e-9:
+                start = clip.end
+    frames = max(0, int(math.floor((at - start) * fps + 1e-6)))
+    return at - frames / fps, frames
 
 
 def _still_seek(piece: _Piece) -> tuple[float, float]:
@@ -2005,9 +2010,14 @@ def frame_command(
     lead, tails = 0, {}
     if project.duration > 0 and fps:
         # A agulha pode ir até o fim exato da edição, onde nenhum bloco está
-        # mais visível; ali a tela mostra o último quadro, como os editores. O
-        # instante vai para a grade de quadros, a mesma que a reprodução mostra.
-        at = frame_time(frame_index(min(at, last_frame_time(project.duration, fps)), fps), fps)
+        # mais visível; ali a tela mostra o último quadro, como os editores.
+        #
+        # Fora disso o instante é o da agulha, sem arredondar para a grade de
+        # quadros: é nele que a caixa de seleção calcula a animação, e compor
+        # noutro instante descasava a imagem da caixa (medido: até 8 px numa
+        # imagem com escala e posição animadas). Que quadro da **fonte** aparece
+        # continua decidido pela grade dela (``_still_seek``).
+        at = min(at, last_frame_time(project.duration, fps))
         tails = _still_tails(project, at, tools)
         at, lead = _still_window(project, at, _still_lead(project, at, tails))
     preview_project = _preview_project(project, size)

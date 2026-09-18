@@ -127,3 +127,40 @@ def test_gif_de_passo_irregular_mostra_o_ultimo_quadro(tools, tmp_path):
     tocado = fluxo[(inteiros - 1) * len(parado):inteiros * len(parado)]
     diferença = sum(abs(a - b) for a, b in zip(parado, tocado)) / len(parado)
     assert diferença < 8, f"quadro parado e reprodução diferem (média {diferença:.1f})"
+
+
+def test_imagem_animada_e_composta_no_instante_exato_da_agulha(tools, tmp_path):
+    """A imagem animada é desenhada no mesmo instante em que a caixa é calculada.
+
+    O quadro parado chegou a ser composto no começo do quadro da grade enquanto
+    a caixa de seleção seguia o instante exato da agulha: com escala e posição
+    animadas, as duas se desencontravam em até 8 px (regressão de f2a8905).
+    Numa animação linear, o meio de dois quadros tem de cair no meio deles.
+    """
+    from videomanager.domain.keyframe import Keyframe
+    from videomanager.domain.project import MediaKind, MediaRef
+
+    foto = tmp_path / "foto.png"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=red:s=64x64", "-frames:v", "1", str(foto)], check=True, timeout=60,
+                   **subprocess_kwargs())
+    imagem = MediaRef(foto, MediaKind.IMAGE, width=64, height=64)
+    anda = (Keyframe(0.0, x=0.2, y=0.5, scale_x=0.3, scale_y=0.3),
+            Keyframe(2.0, x=0.8, y=0.5, scale_x=0.3, scale_y=0.3))
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(imagem, 0, 3.0, x=0.2, scale=0.3, scale_x=0.3,
+                                                                 scale_y=0.3, keyframes=anda),)),),
+                      width=640, height=360, fps=30.0)
+    size = (640, 360)
+
+    def centro(instante):
+        dados = subprocess.run(frame_command(project, instante, size, tools), check=True, timeout=60,
+                               **subprocess_kwargs()).stdout
+        linha = 180 * 640 * 3
+        xs = [x for x in range(640) if dados[linha + x * 3] > 150 and dados[linha + x * 3 + 1] < 80]
+        assert xs, f"imagem não encontrada em {instante}"
+        return (min(xs) + max(xs) + 1) / 2
+
+    antes, depois = centro(15 / 30), centro(16 / 30)
+    meio = centro(15.5 / 30)
+    assert abs(depois - antes) > 5, "a animação precisa andar entre um quadro e outro"
+    assert meio == pytest.approx((antes + depois) / 2, abs=1.0)
