@@ -436,11 +436,25 @@ class ParallelExport:
             pass
 
 
+# Palavras que marcam a linha onde o ffmpeg explica a falha. O resto da cauda é
+# estatística de encerramento, que ele despeja mesmo quando morre.
+_MARCAS_DE_ERRO = ("error", "invalid", "failed", "unable", "cannot", "not supported",
+                   "no space", "killed", "out of memory")
+
+
 def _last_line(cauda: deque[str]) -> str:
+    """A linha da cauda do stderr que explica a falha do trecho.
+
+    A última linha nem sempre é a causa: um trecho que morreu sem mensagem
+    final aparecia como "CPB properties: bitrate max/min/avg: 0/0/0", que não
+    diz nada a quem lê. Sem nenhuma marca de erro, vão as duas últimas linhas
+    com conteúdo — é pouco, mas é contexto de verdade.
+    """
     for texto in reversed(cauda):
-        if "error" in texto.lower() or "invalid" in texto.lower():
+        if any(marca in texto.lower() for marca in _MARCAS_DE_ERRO):
             return texto
-    return cauda[-1] if cauda else "sem detalhes do ffmpeg"
+    uteis = [texto.strip() for texto in cauda if texto.strip()]
+    return " | ".join(uteis[-2:]) if uteis else "sem detalhes do ffmpeg"
 
 __all__ = [
     'FFmpegTools',

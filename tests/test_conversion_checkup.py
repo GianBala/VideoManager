@@ -367,3 +367,27 @@ def test_aba_nao_oferece_codec_que_o_container_recusa(desktop_app) -> None:
         assert all(codecs.model().item(i).isEnabled() for i in range(codecs.count()))
     finally:
         panel.deleteLater()
+
+
+def test_mensagem_do_trecho_aponta_a_causa_e_nao_a_estatistica() -> None:
+    """O ffmpeg despeja estatística no fim, mesmo quando morre.
+
+    Um trecho que falhou aparecia na tela como "CPB properties: bitrate
+    max/min/avg: 0/0/0", que não diz nada a quem lê.
+    """
+    from collections import deque
+
+    from videomanager.infrastructure.ffmpeg.parallel import _last_line
+
+    cauda = deque([
+        "[libvpx-vp9 @ 000] Invalid argument",
+        "[out#0/webm @ 000] video:0KiB audio:0KiB",
+        "[libvpx-vp9 @ 000] CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A",
+    ])
+    assert "Invalid argument" in _last_line(cauda)
+
+    sem_marca = deque(["[out#0/webm @ 000] video:0KiB audio:0KiB", "  ",
+                       "[libvpx-vp9 @ 000] CPB properties: bitrate max/min/avg: 0/0/0"])
+    resposta = _last_line(sem_marca)
+    assert "CPB properties" in resposta and "video:0KiB" in resposta
+    assert _last_line(deque()) == "sem detalhes do ffmpeg"
