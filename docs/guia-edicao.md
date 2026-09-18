@@ -309,8 +309,11 @@ projeto pode ser escolhida no seletor **Tela**, também no topo:
 - **Formato de vídeo** — MP4, MKV, WebM, MOV ou **GIF animado**. O GIF sai em
   loop infinito e com 256 cores; ele não guarda som, então a trilha de áudio
   fica de fora, e não tem codec nem nível de qualidade para escolher (esses
-  campos somem). Cada quadro de um GIF é uma imagem inteira: reduza a tela e
-  fique entre 10 e 15 quadros por segundo, ou o arquivo cresce depressa.
+  campos somem). Cada quadro de um GIF é uma imagem inteira, então em
+  **Automática** a tela vai a no máximo 640 px e a taxa a 15 quadros por
+  segundo: numa edição de 4 s isso é a diferença entre 1,1 MB e 14,9 MB (na
+  tela do projeto, em 1080p a 30 q/s). Escolher tela ou taxa na mão continua
+  valendo, e o tamanho estimado ao lado acompanha a escolha.
 - **Interpolar movimento** — gera quadros de verdade para blocos abaixo da
   taxa da tela, em vez de só duplicar o quadro anterior. Fica desabilitado
   quando nenhum bloco está abaixo da taxa escolhida. É uma opção cara — o

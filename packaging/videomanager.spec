@@ -53,6 +53,11 @@ a = Analysis(
     datas=[
         (str(REPO_ROOT / "src" / "videomanager" / "resources"), "resources"),
         *collect_data_files("yt_dlp", includes=["**/*.js"]),
+        # O .ico também solto ao lado do executável: um atalho feito à mão pode
+        # apontar para ele, e o mesmo vale para quem fixa o programa em algum
+        # lugar que não lê o ícone de dentro do .exe.
+        *([(str(REPO_ROOT / "build" / "videomanager.ico"), ".")]
+          if (REPO_ROOT / "build" / "videomanager.ico").is_file() else []),
     ],
     # Os extratores do yt-dlp são carregados dinamicamente; sem coletá-los
     # explicitamente, o pacote reconhece só uma fração dos sites.
