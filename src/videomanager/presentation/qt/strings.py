@@ -228,8 +228,10 @@ EXPORT_CONTAINER = "Formato de vídeo"
 EXPORT_CONTAINER_TIP = "Formato do arquivo de vídeo gerado (container)"
 EXPORT_GIF_NO_FAST = "GIF é sempre recodificado: não há como copiar os dados como estão."
 EXPORT_GIF_NOTE = (
-    "GIF não guarda som: a trilha de áudio fica de fora. Ele também cresce "
-    "depressa — uma tela menor e 10 a 15 quadros por segundo costumam bastar."
+    "GIF não guarda som: a trilha de áudio fica de fora. Em \"Automática\", "
+    "a tela vai a no máximo 640 px e a taxa a 15 quadros por segundo — cada "
+    "quadro é uma imagem inteira, e na tela do projeto o arquivo fica dez "
+    "vezes maior. Escolher tela ou taxa na mão continua valendo."
 )
 EXPORT_VIDEO_CODEC = "Codec de vídeo"
 EXPORT_VIDEO_CODEC_TIP = "Algoritmo de compressão de vídeo (H.264, HEVC, AV1, VP9)"

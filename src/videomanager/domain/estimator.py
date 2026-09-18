@@ -87,9 +87,11 @@ def estimate_video_bitrate(
     clean_codec = codec.lower().strip()
     if clean_codec == "gif":
         # GIF é comprimido sem prever movimento: o tamanho acompanha pixels por
-        # segundo, não a taxa de bits de um codec de vídeo. Cerca de 0,2 byte
-        # por pixel, medido em exportações de 480 e 640 px de largura.
-        return max(200.0, pixels * safe_fps * 0.2 * 8 / 1000)
+        # segundo, não a taxa de bits de um codec de vídeo. Medido em
+        # exportações reais: 0,27 byte por pixel a 640 px e 0,37 a 1080p (o
+        # material com mais detalhe paga mais). O meio-termo erra para mais, que
+        # é o lado certo de errar num aviso de tamanho.
+        return max(200.0, pixels * safe_fps * 0.3 * 8 / 1000)
     efficiency = _CODEC_EFFICIENCY.get(clean_codec, 1.0)
     q_factor = _QUALITY_FACTOR.get(quality.lower().strip(), 1.0)
 

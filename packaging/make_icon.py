@@ -12,10 +12,12 @@ dependência. Os tamanhos intermediários existem porque o Explorer e a barra de
 tarefas pedem 20, 24 e 40 px em escalas de 125 % e 150 %; sem eles, o Windows
 reduz o de 256 na hora e o desenho fica borrado.
 
-Só o de 256 px vai comprimido em PNG. Os menores vão como bitmap clássico
-(DIB de 32 bits com máscara): o shell do Windows lê PNG em qualquer tamanho,
-mas o GDI+ — usado por atalhos antigos e pelo ``System.Drawing`` — devolvia
-ruído colorido para uma entrada PNG pequena.
+Todos os tamanhos vão como bitmap clássico (DIB de 32 bits com máscara),
+inclusive o de 256. O shell do Windows lê PNG dentro de um ``.ico``, mas as
+APIs antigas — GDI+, ``System.Drawing``, diálogos e utilitários que ainda as
+usam — não: pedindo 256 px elas devolviam o desenho de 128 esticado, e para uma
+entrada PNG pequena, ruído colorido. O arquivo fica maior (cerca de 400 KB
+contra 140 KB), o que é irrelevante ao lado do executável.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import struct
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPainter
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -50,16 +52,6 @@ def _canvas(image: QImage, size: int) -> QImage:
     painter.drawImage((size - scaled.width()) // 2, (size - scaled.height()) // 2, scaled)
     painter.end()
     return canvas
-
-
-def _png_entry(canvas: QImage) -> bytes:
-    data = QByteArray()
-    buffer = QBuffer(data)
-    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-    if not canvas.save(buffer, "PNG"):
-        raise RuntimeError(f"Não foi possível codificar o ícone de {canvas.width()} px.")
-    buffer.close()
-    return bytes(data.data())
 
 
 def _dib_entry(canvas: QImage) -> bytes:
@@ -92,8 +84,7 @@ def build_ico(source: Path, target: Path) -> Path:
         raise RuntimeError(f"Não foi possível ler {source}.")
     entries = []
     for size in SIZES:
-        canvas = _canvas(image, size)
-        entries.append((size, _png_entry(canvas) if size >= 256 else _dib_entry(canvas)))
+        entries.append((size, _dib_entry(_canvas(image, size))))
     header = struct.pack("<HHH", 0, 1, len(entries))
     offset = len(header) + 16 * len(entries)
     directory = b""
