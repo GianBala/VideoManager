@@ -2531,6 +2531,12 @@ class EditPanel(QWidget):
             self._remember()
             self._properties_session = clip_id
         self._properties_session_timer.start()
+        # Os quadros guardados do trecho do bloco deixam de valer. O que está
+        # sendo composto já é da versão anterior, e o preenchimento recomeça
+        # quando a edição para — como depois de qualquer edição (ver
+        # :meth:`_after_edit`), que esta aba não chama.
+        self._cancel_scrub_fill()
+        self._schedule_scrub_fill()
         self._project = self._project.with_updated_clip(clip_id, **changes)
         found_after = self._project.find(clip_id)
         if not found_after:
