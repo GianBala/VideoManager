@@ -530,3 +530,30 @@ def test_export_dialog_volta_do_gif_restaura_codec(qapp, sample_media, single_cl
     assert dialog._quality_box.isVisibleTo(dialog)
     assert dialog._warning.text() == ""
     assert dialog._fast.isEnabled()
+
+
+def test_export_dialog_gif_em_automatica_reduz_tela_e_taxa(qapp, sample_media, single_clip_project, dummy_tools):
+    """Sair na tela do projeto fazia o GIF explodir (medido: 14,9 MB × 1,1 MB)."""
+    ref, local = sample_media
+    dialog = ExportDialog(project=single_clip_project, settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=build_desktop_runtime())
+    dialog._fast.setChecked(False)
+    dialog._container_box.setCurrentIndex(dialog._container_box.findData("gif"))
+
+    efetivo = dialog._effective_project()
+    assert max(efetivo.width, efetivo.height) == 640, "a tela automática do GIF é menor"
+    assert efetivo.width % 2 == 0 and efetivo.height % 2 == 0
+    assert efetivo.fps == 15.0
+
+    # Escolha na mão vale mais que o padrão.
+    dialog._canvas_choice = (1920, 1080)
+    dialog._rate_choice = 30.0
+    escolhido = dialog._effective_project()
+    assert (escolhido.width, escolhido.height, escolhido.fps) == (1920, 1080, 30.0)
+
+    # E o limite é só do GIF.
+    dialog._canvas_choice = dialog._rate_choice = None
+    dialog._container_box.setCurrentIndex(dialog._container_box.findData("mp4"))
+    normal = dialog._effective_project()
+    assert (normal.width, normal.height) == (1920, 1080) and normal.fps == 30.0

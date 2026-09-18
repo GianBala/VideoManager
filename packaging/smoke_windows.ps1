@@ -47,4 +47,10 @@ if ($Icon) {
     }
     Write-Host 'VM_SMOKE_ICON_OK'
 }
+# O .ico tambem solto ao lado do executavel: e para onde um atalho feito a mao
+# pode apontar quando o Windows guardou o icone antigo daquele caminho.
+$icoNoPacote = Join-Path (Split-Path -Parent (Resolve-Path $Executable).Path) 'videomanager.ico'
+if (-not (Test-Path $icoNoPacote)) {
+    throw "O pacote nao traz videomanager.ico ao lado do executavel."
+}
 Write-Host 'VM_SMOKE_BUNDLE_OK: solver JavaScript, Deno e icone conferidos'

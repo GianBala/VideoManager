@@ -78,6 +78,13 @@ _RATE_PRESETS: tuple[float, ...] = (24.0, 25.0, 30.0, 50.0, 60.0)
 # é como o formato guarda a duração de cada quadro (centésimos de segundo).
 _GIF_RATE_PRESETS: tuple[float, ...] = (10.0, 12.5, 20.0, 25.0)
 
+# Tela e taxa de um GIF em "Automática". Sair na tela do projeto é o que fazia
+# o arquivo explodir: medido numa edição de 4 s, 14,9 MB em 1080p a 30 q/s
+# contra 1,1 MB com estes limites — e 46 MB contra 3,6 MB quando a origem é
+# outro GIF. Escolher tela ou taxa na mão continua valendo.
+_GIF_MAX_EDGE = 640
+_GIF_MAX_RATE = 15.0
+
 _CONTAINER_PRESETS: tuple[tuple[str, str], ...] = (
     ("MP4 (.mp4)", "mp4"),
     ("MKV (.mkv)", "mkv"),
@@ -112,6 +119,15 @@ _AUDIO_FORMAT_PRESETS: tuple[tuple[str, str], ...] = (
 def _index_of(box: QComboBox, value: object) -> int:
     """Retorna o índice do item com o dado associado, ou -1."""
     return next((i for i in range(box.count()) if box.itemData(i) == value), -1)
+
+
+def _gif_canvas(width: int, height: int) -> tuple[int, int]:
+    """Tela de um GIF em "Automática": o maior lado vai a 640 px, no máximo."""
+    maior = max(width, height)
+    if maior <= _GIF_MAX_EDGE:
+        return width, height
+    fator = _GIF_MAX_EDGE / maior
+    return max(2, int(width * fator) // 2 * 2), max(2, int(height * fator) // 2 * 2)
 
 
 class ExportDialog(QDialog):
@@ -546,6 +562,11 @@ class ExportDialog(QDialog):
         material = auto_canvas(self._project)
         w, h = self._canvas_choice or (material.width, material.height)
         fps = self._rate_choice or material.fps
+        if self._container_choice == "gif" and not self._audio_only_check.isChecked():
+            if self._canvas_choice is None:
+                w, h = _gif_canvas(w, h)
+            if self._rate_choice is None:
+                fps = min(fps, _GIF_MAX_RATE)
         return self._project.with_output_canvas(w, h, fps)
 
     def _on_aspect_changed(self, index: int) -> None:
