@@ -827,6 +827,55 @@ def test_propriedades_estreitas_permite_alcancar_valores(desktop_app):
         widget.close()
 
 
+def _properties_fit(panel) -> bool:
+    """Se a aba Propriedades cabe na coluna: sem rolar para o lado e com as quatro abas à vista."""
+    bar = panel._extras_tabs.tabBar()
+    return (panel._properties_widget._scroll.horizontalScrollBar().maximum() == 0
+            and bar.sizeHint().width() <= bar.width())
+
+
+def _image_clip_shown(panel, desktop_app):
+    from videomanager.domain.project import Project
+    clip = Clip(MediaRef(Path('foto.png'), MediaKind.IMAGE, width=640, height=360), 0, 5)
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(clip,)),), width=1280, height=720),
+                          None, [], {})
+    panel.resize(1880, 900)
+    panel.show()
+    desktop_app.processEvents()
+    return clip
+
+
+def test_coluna_de_adicionais_nasce_com_a_aba_propriedades_inteira(panel, desktop_app):
+    """A coluna de Adicionais nasce larga o bastante para a aba Propriedades.
+
+    Nascia no mínimo (260 px) e crescia para 340 ao abrir a aba, que pede
+    ~390 no Windows: rolagem para o lado, campos cortados à direita e a aba
+    Texto escondida atrás das setas da barra.
+    """
+    clip = _image_clip_shown(panel, desktop_app)
+    try:
+        initial = panel._top_splitter.sizes()[1]
+        panel._open_properties_tab(clip.clip_id)
+        desktop_app.processEvents()
+        assert panel._top_splitter.sizes()[1] == initial, 'a coluna precisou crescer ao abrir a aba'
+        assert _properties_fit(panel), 'a aba Propriedades não cabe na coluna'
+    finally:
+        panel.hide()
+
+
+def test_abrir_propriedades_devolve_a_largura_da_aba_a_coluna_estreitada(panel, desktop_app):
+    clip = _image_clip_shown(panel, desktop_app)
+    try:
+        sizes = panel._top_splitter.sizes()
+        panel._top_splitter.setSizes([sizes[0], 270, sizes[2] + sizes[1] - 270])
+        desktop_app.processEvents()
+        panel._open_properties_tab(clip.clip_id)
+        desktop_app.processEvents()
+        assert _properties_fit(panel), 'a aba Propriedades não cabe na coluna'
+    finally:
+        panel.hide()
+
+
 def test_selecao_com_quadro_disponivel_nao_dispara_render(panel, monkeypatch):
     from PySide6.QtGui import QPixmap
     panel._text_input.setText('Teste')

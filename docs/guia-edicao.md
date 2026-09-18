@@ -11,9 +11,11 @@ a linha do tempo é livre — arraste para dar mais espaço a quem
 precisar dele naquele momento; **"Retrair prévia"** é só o atalho para o
 extremo mais pedido (linha do tempo ocupando quase tudo).
 
-Em janelas estreitas, a barra horizontal na base da aba permite alcançar as
-colunas laterais. Propriedades também oferece rolagem quando seus campos não
-cabem no painel.
+A coluna de Adicionais já abre com a largura da aba Propriedades, e abrir a
+aba devolve essa largura a uma coluna que tenha sido estreitada, quando a
+janela tem espaço para isso. Em janelas estreitas, a barra horizontal na base
+da aba permite alcançar as colunas laterais. Propriedades também oferece
+rolagem quando seus campos não cabem no painel.
 
 ## Importando mídia
 
