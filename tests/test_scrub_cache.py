@@ -316,3 +316,40 @@ def test_preenchimento_comeca_perto_da_agulha_e_para_na_reproducao(scrub_panel) 
     count = len(calls.scrub)
     panel._start_scrub_fill()
     assert len(calls.scrub) == count, "tocando, não se preenche"
+
+
+def _press_in_properties(panel, clip_id: int, key) -> None:
+    """Uma tecla de verdade no campo Posição X da aba Propriedades."""
+    from PySide6.QtTest import QTest
+
+    panel._open_properties_tab(clip_id)
+    QTest.keyClick(panel._properties_widget._spin_x, key)
+
+
+def test_editar_pela_aba_propriedades_volta_a_preencher_o_cache(scrub_panel) -> None:
+    """Uma edição pela aba Propriedades deixa obsoletos os quadros do bloco.
+
+    O preenchimento só era reagendado por edições da linha do tempo e pelo fim
+    de um arrasto: depois de animar um item pela aba, a agulha passava a pedir
+    um ffmpeg por quadro em todo o trecho dele até o usuário soltar a agulha
+    uma vez — e era justamente ali que se ia conferir a animação.
+    """
+    from PySide6.QtCore import Qt
+
+    panel, calls = scrub_panel
+    clip = panel._project.tracks[0].clips[0]
+    panel._scrub_fill_timer.stop()
+    _press_in_properties(panel, clip.clip_id, Qt.Key.Key_PageUp)
+    assert panel._project.tracks[0].clips[0].x != clip.x, "a tecla precisa editar o bloco"
+    assert panel._scrub_fill_timer.isActive(), "o cache do trecho editado não volta a ser preenchido"
+
+
+def test_editar_pela_aba_propriedades_cancela_o_preenchimento_da_composicao_anterior(scrub_panel) -> None:
+    from PySide6.QtCore import Qt
+
+    panel, calls = scrub_panel
+    clip = panel._project.tracks[0].clips[0]
+    panel._start_scrub_fill()
+    job = calls.scrub[-1]
+    _press_in_properties(panel, clip.clip_id, Qt.Key.Key_PageUp)
+    assert job.cancelled and panel._scrub_job is None
