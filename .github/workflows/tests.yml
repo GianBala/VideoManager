@@ -74,9 +74,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Falha ao instalar PyInstaller.' }
           python packaging/fetch_binaries.py
           if ($LASTEXITCODE -ne 0) { throw 'Falha ao preparar ffmpeg para o pacote.' }
+          # O mesmo passo do build local: sem o .ico gerado antes, o spec deixa o
+          # executável com o ícone padrão do PyInstaller — e era assim que o
+          # pacote guardado aqui saía, porque a conferência do ícone só roda com
+          # -Icon.
+          python packaging/make_icon.py
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao gerar o icone.' }
           pyinstaller --noconfirm packaging/videomanager.spec
           if ($LASTEXITCODE -ne 0) { throw 'Falha no empacotamento.' }
-          .\packaging\smoke_windows.ps1 -Executable '.\dist\VideoManager\VideoManager.exe'
+          .\packaging\smoke_windows.ps1 -Executable '.\dist\VideoManager\VideoManager.exe' -Icon '.\build\videomanager.ico'
       - name: Guardar pacote Windows validado
         if: runner.os == 'Windows' && matrix.python == '3.12'
         uses: actions/upload-artifact@v4
