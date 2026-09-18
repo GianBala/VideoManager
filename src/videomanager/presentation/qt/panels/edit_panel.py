@@ -186,6 +186,14 @@ _SCRUB_SETTLE_MS = 120
 _SCRUB_CHUNK_SECONDS = 20
 _SCRUB_FRAME_ESTIMATE = 40_000
 _SCRUB_MAX_RADIUS_SECONDS = 180
+# Campos da aba Propriedades que só mudam a pose do objeto — posição, tamanho,
+# rotação, opacidade e os quadros-chave delas. É o que as camadas da interação
+# redesenham sem o ffmpeg; o resto (chroma, duração) muda os pixels do objeto.
+_POSE_FIELDS = frozenset({"x", "y", "scale", "scale_x", "scale_y", "rotation", "opacity", "keyframes"})
+# Parada da mão na aba Propriedades que já pede o quadro composto da pose. É
+# maior que a repetição de uma seta segurada num campo (150 ms no Qt), para um
+# ajuste contínuo compor uma vez só, no fim.
+_POSE_SETTLE_MS = 200
 # Quanto o relógio pode passar do fim esperando a emenda do som chegar à placa
 # antes de desistir e reabrir do zero.
 _LOOP_GRACE = 0.5
@@ -478,6 +486,10 @@ class EditPanel(QWidget):
         self._interaction_worker = None
         self._interaction_token = 0
         self._properties_session = -1
+        # A aba Propriedades está mudando a pose e a prévia a mostra pelas
+        # camadas da interação, como no arrasto do objeto (ver
+        # :meth:`_on_properties_changed`).
+        self._pose_live = False
         self._typing_session = -1
         self._pool_thumbnails: dict[Path, QIcon] = {}
         self._selected_filter_name = "pb"
@@ -514,6 +526,11 @@ class EditPanel(QWidget):
         self._properties_session_timer.setSingleShot(True)
         self._properties_session_timer.setInterval(400)
         self._properties_session_timer.timeout.connect(self._end_properties_session)
+
+        self._pose_settle_timer = QTimer(self)
+        self._pose_settle_timer.setSingleShot(True)
+        self._pose_settle_timer.setInterval(_POSE_SETTLE_MS)
+        self._pose_settle_timer.timeout.connect(self._settle_pose)
 
         self._typing_timer = QTimer(self)
         self._typing_timer.setSingleShot(True)
@@ -2493,6 +2510,15 @@ class EditPanel(QWidget):
     def _end_properties_session(self) -> None:
         self._properties_session = -1
         self._properties_session_timer.stop()
+        self._settle_pose()
+
+    def _settle_pose(self) -> None:
+        """A mão parou na aba Propriedades: compõe o quadro da pose final."""
+        self._pose_settle_timer.stop()
+        if not self._pose_live:
+            return
+        self._pose_live = False
+        self._request_frame(force=True)
 
     def _end_typing_session(self) -> None:
         if self._typing_session < 0:
@@ -2573,7 +2599,16 @@ class EditPanel(QWidget):
         self._preview.update()
         self._update_preview_overlay_clips()
 
-        # Atualiza a renderização de vídeo no preview em tempo real
+        # Só a pose mudou e as camadas deste instante estão prontas: a prévia
+        # redesenha o objeto na hora, como no arrasto dele, e o ffmpeg compõe
+        # quando a mão para (``_settle_pose``). Compondo a cada tecla, a imagem
+        # ficava atrás do número digitado e só o alcançava ~180 ms depois da
+        # última. Outras mudanças seguem compostas na hora.
+        self._pose_live = set(changes) <= _POSE_FIELDS and self._interaction_ready()
+        if self._pose_live:
+            self._pose_settle_timer.start()
+        else:
+            self._pose_settle_timer.stop()
         self._request_frame(force=True)
         self.changed.emit()
 
@@ -3294,6 +3329,12 @@ class EditPanel(QWidget):
         plan = interaction_plan(self._project, clip.clip_id, self._position)
         return (self._generation, self._preview_size(), plan) if plan else None
 
+    def _interaction_ready(self) -> bool:
+        """Se as camadas na prévia valem para o objeto, o instante e a composição atuais."""
+        return (self._preview._interaction_layers is not None
+                and self._interaction_context is not None
+                and self._interaction_context == self._interaction_key())
+
     def _invalidate_interaction(self) -> None:
         self._interaction_context = None
         self._interaction_token = next(self._tokens)
@@ -3370,7 +3411,7 @@ class EditPanel(QWidget):
             self._rendered = None
         if force or changed:
             self._frame_token = next(self._tokens)
-        if self._overlay_drag_session >= 0 and self._preview.begin_interaction():
+        if (self._overlay_drag_session >= 0 or self._pose_live) and self._preview.begin_interaction():
             self._end_loading_hint()
             return
         self._begin_loading_hint()
@@ -3427,7 +3468,7 @@ class EditPanel(QWidget):
             return
         self._frame_busy = False
         self._frame_job_token = 0
-        if self._overlay_drag_session >= 0 and self._preview._interaction_visible:
+        if (self._overlay_drag_session >= 0 or self._pose_live) and self._preview._interaction_visible:
             return
         if self._playing or self._project.is_empty:
             return
@@ -3454,7 +3495,7 @@ class EditPanel(QWidget):
             frame = frame.take()
         if self._closed or frame is None:
             return
-        if self._overlay_drag_session >= 0 and self._preview._interaction_visible:
+        if (self._overlay_drag_session >= 0 or self._pose_live) and self._preview._interaction_visible:
             return
         current = True
         gesture = False
@@ -3479,6 +3520,10 @@ class EditPanel(QWidget):
                 gesture = (self._session.editing or self._overlay_drag_session >= 0
                            or self._properties_session >= 0 or self._typing_session >= 0)
                 if key.revision != self._frame_revision and not gesture:
+                    return
+                if key.revision != self._frame_revision and self._preview._interaction_visible:
+                    # As camadas já mostram a pose nova; um quadro composto
+                    # antes dela voltaria o objeto até o definitivo chegar.
                     return
                 if self._cache_shown_for is not None and key.seconds != self._wanted:
                     # A tela já mostra o quadro guardado de um instante mais

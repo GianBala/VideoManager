@@ -173,3 +173,146 @@ def test_textura_isolada_preserva_texto_e_chroma(tmp_path, kind):
                    for y in range(texture.height()) for x in range(texture.width()))
     # Frente não passa a ter fundo preto opaco quando contém outra camada.
     assert images[2].pixelColor(0, 0) == QColor(0, 0, 0, 0)
+
+
+# --- aba Propriedades ---------------------------------------------------------------
+
+def _png(color: str) -> bytes:
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+    from PySide6.QtGui import QColor
+    image = QImage(32, 18, QImage.Format.Format_RGBA8888)
+    image.fill(QColor(color))
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    image.save(buffer, 'PNG')
+    buffer.close()
+    return bytes(data.data())
+
+
+@pytest.fixture
+def pose_panel(isolated_audio, monkeypatch, tmp_path):
+    """Painel com imagem selecionada sobre vídeo, workers falsos e camadas prontas."""
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from videomanager.application.capabilities import FFmpegTools
+    from videomanager.bootstrap import build_desktop_runtime, build_editor_service, build_processing_service
+    from videomanager.domain.preview import RawFrame
+    from videomanager.infrastructure.qt.workers.signals import PreviewSignals
+    from videomanager.infrastructure.storage.settings import Settings
+    from videomanager.presentation.qt.panels.edit_panel import EditPanel
+
+    monkeypatch.setattr(QMessageBox, 'warning', lambda *args: QMessageBox.StandardButton.Ok)
+    tools = FFmpegTools(Path('/usr/bin/ffmpeg'), Path('/usr/bin/ffprobe'), 'teste')
+    runtime = build_desktop_runtime(audio_enabled=False)
+    calls = SimpleNamespace(frames=[], interaction=[], playback=[])
+
+    def fake(kind):
+        def factory(*args, **kwargs):
+            worker = SimpleNamespace(args=args, kwargs=kwargs, signals=PreviewSignals(), cancelled=[])
+            worker.cancel = lambda: worker.cancelled.append(True)
+            worker.start_playback = lambda: None
+            getattr(calls, kind).append(worker)
+            return worker
+        return factory
+
+    monkeypatch.setattr(runtime, 'frame_worker', fake('frames'))
+    monkeypatch.setattr(runtime, 'interaction_worker', fake('interaction'))
+    monkeypatch.setattr(runtime, 'playback_worker', fake('playback'))
+    panel = EditPanel(Settings(), ensure_tools=lambda: tools, editor=build_editor_service(),
+                      processing=build_processing_service(), runtime=runtime)
+    for runner in (panel._runner, panel._scrub_runner, panel._background):
+        monkeypatch.setattr(runner, 'start', lambda *args: None)
+    panel._scrub_fill_timer.timeout.disconnect()
+    video = MediaRef(Path('/m/fundo.mp4'), MediaKind.VIDEO, duration=10, width=320, height=180, fps=30)
+    photo = MediaRef(tmp_path / 'foto.png', MediaKind.IMAGE, width=64, height=64)
+    item = Clip(photo, 0, 5, x=.3, scale=.3, scale_x=.3, scale_y=.3)
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(item,)),
+                              Track(TrackKind.VIDEO, clips=(Clip(video, 0, 10),))),
+                      width=320, height=180, fps=30)
+    panel.install_project(project, None, [], {})
+    panel._timeline.set_position(1.0)
+    panel._open_properties_tab(item.clip_id)
+
+    def deliver(worker, seconds=1.0):
+        size = panel._preview_size()
+        worker.signals.frame.emit(worker.args[4], RawFrame(b'\x10' * (size[0] * size[1] * 3), *size, seconds))
+        worker.signals.done.emit()
+
+    while panel._frame_busy:  # o quadro atual chega e prepara as camadas do item
+        deliver(calls.frames[-1])
+    layers = calls.interaction[-1]
+    layers.signals.frame.emit(layers.args[3], (_png('lime'), _png('red'), _png('#00000000')))
+    layers.signals.done.emit()
+    assert panel._preview._interaction_layers is not None, 'camadas do item deviam estar prontas'
+    yield panel, calls, item, deliver
+    panel.shutdown()
+
+
+def _keys(panel, field: str, key, times: int = 1) -> None:
+    from PySide6.QtTest import QTest
+    spin = getattr(panel._properties_widget, field)
+    for _ in range(times):
+        QTest.keyClick(spin, key)
+
+
+@pytest.mark.parametrize('field', ['_spin_x', '_spin_scale', '_spin_rot', '_spin_opacity'])
+def test_pose_pela_aba_propriedades_aparece_na_hora(pose_panel, field):
+    """Mudar a pose pela aba redesenha a prévia na hora, como arrastar o objeto.
+
+    Antes, cada tecla pedia um quadro inteiro ao ffmpeg e a imagem ficava
+    atrás do número digitado — medido: cerca de 20 px atrás durante as teclas
+    e 180 ms até alcançar a última.
+    """
+    from PySide6.QtCore import Qt
+    panel, calls, item, _ = pose_panel
+    before = len(calls.frames)
+    key = Qt.Key.Key_Down if field == '_spin_opacity' else Qt.Key.Key_PageUp
+    _keys(panel, field, key, times=3)
+    edited = panel._project.find(item.clip_id)[1]
+    assert edited != item, 'as teclas precisam editar o bloco'
+    assert panel._preview._active_clip == edited
+    assert panel._preview._interaction_visible, 'a pose nova não foi desenhada na hora'
+    assert len(calls.frames) == before, 'cada tecla compôs um quadro inteiro'
+    # A mão parou: um só quadro composto, da versão final.
+    panel._pose_settle_timer.timeout.emit()
+    assert len(calls.frames) == before + 1
+    assert calls.frames[-1].args[0] == panel._project
+
+
+def test_quadro_composto_antes_da_pose_nova_nao_volta_o_objeto(pose_panel):
+    """Um quadro em andamento quando a pose muda é de uma pose anterior.
+
+    Mostrado, ele voltaria o objeto para trás até o definitivo chegar — tanto
+    durante as teclas quanto depois de a mão parar, se ainda estiver na fila.
+    """
+    from PySide6.QtCore import Qt
+    from videomanager.domain.preview import RawFrame
+    panel, calls, item, deliver = pose_panel
+    panel._request_frame(force=True)
+    stale = calls.frames[-1]  # em andamento quando a primeira tecla chega
+    size = panel._preview_size()
+    old = RawFrame(b' ' * (size[0] * size[1] * 3), *size, 1.0)
+    _keys(panel, '_spin_x', Qt.Key.Key_PageUp, times=2)
+    stale.signals.frame.emit(stale.args[4], old)
+    assert panel._preview._interaction_visible, 'quadro da pose anterior cobriu a pose nova'
+    panel._pose_settle_timer.timeout.emit()  # a mão parou com o quadro antigo ainda na fila
+    stale.signals.frame.emit(stale.args[4], old)
+    assert panel._preview._interaction_visible, 'quadro da pose anterior cobriu a pose nova'
+    stale.signals.done.emit()
+    final = calls.frames[-1]
+    assert final is not stale and final.args[0] == panel._project
+    deliver(final)
+    assert not panel._preview._interaction_visible, 'o quadro definitivo substitui as camadas'
+
+
+def test_propriedade_fora_da_pose_continua_composta_pelo_ffmpeg(pose_panel):
+    """Chroma muda os pixels do objeto: as camadas não servem e o quadro é composto."""
+    panel, calls, item, _ = pose_panel
+    before = len(calls.frames)
+    panel._properties_widget._chk_chroma.click()
+    assert panel._project.find(item.clip_id)[1].chromakey_enabled
+    assert len(calls.frames) == before + 1
+    assert not panel._preview._interaction_visible
