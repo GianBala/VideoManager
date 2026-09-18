@@ -3810,7 +3810,12 @@ class EditPanel(QWidget):
         self._wanted = seconds
         self._cache_shown_for = seconds
         self._shown_frame = seconds
-        self._preview.set_position(seconds)
+        # A caixa de seleção é calculada no instante do quadro que está na
+        # tela — o começo do quadro da grade do cache —, e não no da agulha.
+        # Um item animado já andou até a agulha: com o instante dela, a caixa
+        # corria na frente da imagem a cada movimento do mouse e as duas só se
+        # reencontravam quando o quadro exato chegava, depois de a mão parar.
+        self._preview.set_position(cache.seconds_of(index))
         if self._on_fullscreen:
             self._fullscreen.set_frame(pixmap)
         else:

@@ -353,3 +353,32 @@ def test_editar_pela_aba_propriedades_cancela_o_preenchimento_da_composicao_ante
     job = calls.scrub[-1]
     _press_in_properties(panel, clip.clip_id, Qt.Key.Key_PageUp)
     assert job.cancelled and panel._scrub_job is None
+
+
+def test_caixa_segue_o_instante_do_quadro_guardado_na_tela(scrub_panel) -> None:
+    """Com o quadro guardado na tela, a caixa de seleção é calculada no instante dele.
+
+    O quadro guardado mostra o começo do quadro da grade do cache; a agulha
+    fica em qualquer ponto dentro dele. Calculando a caixa no instante da
+    agulha, um item animado tinha a caixa andando a cada movimento do mouse e
+    a imagem parada até o quadro seguinte — e os dois só se reencontravam
+    quando o quadro exato chegava, depois de a mão parar.
+    """
+    from videomanager.domain.preview import RawFrame
+
+    panel, calls = scrub_panel
+    _fill_cache(panel)
+    _drag_to(panel, 1.02)
+    assert panel._position == pytest.approx(1.02)
+    assert panel._preview._position == pytest.approx(1.0), "a caixa correu na frente da imagem"
+    _drag_to(panel, 1.03)
+    assert panel._preview._position == pytest.approx(1.0)
+    _drag_to(panel, 1.04)
+    assert panel._preview._position == pytest.approx(31 / 30)
+    # A mão parou: o quadro exato é o da agulha, e a caixa vai junto com ele.
+    panel._scrub_settle_timer.timeout.emit()
+    exact = calls.frames[-1]
+    assert exact.args[1] == pytest.approx(1.04)
+    size = panel._preview_size()
+    exact.signals.frame.emit(panel._frame_token, RawFrame(b"\x00" * (size[0] * size[1] * 3), *size, 1.04))
+    assert panel._preview._position == pytest.approx(1.04)

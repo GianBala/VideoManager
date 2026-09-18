@@ -77,6 +77,11 @@ já compostos em JPEG pequeno (até 640×360, até 30 q/s):
   atrasados de pontos anteriores do arrasto não cobrem o guardado mais novo.
   Sem quadro guardado vale o caminho exato de sempre. A pré-carga do play não é
   aberta durante o arrasto, só quando ele termina.
+- Com o quadro guardado na tela, a caixa de seleção é calculada no instante
+  **dele** — o começo do quadro da grade do cache —, e não no da agulha. Um
+  item animado já andou até a agulha: com o instante dela, a caixa corria na
+  frente da imagem a cada movimento (até 6 px numa prévia de 1280 px) e só se
+  reencontravam no quadro exato. O quadro exato traz a caixa para a agulha.
 
 `scripts/validate_scrub.py` mede preenchimento e custo por movimento com e sem
 cache. `--smoke-test` confere o suporte a JPEG do Qt no pacote.
