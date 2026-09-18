@@ -104,6 +104,15 @@ vezes as dimensões da prévia. O fim do gesto pede o quadro canônico completo.
 Seleção, instante, geração, tamanho e alterações de conteúdo invalidam o plano;
 um callback antigo não pode instalar camadas em outro contexto.
 
+A aba Propriedades usa as mesmas camadas quando só a pose muda (posição,
+tamanho, rotação, opacidade e seus quadros-chave): cada tecla redesenha o objeto
+na hora e o quadro canônico é pedido 200 ms depois da última
+(`_POSE_SETTLE_MS`), mais que a repetição de uma seta segurada. Compondo a cada
+tecla, a imagem ficava cerca de 20 px atrás do número e o alcançava ~180 ms
+depois. Com as camadas na tela, um quadro de revisão anterior não é apresentado:
+voltaria o objeto até o definitivo chegar. Chroma e duração mudam os pixels do
+objeto e continuam compostos na hora.
+
 Transições ativas e filtros posteriores ao objeto que dependem da composição
 continuam no caminho canônico. Nesses casos, snapshots completos da mesma
 posição podem ser apresentados em ordem crescente de revisão, com indicação
