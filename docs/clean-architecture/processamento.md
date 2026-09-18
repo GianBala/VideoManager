@@ -186,7 +186,10 @@ duas decisões dependem dele:
 Uma limitação fica registrada: no ffmpeg 6, uma transição que atravessa um
 adicional **com filtro** deixa o ramo do adicional sem quadros, e ele some
 durante a transição. O agendamento interno que resolve isso chegou no ffmpeg 7.
-Os testes desse caso são pulados quando a ferramenta é mais antiga.
+Os testes desse caso são pulados quando a ferramenta é mais antiga. Os pacotes
+(Windows e Linux) embutem o 7.1, então isso só alcança quem roda pelo
+código-fonte com um ffmpeg antigo do sistema; a CI cobre as duas situações —
+o ffmpeg da distribuição e o do pacote.
 
 ## Validação
 

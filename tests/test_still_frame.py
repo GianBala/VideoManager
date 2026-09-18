@@ -73,6 +73,28 @@ def test_quadro_parado_mostra_o_quadro_que_contem_o_instante(tools, tmp_path, na
         assert shown == pytest.approx(expected, abs=0.5), f"em {moment:.4f} s"
 
 
+@pytest.mark.parametrize("pausa", [4, 60, 200])
+def test_gif_com_pausa_no_fim_mostra_o_ultimo_quadro(tools, tmp_path, pausa):
+    """Um GIF pode segurar o último quadro por segundos.
+
+    A taxa declarada não descreve isso: com uma pausa de 2 s no fim, a grade
+    aponta para um instante onde não há quadro nenhum e a tela ficava preta. O
+    instante real do último quadro é lido do arquivo (ver ``lastframe``).
+    """
+    path = tmp_path / f"pausa{pausa}.gif"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "testsrc2=s=160x90:r=10", "-frames:v", "40", "-final_delay", str(pausa), str(path)],
+                   check=True, timeout=60, **subprocess_kwargs())
+    media = media_ref(probe_file(path, tools))
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(media, 0, media.duration),)),),
+                      width=160, height=90, fps=30.0)
+    último = last_frame_time(project.duration, project.fps)
+    parado = subprocess.run(frame_command(project, último, (160, 90), tools), check=True, timeout=60,
+                            **subprocess_kwargs()).stdout
+    assert len(parado) == 160 * 90 * 3
+    assert sum(parado) / len(parado) > 8, f"tela preta com pausa de {pausa} cs no fim"
+
+
 def test_gif_de_passo_irregular_mostra_o_ultimo_quadro(tools, tmp_path):
     """O fim de um GIF não pode ficar preto (o caso que apareceu no uso real).
 
