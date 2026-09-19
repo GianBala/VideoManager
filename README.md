@@ -1,257 +1,181 @@
+<div align="center">
+
+<img src="src/videomanager/resources/videomanager.png" alt="Ícone do Video Manager" width="128" height="128">
+
 # Video Manager
 
-Aplicativo desktop para Windows e Linux que baixa vídeo e áudio de centenas de
-plataformas, converte arquivos que você já tem no disco e recorta vídeo. Três
-abas — **Download**, **Convert** e **Editar** — sobre uma fila só, que fica fora
-delas e à vista embaixo (no editor ela sai de cena, para o vídeo ocupar a
-janela). Na de download, no espírito do ATubeCatcher: endereço e destino no topo,
-qualidade à esquerda, perfis rápidos à direita.
+**Baixe, converta e edite vídeo — tudo em um só aplicativo.**<br>
+Desktop para Windows e Linux, em português, movido por [yt-dlp](https://github.com/yt-dlp/yt-dlp) e [ffmpeg](https://ffmpeg.org).
 
-Usa **yt-dlp** para extração e **ffmpeg** para processamento.
+[![Testes](https://github.com/GianBala/Video_Manager/actions/workflows/tests.yml/badge.svg)](https://github.com/GianBala/Video_Manager/actions/workflows/tests.yml)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Qt / PySide6](https://img.shields.io/badge/Qt-PySide6-41CD52?logo=qt&logoColor=white)
+![Windows e Linux](https://img.shields.io/badge/Windows%20%7C%20Linux-2b2f3a)
+
+<img src="docs/imagens/demo.gif" alt="Animação com título, ícone do aplicativo e transição, renderizada pelo exportador de GIF do Video Manager" width="480">
+
+<sub>Esta animação foi renderizada pelo exportador de GIF do próprio Video Manager.</sub>
+
+[O que faz](#o-que-faz) · [Editor](#o-editor) · [Começar](#começar) · [Como funciona](#como-funciona) · [Documentação](#documentação)
+
+</div>
+
+---
 
 ## O que faz
 
-- **Vídeo** com escolha explícita de resolução, framerate, codec e container —
-  populados a partir do que a mídia **realmente** oferece, não de uma lista fixa.
-- **Somente áudio** em MP3, M4A/AAC, Opus, Vorbis, FLAC ou WAV, com bitrate à
-  escolha; ou **“Original”**, que apenas extrai o áudio sem recodificar.
-- **Conversão de arquivos locais** para MP3 e outros formatos, com
-  arrastar-e-soltar, na aba **Convert** — que enfileira na mesma fila dos
-  downloads, sem interromper o que já está em andamento.
-- **Edição multipista** na aba **Editar**, com os gestos que o CapCut e o
-  Filmora tornaram padrão:
-  - **Várias trilhas** de vídeo (com fotos), adicionais e áudio, em qualquer
-    ordem — entre vídeo e adicionais, a de cima sobrepõe as de baixo.
-  - **Importar** vídeos, fotos e áudios para o **acervo** (arrastando ou pelo
-    botão) e **arrastar a mídia** até a trilha e o instante desejados, com um
-    bloco fantasma mostrando onde ela vai cair.
-  - **Arrastar os blocos** no tempo e entre trilhas, com imantação nas pontas
-    dos vizinhos, nos quadros-chave e no cursor; alças para ajustar o corte de
-    cada um. A régua e a agulha ficam fixas no topo enquanto as trilhas rolam.
-  - **Volume por bloco em decibéis**, **velocidade por bloco** (0,1× a 10×) e
-    **mudo por trilha ou por bloco**.
-  - **Separar o áudio** de um vídeo para uma trilha própria, e mexer nele
-    sozinho.
-  - **Transições** entre dois cortes (Fade, Dissolve, Wipe, Slide), **texto**,
-    **filtros** e **fundo verde (chroma key)**.
-  - **Animação por quadros-chave** de posição, escala, rotação e opacidade, com
-    curvas de aceleração e efeitos rápidos de entrada, editável direto na prévia
-    ou por campos numéricos na aba **Propriedades**.
-  - **Copiar e colar** blocos, dividir no cursor, excluir, desfazer e refazer;
-    cada gesto é um único passo de desfazer.
-  - **Prévia retrátil** e **tela cheia** (tecla `F` ou duplo clique), com a
-    barra de controles esmaecendo por inatividade.
-  - Reprodução **com o som da mixagem** — todas as trilhas somadas, com os
-    volumes e mudos aplicados —, **loop sem corte** e navegação **quadro a
-    quadro**. Arrastar a agulha responde na hora.
-  - **Proporção e tela** do projeto (16:9, 4:3, 9:16, 1:1, 21:9) e projetos
-    `.vmp` com **Salvar** e **Salvar como**.
-  - **Exportar** em MP4, MKV, WebM, MOV ou **GIF animado**.
+<table>
+<tr>
+<td width="33%" valign="top">
 
-  O que está na tela é a composição de verdade: o mesmo grafo do ffmpeg que
-  exporta o arquivo desenha a prévia. E enquanto a edição for só um recorte de
-  um arquivo, o **corte sem recodificar** continua disponível.
-- **Playlists e canais** em lote, com seleção item a item.
-- **Legendas** (inclusive automáticas), em arquivo separado ou embutidas.
-- **Cookies do navegador** para mídias privadas, com restrição de idade, de
-  assinantes, e para as resoluções altas do BiliBili.
-- **Codificação pela placa de vídeo** (NVENC, Quick Sync, AMF, VAAPI), opcional,
-  em *Configurações → Codificação de vídeo*. A opção escolhida é testada de
-  verdade antes de ser usada — codificando um quadro — e cai para software
-  sozinha quando a placa não responde, em vez de falhar a exportação no meio da
-  fila. O padrão continua sendo software, que comprime melhor no mesmo tamanho
-  de arquivo; a placa exporta várias vezes mais rápido.
-- Fila com vários downloads simultâneos, cancelar, retomar e histórico de erros.
+### ⬇️ Download
 
-## Rodar a partir do código
+Cole um endereço, escolha a qualidade e pronto.
+
+- Resolução, framerate, codec e container **a partir do que a mídia realmente oferece**
+- **Somente áudio**: MP3, M4A/AAC, Opus, Vorbis, FLAC, WAV — ou *Original*, sem recodificar
+- **Playlists e canais** em lote, item a item
+- Legendas (inclusive automáticas), capa e metadados
+- Cookies do navegador para mídias privadas
+- **Perfis rápidos** de um clique
+- Centenas de plataformas, via yt-dlp
+
+</td>
+<td width="33%" valign="top">
+
+### 🔄 Convert
+
+Converta o que já está no disco.
+
+- Arraste os arquivos e escolha o destino
+- Áudio (MP3, M4A, Opus, FLAC…) ou vídeo (MP4, MKV, WebM…)
+- **Copiar** faz remux instantâneo e sem perda, quando o container aceita o codec
+- H.264, HEVC, VP9 ou AV1, com redimensionamento de 2160p a 360p
+- O plano aparece **antes**: “o que vai acontecer”
+- Placa de vídeo opcional (NVENC, Quick Sync, AMF, VAAPI), testada de verdade
+
+</td>
+<td width="33%" valign="top">
+
+### ✂️ Editar
+
+Edição multipista, sem sair do aplicativo.
+
+- Vídeo, fotos, texto, filtros e áudio em **trilhas em qualquer ordem**
+- **Transições**, **animação por quadros-chave** e **chroma key**
+- Prévia com o **som da mixagem**, loop sem corte e quadro a quadro
+- Exporta **MP4, MKV, WebM, MOV ou GIF**
+- **Corte sem recodificar** quando a edição é só um recorte
+
+</td>
+</tr>
+</table>
+
+As três abas compartilham **uma fila de tarefas**: baixe, converta e exporte ao mesmo tempo, cancele, tente de novo e consulte o histórico de erros. No editor a fila sai de cena, para o vídeo ocupar a janela.
+
+<p align="center">
+  <img src="docs/imagens/editor.png" alt="Aba Editar: prévia, acervo, propriedades com animação por quadros-chave e linha do tempo com quatro trilhas" width="100%">
+</p>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/imagens/download.png" alt="Aba Download: cartão da mídia, qualidade, perfis rápidos e fila"></td>
+<td width="50%"><img src="docs/imagens/convert.png" alt="Aba Convert: lista de arquivos, destino da conversão e fila"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Download</b> — qualidade vinda da própria mídia e perfis de um clique</sub></td>
+<td align="center"><sub><b>Convert</b> — o plano da conversão aparece antes de enfileirar</sub></td>
+</tr>
+</table>
+
+<sub>Capturas feitas com mídia sintética por [`scripts/capture_screenshots.py`](scripts/capture_screenshots.py).</sub>
+
+## Por que é diferente
+
+- 🎯 **Opções reais, não uma lista fixa.** O que aparece nos combos vem do que aquela mídia oferece — e um extrator que não informa `fps` não faz as opções sumirem.
+- 🔒 **Nada de recodificação escondida.** Se o container não aceita o codec, o app troca de stream ou de container e **avisa antes** de baixar.
+- 🎞️ **O que você vê é o que sai.** A prévia e o arquivo exportado nascem do mesmo grafo do ffmpeg: trilhas sobrepostas, volume, transições e animações aparecem na tela como ficarão no resultado.
+- ✂️ **Corte sem recodificar, com honestidade.** Só se corta sem recodificar num *keyframe*; o app mostra o ponto real do corte antes de enfileirar.
+- 🧵 **A interface não trava.** O trabalho pesado roda em segundo plano, e cancelar alcança os subprocessos.
+
+## O editor
+
+Multipista, com os gestos que o CapCut e o Filmora tornaram padrão.
+
+<details>
+<summary><b>Tudo o que o editor faz</b></summary>
+
+<br>
+
+- **Trilhas em qualquer ordem** — vídeo (com fotos), adicionais (texto e filtros) e áudio. Entre vídeo e adicionais, a trilha de cima sobrepõe as de baixo.
+- **Acervo e arrasto** — importe para o acervo e arraste a mídia até a trilha e o instante desejados, com bloco fantasma e ímã.
+- **Blocos** — arraste no tempo e entre trilhas, ajuste o corte pelas alças, divida no cursor, copie e cole, separe o áudio de um vídeo.
+- **Som** — volume por bloco em decibéis, mudo por trilha ou por bloco e **velocidade** de 0,1× a 10×.
+- **Transições** entre dois cortes — Fade, Dissolve, Wipe, Slide.
+- **Texto, filtros e chroma key.**
+- **Animação por quadros-chave** — posição, escala, rotação e opacidade, com curvas de aceleração e efeitos rápidos de entrada; editável direto na prévia ou na aba **Propriedades**.
+- **Prévia** — retrátil, em tela cheia (`F`), com o som da mixagem, loop sem corte e navegação quadro a quadro. Arrastar a agulha responde na hora.
+- **Tela** — proporção 16:9, 4:3, 9:16, 1:1 ou 21:9, e *Slideshow* para montagens só de fotos.
+- **Projetos `.vmp`** — Salvar e Salvar como, desfazer e refazer (cada gesto é um único passo).
+- **Exportar** — MP4, MKV, WebM, MOV ou GIF animado; corte rápido sem recodificar; interpolação de movimento; codificação pela placa de vídeo.
+
+Veja o [guia do editor](docs/guia-edicao.md) para atalhos e detalhes.
+
+</details>
+
+## Começar
 
 ```bash
+git clone https://github.com/GianBala/Video_Manager.git && cd Video_Manager
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 PYTHONPATH=src .venv/bin/python -m videomanager
 ```
 
-Na primeira execução o app procura o `ffmpeg` — empacotado, baixado antes, ou no
-`PATH` do sistema. Se não achar nenhum, oferece baixar a versão oficial (~130 MB)
-numa pasta só dele, sem alterar nada no sistema. Quem já tem `ffmpeg` instalado
-nunca paga esse download.
+No Windows, use `.venv\Scripts\python`. Na primeira execução o app procura o `ffmpeg` — empacotado, baixado antes ou no `PATH` — e, se não achar, oferece baixar a build oficial (~130 MB) numa pasta só dele, sem alterar nada no sistema. No Linux, o Qt precisa de `libxcb-cursor0` (`sudo apt install libxcb-cursor0`).
 
-**Linux:** o Qt precisa de `libxcb-cursor0`, que não vem em toda distribuição:
+**Gerar um pacote** — cada sistema gera o seu; os scripts rodam os testes, embutem o ffmpeg e **abrem o resultado para confirmar que ele sobe**:
 
 ```bash
-sudo apt install libxcb-cursor0
+./packaging/build_appimage.sh   # Linux   → AppImage
+.\packaging\build_windows.ps1   # Windows → VideoManager.exe, arquivo único
 ```
 
-Sem ele o Qt falha com *“Could not load the Qt platform plugin xcb”*.
+Mais em [empacotamento](docs/empacotamento.md) e [instalação](docs/instalacao.md).
 
-## Testes
+## Como funciona
 
-```bash
-.venv/bin/python -m pytest -q          # offline, inclui integração local com ffmpeg
-.venv/bin/python -m pytest -q -m "not network and not ffmpeg"  # sem as integrações demoradas
-.venv/bin/python -m pytest -m network  # testes que acessam a internet
+```mermaid
+flowchart LR
+    K["🔑 Quadros-chave<br/>e ajustes"] --> P["📁 Projeto<br/>imutável"]
+    P --> C["🧩 Compositor<br/>um grafo do ffmpeg"]
+    C --> A["🖼️ Quadro parado<br/>e cache da agulha"]
+    C --> B["▶️ Reprodução<br/>imagem + som"]
+    C --> E["💾 Exportação<br/>MP4 · MKV · WebM · MOV · GIF"]
 ```
 
-Rodando pelo código-fonte, vale o `ffmpeg` do sistema, e o aplicativo funciona
-com as versões 6 a 9 (os pacotes trazem a 7.1); a CI cobre 6.1, 7.1 e 9.0.
-Ensaios opt-in de fluidez, gestos e áudio ficam em `scripts/` — ver
-[testes](docs/clean-architecture/testes.md#ensaios-opt-in-do-editor).
-
-## Empacotar
-
-Cada sistema gera o seu próprio pacote — o PyInstaller não faz compilação cruzada.
-
-```bash
-./packaging/build_appimage.sh  # Linux  -> dist/Video_Manager-<versão>-<arch>.AppImage
-./packaging/build_linux.sh     # Linux  -> dist/VideoManager/
-.\packaging\build_windows.ps1  # Windows -> dist\VideoManager.exe (arquivo único)
-```
-
-Os scripts rodam os testes, baixam o `ffmpeg` para embutir, empacotam e por fim
-abrem o executável gerado para conferir que ele realmente sobe.
-
-Os testes de integração com o `ffmpeg` são os mais demorados. Para uma
-iteração local rápida, deixe esses testes para a CI:
-
-```bash
-./packaging/build_appimage.sh
-```
-
-Esse é o modo padrão e ainda executa os testes de domínio, aplicação, interface
-e arquitetura. Para executar também as integrações demoradas com `ffmpeg`, use
-`VM_FAST_TESTS=0 ./packaging/build_appimage.sh`.
-
-### AppImage
-
-Um arquivo só, sem instalação: baixe, dê permissão de execução, clique.
-
-```bash
-chmod +x Video_Manager-1.0-x86_64.AppImage
-./Video_Manager-1.0-x86_64.AppImage
-```
-
-Ele envelopa o mesmo pacote do `build_linux.sh`, então tem tudo dentro: Python,
-Qt, yt-dlp e o `ffmpeg`. Duas opções úteis:
-
-```bash
-./packaging/build_appimage.sh --reuse-dist        # pula o build, reusa dist/
-VM_BUNDLE_FFMPEG=0 ./packaging/build_appimage.sh  # sem ffmpeg: ~290 MB a menos
-```
-
-Com `VM_BUNDLE_FFMPEG=0` o app usa o `ffmpeg` do sistema ou oferece baixá-lo na
-primeira execução — vale a pena quando o AppImage vai ser distribuído por
-download.
-
-O AppImage não se instala no menu do sistema sozinho; para isso existe o
-[AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher). Se a imagem
-não montar por falta de FUSE na máquina, roda assim mesmo:
-
-```bash
-./Video_Manager-1.0-x86_64.AppImage --appimage-extract-and-run
-```
-
-## Como o projeto está organizado
+O código segue **Clean Architecture**: domínio e aplicação funcionam sem Qt, yt-dlp ou ffmpeg — e há testes que provam isso —, e as integrações ficam em adaptadores.
 
 ```text
 src/videomanager/
 ├── domain/          modelos imutáveis e regras puras
 ├── application/     casos de uso, sessão, tarefas e portas
 ├── infrastructure/  ffmpeg, yt-dlp, arquivos e adaptadores Qt
-├── presentation/    janela, controllers, painéis e widgets
+├── presentation/    janela, painéis e widgets
 ├── bootstrap.py     montagem explícita dos serviços
 └── app.py           inicialização Qt e recursos
 ```
 
-O projeto usa Clean Architecture. Domínio e aplicação funcionam sem Qt,
-yt-dlp ou ffmpeg instalados; as integrações ficam em adaptadores externos.
-A apresentação recebe os serviços por injeção, sem importar infraestrutura.
-Testes verificam dependências, ausência de ciclos e resultados de mídia reais.
+**Qualidade** — mais de 1.300 testes: domínio e aplicação sem Qt; interface Qt com eventos reais; e **mídia de verdade**, medindo duração, quadros, volume e streams do arquivo gerado em vez de comparar comandos. Respostas reais de extratores (YouTube, archive.org, HLS, SoundCloud, Instagram) e o parser do próprio yt-dlp validam cada expressão de formato. A CI roda em Ubuntu e Windows, com Python 3.10 e 3.12 e ffmpeg 6.1, 7.1 e 9.0, e gera e abre os pacotes de Linux e Windows.
 
-O [guia completo para desenvolvedores](docs/clean-architecture/README.md)
-explica cada camada, os fluxos, a concorrência e o papel de cada módulo.
-A sessão de edição possui histórico e ponto salvo; a fila possui transições
-por tentativa. Pedidos tipados substituem opções de ferramentas na interface.
-Texto usa rasterização injetada e prévia/exportação compartilham o compositor.
+## Documentação
 
-### Os módulos que importam
-
-Alguns algoritmos ajudam a entender as principais decisões do aplicativo.
-
-**`infrastructure/yt_dlp/formats.py`** normaliza a resposta crua de cada extrator. Cada
-plataforma devolve uma estrutura diferente, e a diferença não é cosmética:
-
-- O YouTube manda DASH com trilhas separadas, três codecs por resolução, HDR, e
-  uma pilha de storyboards `mhtml` que não são mídia.
-- O archive.org **não declara codec algum** e nenhum formato tem `fps`.
-- O HLS da Apple declara `vcodec: "none"` nas faixas de áudio mas **omite**
-  `acodec`.
-- Muitos sites servem só HLS, sem `height`, sem `fps` e sem tamanho.
-
-A distinção que sustenta o módulo: `"vcodec": "none"` significa *“conferi, não há
-vídeo”*, enquanto a **ausência** da chave significa *“não sei”*. Tratar as duas
-como a mesma coisa descarta mídia perfeitamente baixável — e foi exatamente o bug
-que as fixtures pegaram: o archive.org ficava 100% inacessível e o HLS da Apple
-baixava vídeo **mudo**.
-
-**`infrastructure/yt_dlp/selector.py`** traduz a escolha em opções do yt-dlp, sob duas regras:
-
-- **Filtros não-estritos.** Todo limite sai como `[height<=?720]`. O `?` impede
-  que formatos sem aquele campo sejam descartados. Sem ele, pedir “no máximo
-  30 fps” elimina todos os formatos de sites que não informam `fps` — ou seja,
-  quase tudo fora do YouTube.
-- **Nunca recodificar sem consentimento.** Quando o container pedido não aceita o
-  codec escolhido, a saída é **trocar de stream** (sem perda, mesma qualidade) ou
-  **trocar de container** — nunca recodificar por conta própria. Toda substituição
-  vira um aviso na tela, antes de o download começar.
-
-**`infrastructure/ffmpeg/trimmer.py`** é o recorte, e vive do fato de que vídeo comprimido só
-pode ser cortado sem recodificar **num keyframe** — quadros completos que
-aparecem a cada poucos segundos; entre eles há apenas diferenças, que sozinhas
-não formam imagem. Daí as duas saídas honestas, e as duas na tela:
-
-- **Corte exato**, que recodifica o trecho e começa no quadro marcado;
-- **Corte rápido**, que copia os dados como estão — sai em segundos, sem perda
-  nenhuma, mas começa no keyframe anterior.
-
-O aplicativo mapeia os keyframes com o ffprobe (só demultiplexando, sem
-decodificar) e **anuncia o ponto real do corte antes de enfileirar**: “sem
-recodificar, o corte vai começar em 0:00:04,000 — 1,30 s antes do ponto
-marcado”. As marcas aparecem na linha do tempo e o arrasto se imanta nelas, o
-que permite escolher um corte instantâneo e exato de propósito.
-
-A prévia e as miniaturas saem do próprio ffmpeg, em quadros crus, e não de um
-player: um player entrega o quadro que conseguir — normalmente o keyframe mais
-próximo —, e aqui o que está na tela precisa ser exatamente o quadro do corte.
-
-**`infrastructure/ffmpeg/composer.py`** monta a edição inteira num grafo de filtros do ffmpeg, e
-esse **mesmo grafo serve três usos**: exportar o arquivo, desenhar o quadro
-parado da prévia e alimentar a reprodução. A consequência é a que importa —
-trilha sobreposta, vão preto, volume em decibéis e mudo aparecem na tela como
-vão aparecer no resultado, em vez de só na hora de exportar.
-
-Animações seguem a mesma regra: os quadros-chave viram expressões que o ffmpeg
-avalia a cada quadro (escala, rotação, posição e opacidade), e por isso a prévia
-e o arquivo exportado se movem igual.
-
-O som segue o mesmo caminho: o compositor produz a mixagem em PCM e um
-`QAudioSink` toca. Um player de arquivo não daria conta, porque uma edição com
-duas trilhas de áudio não é um arquivo. E enquanto a prévia roda, **o relógio é
-o áudio** — o ouvido percebe um engasgo de vinte milissegundos, o olho não
-percebe um quadro repetido —, com a imagem se corrigindo contra ele.
-
-### Testes
-
-O que sustenta a promessa de funcionar em plataformas diversas são **fixtures
-reais** — respostas de extratores capturadas em `tests/fixtures/`, cada uma
-escolhida por expor uma estrutura diferente (ver o README de lá). Sobre elas se
-afirma o que precisa valer para qualquer extrator: nada de storyboards vazando,
-nada de exceção com campo nulo, nenhuma mídia baixável resultando em zero opções.
-
-Além disso, cada expressão de formato gerada é submetida ao **parser real do
-yt-dlp**. Um erro de sintaxe no `~=` ou no `<=?` não apareceria em nenhum teste de
-comparação de strings — apareceria no primeiro download do usuário.
+| Para… | Leia |
+| --- | --- |
+| **Usar** | [Manual](docs/README.md) · [Instalação](docs/instalacao.md) · [Download](docs/guia-download.md) · [Convert](docs/guia-conversao.md) · [Editor](docs/guia-edicao.md) · [Configurações](docs/configuracoes.md) |
+| **Entender o código** | [Guia de arquitetura](docs/clean-architecture/README.md) · [Decisões de projeto](docs/decisoes-de-projeto.md) · [Catálogo de módulos](docs/clean-architecture/modulos.md) |
+| **Contribuir** | [Guia de desenvolvimento](docs/desenvolvimento.md) · [Testes](docs/clean-architecture/testes.md) · [Empacotamento](docs/empacotamento.md) |
 
 ## Aviso
 
-Este aplicativo é uma interface para o yt-dlp. Respeitar os termos de uso e os
-direitos autorais de cada plataforma é responsabilidade de quem usa.
+Este aplicativo é uma interface para o yt-dlp. Respeitar os termos de uso e os direitos autorais de cada plataforma é responsabilidade de quem usa.
