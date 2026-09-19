@@ -27,6 +27,9 @@ repositório para uma visão geral rápida; esta pasta traz o manual completo.
   conceitos, camadas, fluxos de ponta a ponta, concorrência, testes e catálogo
   de módulos para quem está chegando ao projeto.
 - [**Arquitetura**](arquitetura.md) — mapa resumido da estrutura atual.
+- [**Decisões de projeto**](decisoes-de-projeto.md) — os algoritmos por trás
+  das escolhas principais (normalização de extratores, corte sem recodificar,
+  grafo único do ffmpeg) e o motivo de cada uma.
 - [**Plano de migração para Clean Architecture**](plano-clean-architecture.md)
   — registro da proposta original; veja as entregas e evidências no
   [registro da migração](clean-architecture/migracao.md).

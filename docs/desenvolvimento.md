@@ -114,6 +114,22 @@ com rotação, na pasta de logs do usuário (`platformdirs.user_log_dir`), inclu
 exceções não tratadas em slots do Qt e em threads — é o único rastro de um
 defeito que só aparece no pacote do Windows, que roda sem console.
 
+## Imagens do README
+
+As capturas de tela e o GIF do README ficam em `docs/imagens/` e saem de um
+script, para poderem ser refeitas quando a interface mudar de forma visível:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/capture_screenshots.py
+```
+
+O script usa mídia sintética (ffmpeg) e um perfil temporário, desenha a janela
+sem exibi-la (`WA_DontShowOnScreen`) e exporta o GIF pelo mesmo caminho da janela
+de exportação. No Windows ele usa a plataforma `windows` do Qt: a `offscreen` não
+tem fontes de símbolos e desenha quadrados no lugar dos ícones. `--saida` e
+`--plataforma` mudam a pasta e a plataforma. Confira as imagens antes de
+versionar: o resultado depende das fontes da máquina.
+
 ## Convenções
 
 Comentários, docstrings e mensagens seguem pt-BR. Novos textos de controles
