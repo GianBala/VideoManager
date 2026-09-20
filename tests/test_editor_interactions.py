@@ -593,6 +593,46 @@ def test_primeiro_keyframe_captura_opacidade_recente():
     assert widget._clip.keyframes[0].opacity == pytest.approx(.4)
 
 
+@pytest.mark.parametrize('remove', ['preset', 'ultimo_ponto'])
+def test_remover_animacao_sincroniza_campos_com_pose_estatica(remove):
+    widget = _ClipPropertiesWidget()
+    clip = Clip(None, 0, 2, overlay_type='text', text_content='Teste',
+                x=.2, opacity=.8, keyframes=(Keyframe(0, x=.7, opacity=.3),))
+    widget.load_clip(clip, 1000, 600)
+    if remove == 'preset':
+        widget._combo_presets.setCurrentIndex(widget._combo_presets.findData('clear'))
+    else:
+        widget._on_toggle_keyframe()
+    assert not widget._clip.has_keyframes
+    assert widget._spin_x.value() == round(widget._clip.x * 1000)
+    assert widget._spin_opacity.value() == round(widget._clip.opacity * 100)
+    assert widget._last_x == widget._clip.x
+
+
+def test_cursor_nao_apaga_digitacao_parcial_em_clipe_estatico():
+    from PySide6.QtTest import QTest
+
+    widget = _ClipPropertiesWidget()
+    widget.load_clip(Clip(None, 0, 2, overlay_type='text', text_content='Teste'), 1000, 600)
+    field = widget._spin_x.lineEdit()
+    field.selectAll()
+    QTest.keyClicks(field, '-')
+    pending = field.text()
+    assert '-' in pending
+    widget.set_playhead_position(.5)
+    assert field.text() == pending
+
+
+def test_cursor_preserva_campos_atualizados_por_arrasto_estatico():
+    widget = _ClipPropertiesWidget()
+    widget.load_clip(Clip(None, 0, 2, overlay_type='text', text_content='Teste'), 1000, 600)
+    widget.update_transform_fields(.7, .6, 1.2, 1.3, 45)
+    widget.set_playhead_position(.5)
+    assert widget._spin_x.value() == 700
+    assert widget._spin_y.value() == 360
+    assert widget._spin_rot.value() == 45
+
+
 @pytest.mark.parametrize("fps", [24, 30, 60, 30000 / 1001])
 def test_pontos_adjacentes_sao_editados_e_navegados_individualmente(fps):
     widget = _ClipPropertiesWidget()

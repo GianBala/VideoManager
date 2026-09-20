@@ -2462,10 +2462,10 @@ class EditPanel(QWidget):
             )
             self._act(menu, f"{strings.EDIT_DELETE}  (Del)", self._delete_selected)
             menu.addSeparator()
-            if clip.media.has_audio and clip.media.kind is not MediaKind.AUDIO:
+            if clip.has_image and clip.media.has_audio and clip.media.kind is MediaKind.VIDEO:
                 self._act(
                     menu, strings.EDIT_DETACH, self._detach_audio,
-                    enabled=not clip.detached, tip=strings.EDIT_DETACH_TIP,
+                    enabled=clip.can_detach_audio, tip=strings.EDIT_DETACH_TIP,
                 )
             if clip.can_adjust_sound:
                 self._act(
@@ -2821,7 +2821,7 @@ class EditPanel(QWidget):
 
     def _detach_audio(self) -> None:
         clip = self._timeline.selected_clip
-        if clip is None or clip.media is None or not clip.media.has_audio:
+        if clip is None or not clip.can_detach_audio:
             return
         self._remember()
         self._apply(self._project.detached_audio(clip.clip_id))

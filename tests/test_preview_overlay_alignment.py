@@ -23,6 +23,40 @@ from videomanager.presentation.qt.panels.edit_widgets import _Preview
 pytestmark = pytest.mark.usefixtures("desktop_app")
 
 
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize('scale', [.5, .02])
+def test_animacao_sutil_de_escala_alinha_alcas_com_pixels_renderizados(tmp_path, scale):
+    from videomanager.infrastructure.ffmpeg.composer import frame_command
+    from videomanager.infrastructure.ffmpeg.preview import frame_from_command
+
+    tools = find_tools()
+    if tools is None:
+        pytest.skip('ffmpeg indisponível')
+    path = tmp_path / 'branco.png'
+    image = QImage(320, 180, QImage.Format.Format_RGB32)
+    image.fill(QColor('white'))
+    assert image.save(str(path))
+    clip = Clip(MediaRef(path, MediaKind.IMAGE, width=320, height=180), 0, 2,
+                scale_x=scale, scale_y=scale, keyframes=(
+                    Keyframe(0, scale_x=scale, scale_y=scale),
+                    Keyframe(2, scale_x=scale+.009, scale_y=scale+.009)))
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(clip,)),), width=320, height=180)
+    frame = frame_from_command(frame_command(project, 1, (320, 180), tools), (320, 180))
+    assert frame and frame.is_complete
+    points = [(x, y) for y in range(180) for x in range(320)
+              if frame.data[(y*320+x)*3] > 200]
+    left, top = min(x for x, _ in points), min(y for _, y in points)
+    width = max(x for x, _ in points) - left + 1
+    height = max(y for _, y in points) - top + 1
+    preview = _Preview()
+    preview.resize(320, 180)
+    preview.set_frame_pixmap(QPixmap(320, 180))
+    preview.set_active_clip(clip, 320, 180)
+    preview.set_position(1)
+    cx, cy, w, h = preview._clip_geometry(clip)
+    assert (cx-w/2, cy-h/2, w, h) == pytest.approx((left, top, width, height))
+
+
 def _migrado(clip: Clip, width: int = 1920, height: int = 1080) -> Clip:
     """Clipe de projeto antigo, convertido pela migração do formato 3.
 

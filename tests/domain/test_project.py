@@ -549,6 +549,20 @@ class TestDividir:
 
 
 class TestSepararAudio:
+    def test_preserva_silencio_do_clipe(self) -> None:
+        original = clip(VIDEO, muted=True, gain_db=-6)
+        separado = montado(original).detached_audio(original.clip_id)
+        audio = next(c for c in separado.clips if c.audio_only)
+        assert audio.muted
+        assert audio.gain_db == -6
+        assert not separado.has_sound
+
+    def test_nao_separa_audio_que_ja_foi_extraido(self) -> None:
+        original = clip(VIDEO)
+        separado = montado(original).detached_audio(original.clip_id)
+        audio = next(c for c in separado.clips if c.audio_only)
+        assert separado.detached_audio(audio.clip_id) is separado
+
     def test_som_sai_do_video_para_trilha_propria(self) -> None:
         projeto = montado(clip(VIDEO, start=3.0, duration=8.0))
         separado = projeto.detached_audio(projeto.clips[0].clip_id)

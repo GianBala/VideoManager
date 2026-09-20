@@ -391,35 +391,35 @@ class _Preview(QLabel):
             int(round(canonical_h * compose_h / self._proj_h / 2.0) * 2),
         )
 
-        base_sx = max(0.05, clip.scale_x)
-        base_sy = max(0.05, clip.scale_y)
+        base_sx = clip.scale_x
+        base_sy = clip.scale_y
         animated_scale = clip.has_keyframes and (
             any(
-                abs(k.scale_x - base_sx) > 0.01
-                or abs(k.scale_y - base_sy) > 0.01
+                abs(k.scale_x - base_sx) > 1e-9
+                or abs(k.scale_y - base_sy) > 1e-9
                 for k in clip.keyframes
             )
             or any(
                 abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x)
-                > 0.01
+                > 1e-9
                 or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y)
-                > 0.01
+                > 1e-9
                 for i in range(len(clip.keyframes) - 1)
             )
         )
         if animated_scale:
             # O filtro com ``eval=frame`` usa ``trunc``; o caminho estático usa
             # ``round`` ao montar o comando.
-            item_w = max(2, int(base_w * max(0.05, transform.scale_x) / 2.0) * 2)
-            item_h = max(2, int(base_h * max(0.05, transform.scale_y) / 2.0) * 2)
+            item_w = max(2, int(base_w * transform.scale_x / 2.0) * 2)
+            item_h = max(2, int(base_h * transform.scale_y / 2.0) * 2)
         else:
             item_w = max(
                 2,
-                int(round(base_w * max(0.05, transform.scale_x) / 2.0) * 2),
+                int(round(base_w * transform.scale_x / 2.0) * 2),
             )
             item_h = max(
                 2,
-                int(round(base_h * max(0.05, transform.scale_y) / 2.0) * 2),
+                int(round(base_h * transform.scale_y / 2.0) * 2),
             )
 
         # O filtro overlay do FFmpeg avalia a expressão com round(), correspondendo a
@@ -1633,7 +1633,7 @@ class _ClipPropertiesWidget(QWidget):
                       if frame_index(self._clip.start + k.time_offset, self._fps) == frame]
         return min(candidates, key=lambda k: abs(k.time_offset - offset), default=None)
 
-    def _refresh_keyframe_controls(self) -> None:
+    def _refresh_keyframe_controls(self, *, refresh_static: bool = False) -> None:
         if self._clip is None or not hasattr(self, "_animation_group"):
             return
         t_offset = max(0.0, min(self._clip.duration, self._playhead_pos - self._clip.start))
@@ -1668,40 +1668,45 @@ class _ClipPropertiesWidget(QWidget):
             has_next = any(k.time_offset > t_offset + 1e-8 for k in self._clip.visible_keyframes)
             self._btn_kf_prev.setEnabled(has_prev)
             self._btn_kf_next.setEnabled(has_next)
-
-            # Sincroniza campos numéricos com o estado interpolado no instante do cursor
-            self._updating = True
-            try:
-                cur_t = self._clip.transform_at(t_offset)
-                cur_w = max(1, round(self._base_w * cur_t.scale_x))
-                cur_h = max(1, round(self._base_h * cur_t.scale_y))
-                if hasattr(self, "_spin_x"):
-                    self._spin_x.setValue(round(cur_t.x * self._proj_w))
-                if hasattr(self, "_spin_y"):
-                    self._spin_y.setValue(round(cur_t.y * self._proj_h))
-                if hasattr(self, "_spin_w"):
-                    self._spin_w.setValue(cur_w)
-                if hasattr(self, "_spin_h"):
-                    self._spin_h.setValue(cur_h)
-                if hasattr(self, "_spin_scale"):
-                    self._spin_scale.setValue((cur_t.scale_x + cur_t.scale_y) / 2.0)
-                if hasattr(self, "_spin_rot"):
-                    self._spin_rot.setValue(cur_t.rotation % 360.0)
-                if hasattr(self, "_slider_opacity") and hasattr(self, "_spin_opacity"):
-                    op_pct = int(round(cur_t.opacity * 100))
-                    self._slider_opacity.setValue(op_pct)
-                    self._spin_opacity.setValue(op_pct)
-                self._last_w = cur_w
-                self._last_h = cur_h
-                self._last_x = cur_t.x
-                self._last_y = cur_t.y
-                self._last_rot = cur_t.rotation
-            finally:
-                self._updating = False
         else:
             self._lbl_kf_status.setText("Sem quadros-chave")
             self._btn_kf_prev.setEnabled(False)
             self._btn_kf_next.setEnabled(False)
+
+        # Sem animação, o cursor não muda a pose. Reescrever os campos a cada
+        # tick apagaria digitação parcial e valores de um arrasto em andamento.
+        if not self._clip.has_keyframes and not refresh_static:
+            return
+        # Sincroniza campos numéricos com o estado interpolado no instante do cursor
+        was_updating = self._updating
+        self._updating = True
+        try:
+            cur_t = self._clip.transform_at(t_offset)
+            cur_w = max(1, round(self._base_w * cur_t.scale_x))
+            cur_h = max(1, round(self._base_h * cur_t.scale_y))
+            if hasattr(self, "_spin_x"):
+                self._spin_x.setValue(round(cur_t.x * self._proj_w))
+            if hasattr(self, "_spin_y"):
+                self._spin_y.setValue(round(cur_t.y * self._proj_h))
+            if hasattr(self, "_spin_w"):
+                self._spin_w.setValue(cur_w)
+            if hasattr(self, "_spin_h"):
+                self._spin_h.setValue(cur_h)
+            if hasattr(self, "_spin_scale"):
+                self._spin_scale.setValue((cur_t.scale_x + cur_t.scale_y) / 2.0)
+            if hasattr(self, "_spin_rot"):
+                self._spin_rot.setValue(cur_t.rotation % 360.0)
+            if hasattr(self, "_slider_opacity") and hasattr(self, "_spin_opacity"):
+                op_pct = int(round(cur_t.opacity * 100))
+                self._slider_opacity.setValue(op_pct)
+                self._spin_opacity.setValue(op_pct)
+            self._last_w = cur_w
+            self._last_h = cur_h
+            self._last_x = cur_t.x
+            self._last_y = cur_t.y
+            self._last_rot = cur_t.rotation
+        finally:
+            self._updating = was_updating
 
     def _on_opacity_slider_changed(self, val: int) -> None:
         if self._updating:
@@ -1755,7 +1760,7 @@ class _ClipPropertiesWidget(QWidget):
             updated_clip = self._clip.without_keyframe(nearest.time_offset, tolerance=1e-9)
             self._clip = updated_clip
             self.property_changed.emit(self._clip_id, {"keyframes": updated_clip.keyframes})
-            self._refresh_keyframe_controls()
+            self._refresh_keyframe_controls(refresh_static=True)
         else:
             cur_t = self._clip.transform_at(t_offset)
             easing = self._combo_easing.currentData() or "linear"
@@ -1807,7 +1812,7 @@ class _ClipPropertiesWidget(QWidget):
             self._combo_presets.setCurrentIndex(0)
         finally:
             self._updating = False
-        self._refresh_keyframe_controls()
+        self._refresh_keyframe_controls(refresh_static=preset == "clear")
 
     def _emit_property_change(self, changes: dict) -> None:
         if self._clip_id < 0 or self._clip is None:

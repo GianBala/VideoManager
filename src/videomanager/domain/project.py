@@ -39,7 +39,7 @@ from videomanager.domain.keyframe import ClipTransform
 from videomanager.domain.geometry import image_base_size, natural_image_size
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import interpolate_keyframes
-from videomanager.domain.timing import source_time, available_duration, frame_index, last_frame_time
+from videomanager.domain.timing import source_time, available_duration, frame_index
 
 if TYPE_CHECKING:  # pragma: no cover - só para o verificador de tipos
     from videomanager.domain.media import LocalMedia
@@ -337,6 +337,11 @@ class Clip:
         return bool(self.media and self.media.has_audio and not self.detached and not self.is_additional)
 
     @property
+    def can_detach_audio(self) -> bool:
+        """Somente vídeo com som ainda incorporado permite separar áudio."""
+        return self.can_adjust_sound and self.has_image and self.media.kind is MediaKind.VIDEO
+
+    @property
     def is_image(self) -> bool:
         return (
             self.overlay_type in ("none", "image")
@@ -397,7 +402,9 @@ class Clip:
                               whole_animation: bool = False) -> Clip:
         """Edita uma pose ou transforma a curva inteira por comando explícito."""
         names = ("x", "y", "scale_x", "scale_y", "rotation", "opacity")
-        offset = max(0, min(last_frame_time(self.duration, fps), offset))
+        # O ponto no fim do clipe também é editável: ele sustenta a curva até
+        # a borda. Recuar um quadro editaria outra pose e criaria outro ponto.
+        offset = max(0, min(self.duration, offset))
         current = self.transform_at(offset)
         target = replace(current, **{k: v for k, v in changes.items() if k in names})
         if not self.keyframes:
@@ -410,12 +417,15 @@ class Clip:
             factors = {}
             for axis in ("scale_x", "scale_y"):
                 factor = getattr(target, axis) / max(.000001, getattr(current, axis))
+                if abs(factor - 1) < 1e-9:
+                    factors[axis] = 1.0
+                    continue
                 minimum = min(getattr(k, axis) for k in self.keyframes)
                 maximum = max(getattr(k, axis) for k in self.keyframes)
                 factors[axis] = max(.05 / max(minimum, .000001), min(10 / maximum, factor))
             requested_x = target.scale_x / max(.000001, current.scale_x)
             requested_y = target.scale_y / max(.000001, current.scale_y)
-            if abs(requested_x - requested_y) < 1e-9:
+            if abs(requested_x - requested_y) < 1e-9 and abs(requested_x - 1) >= 1e-9:
                 # Um redimensionamento proporcional precisa de um único fator,
                 # inclusive quando um ponto distante já está no limite da escala.
                 values = [value for k in self.keyframes for value in (k.scale_x, k.scale_y)]
@@ -1238,7 +1248,7 @@ class Project:
         if found is None:
             return self
         _, clip = found
-        if not clip.can_adjust_sound or clip.media.kind is MediaKind.AUDIO:
+        if not clip.can_detach_audio:
             return self
 
         project = self.with_updated_clip(clip_id, detached=True, muted=False)
@@ -1252,6 +1262,7 @@ class Project:
             duration=clip.duration,
             in_point=clip.in_point,
             gain_db=clip.gain_db,
+            muted=clip.muted,
             speed=clip.speed,
             audio_only=True,
         )
