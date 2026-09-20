@@ -214,3 +214,24 @@ def test_edicao_local_preserva_outros_pontos_e_global_alcanca_suportes():
     assert whole.keyframes[0].x == pytest.approx(.4)
     assert whole.keyframes[-1].x == pytest.approx(.8)
     assert [k.scale_x for k in whole.keyframes] == [2, 4]
+
+
+@pytest.mark.parametrize('changes', [{'x': .7}, {'opacity': .8}, {'rotation': 45}])
+def test_edicao_global_nao_modifica_escalas_sem_pedido(changes):
+    clip = Clip(None, 0, 2, overlay_type='text', keyframes=(
+        Keyframe(0, scale_x=.02, scale_y=.03),
+        Keyframe(2, scale_x=.04, scale_y=.06)))
+    updated = clip.with_edited_transform(1, changes, fps=30, whole_animation=True)
+    assert [(k.scale_x, k.scale_y) for k in updated.keyframes] == [
+        (k.scale_x, k.scale_y) for k in clip.keyframes]
+
+
+@pytest.mark.parametrize('offset', [1.99, 2])
+def test_editar_ponto_no_final_nao_cria_outro_no_quadro_anterior(offset):
+    clip = Clip(None, 0, 2, overlay_type='text', keyframes=(
+        Keyframe(0, x=.2, y=.1), Keyframe(offset, x=.8, y=.9)))
+    updated = clip.with_edited_transform(offset, {'x': .9}, fps=30)
+    assert len(updated.keyframes) == 2
+    assert updated.keyframes[-1].time_offset == offset
+    assert updated.transform_at(offset).x == pytest.approx(.9)
+    assert updated.transform_at(offset).y == pytest.approx(.9)

@@ -88,6 +88,23 @@ def test_exportacao_exata_preserva_velocidade_e_opacidade(tools, tmp_path):
     assert 105 <= frame.data[(60*160+80)*3] <= 145
 
 
+def test_separar_audio_silenciado_exporta_sem_som(tools, tmp_path):
+    source = tmp_path / 'com_som.mp4'
+    run(tools, '-f', 'lavfi', '-i', 'color=c=red:s=160x120:r=25:d=1',
+        '-f', 'lavfi', '-i', 'sine=duration=1', '-c:v', 'libx264', '-c:a', 'aac', source)
+    local = probe_file(source, tools)
+    assert local.audio is not None
+    project = new_project(media_ref(local))
+    identity = project.clips[0].clip_id
+    project = project.with_updated_clip(identity, muted=True).detached_audio(identity)
+    destination = tmp_path / 'silenciado.mp4'
+    Converter(local, Composition(project), destination, tools).run()
+    result = probe_file(destination, tools)
+    assert result.duration == pytest.approx(1, abs=.05)
+    assert result.video is not None
+    assert result.audio is None
+
+
 def test_opacidade_de_99_porcento_nao_e_descartada(tools, tmp_path):
     source = tmp_path / 'white.mp4'
     run(tools, '-f', 'lavfi', '-i', 'color=c=white:s=160x120:r=20:d=1', '-c:v', 'libx264', source)

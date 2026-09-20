@@ -30,48 +30,47 @@ Desktop para Windows e Linux, em português, movido por [yt-dlp](https://github.
 
 ### ⬇️ Download
 
-Cole um endereço, escolha a qualidade e pronto.
+Cole o endereço e baixe com opções reais da fonte.
 
-- Resolução, framerate, codec e container **a partir do que a mídia realmente oferece**
-- **Somente áudio**: MP3, M4A/AAC, Opus, Vorbis, FLAC, WAV — ou *Original*, sem recodificar
-- **Playlists e canais** em lote, item a item
-- Legendas (inclusive automáticas), capa e metadados
-- Cookies do navegador para mídias privadas
+- **Opções reais**: resolução, framerate e codecs (H.264, VP9, AV1) detectados direto da mídia, sem listas fixas
+- **Somente áudio**: modo *Original* (sem recodificar) ou conversão para MP3, M4A, Opus, FLAC, Vorbis e WAV
+- **Playlists e canais** em lote, com seleção item a item
+- **Legendas** embutidas ou externas (inclusive automáticas), capas e metadados
+- **Cookies do navegador** para mídias privadas ou restritas
 - **Perfis rápidos** de um clique
-- Centenas de plataformas, via yt-dlp
+- Centenas de plataformas via yt-dlp
 
 </td>
 <td width="33%" valign="top">
 
 ### 🔄 Convert
 
-Converta o que já está no disco.
+Converta e reprocesse mídias locais com rapidez.
 
-- Arraste os arquivos e escolha o destino
-- Áudio (MP3, M4A, Opus, FLAC…) ou vídeo (MP4, MKV, WebM…)
-- **Copiar** faz remux instantâneo e sem perda, quando o container aceita o codec
-- H.264, HEVC, VP9 ou AV1, com redimensionamento de 2160p a 360p
-- O plano aparece **antes**: “o que vai acontecer”
-- Placa de vídeo opcional (NVENC, Quick Sync, AMF, VAAPI), testada de verdade
+- **Conversão em lote**: arraste arquivos e converta vídeo (MP4, MKV, WebM, MOV) e áudio (MP3, M4A, Opus, FLAC…)
+- **Copiar (remux)**: troca de container instantânea e sem perda quando os codecs já são compatíveis
+- **Plano transparente**: mostra exatamente o que vai acontecer com cada trilha antes de enfileirar
+- **Resoluções e codecs**: H.264, HEVC, VP9 ou AV1, de 2160p até 360p
+- **Placa de vídeo** (NVENC, Quick Sync, AMF, VAAPI) testada de verdade, com recuo automático para CPU
 
 </td>
 <td width="33%" valign="top">
 
 ### ✂️ Editar
 
-Edição multipista, sem sair do aplicativo.
+Edição multipista completa, sem sair do aplicativo.
 
-- Vídeo, fotos, texto, filtros e áudio em **trilhas em qualquer ordem**
-- **Transições**, **animação por quadros-chave** e **chroma key**
-- Prévia com o **som da mixagem**, loop sem corte e quadro a quadro
-- Exporta **MP4, MKV, WebM, MOV ou GIF**
-- **Corte sem recodificar** quando a edição é só um recorte
+- **Trilhas livres**: vídeos, fotos, áudios, textos e filtros em qualquer ordem
+- **Cortes precisos**: montagem magnética com ímã, alças de corte, divisão no cursor e separação de áudio
+- **Efeitos e transições**: Dissolve, Wipe, Slide, Fade, filtros de cor, chroma key e quadros-chave
+- **Prévia fiel**: reprodução com o som da mixagem em tempo real, loop sem corte e tela cheia (`F`)
+- **Exportação versátil**: MP4, MKV, WebM, MOV ou GIF animado, e corte sem recodificar em keyframes
 
 </td>
 </tr>
 </table>
 
-As três abas compartilham **uma fila de tarefas**: baixe, converta e exporte ao mesmo tempo, cancele, tente de novo e consulte o histórico de erros. No editor a fila sai de cena, para o vídeo ocupar a janela.
+As três abas compartilham **uma fila de tarefas unificada**: baixe, converta e exporte ao mesmo tempo em segundo plano, com cancelamento, nova tentativa e histórico de erros. No editor a fila sai de cena, para o vídeo ocupar a janela.
 
 <p align="center">
   <img src="docs/imagens/editor.png" alt="Aba Editar: prévia, acervo, propriedades com animação por quadros-chave e linha do tempo com quatro trilhas" width="100%">
@@ -89,14 +88,6 @@ As três abas compartilham **uma fila de tarefas**: baixe, converta e exporte ao
 </table>
 
 <sub>Capturas feitas com mídia sintética por [`scripts/capture_screenshots.py`](scripts/capture_screenshots.py).</sub>
-
-## Por que é diferente
-
-- 🎯 **Opções reais, não uma lista fixa.** O que aparece nos combos vem do que aquela mídia oferece — e um extrator que não informa `fps` não faz as opções sumirem.
-- 🔒 **Nada de recodificação escondida.** Se o container não aceita o codec, o app troca de stream ou de container e **avisa antes** de baixar.
-- 🎞️ **O que você vê é o que sai.** A prévia e o arquivo exportado nascem do mesmo grafo do ffmpeg: trilhas sobrepostas, volume, transições e animações aparecem na tela como ficarão no resultado.
-- ✂️ **Corte sem recodificar, com honestidade.** Só se corta sem recodificar num *keyframe*; o app mostra o ponto real do corte antes de enfileirar.
-- 🧵 **A interface não trava.** O trabalho pesado roda em segundo plano, e cancelar alcança os subprocessos.
 
 ## O editor
 
@@ -146,27 +137,59 @@ Mais em [empacotamento](docs/empacotamento.md) e [instalação](docs/instalacao.
 ## Como funciona
 
 ```mermaid
-flowchart LR
-    K["🔑 Quadros-chave<br/>e ajustes"] --> P["📁 Projeto<br/>imutável"]
-    P --> C["🧩 Compositor<br/>um grafo do ffmpeg"]
-    C --> A["🖼️ Quadro parado<br/>e cache da agulha"]
-    C --> B["▶️ Reprodução<br/>imagem + som"]
-    C --> E["💾 Exportação<br/>MP4 · MKV · WebM · MOV · GIF"]
+flowchart TD
+    subgraph UI["Interface (PySide6)"]
+        D["⬇️ Aba Download<br/>URLs e playlists"]
+        C["🔄 Aba Convert<br/>Arquivos locais"]
+        E["✂️ Aba Editar<br/>Linha do tempo multipista"]
+    end
+
+    subgraph Core["Aplicação & Domínio (Clean Architecture)"]
+        Queue["Fila de Tarefas Unificada<br/>(Tentativas, concorrência e cancelamento)"]
+        Session["Sessão e Projeto Imutável<br/>(Histórico de edições e snapshots)"]
+    end
+
+    subgraph Engines["Motores de Processamento"]
+        YTDLP["yt-dlp<br/>Extração, metadados e streams"]
+        FFMPEG["ffmpeg & ffprobe<br/>Grafo de composição, filtros e aceleração por GPU"]
+    end
+
+    subgraph Outputs["Saídas"]
+        Files["💾 Mídia Final<br/>(MP4, MKV, WebM, MP3, GIF...)"]
+        Preview["🖥️ Prévia ao Vivo<br/>(Quadros sincronizados e mixagem PCM)"]
+    end
+
+    D --> Queue
+    C --> Queue
+    E --> Session
+    Session --> Queue
+
+    Queue --> YTDLP
+    Queue --> FFMPEG
+    Session -.->|renderização direta| FFMPEG
+
+    YTDLP --> Files
+    FFMPEG --> Files
+    FFMPEG --> Preview
 ```
 
-O código segue **Clean Architecture**: domínio e aplicação funcionam sem Qt, yt-dlp ou ffmpeg — e há testes que provam isso —, e as integrações ficam em adaptadores.
+O código segue **Clean Architecture**: as regras de negócio do domínio e a orquestração da aplicação são desacopladas da interface e de bibliotecas externas (sem dependências de Qt, yt-dlp ou subprocessos). As integrações com ferramentas e sistema operacional ficam isoladas em adaptadores de infraestrutura.
 
 ```text
 src/videomanager/
-├── domain/          modelos imutáveis e regras puras
-├── application/     casos de uso, sessão, tarefas e portas
-├── infrastructure/  ffmpeg, yt-dlp, arquivos e adaptadores Qt
-├── presentation/    janela, painéis e widgets
-├── bootstrap.py     montagem explícita dos serviços
-└── app.py           inicialização Qt e recursos
+├── domain/          modelos imutáveis e regras de negócio puras
+├── application/     casos de uso, histórico de sessão e contratos (portas)
+├── infrastructure/  adaptadores ffmpeg, yt-dlp, arquivos e Qt
+├── presentation/    janela, painéis, controles e linha do tempo
+├── bootstrap.py     montagem explícita e injeção de dependências
+└── app.py           inicialização da aplicação Qt e recursos
 ```
 
-**Qualidade** — mais de 1.300 testes: domínio e aplicação sem Qt; interface Qt com eventos reais; e **mídia de verdade**, medindo duração, quadros, volume e streams do arquivo gerado em vez de comparar comandos. Respostas reais de extratores (YouTube, archive.org, HLS, SoundCloud, Instagram) e o parser do próprio yt-dlp validam cada expressão de formato. A CI roda em Ubuntu e Windows, com Python 3.10 e 3.12 e ffmpeg 6.1, 7.1 e 9.0, e gera e abre os pacotes de Linux e Windows.
+**Confiabilidade com testes reais** — mais de 1.300 testes automatizados:
+- **Domínio e aplicação puros**: executados sem instanciar Qt, sem rede e sem tocar no disco.
+- **Interface e interação**: testes em Qt offscreen com eventos reais de clique, arrasto e atalhos.
+- **Mídia de verdade**: conferência de conversões e edições com `ffprobe`, medindo duração exata, contagem de quadros, trilhas e níveis de áudio do arquivo resultante.
+- **Fixtures reais de extratores**: respostas capturadas de serviços reais (YouTube, archive.org, SoundCloud, HLS) validadas contra o parser do próprio yt-dlp. A CI roda em Ubuntu e Windows, com Python 3.10 e 3.12 e ffmpeg 6.1, 7.1 e 9.0, garantindo também que os pacotes finais abram corretamente.
 
 ## Documentação
 

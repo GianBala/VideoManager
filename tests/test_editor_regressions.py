@@ -41,6 +41,25 @@ def test_ids_restaurados_nao_colidem_com_insercao_e_exclusao():
     assert updated.clips == project.clips
 
 
+def test_audio_separado_nao_oferece_nova_separacao_nem_altera_historico(panel):
+    from videomanager.domain.project import new_project
+    from videomanager.presentation.qt import strings
+
+    media = MediaRef(Path('video.mp4'), MediaKind.VIDEO, duration=5, has_audio=True)
+    project = new_project(media)
+    project = project.detached_audio(project.clips[0].clip_id)
+    panel.install_project(project, None, [], {})
+    audio = next(c for c in project.clips if c.audio_only)
+    panel._timeline.select(audio.clip_id)
+    index, _ = project.find(audio.clip_id)
+    menu = panel.build_menu('clip', index, audio.clip_id)
+    assert strings.EDIT_DETACH not in [action.text() for action in menu.actions()]
+    panel._detach_audio()
+    assert panel._project is project
+    assert not panel._session.history
+    assert not panel.has_unsaved_changes
+
+
 def test_ids_ausentes_sao_gerados_apos_reservar_todos_os_restaurados():
     data = document(next_clip_id() + 1000)
     data["tracks"].insert(0, {"clips": [{"duration": 1, "media": {"path": "other.mp4"}}]})
