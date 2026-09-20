@@ -144,7 +144,7 @@ def build_app(argv: list[str] | None = None, *, audio_enabled: bool = True) -> t
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"{APP_NAME}.1.0")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"{APP_NAME}.2.0")
         except Exception:
             pass
 
