@@ -7,6 +7,7 @@ dist/
 .pytest_cache/
 CLAUDE.md
 .claude
+AGENTS.md
 # Binários de ffmpeg baixados/empacotados: nunca versionados
 vendor/
 
