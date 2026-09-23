@@ -337,6 +337,17 @@ class TestCustoDaInterpolacao:
         texto = filtros(projeto_4k, interpolate=True)
         assert texto.index("scale=") < texto.index("minterpolate")
 
+    def test_bloco_transformado_tambem_encolhe_antes_de_interpolar(self) -> None:
+        # Qualquer posição, escala ou opacidade leva o bloco por outro caminho
+        # do grafo, e ali a interpolação vinha sempre antes de encaixar: um 4K
+        # deslocado numa tela 1080p era interpolado em 4K (5,6 GB) enquanto o
+        # aviso e o plano dos trechos paralelos contavam 1080p (1,6 GB).
+        from dataclasses import replace as mudar
+        deslocado = mudar(clip(self.material(3840, 2160)), x=0.4)
+        projeto_4k = Project(tracks=(video_track(deslocado),), width=1920, height=1080, fps=60.0)
+        texto = filtros(projeto_4k, interpolate=True)
+        assert texto.index("scale=1920:1080") < texto.index("minterpolate")
+
     def test_material_menor_que_a_tela_interpola_antes_de_crescer(self) -> None:
         # O movimento está nos pixels originais: ampliar primeiro só faria o
         # filtro estimar movimento em pixels que o próprio scale inventou, pelo
