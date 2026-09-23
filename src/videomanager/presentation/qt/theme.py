@@ -179,6 +179,15 @@ QPushButton[role="spin-tool"] {{
 QPushButton[role="spin-tool"]:hover {{ border-color: {accent}; }}
 QPushButton[role="spin-tool"]:pressed {{ background: {accent}; color: {accent_text}; }}
 
+/* Escolha entre opções (filtros, transições, fonte): texto à esquerda e a
+   marcada com a borda da cor de destaque. */
+QPushButton[role="option"] {{ text-align: left; padding: 6px 10px; }}
+QPushButton[role="option"]:checked {{ border: 2px solid {accent}; font-weight: 600; }}
+/* Botão curto de atalho de valor (tamanhos de fonte, predefinições). */
+QPushButton[role="chip"] {{ padding: 2px 4px; font-size: 9pt; }}
+/* Painel suspenso sem moldura de janela (volume e velocidade do bloco). */
+QDialog[role="popup"] {{ background: {surface}; border: 1px solid {border}; border-radius: 8px; }}
+
 /* O indicador precisa ser desenhado aqui: assim que o QSS toca no QRadioButton,
    o estilo deixa de pintar o círculo nativo e sobra um marcador quase invisível
    — não dava para ver qual das duas opções estava escolhida. */
