@@ -859,7 +859,12 @@ class ExportDialog(QDialog):
         source_size = getattr(local, "size", None)
         source_dur = getattr(local, "duration", None)
 
-        export_duration = target.output_duration if (is_fast and target) else proj.export_duration
+        if is_fast and target:
+            export_duration = target.output_duration
+        elif self._container_choice == "gif" and not audio_only:
+            export_duration = proj.video_duration
+        else:
+            export_duration = proj.export_duration
         codec_family = ("gif" if self._container_choice == "gif"
                         else self._codec_choice or hwaccel.family_for(self._container_choice or "mp4"))
 

@@ -628,10 +628,12 @@ class Project:
 
     @property
     def export_duration(self) -> float:
-        ends = [clip.end for clip in self.visible_video_clips] + [
-            clip.end for clip in self.audible_clips
-        ]
-        return max(ends, default=0.0)
+        return max(self.video_duration, self.audible_duration)
+
+    @property
+    def video_duration(self) -> float:
+        """Fim da última imagem visível: a duração de uma saída sem som (GIF)."""
+        return max((clip.end for clip in self.visible_video_clips), default=0.0)
 
     @property
     def audible_duration(self) -> float:
