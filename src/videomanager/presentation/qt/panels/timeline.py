@@ -1024,12 +1024,18 @@ class Timeline(QWidget):
 
         # A transição se sobrepõe aos clipes que une. Testá-la primeiro faz o
         # clique escolher o marcador desenhado por cima, não o vídeo de baixo.
+        # Depois vem o bloco sob o ponteiro, dono das alças junto às próprias
+        # bordas: entre dois blocos encostados, medir só a distância entregava
+        # a faixa inteira à ponta final do primeiro, e a alça inicial do
+        # segundo nunca era alcançável.
+        rects = {clip.clip_id: self._clip_rect(index, clip) for clip in self._project.tracks[index].clips}
         ordered = sorted(
             self._project.tracks[index].clips,
-            key=lambda item: not item.is_transition,
+            key=lambda item: (not item.is_transition,
+                              not rects[item.clip_id].left() <= x <= rects[item.clip_id].right()),
         )
         for clip in ordered:
-            rect = self._clip_rect(index, clip)
+            rect = rects[clip.clip_id]
             d_left = abs(x - rect.left())
             d_right = abs(x - rect.right())
             if d_left <= _HANDLE_GRAB and d_right <= _HANDLE_GRAB:
