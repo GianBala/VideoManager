@@ -805,15 +805,6 @@ class Project:
             return None
         return self.tracks[track_index].clip_at(seconds)
 
-    def topmost_video_at(self, seconds: float) -> Clip | None:
-        """O bloco visual que aparece por cima no instante dado."""
-        for track in self.tracks:
-            if track.kind in (TrackKind.ADDITIONAL, TrackKind.VIDEO):
-                clip = track.clip_at(seconds)
-                if clip is not None:
-                    return clip
-        return None
-
     # -- escrita (sempre devolvendo um projeto novo) ----------------------
 
     def _replace_track(self, index: int, track: Track) -> Project:
@@ -1350,13 +1341,6 @@ class Project:
             keyframes=tuple(replace(k, scale_x=exact(k.scale_x * fx), scale_y=exact(k.scale_y * fy))
                             for k in clip.keyframes),
         )
-
-    def without_empty_tracks(self, keep: int = 2) -> Project:
-        """Descarta trilhas vazias, mantendo um mínimo para trabalhar."""
-        used = [t for t in self.tracks if t.clips]
-        if len(used) >= keep:
-            return replace(self, tracks=tuple(used))
-        return self
 
 
 def accepts(kind: TrackKind, clip: Clip) -> bool:
