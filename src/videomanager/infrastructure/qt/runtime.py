@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 from dataclasses import asdict
+from functools import partial
 from platformdirs import user_cache_dir
 from videomanager import APP_NAME
 from videomanager.application.media.preview import prepare_preview
@@ -74,12 +75,17 @@ class DesktopRuntime:
         text_assets = None,
     ):
         request = prepare_preview(project, seconds, size, token, text_assets=text_assets)
-        command = composer.frame_command(request.project, request.seconds, request.size, tools,
-                                         text_assets=dict(request.text_assets))
+        # Montado no worker, e não aqui: no último quadro de um bloco o comando
+        # lê o fim do arquivo com o ffprobe (ver ``lastframe``), e isso não pode
+        # travar a interface.
+        command = partial(composer.frame_command, request.project, request.seconds, request.size, tools,
+                          text_assets=dict(request.text_assets))
         return FrameWorker(command, request.size, request.seconds, request.token)
 
     def interaction_worker(self, plan, size, tools, token, *, text_assets=None):
-        return InteractionWorker(composer.interaction_commands(plan, size, tools, text_assets=text_assets), token)
+        # Pelo mesmo motivo do quadro parado: fundo e frente são quadros parados.
+        return InteractionWorker(partial(composer.interaction_commands, plan, size, tools,
+                                         text_assets=text_assets), token)
 
     def playback_worker(
         self,

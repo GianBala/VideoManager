@@ -208,3 +208,39 @@ def test_worker_concluido_libera_processo_e_buffers(monkeypatch):
     worker = FrameWorker(['ffmpeg'], (2, 2), 0, 1)
     worker.run()
     assert worker._guard._process is None
+
+
+def test_quadro_parado_monta_o_comando_fora_da_interface(monkeypatch):
+    """O comando do quadro parado é montado no worker, não na interface.
+
+    No último quadro de um bloco ele lê o fim do arquivo com o ffprobe (ver
+    ``lastframe``): montado na thread da interface, cada arquivo novo custava
+    uma espera de processo com a janela parada.
+    """
+    import threading
+    from PySide6.QtCore import QCoreApplication
+    from videomanager.bootstrap import build_desktop_runtime
+    from videomanager.domain.preview import RawFrame
+    from videomanager.domain.project import new_project
+    from videomanager.infrastructure.ffmpeg import composer
+
+    montado_em = []
+
+    def frame_command(*args, **kwargs):
+        montado_em.append(threading.current_thread())
+        return ['ffmpeg']
+
+    monkeypatch.setattr(composer, 'frame_command', frame_command)
+    monkeypatch.setattr('videomanager.infrastructure.qt.workers.preview_worker.frame_from_command',
+                        lambda *args, register, **kwargs: RawFrame(bytes(12), 2, 2))
+    worker = build_desktop_runtime(audio_enabled=False).frame_worker(new_project(), 0.0, (2, 2), TOOLS, 7)
+    assert montado_em == [], "o comando foi montado na thread que pediu o quadro"
+
+    quadros = []
+    worker.signals.frame.connect(lambda token, frame: quadros.append(token))
+    thread = threading.Thread(target=worker.run)
+    thread.start()
+    thread.join(10)
+    QCoreApplication.processEvents()
+    assert montado_em == [thread]
+    assert quadros == [7]

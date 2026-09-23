@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
@@ -85,12 +86,13 @@ class FrameWorker(QRunnable):
 
     def __init__(
         self,
-        command: list[str],
+        command: list[str] | Callable[[], list[str]],
         size: tuple[int, int],
         seconds: float,
         token: int,
     ) -> None:
         super().__init__()
+        # Pode vir pronto ou como receita, montada já na thread do worker.
         self._command = command
         self._size = size
         self._seconds = seconds
@@ -104,8 +106,9 @@ class FrameWorker(QRunnable):
     @Slot()
     def run(self) -> None:
         try:
+            command = self._command() if callable(self._command) else self._command
             frame = frame_from_command(
-                self._command, self._size, register=self._guard.register, strict=True
+                command, self._size, register=self._guard.register, strict=True
             )
             if frame is not None and not self._guard.cancelled:
                 emit_safely(
@@ -419,8 +422,9 @@ class InteractionWorker(QRunnable):
     def run(self):
         from videomanager.infrastructure.ffmpeg.preview import _run
         try:
+            commands = self._commands() if callable(self._commands) else self._commands
             images = []
-            for command in self._commands:
+            for command in commands:
                 if self._guard.cancelled:
                     return
                 images.append(_run(command, 30, self._guard.register, strict=True))
