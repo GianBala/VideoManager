@@ -1927,12 +1927,7 @@ def export_args(
         filter_text = ";".join(filters)
         args += ["-filter_complex", filter_text]
     if video_label:
-        args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality]
-        if (
-            encoder.name in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi")
-            and container in ("mp4", "mov")
-        ):
-            args += ["-tag:v", "hvc1"]
+        args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality, *_hevc_tag(encoder.name, container)]
     if graph.audio_label:
         args += ["-map", graph.audio_label, *encode_audio_args(container)]
     elif video_label:
@@ -1942,6 +1937,18 @@ def export_args(
             "Todos os blocos estão mudos ou vazios: não há o que exportar."
         )
     return args + tail_args(container, destination, map_metadata=False)
+
+
+def _hevc_tag(encoder: str, container: str) -> list[str]:
+    """Etiqueta ``hvc1`` do HEVC em MP4 e MOV.
+
+    Sem ela o ffmpeg grava ``hev1``, que o QuickTime, os aparelhos Apple e o
+    app Filmes e TV do Windows não abrem. Uma função só para a exportação e
+    para os trechos paralelos: com a regra repetida, o trecho paralelo em MOV
+    saía sem a etiqueta, e a emenda copia o que o trecho tiver.
+    """
+    hevc = encoder in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi")
+    return ["-tag:v", "hvc1"] if hevc and container in ("mp4", "mov") else []
 
 
 def _limited_inputs(inputs: list[str]) -> list[str]:
@@ -2298,9 +2305,7 @@ def segment_video_args(
         video_label = "[vhw]"
     filter_text = ";".join(filters)
     args += ["-filter_complex", filter_text]
-    args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality]
-    if encoder.name in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi") and container == "mp4":
-        args += ["-tag:v", "hvc1"]
+    args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality, *_hevc_tag(encoder.name, container)]
     # ``-t`` na saída, e não ``-frames:v``: a conta que interessa é a do tempo,
     # e é ela que faz a soma dos trechos bater com a duração do projeto.
     return args + [

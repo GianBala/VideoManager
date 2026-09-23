@@ -159,6 +159,19 @@ class TestComandoDoTrecho:
     def test_o_trecho_interpola(self) -> None:
         assert "minterpolate" in " ".join(self.comando())
 
+    @pytest.mark.parametrize("container", ["mp4", "mov"])
+    def test_hevc_do_trecho_leva_a_etiqueta_da_apple(self, container: str, monkeypatch) -> None:
+        # A emenda e a junção copiam a etiqueta do trecho. Em MOV ela faltava,
+        # e o arquivo final saía "hev1", que o QuickTime não abre — o caminho
+        # serial sempre a gravou.
+        from types import SimpleNamespace
+        from videomanager.infrastructure.ffmpeg import hardware
+        monkeypatch.setattr(hardware, "resolve", lambda *a, **k: SimpleNamespace(
+            name="libx265", quality=[], device=[], filter_suffix=""))
+        args = segment_video_args(projeto(), 0.0, 10.0, Path(f"/tmp/t.{container}"), TOOLS,
+                                  container=container, family="hevc")
+        assert args[args.index("-tag:v") + 1] == "hvc1"
+
     def test_o_trecho_relata_progresso(self) -> None:
         # São vários processos ao mesmo tempo; sem o progresso de cada um, a
         # barra não teria como somar.
