@@ -751,11 +751,20 @@ def _video_chain(
         or clip.opacity < 1 - 1e-9
     )
     if has_transform:
-        steps.append(_rate_chain(piece, fps, interpolate))
-        steps.append("format=rgba")
         mw = clip.media.width if clip.media else None
         mh = clip.media.height if clip.media else None
         base_w, base_h = fit_size(mw, mh, project.width, project.height)
+        if _interpolates(piece, fps, interpolate) and mw and mh and mw * mh > base_w * base_h:
+            # A regra de ``_rate_first`` vale aqui também: o ``minterpolate``
+            # reserva memória pelo quadro que recebe, e um 4K com qualquer
+            # posição, escala ou opacidade numa tela 1080p era interpolado em
+            # 4K — 5,6 GB por bloco onde o aviso anunciava 1,6, multiplicados
+            # pelos trechos paralelos planejados com o número menor. As escalas
+            # abaixo partem de ``base_w``/``base_h``, então encolher antes não
+            # muda o resultado.
+            steps.append(f"scale={base_w}:{base_h}")
+        steps.append(_rate_chain(piece, fps, interpolate))
+        steps.append("format=rgba")
         if has_anim_scale:
             expr_sx = _keyframe_expr(clip.keyframes, "scale_x", origin, sx, time_var="t")
             expr_sy = _keyframe_expr(clip.keyframes, "scale_y", origin, sy, time_var="t")
