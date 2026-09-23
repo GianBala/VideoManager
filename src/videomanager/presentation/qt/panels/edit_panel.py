@@ -3004,8 +3004,15 @@ class EditPanel(QWidget):
             self._remember()
             self._speed_session = clip.clip_id
 
+        # A animação acompanha o conteúdo, como a duração: sem reescalar, a
+        # saída em fade de um bloco acelerado ficava além do fim dele, e num
+        # bloco desacelerado o sumiço vinha no meio, com o resto invisível.
+        factor = new_duration / clip.duration
         self._apply(
-            self._project.with_updated_clip(clip.clip_id, speed=value, duration=new_duration)
+            self._project.with_updated_clip(
+                clip.clip_id, speed=value, duration=new_duration,
+                keyframes=tuple(replace(k, time_offset=k.time_offset * factor) for k in clip.keyframes),
+            )
         )
         self._refresh_clip_fields()
         self._refresh_controls()
@@ -4857,9 +4864,10 @@ class EditPanel(QWidget):
             if clip is not None and clip.detached
             else strings.EDIT_GAIN_TIP
         )
-        # Foto não tem relógio de mídia: velocidade só esticaria a duração, e a
-        # composição a ignora.
-        self._speed_btn.setEnabled(clip is not None and clip.overlay_type != "filter" and not clip.is_image)
+        # Foto, texto, filtro e transição não têm relógio de mídia: velocidade
+        # só esticaria a duração (e o selo "2,0x" no bloco), e a composição a
+        # ignora.
+        self._speed_btn.setEnabled(clip is not None and not clip.is_additional)
         self._speed_btn.setToolTip(strings.EDIT_SPEED_TIP)
 
         self._refresh_clip_actions()
