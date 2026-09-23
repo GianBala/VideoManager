@@ -275,3 +275,36 @@ def test_timeline_track_reordering_target_detection(qapp: QApplication, dummy_to
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
 pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+def test_atalhos_de_projeto_funcionam_com_o_foco_no_editor(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ctrl+S, Ctrl+N e Ctrl+E acionam o menu Arquivo com o foco na linha do tempo.
+
+    O painel registrava as mesmas teclas que as ações do menu. Com as duas
+    ativas, o Qt considerava o atalho ambíguo e não acionava nenhuma: salvar
+    pelo teclado não fazia nada em qualquer ponto do editor.
+    """
+    from PySide6.QtTest import QTest
+
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.ensure_ffmpeg", lambda parent, **kw: None)
+    window = MainWindow(Settings(), editor=build_editor_service(), processing=build_processing_service(),
+                        downloads=build_download_service(), runtime=build_desktop_runtime(audio_enabled=False))
+    chamadas = []
+    monkeypatch.setattr(window._edit, "save_project", lambda: chamadas.append("salvar"))
+    monkeypatch.setattr(window._edit, "new_project", lambda: chamadas.append("novo"))
+    monkeypatch.setattr(window._edit, "_open_export_dialog", lambda: chamadas.append("exportar"))
+    # A ação guarda o método de antes; o atalho precisa chegar ao que foi trocado.
+    window._export_action.triggered.disconnect()
+    window._export_action.triggered.connect(lambda: window._edit._open_export_dialog())
+    try:
+        window.show()
+        window._tabs.setCurrentIndex(_TAB_EDIT)
+        window.activateWindow()
+        window._edit._timeline.setFocus()
+        qapp.processEvents()
+        for tecla in (Qt.Key.Key_S, Qt.Key.Key_N, Qt.Key.Key_E):
+            QTest.keyClick(window._edit._timeline, tecla, Qt.KeyboardModifier.ControlModifier)
+            qapp.processEvents()
+        assert chamadas == ["salvar", "novo", "exportar"]
+    finally:
+        window.close()
