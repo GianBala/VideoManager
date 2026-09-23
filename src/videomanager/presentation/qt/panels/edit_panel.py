@@ -2771,8 +2771,10 @@ class EditPanel(QWidget):
 
     def _split_here(self) -> None:
         position = self._position
+        # O marcador de transição cobre metade de cada bloco que une: achado
+        # primeiro, ele fazia a tesoura não cortar nada sobre um corte.
         clip = next(
-            (c for c in self._project.clips if c.contains(position)), None
+            (c for c in self._project.clips if c.contains(position) and not c.is_transition), None
         )
         selected = self._timeline.selected_clip
         if selected is not None:
