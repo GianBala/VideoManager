@@ -192,6 +192,59 @@ class _SpeedPopup(QDialog):
         super().closeEvent(event)
 
 
+class _TransportBar(QWidget):
+    """Barra de transporte que desce os controles da direita quando falta largura.
+
+    Numa linha só ela pede perto de 1000 px, e era esse o piso da aba inteira:
+    numa tela de notebook — 1366 px, ou 1920 px com a escala de 125% do
+    Windows — a aba não cabia e o botão Exportar ficava atrás de uma barra de
+    rolagem. Sem largura para uma linha, o grupo da direita desce para uma
+    segunda, e quem cede a altura dela é a prévia.
+    """
+
+    _SPACING = 6
+
+    def __init__(self, readouts: QWidget, controls: QWidget, extras: QWidget) -> None:
+        super().__init__()
+        self.setProperty("role", "plain")
+        self._groups = (readouts, controls, extras)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(4, 4, 4, 0)
+        column.setSpacing(4)
+        self._first, self._second = QHBoxLayout(), QHBoxLayout()
+        for row in (self._first, self._second):
+            row.setSpacing(self._SPACING)
+            column.addLayout(row)
+        self._first.addWidget(readouts)
+        self._first.addStretch(1)
+        self._first.addWidget(controls)
+        self._first.addStretch(1)
+        self._first.addWidget(extras)
+        self._second.addStretch(1)
+        self._wrapped = False
+
+    def _width(self, *groups: QWidget) -> int:
+        margins = self.layout().contentsMargins()
+        return (sum(group.sizeHint().width() for group in groups) + self._SPACING * (len(groups) - 1)
+                + margins.left() + margins.right())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        readouts, controls, extras = self._groups
+        return QSize(max(self._width(readouts, controls), self._width(extras)),
+                     super().minimumSizeHint().height())
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        wrap = event.size().width() < self._width(*self._groups)
+        if wrap == self._wrapped:
+            return
+        self._wrapped = wrap
+        extras = self._groups[2]
+        (self._first if wrap else self._second).removeWidget(extras)
+        (self._second if wrap else self._first).addWidget(extras)
+        self.updateGeometry()
+
+
 class _Preview(QLabel):
     """Tela da prévia: mantém o quadro centralizado, o fundo preto e suporte a transformações."""
 

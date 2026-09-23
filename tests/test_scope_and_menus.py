@@ -204,7 +204,23 @@ def test_edit_panel_splitter_anti_overlap_bounds(qapp: QApplication, dummy_tools
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
-        assert panel._player_box.minimumWidth() >= 1040
+        # Sem sobreposição em nenhuma largura — e sem impor ~1000 px à aba
+        # inteira: estreita, a barra de transporte quebra em duas linhas. O
+        # piso fixo de 1040 px deixava a aba maior que uma tela de 1366 px (ou
+        # de 1920 px com escala de 125%) e o botão Exportar fora da vista.
+        from PySide6.QtCore import QPoint, QRect
+        panel.show()
+        assert panel.minimumSizeHint().width() <= 1280
+        controles = [*panel._buttons, panel._time_label, panel._frame_label, panel._loop,
+                     panel._mute, panel._volume]
+        for largura in (panel.minimumSizeHint().width(), 1920):
+            panel.resize(largura, 900)
+            qapp.processEvents()
+            areas = [QRect(w.mapTo(panel, QPoint(0, 0)), w.size()) for w in controles]
+            for i, area in enumerate(areas):
+                assert area.right() <= panel.width(), "controle fora da aba"
+                for outra in areas[i + 1:]:
+                    assert not area.intersects(outra), "controles da barra de transporte sobrepostos"
         assert panel._media_box.minimumWidth() >= 200
         assert panel._extras_box.minimumWidth() >= 260
         assert not panel._top_splitter.childrenCollapsible()
