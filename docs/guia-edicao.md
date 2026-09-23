@@ -314,11 +314,12 @@ posição relativos do texto, incluindo contorno e animação.
 
 Os botões **🔊 dB** e **⚡ velocidade**, na barra da linha do tempo, abrem um
 painel curto para o bloco selecionado. A velocidade vai de 0,1× a 10×, com
-atalhos (0,5×, 1×, 1,5×, 2×, 4×); o bloco encurta ou alonga na trilha. Se a
+atalhos (0,5×, 1×, 1,5×, 2×, 4×); o bloco encurta ou alonga na trilha, e a
+animação por quadros-chave encurta ou alonga junto. Se a
 nova duração passaria por cima do bloco seguinte, a velocidade é recusada com
 **um** aviso por sessão do painel — mova o vizinho ou escolha outro valor. O
-áudio separado de um vídeo acelerado acompanha a mesma velocidade. Fotos não
-têm velocidade.
+áudio separado de um vídeo acelerado acompanha a mesma velocidade. Fotos,
+textos, filtros e transições não têm velocidade.
 
 ### Menu de contexto (botão direito)
 
