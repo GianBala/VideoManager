@@ -1267,10 +1267,14 @@ class Timeline(QWidget):
         targets = [self._position, 0.0]
         for track in self._project.tracks:
             for clip in track.clips:
-                if moving is None or clip.clip_id != moving.clip_id:
-                    targets += [clip.start, clip.end]
-                for kf in clip.visible_keyframes:
-                    targets.append(clip.start + kf.time_offset)
+                if moving is not None and clip.clip_id == moving.clip_id:
+                    # Nem as pontas nem os quadros-chave do próprio bloco: os
+                    # quadros-chave andam com ele, e como alvo prendiam o bloco
+                    # onde ele já estava a cada movimento — o arrasto de um
+                    # bloco animado andava aos saltos de 8 px.
+                    continue
+                targets += [clip.start, clip.end]
+                targets += [clip.start + kf.time_offset for kf in clip.visible_keyframes]
         return targets
 
     def _snap(self, moment: float, moving: Clip) -> float:
