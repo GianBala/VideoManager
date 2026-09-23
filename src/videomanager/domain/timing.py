@@ -29,6 +29,9 @@ def available_duration(duration: float, in_point: float, speed: float) -> float:
     return max(0.0, duration - in_point) / speed
 
 
+# Aceita "12", "12,5", "1:23.45", "01:02:03,250". A vírgula decimal é a forma
+# em pt-BR (é a que o próprio formato de legenda .srt usa no Brasil), mas o
+# ponto também é aceito: teclado numérico e conteúdo colado usam ponto.
 _SECONDS = re.compile(r"^\d{1,2}(?:[.,]\d{1,6})?$")
 
 

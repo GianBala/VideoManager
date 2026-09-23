@@ -49,25 +49,12 @@ from videomanager.domain.project import TrackKind
 from videomanager.domain.project import TransitionContext
 from videomanager.infrastructure.ffmpeg.lastframe import last_frame_start
 from videomanager.infrastructure.ffmpeg.trimmer import encode_audio_args
-from videomanager.domain.timing import format_span
 from videomanager.domain.timing import frame_index
 from videomanager.domain.timing import frame_time
 from videomanager.domain.timing import last_frame_time
 from videomanager.infrastructure.ffmpeg.trimmer import tail_args
-
-from videomanager.domain.composition import Composition as Composition
-
-from videomanager.domain.export_policy import simple_trim as simple_trim
-from videomanager.domain.export_policy import as_trim_target as as_trim_target
-from videomanager.domain.export_policy import _interpolated_clips as _interpolated_clips
-from videomanager.domain.export_policy import can_interpolate as can_interpolate
-
-from videomanager.domain.geometry import image_base_size as image_base_size
-
-from videomanager.domain.render_cost import _INTERPOLATE_BYTES_PER_PIXEL as _INTERPOLATE_BYTES_PER_PIXEL
-from videomanager.domain.render_cost import interpolation_bytes as interpolation_bytes
-
-from videomanager.application.media.export_description import describe_export as describe_export
+from videomanager.domain.geometry import image_base_size
+from videomanager.domain.render_cost import interpolation_bytes
 
 # Formato interno do áudio. Fixá-lo antes da mixagem evita o erro mais comum de
 # ``amix``: entradas com taxas ou layouts diferentes, que ele recusa.
@@ -99,14 +86,6 @@ _MIN_CANVAS = 0.04
 # segundo cobre com folga os poucos quadros que o filtro não consegue produzir,
 # e nada disso aparece: a sobreposição é desligada no fim do bloco.
 _INTERPOLATE_TAIL = 0.5
-
-# Memória do ``minterpolate``, por pixel do quadro que ele **recebe**. Medido
-# nesta máquina, pico de RSS de uma exportação: 1589 MB a 1920×1080 (803 B/px) e
-# 5655 MB a 3840×2160 (715 B/px). Não cresce com a duração — 20 s a 1080p pediu
-# os mesmos 1,6 GB que 5 s —, e é por isso que o custo pode ser anunciado antes
-# de a exportação começar (ver :func:`interpolation_bytes`). O valor é o maior
-# dos dois: errar para cima só antecipa um aviso, errar para baixo derruba a
-# máquina.
 
 
 @dataclass(frozen=True)
@@ -2383,27 +2362,6 @@ def mux_args(
     # pacotes AAC e reordenação de B-frames. Preserve todos os pacotes prontos.
     args += ["-map_metadata", "-1", "-map_chapters", "-1"]
     return args + [str(destination)]
-
-
-__all__ = [
-    'simple_trim',
-    'as_trim_target',
-    'can_interpolate',
-    'Composition',
-    'FFmpegTools',
-    'ConversionError',
-    'fit_size',
-    'Clip',
-    'MediaKind',
-    'Project',
-    'TrackKind',
-    'format_span',
-    '_interpolated_clips',
-    'image_base_size',
-    '_INTERPOLATE_BYTES_PER_PIXEL',
-    'interpolation_bytes',
-    'describe_export',
-]
 
 
 def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[str], ...]:

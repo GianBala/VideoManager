@@ -18,7 +18,7 @@ from videomanager.infrastructure.system import binaries
 from videomanager.domain.media import AudioTarget
 from videomanager.infrastructure.ffmpeg.converter import Converter
 from videomanager.domain.compatibility import can_copy_audio
-from videomanager.infrastructure.ffmpeg.converter import output_path
+from videomanager.infrastructure.storage.output_paths import output_path
 from videomanager.infrastructure.ffmpeg.converter import probe_file
 from videomanager.infrastructure.yt_dlp.downloader import Downloader
 from videomanager.domain.format_policy import pick_audio
