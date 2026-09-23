@@ -1043,3 +1043,47 @@ def test_barra_de_rolagem_e_divisoria_nao_desselecionam(panel):
     panel.eventFilter(panel._scroll, event)
     panel.eventFilter(panel._split_view.handle(1), event)
     assert panel._timeline.selected == clip_a.clip_id
+
+
+def test_mapa_de_keyframes_e_lido_uma_vez_por_arquivo(monkeypatch, wait_until):
+    """Alternar a seleção entre blocos de mídias diferentes não relê os arquivos.
+
+    O ffprobe percorre o arquivo inteiro para mapear os keyframes; sem guardar
+    o mapa, cada clique alternando entre dois blocos refazia essa leitura na
+    fila de fundo, à frente das miniaturas.
+    """
+    from PySide6.QtCore import QRunnable
+    from videomanager.application.capabilities import FFmpegTools
+    from videomanager.domain.project import Project
+    from videomanager.infrastructure.qt.workers.signals import PreviewSignals
+
+    lidos = []
+
+    class Leitura(QRunnable):
+        def __init__(self, path, tools):
+            super().__init__()
+            self.path, self.signals = path, PreviewSignals()
+
+        def cancel(self):
+            pass
+
+        def run(self):
+            lidos.append(self.path.name)
+            self.signals.keyframes.emit((0.0, 2.0))
+            self.signals.done.emit()
+
+    tools = FFmpegTools(Path("/bin/false"), Path("/bin/false"), "teste")
+    runtime = build_desktop_runtime(audio_enabled=False)
+    monkeypatch.setattr(runtime, "keyframe_worker", Leitura)
+    painel = EditPanel(Settings(), ensure_tools=lambda: tools, editor=build_editor_service(),
+                       processing=build_processing_service(), runtime=runtime)
+    try:
+        um = Clip(MediaRef(Path("/tmp/um.mp4"), MediaKind.VIDEO, duration=5.0, fps=10.0), 0.0, 5.0)
+        dois = Clip(MediaRef(Path("/tmp/dois.mp4"), MediaKind.VIDEO, duration=5.0, fps=10.0), 5.0, 5.0)
+        painel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(um, dois)),)), None, [], {})
+        for bloco in (um, dois, um, dois, um):
+            painel._timeline.select(bloco.clip_id)
+            wait_until(lambda: painel._keyframes == (0.0, 2.0))
+        assert sorted(lidos) == ["dois.mp4", "um.mp4"]
+    finally:
+        painel.shutdown()
