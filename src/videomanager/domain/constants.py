@@ -5,4 +5,6 @@ MIN_SEGMENT = 0.05
 # comunicar movimento. A timeline e os campos de propriedades compartilham
 # este limite; ele não pode ser o mínimo genérico usado por cortes comuns.
 MIN_TRANSITION_DURATION = 0.2
+# Capa de MP3 e miniatura embutida aparecem como trilha de vídeo. Recodificá-las
+# como vídeo produz um arquivo de uma imagem só, com horas de duração.
 IMAGE_CODECS = frozenset({"mjpeg", "png", "bmp", "gif", "webp"})

@@ -2,6 +2,13 @@
 from videomanager.domain.project import Project
 from videomanager.domain.export_policy import _interpolated_clips
 
+# Memória do ``minterpolate``, por pixel do quadro que ele **recebe**. Medido
+# nesta máquina, pico de RSS de uma exportação: 1589 MB a 1920×1080 (803 B/px) e
+# 5655 MB a 3840×2160 (715 B/px). Não cresce com a duração — 20 s a 1080p pediu
+# os mesmos 1,6 GB que 5 s —, e é por isso que o custo pode ser anunciado antes
+# de a exportação começar (ver :func:`interpolation_bytes`). O valor é o maior
+# dos dois: errar para cima só antecipa um aviso, errar para baixo derruba a
+# máquina.
 _INTERPOLATE_BYTES_PER_PIXEL = 803
 
 
