@@ -1995,6 +1995,11 @@ class EditPanel(QWidget):
         As setas ficam de fora: elas pertencem à linha do tempo, que só as
         recebe quando tem o foco. Um atalho de janela para elas roubaria as
         setas de todo campo de texto da aba.
+
+        Novo, abrir, salvar e exportar também ficam de fora: são as ações do
+        menu Arquivo da janela, que já têm esses atalhos nesta aba. Com os dois
+        registrados, o Qt considera a tecla ambígua e não aciona nenhum — Ctrl+S
+        não salvava com o foco em qualquer lugar do editor.
         """
         for keys, slot in (
             ("Space", self._toggle_play),
@@ -2013,18 +2018,12 @@ class EditPanel(QWidget):
             ("Ctrl+Z", self._undo_edit),
             ("Ctrl+Shift+Z", self._redo_edit),
             ("Ctrl+Y", self._redo_edit),
-            ("Ctrl+S", lambda: self.save_project()),
-            ("Ctrl+Shift+S", lambda: self.save_project_as()),
-            ("Ctrl+O", lambda: self.open_project()),
-            ("Ctrl+N", lambda: self.new_project()),
-            ("Ctrl+E", self._open_export_dialog),
             ("F", self._toggle_fullscreen),
             ("F11", self._toggle_fullscreen),
         ):
             shortcut = QShortcut(QKeySequence(keys), self)
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            global_command = keys in {"Ctrl+S", "Ctrl+Shift+S", "Ctrl+O", "Ctrl+N", "Ctrl+E", "F11"}
-            shortcut.activated.connect(lambda slot=slot, allowed=global_command: self._dispatch(slot, allow_in_field=allowed))
+            shortcut.activated.connect(lambda slot=slot, allowed=keys == "F11": self._dispatch(slot, allow_in_field=allowed))
 
     def _dispatch(self, slot: Callable[[], None], *, allow_in_field: bool = False) -> None:
         """Filtra os atalhos de uma tecla antes de deixá-los agir.
