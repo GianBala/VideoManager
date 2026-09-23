@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 from videomanager.bootstrap import build_desktop_runtime, build_editor_service, build_processing_service
 from videomanager.domain.keyframe import Keyframe
@@ -25,6 +26,9 @@ def panel():
                        processing=build_processing_service(), runtime=build_desktop_runtime(audio_enabled=False))
     painel.resize(1600, 900)
     painel.show()
+    # Janela ativa: sem ela o Qt não entrega os atalhos de teclado do painel.
+    painel.activateWindow()
+    QApplication.processEvents()
     yield painel
     painel.shutdown()
 
@@ -105,3 +109,26 @@ def test_duracao_do_filtro_pelo_campo_nao_invade_o_bloco_seguinte(panel):
     assert panel._filter_dur.value() == pytest.approx(5.0), "o campo anuncia uma duração que não existe"
     panel._filter_dur.setValue(3.0)
     assert panel._project.tracks[0].sorted_clips()[0].end == pytest.approx(3.0)
+
+
+def test_tesoura_sem_selecao_corta_o_bloco_sob_uma_transicao(panel):
+    """A tesoura sem bloco escolhido corta o vídeo mesmo sob o marcador.
+
+    O marcador cobre metade de cada bloco que une e vinha antes do bloco da
+    direita na trilha: achado primeiro, a tesoura desistia sem cortar nada.
+    """
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=20.0, width=160, height=90, fps=10.0)
+    esquerda, direita = Clip(video, 0.0, 5.0), Clip(video, 5.0, 5.0, in_point=5.0)
+    marcador = Clip(MediaRef(Path("Transição_x"), MediaKind.IMAGE, duration=1.0), 4.5, 1.0,
+                    overlay_type="transition", transition_name="fade",
+                    transition_left_id=esquerda.clip_id, transition_right_id=direita.clip_id)
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(esquerda, marcador, direita)),)),
+                          None, [], {})
+    panel._timeline.select(-1)
+    panel._timeline.set_position(5.2)
+    panel._timeline.setFocus()
+
+    QTest.keyClick(panel._timeline, Qt.Key.Key_S)
+
+    blocos = [c for c in panel._project.clips if not c.is_transition]
+    assert len(blocos) == 3, "a tesoura não cortou o bloco sob a transição"
