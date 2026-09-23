@@ -1,4 +1,8 @@
-"""Gestos de mouse na linha do tempo, com eventos reais sobre o painel."""
+"""Gestos de mouse na linha do tempo, com eventos reais sobre o painel.
+
+Os dois casos daqui não levantavam erro nenhum: a alça simplesmente pegava o
+bloco errado, e o bloco animado andava aos saltos.
+"""
 
 from pathlib import Path
 
@@ -6,15 +10,13 @@ import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
-from videomanager.application.capabilities import FFmpegTools
 from videomanager.bootstrap import build_desktop_runtime, build_editor_service, build_processing_service
+from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip, MediaKind, MediaRef, Project, Track, TrackKind
 from videomanager.infrastructure.storage.settings import Settings
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
 
 pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
-
-TOOLS = FFmpegTools(ffmpeg=Path("/bin/false"), ffprobe=Path("/bin/false"), source="system")
 
 
 @pytest.fixture
@@ -59,3 +61,24 @@ def test_alca_inicial_de_bloco_encostado_no_anterior_e_alcancavel(panel):
     assert depois.start > 5.3, "a alça inicial do segundo bloco não foi arrastada"
     assert depois.end == pytest.approx(10.0)
 
+
+def test_bloco_animado_acompanha_o_arrasto_sem_grudar_nos_proprios_quadros_chave(panel):
+    """O ímã não pode atrair o bloco para os próprios quadros-chave.
+
+    Eles andam junto com o bloco: um quadro-chave no começo virava alvo a
+    cada movimento, e o bloco só saía do lugar quando a mão passava da
+    tolerância do ímã — aos saltos de 8 px.
+    """
+    texto = Clip(MediaRef(Path("Texto_x"), MediaKind.IMAGE, duration=5.0), 2.0, 3.0, overlay_type="text",
+                 text_content="x", keyframes=(Keyframe(0.0, opacity=0.0), Keyframe(0.5, opacity=1.0)))
+    panel.install_project(Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(texto,)),)), None, [], {})
+    timeline = panel._timeline
+    timeline.set_view(0.0, 10.0)
+    inicio = QPoint(round(timeline._x_of(3.0)), round(timeline._lane_rect(0).center().y()))
+
+    posicoes = []
+    timeline.clip_moved.connect(lambda *_: posicoes.append(panel._project.clips[0].start))
+    _drag(timeline, inicio, 40)
+
+    assert len(set(posicoes)) >= 30, f"o bloco andou só {len(set(posicoes))} vezes em 36 movimentos"
+    assert panel._project.clips[0].start > 2.0 + 30 * timeline._seconds_per_pixel()
