@@ -557,3 +557,25 @@ def test_export_dialog_gif_em_automatica_reduz_tela_e_taxa(qapp, sample_media, s
     dialog._container_box.setCurrentIndex(dialog._container_box.findData("mp4"))
     normal = dialog._effective_project()
     assert (normal.width, normal.height) == (1920, 1080) and normal.fps == 30.0
+
+
+def test_tela_escolhida_fora_das_predefinidas_aparece_como_escolhida(qapp: QApplication) -> None:
+    """A tela do slideshow (1920×1440) não está no acervo nem nas predefinidas.
+
+    A janela mostrava "Automática" com ela em vigor, e a exportação saía na
+    tela escolhida; como "Automática" já estava marcada, voltar ao automático
+    de verdade (1920×1080 sem vídeo) não era possível.
+    """
+    foto = MediaRef(Path("/tmp/foto.jpg"), MediaKind.IMAGE, width=4000, height=3000)
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(foto, 0, 5.0),)),))
+    dialog = ExportDialog(project=project, settings=Settings(), pool=[foto], probed={},
+                          initial_canvas=(1920, 1440), initial_rate=23.976,
+                          processing=build_processing_service(), runtime=build_desktop_runtime(audio_enabled=False))
+    assert dialog._canvas_box.currentData() == (1920, 1440)
+    assert dialog._rate_box.currentData() == 23.976
+
+    dialog._canvas_box.setCurrentIndex(0)
+
+    assert dialog.chosen_canvas is None
+    efetivo = dialog._effective_project()
+    assert (efetivo.width, efetivo.height) == (1920, 1080)

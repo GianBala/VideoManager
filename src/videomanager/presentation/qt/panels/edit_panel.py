@@ -117,7 +117,7 @@ from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import icons
 from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.editor_project import EditorProject
-from videomanager.presentation.qt.export_dialog import ExportDialog
+from videomanager.presentation.qt.export_dialog import CANVAS_PRESETS, ExportDialog, canvas_options, rate_options
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
 from videomanager.presentation.qt.theme import palette
 from videomanager.presentation.qt.panels.timeline import AUDIO_TRACK_HEIGHT
@@ -208,17 +208,6 @@ _WAVE_MAX_WIDTH = 1200
 # Sem ele o layout espreme a linha do tempo até sobrar só a régua, porque é a
 # prévia que tem política de esticar e ela não abre mão sozinha.
 _TIMELINE_MIN_HEIGHT = 150
-
-# Telas oferecidas além das que o próprio material traz. São os formatos que os
-# aparelhos e os sites esperam — não uma tabela de tudo que existe.
-_CANVAS_PRESETS = (
-    (3840, 2160), (2560, 1440), (1920, 1080), (1280, 720), (854, 480),  # 16:9
-    (1080, 1920), (720, 1280),  # 9:16
-    (1440, 1080), (960, 720), (640, 480),  # 4:3
-    (1080, 1080), (720, 720),  # 1:1
-    (2560, 1080),  # 21:9
-)
-_RATE_PRESETS = (24.0, 25.0, 30.0, 50.0, 60.0)
 
 # Piso das duas listas de saída, com folga. Quem paga um piso apertado é o
 # item "Automática" — o texto mais longo das duas listas, e justamente o que
@@ -3183,7 +3172,7 @@ class EditPanel(QWidget):
                 else None
             )
             if cur_aspect != self._aspect_choice:
-                for w, h in _CANVAS_PRESETS:
+                for w, h in CANVAS_PRESETS:
                     if format_aspect_ratio(w, h) == self._aspect_choice:
                         self._canvas_choice = (w, h)
                         break
@@ -3205,54 +3194,6 @@ class EditPanel(QWidget):
         self._rate_choice = self._rate_box.itemData(index)
         self._after_edit()
 
-    def _canvas_options(self) -> list[tuple[str, object]]:
-        """Automática, os tamanhos do próprio material e os formatos comuns.
-
-        Os tamanhos das mídias importadas vêm primeiro porque são os únicos que
-        não custam nada: qualquer outro obriga a redimensionar todo bloco.
-        """
-        options: list[tuple[str, object]] = [(strings.EDIT_CANVAS_AUTO, None)]
-        seen: set[tuple[int, int]] = set()
-        sizes = [
-            (ref.width, ref.height)
-            for ref in self._pool
-            if ref.has_video and ref.width and ref.height
-        ]
-        ordered = sorted(sizes, key=lambda size: -size[0] * size[1])
-        # Projetos reabertos e o slideshow podem usar tamanhos que não estão
-        # no acervo nem nos presets. A reconstrução do controle deve conservá-los.
-        all_candidates = ([self._canvas_choice] if self._canvas_choice else []) + [*ordered, *_CANVAS_PRESETS]
-        if self._aspect_choice:
-            filtered = [
-                (w, h)
-                for (w, h) in all_candidates
-                if format_aspect_ratio(w, h) == self._aspect_choice
-            ]
-        else:
-            filtered = all_candidates
-
-        for width, height in filtered:
-            if (width, height) in seen:
-                continue
-            seen.add((width, height))
-            aspect = format_aspect_ratio(width, height)
-            label = (
-                f"{aspect} · {width} × {height}"
-                if aspect and not self._aspect_choice
-                else strings.EDIT_CANVAS_SIZE.format(width=width, height=height)
-            )
-            options.append((label, (width, height)))
-        return options
-
-    def _rate_options(self) -> list[tuple[str, object]]:
-        options: list[tuple[str, object]] = [(strings.EDIT_CANVAS_RATE_AUTO, None)]
-        rates = {
-            round(ref.fps, 3) for ref in self._pool if ref.has_video and ref.fps
-        }
-        for rate in sorted(rates | set(_RATE_PRESETS)):
-            options.append((strings.EDIT_CANVAS_FPS.format(fps=format_rate(rate)), rate))
-        return options
-
     def _refresh_canvas_controls(self) -> None:
         """Reconstrói as listas só quando elas mudam de conteúdo.
 
@@ -3272,8 +3213,9 @@ class EditPanel(QWidget):
             self._aspect_box.setCurrentIndex(max(0, idx_a))
 
             for box, options, choice in (
-                (self._canvas_box, self._canvas_options(), self._canvas_choice),
-                (self._rate_box, self._rate_options(), self._rate_choice),
+                (self._canvas_box, canvas_options(self._pool, self._aspect_choice, self._canvas_choice),
+                 self._canvas_choice),
+                (self._rate_box, rate_options(self._pool, self._rate_choice), self._rate_choice),
             ):
                 # Comparação só pelos dados: o texto do primeiro item é
                 # reescrito no fim daqui com a tela que a escolha produziu.
@@ -3283,17 +3225,8 @@ class EditPanel(QWidget):
                     box.clear()
                     for label, data in options:
                         box.addItem(label, data)
-                index = _index_of(box, choice)
-                if index < 0 and choice is not None:
-                    # A escolha sumiu da lista: volta ao automático de verdade,
-                    # em vez de a lista dizer "Automática" e a exportação sair
-                    # com a tela antiga.
-                    self._canvas_choice, self._rate_choice = (
-                        (None, self._rate_choice)
-                        if box is self._canvas_box
-                        else (self._canvas_choice, None)
-                    )
-                box.setCurrentIndex(max(0, index))
+                # A escolha em vigor sempre está na lista (ver canvas_options).
+                box.setCurrentIndex(max(0, _index_of(box, choice)))
         finally:
             self._syncing = False
 

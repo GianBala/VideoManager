@@ -53,9 +53,13 @@ from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_step
 from videomanager.domain.timing import keyframe_at_or_before
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.panels.edit_widgets import _index_of
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
-_CANVAS_PRESETS: tuple[tuple[int, int], ...] = (
+# Telas oferecidas além das que o próprio material traz, no painel e aqui. São
+# os formatos que os aparelhos e os sites esperam — não uma tabela de tudo que
+# existe.
+CANVAS_PRESETS: tuple[tuple[int, int], ...] = (
     (3840, 2160),  # 4K UHD 16:9
     (2560, 1440),  # 2K QHD 16:9
     (1920, 1080),  # Full HD 16:9
@@ -71,7 +75,7 @@ _CANVAS_PRESETS: tuple[tuple[int, int], ...] = (
     (2560, 1080),  # Ultrawide 21:9
 )
 
-_RATE_PRESETS: tuple[float, ...] = (24.0, 25.0, 30.0, 50.0, 60.0)
+RATE_PRESETS: tuple[float, ...] = (24.0, 25.0, 30.0, 50.0, 60.0)
 
 # Taxas usuais de GIF. São baixas de propósito: cada quadro do GIF é uma imagem
 # inteira, então dobrar a taxa dobra o arquivo. Todas dividem 100 sem sobra, que
@@ -116,9 +120,39 @@ _AUDIO_FORMAT_PRESETS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _index_of(box: QComboBox, value: object) -> int:
-    """Retorna o índice do item com o dado associado, ou -1."""
-    return next((i for i in range(box.count()) if box.itemData(i) == value), -1)
+def canvas_options(pool: list[MediaRef], aspect_choice: str | None,
+                   canvas_choice: tuple[int, int] | None) -> list[tuple[str, tuple[int, int] | None]]:
+    """Automática, a tela em vigor, os tamanhos do material e os formatos comuns.
+
+    Os tamanhos das mídias importadas vêm antes dos formatos comuns porque são
+    os únicos que não custam nada: qualquer outro obriga a redimensionar todo
+    bloco. A tela em vigor entra mesmo fora das duas listas — projeto reaberto,
+    slideshow —: sem ela a lista mostrava "Automática" enquanto a saída usava
+    a tela escolhida, e voltar ao automático de verdade não era possível.
+    Uma lista só para o painel e para esta janela.
+    """
+    sizes = sorted(((ref.width, ref.height) for ref in pool if ref.has_video and ref.width and ref.height),
+                   key=lambda size: -size[0] * size[1])
+    options: list[tuple[str, tuple[int, int] | None]] = [(strings.EDIT_CANVAS_AUTO, None)]
+    seen: set[tuple[int, int]] = set()
+    for width, height in ([canvas_choice] if canvas_choice else []) + [*sizes, *CANVAS_PRESETS]:
+        aspect = format_aspect_ratio(width, height)
+        if (width, height) in seen or (aspect_choice and aspect != aspect_choice):
+            continue
+        seen.add((width, height))
+        label = (f"{aspect} · {width} × {height}" if aspect and not aspect_choice
+                 else strings.EDIT_CANVAS_SIZE.format(width=width, height=height))
+        options.append((label, (width, height)))
+    return options
+
+
+def rate_options(pool: list[MediaRef], rate_choice: float | None,
+                 extra: tuple[float, ...] = ()) -> list[tuple[str, float | None]]:
+    """Automática, a taxa em vigor, as taxas do material e as usuais."""
+    rates = {round(ref.fps, 3) for ref in pool if ref.has_video and ref.fps}
+    rates |= set(RATE_PRESETS) | set(extra) | ({rate_choice} if rate_choice else set())
+    return [(strings.EDIT_CANVAS_RATE_AUTO, None)] + [
+        (strings.EDIT_CANVAS_FPS.format(fps=format_rate(rate)), rate) for rate in sorted(rates)]
 
 
 def _gif_canvas(width: int, height: int) -> tuple[int, int]:
@@ -401,38 +435,7 @@ class ExportDialog(QDialog):
     def _sync_canvas_box(self) -> None:
         self._canvas_box.blockSignals(True)
         self._canvas_box.clear()
-        options_canvas: list[tuple[str, tuple[int, int] | None]] = [
-            (strings.EDIT_CANVAS_AUTO, None)
-        ]
-        seen: set[tuple[int, int]] = set()
-        sizes = [
-            (ref.width, ref.height)
-            for ref in self._pool
-            if ref.has_video and ref.width and ref.height
-        ]
-        ordered = sorted(sizes, key=lambda s: -s[0] * s[1])
-        all_candidates = [*ordered, *_CANVAS_PRESETS]
-        if self._aspect_choice:
-            filtered = [
-                (w, h)
-                for (w, h) in all_candidates
-                if format_aspect_ratio(w, h) == self._aspect_choice
-            ]
-        else:
-            filtered = all_candidates
-
-        for w, h in filtered:
-            if (w, h) in seen:
-                continue
-            seen.add((w, h))
-            aspect = format_aspect_ratio(w, h)
-            label = (
-                f"{aspect} · {w} × {h}"
-                if aspect and not self._aspect_choice
-                else strings.EDIT_CANVAS_SIZE.format(width=w, height=h)
-            )
-            options_canvas.append((label, (w, h)))
-        for label, val in options_canvas:
+        for label, val in canvas_options(self._pool, self._aspect_choice, self._canvas_choice):
             self._canvas_box.addItem(label, val)
 
         idx_c = _index_of(self._canvas_box, self._canvas_choice)
@@ -479,16 +482,8 @@ class ExportDialog(QDialog):
         """Repopula as taxas — o GIF traz as dele, mais baixas."""
         self._rate_box.blockSignals(True)
         self._rate_box.clear()
-        options_rate: list[tuple[str, float | None]] = [
-            (strings.EDIT_CANVAS_RATE_AUTO, None)
-        ]
-        rates = {round(ref.fps, 3) for ref in self._pool if ref.has_video and ref.fps}
-        presets = set(_RATE_PRESETS)
-        if self._container_choice == "gif":
-            presets |= set(_GIF_RATE_PRESETS)
-        for r in sorted(rates | presets):
-            options_rate.append((strings.EDIT_CANVAS_FPS.format(fps=format_rate(r)), r))
-        for label, val in options_rate:
+        extra = _GIF_RATE_PRESETS if self._container_choice == "gif" else ()
+        for label, val in rate_options(self._pool, self._rate_choice, extra):
             self._rate_box.addItem(label, val)
         idx_r = _index_of(self._rate_box, self._rate_choice)
         self._rate_box.setCurrentIndex(max(0, idx_r))
@@ -582,7 +577,7 @@ class ExportDialog(QDialog):
                 else None
             )
             if cur_aspect != self._aspect_choice:
-                for w, h in _CANVAS_PRESETS:
+                for w, h in CANVAS_PRESETS:
                     if format_aspect_ratio(w, h) == self._aspect_choice:
                         self._canvas_choice = (w, h)
                         break
