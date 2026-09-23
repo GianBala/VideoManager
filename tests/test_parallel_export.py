@@ -12,6 +12,7 @@ foi essa memória que já derrubou esta máquina uma vez.
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -118,6 +119,20 @@ class TestLimitesDosTrechos:
 
     def test_um_trecho_e_a_edicao_toda(self) -> None:
         assert segment_bounds(7.5, 1) == ((0.0, 7.5),)
+
+
+class TestDuracaoDosTrechos:
+    def test_os_trechos_cobrem_a_saida_e_nao_a_edicao_inteira(self, tmp_path: Path) -> None:
+        # Um áudio mudo depois do fim do vídeo conta na duração da edição, mas
+        # não sai no arquivo. Dividindo por ela, o paralelo gravava segundos
+        # de tela preta que o caminho serial não grava.
+        mudo = Clip(media=LENTO, start=0.0, duration=90.0, muted=True, audio_only=True)
+        edicao = replace(projeto(duration=60.0), tracks=(
+            *projeto(duration=60.0).tracks, Track(kind=TrackKind.AUDIO, clips=(mudo,), name="A")))
+        composicao = Composition(project=edicao, container="mp4", interpolate=True)
+        limites = ParallelExport(composicao, tmp_path / "saida.mp4", TOOLS, 4)._bounds
+        assert sum(span for _, span in limites) == pytest.approx(composicao.output_duration)
+        assert composicao.output_duration == pytest.approx(60.0)
 
 
 class TestComandoDoTrecho:

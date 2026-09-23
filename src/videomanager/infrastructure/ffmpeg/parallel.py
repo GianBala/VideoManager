@@ -124,7 +124,10 @@ class ParallelExport:
         self._outputs = FileOutputStore()
         self._lease = lease
         self._tools = tools
-        self._bounds = segment_bounds(composition.project.duration, segments)
+        # A duração da **saída**, a mesma do caminho serial. A da edição inteira
+        # conta blocos que não saem no arquivo (um áudio mudo depois do fim do
+        # vídeo) e deixava o paralelo mais longo que o serial, com tela preta.
+        self._bounds = segment_bounds(composition.output_duration, segments)
         self._on_progress = on_progress
         # Duas bandeiras, e não uma: ``_cancelled`` é a desistência do usuário e
         # ``_aborted`` é "pare tudo", que também vale quando um trecho falha.
@@ -265,7 +268,7 @@ class ParallelExport:
         self._check_cancelled()
         # Publica sobre a reserva desta tarefa, no mesmo sistema de arquivos.
         # O lock ordena a entrega e o cancelamento; a porta confere a propriedade.
-        self._emit(self._composition.project.duration, share=1.0)
+        self._emit(self._composition.output_duration, share=1.0)
         with self._lock:
             self._postprocess.check()
             self._outputs.commit(pronto, self._destination, lease=self._lease)
@@ -412,7 +415,7 @@ class ParallelExport:
     def _emit(self, seconds: float, share: float = _SEGMENTS_SHARE) -> None:
         if self._on_progress is None:
             return
-        duracao = self._composition.project.duration
+        duracao = self._composition.output_duration
         percent = min(100.0, seconds * 100.0 * share / duracao) if duracao else None
         self._on_progress(
             Progress(
