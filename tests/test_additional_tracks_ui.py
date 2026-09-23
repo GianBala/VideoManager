@@ -497,8 +497,10 @@ def test_font_size_controls_and_presets(qapp: QApplication, dummy_tools: FFmpegT
         inc_btns = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.text() == "+"]
         assert len(dec_btns) == 1
         assert len(inc_btns) == 1
-        assert "color: #ffffff" in dec_btns[0].styleSheet()
-        assert "color: #ffffff" in inc_btns[0].styleSheet()
+        # Estilo do tema (legível no claro e no escuro), e não cores fixas.
+        for botao in (dec_btns[0], inc_btns[0]):
+            assert botao.property("role") == "spin-tool"
+            assert botao.styleSheet() == ""
 
         # Step is 1 pt
         initial_val = panel._font_size_spin.value()
@@ -553,14 +555,18 @@ def test_filter_selection_highlight_style(qapp: QApplication, dummy_tools: FFmpe
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
-        # Check stylesheet of filter buttons
+        # A opção marcada ganha a borda de destaque do tema, sem pintar o
+        # fundo inteiro — e sem cores fixas, que no tema claro deixavam os
+        # botões pretos.
+        from videomanager.presentation.qt.theme import DARK, LIGHT, stylesheet
         for btn in panel._filter_buttons:
-            style = btn.styleSheet()
-            # Must have light blue border on checked
-            assert "border: 2px solid #38bdf8" in style
-            # Must NOT paint entire background purple
-            assert "#7b1fa2" not in style
-            assert "#9c27b0" not in style
+            assert btn.property("role") == "option"
+            assert btn.styleSheet() == ""
+        for tema, cores in (("dark", DARK), ("light", LIGHT)):
+            regra = next(linha for linha in stylesheet(tema).splitlines()
+                         if linha.startswith('QPushButton[role="option"]:checked'))
+            assert f"border: 2px solid {cores['accent']}" in regra
+            assert "background" not in regra
     finally:
         panel.shutdown()
 

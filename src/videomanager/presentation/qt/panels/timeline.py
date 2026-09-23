@@ -649,7 +649,7 @@ class Timeline(QWidget):
         # Botão de visibilidade (olho): para vídeo e adicionais
         if track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL):
             box = self._eye_rect(index)
-            painter.setBrush(self._color("surface_alt") if track.visible else QColor("#1a1b24"))
+            painter.setBrush(self._color("surface_alt") if track.visible else self._color("bg"))
             painter.setPen(QPen(self._color("border"), 1))
             painter.drawRoundedRect(box, 4, 4)
             self._paint_eye_icon(painter, box, track.visible)
@@ -685,7 +685,7 @@ class Timeline(QWidget):
             painter.setBrush(self._color("text_dim"))
             painter.drawEllipse(QPointF(cx, cy), 2.2, 2.2)
         else:
-            painter.setPen(QPen(QColor("#64748b"), 1.2))
+            painter.setPen(QPen(self._color("text_dim"), 1.2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
             painter.setPen(QPen(self._color("error"), 1.6))

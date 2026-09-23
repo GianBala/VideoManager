@@ -94,12 +94,7 @@ class _VolumePopup(QDialog):
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setMinimumWidth(280)
-        self.setStyleSheet(
-            "QDialog { background: #222228; border: 1px solid #444450; border-radius: 8px; }"
-            " QLabel { color: #f0f0f0; }"
-            " QPushButton { background: #32323e; border: 1px solid #444454; border-radius: 4px; color: #fff; padding: 3px 6px; font-size: 11px; }"
-            " QPushButton:hover { background: #424252; border-color: #666678; }"
-        )
+        self.setProperty("role", "popup")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
@@ -127,6 +122,7 @@ class _VolumePopup(QDialog):
             btn = QPushButton(label)
             btn.setFixedHeight(26)
             btn.setMinimumWidth(50)
+            btn.setProperty("role", "chip")
             btn.clicked.connect(lambda _, v=db: self._spin.setValue(v))
             presets.addWidget(btn)
         layout.addLayout(presets)
@@ -148,12 +144,7 @@ class _SpeedPopup(QDialog):
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setMinimumWidth(320)
-        self.setStyleSheet(
-            "QDialog { background: #222228; border: 1px solid #444450; border-radius: 8px; }"
-            " QLabel { color: #f0f0f0; }"
-            " QPushButton { background: #32323e; border: 1px solid #444454; border-radius: 4px; color: #fff; padding: 3px 6px; font-size: 11px; }"
-            " QPushButton:hover { background: #424252; border-color: #666678; }"
-        )
+        self.setProperty("role", "popup")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
@@ -181,6 +172,7 @@ class _SpeedPopup(QDialog):
             btn = QPushButton(label)
             btn.setFixedHeight(26)
             btn.setMinimumWidth(48)
+            btn.setProperty("role", "chip")
             btn.clicked.connect(lambda _, v=spd: self._spin.setValue(v))
             presets.addWidget(btn)
         layout.addLayout(presets)
@@ -1709,10 +1701,7 @@ class _ClipPropertiesWidget(QWidget):
         else:
             self._btn_kf_toggle.setText("◇")
             self._btn_kf_toggle.setToolTip(strings.EDIT_KEYFRAME_ADD)
-            self._btn_kf_toggle.setStyleSheet(
-                "QPushButton { background: #2a2a35; color: #e4e4e7; border: 1px solid #444455; border-radius: 4px; font-weight: bold; font-size: 14px; }"
-                " QPushButton:hover { background: #3f3f4e; border-color: #71717a; }"
-            )
+            self._btn_kf_toggle.setStyleSheet("")
 
         count = len(self._clip.visible_keyframes)
         if self._clip.has_keyframes:
@@ -2154,17 +2143,12 @@ class _FontSelectorWidget(QWidget):
         layout.setSpacing(2)
 
         self._toggle_btn = QPushButton(f"🔤 {initial_family}  ▾")
-        self._toggle_btn.setStyleSheet(
-            "QPushButton { text-align: left; padding: 5px 8px; border: 1px solid #444; border-radius: 4px; background: #2a2a32; color: #fff; } "
-            "QPushButton:hover { background: #353540; border-color: #666; }"
-        )
+        self._toggle_btn.setProperty("role", "option")
         self._toggle_btn.clicked.connect(self._toggle_list)
         layout.addWidget(self._toggle_btn)
 
         self._list_container = QFrame()
-        self._list_container.setStyleSheet(
-            "QFrame { background: #22222a; border: 1px solid #444450; border-radius: 4px; }"
-        )
+        self._list_container.setFrameShape(QFrame.Shape.StyledPanel)
         self._list_container.setVisible(False)
         c_layout = QVBoxLayout(self._list_container)
         c_layout.setContentsMargins(4, 4, 4, 4)
@@ -2172,20 +2156,11 @@ class _FontSelectorWidget(QWidget):
 
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("🔍 Buscar fonte...")
-        self._search_input.setStyleSheet(
-            "QLineEdit { background: #1a1a22; border: 1px solid #444; border-radius: 3px; padding: 4px 6px; color: #fff; font-size: 11px; }"
-        )
         self._search_input.textChanged.connect(self._filter_fonts)
         c_layout.addWidget(self._search_input)
 
         self._font_list = QListWidget()
         self._font_list.setFixedHeight(140)
-        self._font_list.setStyleSheet(
-            "QListWidget { background: transparent; border: none; color: #eee; } "
-            "QListWidget::item { padding: 4px 6px; border-radius: 3px; } "
-            "QListWidget::item:selected { background: #0284c7; color: #fff; } "
-            "QListWidget::item:hover { background: #2f2f3c; }"
-        )
 
         seen: set[str] = set()
         all_families: list[str] = []
