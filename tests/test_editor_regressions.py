@@ -802,9 +802,12 @@ def test_editor_estreito_permite_alcancar_controles_e_status(panel, desktop_app,
     try:
         desktop_app.processEvents()
         area = wrapper.findChild(QScrollArea)
-        assert area.horizontalScrollBar().isVisible()
-        area.horizontalScrollBar().setValue(area.horizontalScrollBar().maximum())
-        desktop_app.processEvents()
+        # Cabe sem rolagem lateral: a barra de transporte quebra em duas linhas
+        # em vez de levar o volume (e o Exportar) para fora da vista.
+        assert not area.horizontalScrollBar().isVisible()
+        for controle in (panel._mute, panel._export_button):
+            centro = controle.mapTo(area.viewport(), controle.rect().center())
+            assert area.viewport().rect().contains(centro)
         volume = panel._mute
         center = volume.mapTo(area.viewport(), volume.rect().center())
         assert area.viewport().rect().contains(center)
