@@ -869,11 +869,6 @@ class EditPanel(QWidget):
         btn_dec.setProperty("role", "spin-tool")
         btn_dec.setFixedSize(30, 28)
         btn_dec.setToolTip("Diminuir tamanho da fonte (1 pt)")
-        btn_dec.setStyleSheet(
-            "QPushButton { font-weight: bold; font-size: 16px; color: #ffffff; background: #2a2a32; border: 1px solid #555; border-radius: 4px; padding: 0px; margin: 0px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; text-align: center; } "
-            "QPushButton:hover { background: #383844; border-color: #777; color: #ffffff; } "
-            "QPushButton:pressed { background: #0284c7; color: #ffffff; }"
-        )
         btn_dec.clicked.connect(lambda: self._font_size_spin.setValue(max(8, self._font_size_spin.value() - 1)))
         row_size.addWidget(btn_dec)
 
@@ -884,11 +879,6 @@ class EditPanel(QWidget):
         self._font_size_spin.setSuffix(" pt")
         self._font_size_spin.setFixedHeight(28)
         self._font_size_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self._font_size_spin.setStyleSheet(
-            "QSpinBox { background: #1e1e26; border: 1px solid #444; border-radius: 4px; color: #ffffff; padding: 2px 8px; font-size: 13px; } "
-            "QSpinBox:focus { border: 1px solid #0284c7; } "
-            "QSpinBox::up-button, QSpinBox::down-button { width: 0px; height: 0px; border: none; }"
-        )
         self._font_size_spin.valueChanged.connect(lambda _: self._on_text_style_changed())
         row_size.addWidget(self._font_size_spin, 1)
 
@@ -896,11 +886,6 @@ class EditPanel(QWidget):
         btn_inc.setProperty("role", "spin-tool")
         btn_inc.setFixedSize(30, 28)
         btn_inc.setToolTip("Aumentar tamanho da fonte (1 pt)")
-        btn_inc.setStyleSheet(
-            "QPushButton { font-weight: bold; font-size: 16px; color: #ffffff; background: #2a2a32; border: 1px solid #555; border-radius: 4px; padding: 0px; margin: 0px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; text-align: center; } "
-            "QPushButton:hover { background: #383844; border-color: #777; color: #ffffff; } "
-            "QPushButton:pressed { background: #0284c7; color: #ffffff; }"
-        )
         btn_inc.clicked.connect(lambda: self._font_size_spin.setValue(min(200, self._font_size_spin.value() + 1)))
         row_size.addWidget(btn_inc)
         layout.addLayout(row_size)
@@ -910,12 +895,8 @@ class EditPanel(QWidget):
         for sz in (18, 24, 36, 48, 64, 72):
             btn_sz = QPushButton(f"{sz}")
             btn_sz.setFixedHeight(24)
+            btn_sz.setProperty("role", "chip")
             btn_sz.setToolTip(f"Definir tamanho para {sz} pt")
-            btn_sz.setStyleSheet(
-                "QPushButton { font-size: 11px; font-weight: 500; color: #ddd; background: #2a2a32; border: 1px solid #444; border-radius: 3px; padding: 2px 4px; } "
-                "QPushButton:hover { background: #383844; border-color: #666; color: #fff; } "
-                "QPushButton:pressed { background: #0284c7; color: #fff; }"
-            )
             btn_sz.clicked.connect(lambda _, s=sz: self._font_size_spin.setValue(s))
             size_presets.addWidget(btn_sz)
         layout.addLayout(size_presets)
@@ -981,11 +962,6 @@ class EditPanel(QWidget):
         self._stroke_spin.setSuffix(" px")
         self._stroke_spin.setFixedHeight(28)
         self._stroke_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self._stroke_spin.setStyleSheet(
-            "QSpinBox { background: #1e1e26; border: 1px solid #444; border-radius: 4px; color: #ffffff; padding: 2px 8px; font-size: 13px; } "
-            "QSpinBox:focus { border: 1px solid #0284c7; } "
-            "QSpinBox::up-button, QSpinBox::down-button { width: 0px; height: 0px; border: none; }"
-        )
         self._stroke_spin.setToolTip("Grossura do contorno em pixels")
         self._stroke_spin.setEnabled(False)
         self._stroke_spin.valueChanged.connect(lambda _: self._on_text_style_changed())
@@ -1083,12 +1059,7 @@ class EditPanel(QWidget):
             btn = QPushButton(flabel)
             btn.setCheckable(True)
             btn.setChecked(fid == self._selected_filter_name)
-            btn.setStyleSheet(
-                "QPushButton { text-align: left; padding: 6px 10px; border-radius: 4px; border: 1px solid #444; background: #2a2a32; color: #fff; font-size: 12px; }"
-                "QPushButton:hover { background: #353540; border-color: #666; }"
-                "QPushButton:checked { background: #2a2a32; border: 2px solid #38bdf8; font-weight: bold; color: #ffffff; }"
-                "QPushButton:checked:hover { background: #32323c; border: 2px solid #38bdf8; }"
-            )
+            btn.setProperty("role", "option")
             self._filter_group.addButton(btn)
             btn.clicked.connect(lambda _, f=fid: self._select_filter(f))
             layout.addWidget(btn)
@@ -1313,12 +1284,7 @@ class EditPanel(QWidget):
             btn = QPushButton(tlabel)
             btn.setCheckable(True)
             btn.setChecked(tid == self._selected_trans_name)
-            btn.setStyleSheet(
-                "QPushButton { text-align: left; padding: 6px 10px; border-radius: 4px; border: 1px solid #444; background: #2a2a32; color: #fff; font-size: 12px; }"
-                "QPushButton:hover { background: #353540; border-color: #666; }"
-                "QPushButton:checked { background: #2a2a32; border: 2px solid #fbbf24; font-weight: bold; color: #ffffff; }"
-                "QPushButton:checked:hover { background: #32323c; border: 2px solid #fbbf24; }"
-            )
+            btn.setProperty("role", "option")
             self._trans_group.addButton(btn)
             btn.clicked.connect(lambda _, t=tid: self._select_transition(t))
             layout.addWidget(btn)
@@ -1349,7 +1315,6 @@ class EditPanel(QWidget):
         hint = QLabel(strings.EDIT_TRANSITION_TRACK_HINT)
         hint.setWordWrap(True)
         hint.setProperty("role", "dim")
-        hint.setStyleSheet("font-size: 11px; color: #94a3b8;")
         layout.addWidget(hint)
 
         layout.addStretch(1)
