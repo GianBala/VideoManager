@@ -82,3 +82,26 @@ def test_bloco_animado_acompanha_o_arrasto_sem_grudar_nos_proprios_quadros_chave
 
     assert len(set(posicoes)) >= 30, f"o bloco andou só {len(set(posicoes))} vezes em 36 movimentos"
     assert panel._project.clips[0].start > 2.0 + 30 * timeline._seconds_per_pixel()
+
+
+def test_duracao_do_filtro_pelo_campo_nao_invade_o_bloco_seguinte(panel):
+    """O campo de duração da aba Filtros respeita o vizinho, como a alça.
+
+    Aplicada direto no bloco, a duração sobrepunha dois filtros na mesma
+    trilha — o estado que nenhum outro gesto permite criar.
+    """
+    def filtro(nome, inicio):
+        return Clip(MediaRef(Path(f"Filtro_{nome}"), MediaKind.IMAGE, duration=5.0), inicio, 5.0,
+                    overlay_type="filter", filter_name=nome)
+
+    primeiro, segundo = filtro("pb", 0.0), filtro("sepia", 5.0)
+    panel.install_project(Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(primeiro, segundo)),)), None, [], {})
+    panel._timeline.select(primeiro.clip_id)
+
+    panel._filter_dur.setValue(8.0)
+
+    antes, depois = panel._project.tracks[0].sorted_clips()
+    assert antes.end == pytest.approx(5.0) and depois.start == pytest.approx(5.0)
+    assert panel._filter_dur.value() == pytest.approx(5.0), "o campo anuncia uma duração que não existe"
+    panel._filter_dur.setValue(3.0)
+    assert panel._project.tracks[0].sorted_clips()[0].end == pytest.approx(3.0)
