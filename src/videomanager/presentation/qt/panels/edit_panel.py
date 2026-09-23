@@ -1113,19 +1113,29 @@ class EditPanel(QWidget):
         clip = self._timeline.selected_clip
         if not self._syncing and clip is not None and clip.overlay_type == "filter":
             self._remember()
-            self._apply(self._project.with_updated_clip(clip.clip_id, duration=dur))
+            self._apply(self._filter_resized(clip, dur))
+
+    def _filter_resized(self, clip: Clip, duration: float) -> Project:
+        """A duração pedida no campo, sem passar por cima do bloco seguinte.
+
+        É o mesmo limite da alça (``Project.resized``). Aplicada direto, a
+        duração sobrepunha dois filtros na mesma trilha. O campo volta ao valor
+        aceito, para não anunciar uma duração que não vai existir.
+        """
+        project = self._project.resized(clip.clip_id, "fim", clip.start + duration)
+        accepted = project.find(clip.clip_id)[1].duration
+        if abs(accepted - self._filter_dur.value()) > 1e-6:
+            self._filter_dur.blockSignals(True)
+            self._filter_dur.setValue(accepted)
+            self._filter_dur.blockSignals(False)
+        return project
 
     def _handle_apply_or_update_filter(self) -> None:
         clip = self._timeline.selected_clip
         if clip is not None and clip.overlay_type == "filter":
             self._remember()
-            self._apply(
-                self._project.with_updated_clip(
-                    clip.clip_id,
-                    filter_name=self._selected_filter_name,
-                    duration=self._filter_dur.value(),
-                )
-            )
+            project = self._filter_resized(clip, self._filter_dur.value())
+            self._apply(project.with_updated_clip(clip.clip_id, filter_name=self._selected_filter_name))
         else:
             self._insert_filter_clip(self._selected_filter_name)
 
