@@ -88,7 +88,6 @@ from videomanager.application.media.scrub import ScrubFrameCache
 from videomanager.domain.scrub import render_signature, signature_at, signature_segments
 from videomanager.domain.project import slideshow_canvas
 from videomanager.application.capabilities import FFmpegTools
-from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.media import LocalMedia
 from videomanager.application.editor.service import EditorService
 from videomanager.application.formatting import format_aspect_ratio, format_rate
@@ -106,8 +105,6 @@ from videomanager.domain.project import next_clip_id
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
-from videomanager.domain.timing import CutMode
-from videomanager.domain.timing import TrimTarget
 from videomanager.domain.timing import format_span
 from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_index
@@ -118,7 +115,7 @@ from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import icons
 from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.editor_project import EditorProject
-from videomanager.presentation.qt.export_dialog import CANVAS_PRESETS, ExportDialog, canvas_options, rate_options
+from videomanager.presentation.qt.export_dialog import CANVAS_PRESETS, ExportDialog, canvas_options
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
 from videomanager.presentation.qt.theme import palette
 from videomanager.presentation.qt.panels.timeline import AUDIO_TRACK_HEIGHT
@@ -211,17 +208,6 @@ _WAVE_MAX_WIDTH = 1200
 # prévia que tem política de esticar e ela não abre mão sozinha.
 _TIMELINE_MIN_HEIGHT = 150
 
-# Piso das duas listas de saída, com folga. Quem paga um piso apertado é o
-# item "Automática" — o texto mais longo das duas listas, e justamente o que
-# diz em que tela e em que taxa a edição está. Medido com a fonte da
-# aplicação, que o QSS fixa em 10pt: "Automática · segue o material
-# (3840 × 2160)" pede 299 px e "Automática (29,97 fps)" pede 172, já com os
-# 38 px de moldura e seta do Fusion. Os valores anteriores, 210 e 130,
-# cortavam os dois. ``AdjustToContents``, logo abaixo, cobre o que passar
-# disto — uma taxa de três dígitos, um tamanho de tela maior.
-_CANVAS_BOX_WIDTH = 300
-_RATE_BOX_WIDTH = 210
-
 # Largura com que a coluna de Adicionais nasce, e à qual volta ao abrir a aba
 # Propriedades se estiver mais estreita. É a da aba Propriedades, a mais larga
 # da coluna: medido no Windows com a fonte da aplicação, o conteúdo pede 370 px
@@ -303,10 +289,6 @@ class EditPanel(QWidget):
     @property
     def desktop_runtime(self):
         return self._runtime
-
-    @property
-    def current_project(self):
-        return self._project
 
     @property
     def project_path(self):
@@ -704,10 +686,6 @@ class EditPanel(QWidget):
         self._canvas_box.currentIndexChanged.connect(self._on_canvas_choice)
         row.addWidget(self._canvas_box)
 
-        self._rate_box = QComboBox()
-        self._rate_box.setToolTip(strings.EDIT_CANVAS_RATE_TIP)
-        self._rate_box.currentIndexChanged.connect(self._on_rate_choice)
-
         row.addSpacing(6)
 
         self._collapse = QPushButton(strings.EDIT_COLLAPSE)
@@ -831,13 +809,6 @@ class EditPanel(QWidget):
         layout.addWidget(self._extras_tabs, 1)
 
         return box
-
-    def _update_extras_tab_close_buttons(self) -> None:
-        pass
-
-    def _on_extras_tab_close_requested(self, index: int) -> None:
-        if self._extras_tabs.widget(index) is self._properties_widget:
-            self._extras_tabs.removeTab(index)
 
     def _close_properties_tab(self) -> None:
         idx = self._extras_tabs.indexOf(self._properties_widget)
@@ -1981,9 +1952,6 @@ class EditPanel(QWidget):
                 self._after_edit()
             self.jobs_ready.emit([dialog.created_job])
 
-    def _enqueue(self) -> None:
-        self._open_export_dialog()
-
     def _install_shortcuts(self) -> None:
         """Atalhos do editor, com o alcance do painel.
 
@@ -2512,7 +2480,6 @@ class EditPanel(QWidget):
             self._seek_to(clip.start)
         if self._extras_tabs.indexOf(self._properties_widget) < 0:
             self._extras_tabs.addTab(self._properties_widget, strings.EDIT_TAB_PROPERTIES)
-            self._update_extras_tab_close_buttons()
         self._properties_widget.set_playhead_position(self._position)
         self._properties_widget.load_clip(clip, self._project.width, self._project.height, fps=self._project.fps, text_ratio=self._project.text_ratio)
         self._extras_tabs.setCurrentWidget(self._properties_widget)
@@ -3191,12 +3158,6 @@ class EditPanel(QWidget):
             self._aspect_choice = None
         self._after_edit()
 
-    def _on_rate_choice(self, index: int) -> None:
-        if self._syncing or index < 0:
-            return
-        self._rate_choice = self._rate_box.itemData(index)
-        self._after_edit()
-
     def _refresh_canvas_controls(self) -> None:
         """Reconstrói as listas só quando elas mudam de conteúdo.
 
@@ -3215,21 +3176,16 @@ class EditPanel(QWidget):
             idx_a = _index_of(self._aspect_box, self._aspect_choice)
             self._aspect_box.setCurrentIndex(max(0, idx_a))
 
-            for box, options, choice in (
-                (self._canvas_box, canvas_options(self._pool, self._aspect_choice, self._canvas_choice),
-                 self._canvas_choice),
-                (self._rate_box, rate_options(self._pool, self._rate_choice), self._rate_choice),
-            ):
-                # Comparação só pelos dados: o texto do primeiro item é
-                # reescrito no fim daqui com a tela que a escolha produziu.
-                if [box.itemData(i) for i in range(box.count())] != [
-                    data for _, data in options
-                ]:
-                    box.clear()
-                    for label, data in options:
-                        box.addItem(label, data)
-                # A escolha em vigor sempre está na lista (ver canvas_options).
-                box.setCurrentIndex(max(0, _index_of(box, choice)))
+            box = self._canvas_box
+            options = canvas_options(self._pool, self._aspect_choice, self._canvas_choice)
+            # Comparação só pelos dados: o texto do primeiro item é reescrito
+            # no fim daqui com a tela que a escolha produziu.
+            if [box.itemData(i) for i in range(box.count())] != [data for _, data in options]:
+                box.clear()
+                for label, data in options:
+                    box.addItem(label, data)
+            # A escolha em vigor sempre está na lista (ver canvas_options).
+            box.setCurrentIndex(max(0, _index_of(box, self._canvas_choice)))
         finally:
             self._syncing = False
 
@@ -3248,12 +3204,6 @@ class EditPanel(QWidget):
             + strings.EDIT_CANVAS_SIZE.format(
                 width=self._project.width, height=self._project.height
             )
-            + ")",
-        )
-        self._rate_box.setItemText(
-            0,
-            f"{strings.EDIT_CANVAS_RATE_AUTO}  ("
-            + strings.EDIT_CANVAS_FPS.format(fps=format_rate(self._project.fps))
             + ")",
         )
 
@@ -4657,39 +4607,6 @@ class EditPanel(QWidget):
     # Exportação
     # ------------------------------------------------------------------
 
-    def _on_mode_changed(self) -> None:
-        self._timeline.update()
-        self._refresh_plan()
-        # O aviso aparece e some com a escolha, e com ele a altura preferida do
-        # painel: sem avisar, a linha de baixo nasce cortada (ver
-        # ``MainWindow._balance_panes``).
-        self.changed.emit()
-
-    def _fast_available(self) -> bool:
-        """O corte sem recodificar só sobrevive enquanto a edição for um recorte.
-
-        Um arquivo, blocos na ordem, nenhum volume mexido, nada sobreposto: é o
-        caso em que copiar os dados ainda produz o resultado pedido. Qualquer
-        montagem além disso precisa de composição, e composição recodifica.
-        """
-        segments = simple_trim(self._project)
-        return bool(segments) and len(segments) == 1
-
-    def _trim_target(self) -> TrimTarget | None:
-        segments = simple_trim(self._project)
-        if not segments or len(segments) != 1:
-            return None
-        clip = self._project.clips[0]
-        anchor = keyframe_at_or_before(self._keyframes_for(clip), segments[0].start)
-        return TrimTarget(
-            segments=segments,
-            container=clip.media.path.suffix.lstrip(".").lower() or "mp4",
-            mode=CutMode.FAST,
-            anchor=anchor,
-            hardware=self._settings.hardware_encoder,
-            copy_metadata=False,
-        )
-
     def _main_clip(self) -> Clip | None:
         """O bloco que dá nome e formato à saída.
 
@@ -4708,18 +4625,6 @@ class EditPanel(QWidget):
                 return track.sorted_clips()[0]
         clips = self._project.clips
         return clips[0] if clips else None
-
-    def _container(self) -> str:
-        video = self._main_clip()
-        if video is None or not video.media.has_video:
-            return "m4a"
-        suffix = video.media.path.suffix.lstrip(".").lower()
-        # Uma imagem não dá container de saída: um projeto que começa por foto
-        # sai em mp4, que é o que qualquer aparelho abre.
-        return "mp4" if not suffix or video.media.kind is MediaKind.IMAGE else suffix
-
-    def _refresh_plan(self) -> None:
-        pass
 
     # ------------------------------------------------------------------
     # Sincronização geral

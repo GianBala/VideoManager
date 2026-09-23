@@ -169,13 +169,6 @@ class _Strip:
     thumbs: dict[float, QImage] = field(default_factory=dict)
     wave: QImage | None = None
 
-    def matches(self, in_point: float, out_point: float) -> bool:
-        """Se a tira ainda corresponde ao trecho de origem do bloco."""
-        return (
-            abs(self.in_point - in_point) < 1e-6
-            and abs(self.out_point - out_point) < 1e-6
-        )
-
     @property
     def span(self) -> float:
         """Largura, em segundos de origem, da célula de cada miniatura."""
@@ -404,11 +397,6 @@ class Timeline(QWidget):
             nova.thumbs = nova._inherit(antiga.thumbs)
         self._strips[clip_id] = nova
 
-    def strip_count(self, clip_id: int) -> int:
-        """Quantas miniaturas o bloco tem pedidas — zero se ainda não tem tira."""
-        strip = self._strips.get(clip_id)
-        return strip.count if strip else 0
-
     def strip_range(self, clip_id: int) -> tuple[float, float] | None:
         strip = self._strips.get(clip_id)
         return (strip.in_point, strip.out_point) if strip else None
@@ -435,9 +423,6 @@ class Timeline(QWidget):
         strip = self._strips.setdefault(clip_id, _Strip(in_point, out_point, 0, {}))
         strip.in_point, strip.out_point, strip.wave = in_point, out_point, image
         self.update()
-
-    def has_strip(self, clip_id: int) -> bool:
-        return clip_id in self._strips
 
     # ------------------------------------------------------------------
     # Janela visível
