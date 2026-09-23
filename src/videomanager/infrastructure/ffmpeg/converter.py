@@ -37,43 +37,26 @@ from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
 from videomanager.application.events import Progress
 from videomanager.application.errors import ConversionError
-from videomanager.application.errors import JobCancelled
 from videomanager.infrastructure.system.process import ProcessControl, terminate_and_wait, terminate_async
 from videomanager.domain.composition import Composition
-from videomanager.application.media.export_description import describe_export
 from videomanager.infrastructure.ffmpeg.composer import export_args
 from videomanager.infrastructure.ffmpeg.parallel import ParallelExport
 from videomanager.infrastructure.ffmpeg.parallel import plan_segments
 from videomanager.infrastructure.ffmpeg.thumbnail import embed_thumbnail
 from videomanager.domain.timing import TrimTarget
 from videomanager.infrastructure.ffmpeg.trimmer import build_trim_args
-from videomanager.application.media.trim_description import describe_trim
 
-from videomanager.domain.media import LocalStream as LocalStream
-from videomanager.domain.media import LocalMedia as LocalMedia
-from videomanager.domain.media import AudioTarget as AudioTarget
-from videomanager.domain.media import VideoTarget as VideoTarget
+from videomanager.domain.media import LocalStream
+from videomanager.domain.media import LocalMedia
+from videomanager.domain.media import AudioTarget
+from videomanager.domain.media import VideoTarget
 
-from videomanager.domain.compatibility import _EQUIVALENT_SOURCE_CODECS as _EQUIVALENT_SOURCE_CODECS
-from videomanager.domain.compatibility import _CONTAINER_VIDEO_OK as _CONTAINER_VIDEO_OK
-from videomanager.domain.compatibility import _CONTAINER_AUDIO_OK as _CONTAINER_AUDIO_OK
-from videomanager.domain.compatibility import _CONTAINER_VIDEO_FALLBACK as _CONTAINER_VIDEO_FALLBACK
-from videomanager.domain.compatibility import _CONTAINER_AUDIO_FALLBACK as _CONTAINER_AUDIO_FALLBACK
-from videomanager.domain.compatibility import can_copy_audio as can_copy_audio
-from videomanager.domain.compatibility import needs_scaling as needs_scaling
+from videomanager.domain.compatibility import can_copy_audio
+from videomanager.domain.compatibility import needs_scaling
 from videomanager.domain.compatibility import is_portrait
-from videomanager.domain.compatibility import _container_accepts as _container_accepts
-from videomanager.domain.compatibility import needs_video_reencode as needs_video_reencode
-from videomanager.domain.compatibility import needs_audio_reencode as needs_audio_reencode
-from videomanager.domain.compatibility import resolved_video_codec as resolved_video_codec
-from videomanager.domain.compatibility import resolved_audio_codec as resolved_audio_codec
+from videomanager.domain.compatibility import resolved_video_codec
+from videomanager.domain.compatibility import resolved_audio_codec
 
-from videomanager.domain.targets import AUDIO_TARGETS as AUDIO_TARGETS
-from videomanager.domain.targets import VIDEO_CONTAINERS as VIDEO_CONTAINERS
-
-from videomanager.application.media.conversion_description import describe_target as describe_target
-
-from videomanager.infrastructure.storage.output_paths import output_path as output_path
 
 # --- alvos de áudio ---------------------------------------------------------
 # Codec pedido -> encoder do ffmpeg. "copy" não aparece aqui: é tratado à parte.
@@ -724,35 +707,3 @@ def _last_error_line(stderr: str) -> str:
     """Última linha significativa do stderr — onde o ffmpeg diz a causa."""
     lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
     return lines[-1] if lines else "erro não informado"
-
-
-__all__ = [
-    'output_path',
-    'LocalStream',
-    'LocalMedia',
-    'AudioTarget',
-    'VideoTarget',
-    '_EQUIVALENT_SOURCE_CODECS',
-    '_CONTAINER_VIDEO_OK',
-    '_CONTAINER_AUDIO_OK',
-    '_CONTAINER_VIDEO_FALLBACK',
-    '_CONTAINER_AUDIO_FALLBACK',
-    'can_copy_audio',
-    'needs_scaling',
-    '_container_accepts',
-    'needs_video_reencode',
-    'needs_audio_reencode',
-    'resolved_video_codec',
-    'resolved_audio_codec',
-    'FFmpegTools',
-    'Progress',
-    'ConversionError',
-    'JobCancelled',
-    'Composition',
-    'describe_export',
-    'TrimTarget',
-    'describe_trim',
-    'AUDIO_TARGETS',
-    'VIDEO_CONTAINERS',
-    'describe_target',
-]

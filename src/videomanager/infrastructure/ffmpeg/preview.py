@@ -38,23 +38,9 @@ from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
 
 from videomanager.application.media.preview import playback_clock
-from videomanager.domain.preview import MAX_PREVIEW_FPS as MAX_PREVIEW_FPS
-from videomanager.domain.preview import preview_fps as preview_fps
-from videomanager.domain.preview import BYTES_PER_PIXEL as BYTES_PER_PIXEL
-from videomanager.domain.preview import RawFrame as RawFrame
-from videomanager.domain.preview import fit_size as fit_size
-from videomanager.domain.preview import filmstrip_times as filmstrip_times
-
-# Teto da taxa da prévia. Abaixo dele a reprodução usa **a taxa do próprio
-# projeto**: pedir ao ffmpeg a mesma taxa da origem faz o filtro ``fps`` não ter
-# o que duplicar nem descartar, e o movimento na tela é o do arquivo. Uma taxa
-# fixa mais baixa — havia 15 aqui — deixa a imagem visivelmente aos trancos num
-# vídeo de 30 ou 60 fps.
-#
-# O teto existe para material acima de 60 fps, onde o ganho é imperceptível e o
-# custo não é: cada quadro é uma imagem crua atravessando um cano. Medido nesta
-# máquina, 1920×1080 a 60 fps sustenta 355 MB/s sem atrasar.
-
+from videomanager.domain.preview import BYTES_PER_PIXEL
+from videomanager.domain.preview import RawFrame
+from videomanager.domain.preview import filmstrip_times
 
 # Recebe o processo recém-aberto, para quem chamou poder interrompê-lo. Ver
 # :func:`_run`.
@@ -760,14 +746,3 @@ class FramePump:
             diagnostic.close()
             with self._lock:
                 self._process = None
-
-__all__ = [
-    'jpeg_frames',
-    'FFmpegTools',
-    'MAX_PREVIEW_FPS',
-    'preview_fps',
-    'BYTES_PER_PIXEL',
-    'RawFrame',
-    'fit_size',
-    'filmstrip_times',
-]
