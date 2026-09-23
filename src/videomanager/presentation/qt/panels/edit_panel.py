@@ -70,6 +70,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QScrollBar,
     QSlider,
     QSpinBox,
@@ -130,6 +131,7 @@ from videomanager.presentation.qt.panels.timeline import pixmap_from_frame
 from videomanager.presentation.qt.panels.edit_widgets import _index_of as _index_of
 from videomanager.presentation.qt.panels.edit_widgets import _VolumePopup as _VolumePopup
 from videomanager.presentation.qt.panels.edit_widgets import _SpeedPopup as _SpeedPopup
+from videomanager.presentation.qt.panels.edit_widgets import _TransportBar
 from videomanager.presentation.qt.panels.edit_widgets import _Preview as _Preview
 from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget as _ClipPropertiesWidget
 from videomanager.presentation.qt.panels.edit_widgets import _MediaListWidget as _MediaListWidget
@@ -259,6 +261,15 @@ class _ExtrasColumn(QWidget):
     def sizeHint(self) -> QSize:  # noqa: N802
         hint = super().sizeHint()
         return QSize(max(hint.width(), _EXTRAS_WIDTH), hint.height())
+
+
+def _scrollable(page: QWidget) -> QScrollArea:
+    area = QScrollArea()
+    area.setWidget(page)
+    area.setWidgetResizable(True)
+    area.setFrameShape(QScrollArea.Shape.NoFrame)
+    area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    return area
 
 
 def _bounded_pool(parent: QObject, threads: int) -> QThreadPool:
@@ -648,6 +659,7 @@ class EditPanel(QWidget):
         row.addSpacing(6)
         self._project_label = QLabel("")
         self._project_label.setProperty("role", "dim")
+        self._project_label.setMinimumWidth(40)
         row.addWidget(self._project_label)
         self._update_project_label()
 
@@ -662,7 +674,11 @@ class EditPanel(QWidget):
         aspect_label.setProperty("role", "dim")
         row.addWidget(aspect_label)
 
+        # Pisos explícitos, abaixo da largura do texto: com espaço a lista mostra
+        # o texto inteiro; sem, encolhe em vez de empurrar Exportar para fora da
+        # tela. O item longo continua inteiro ao abrir a lista.
         self._aspect_box = QComboBox()
+        self._aspect_box.setMinimumWidth(110)
         self._aspect_box.setToolTip(strings.EDIT_CANVAS_ASPECT_TIP)
         self._aspect_box.currentIndexChanged.connect(self._on_aspect_choice)
         row.addWidget(self._aspect_box)
@@ -672,6 +688,7 @@ class EditPanel(QWidget):
         row.addWidget(canvas_label)
 
         self._canvas_box = QComboBox()
+        self._canvas_box.setMinimumWidth(150)
         self._canvas_box.setToolTip(strings.EDIT_CANVAS_TIP)
         self._canvas_box.currentIndexChanged.connect(self._on_canvas_choice)
         row.addWidget(self._canvas_box)
@@ -787,9 +804,12 @@ class EditPanel(QWidget):
         layout.addLayout(header)
 
         self._extras_tabs = QTabWidget()
-        self._extras_tabs.addTab(self._build_text_tab(), strings.EDIT_TAB_TEXT)
-        self._extras_tabs.addTab(self._build_filters_tab(), strings.EDIT_TAB_FILTERS)
-        self._extras_tabs.addTab(self._build_transitions_tab(), strings.EDIT_TAB_TRANSITIONS)
+        # Roláveis: a aba de transições pede 405 px de altura e, fixa, era o piso
+        # da metade de cima inteira — numa tela de 768 px sobrava uma trilha só
+        # à vista. A aba Propriedades já rola por conta própria.
+        self._extras_tabs.addTab(_scrollable(self._build_text_tab()), strings.EDIT_TAB_TEXT)
+        self._extras_tabs.addTab(_scrollable(self._build_filters_tab()), strings.EDIT_TAB_FILTERS)
+        self._extras_tabs.addTab(_scrollable(self._build_transitions_tab()), strings.EDIT_TAB_TRANSITIONS)
         self._extras_tabs.setTabsClosable(False)
         self._properties_widget = _ClipPropertiesWidget()
         self._properties_widget.property_changed.connect(self._on_properties_changed)
@@ -1589,7 +1609,6 @@ class EditPanel(QWidget):
     def _build_player(self) -> QWidget:
         box = QWidget()
         box.setProperty("role", "plain")
-        box.setMinimumWidth(1040)
         column = QVBoxLayout(box)
         column.setContentsMargins(4, 0, 0, 0)
         column.setSpacing(6)
@@ -1617,13 +1636,6 @@ class EditPanel(QWidget):
         return box
 
     def _build_transport(self) -> QWidget:
-        box = QWidget()
-        box.setProperty("role", "plain")
-        box.setMinimumWidth(1040)
-        row = QHBoxLayout(box)
-        row.setContentsMargins(4, 4, 4, 0)
-        row.setSpacing(6)
-
         mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self._time_label = QLabel(
             strings.EDIT_POSITION.format(
@@ -1648,10 +1660,12 @@ class EditPanel(QWidget):
         readouts_layout.setSpacing(12)
         readouts_layout.addWidget(self._time_label)
         readouts_layout.addWidget(self._frame_label)
-        row.addWidget(readouts)
 
-        row.addStretch(1)
-
+        controls = QWidget()
+        controls.setProperty("role", "plain")
+        row = QHBoxLayout(controls)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
         self._buttons: list[QPushButton] = []
         specs = (
             ("|◀◀", strings.EDIT_TO_START, lambda: self._seek_to(0.0)),
@@ -1676,7 +1690,11 @@ class EditPanel(QWidget):
         self._play_button.setFixedHeight(32)
         self._play_button.setProperty("role", "primary")
 
-        row.addStretch(1)
+        extras = QWidget()
+        extras.setProperty("role", "plain")
+        row = QHBoxLayout(extras)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
 
         self._prev_key = QPushButton(strings.EDIT_PREV_KEY_SHORT)
         self._prev_key.setToolTip(strings.EDIT_PREV_KEY)
@@ -1715,7 +1733,7 @@ class EditPanel(QWidget):
 
         row.addSpacing(6)
         row.addWidget(self._build_volume())
-        return box
+        return _TransportBar(readouts, controls, extras)
 
     def _on_snap_toggled(self, checked: bool) -> None:
         self._preview.set_snap_enabled(checked)
@@ -1895,6 +1913,7 @@ class EditPanel(QWidget):
         row.addStretch(1)
         self._count_label = QLabel("")
         self._count_label.setProperty("role", "dim")
+        self._count_label.setMinimumWidth(40)
         row.addWidget(self._count_label)
         # O bloco escolhido tinha uma faixa só para ele, com dois campos de
         # timecode e o nome do arquivo. Os campos saíram — as pontas se
@@ -1903,6 +1922,7 @@ class EditPanel(QWidget):
         row.addSpacing(10)
         self._clip_label = QLabel(strings.EDIT_CLIP_NONE)
         self._clip_label.setProperty("role", "dim")
+        self._clip_label.setMinimumWidth(40)
         row.addWidget(self._clip_label)
         row.addStretch(1)
 
