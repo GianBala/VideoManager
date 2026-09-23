@@ -132,3 +132,37 @@ def test_tesoura_sem_selecao_corta_o_bloco_sob_uma_transicao(panel):
 
     blocos = [c for c in panel._project.clips if not c.is_transition]
     assert len(blocos) == 3, "a tesoura não cortou o bloco sob a transição"
+
+
+def test_velocidade_leva_a_animacao_junto_com_o_conteudo(panel):
+    """Mudar a velocidade reescala os quadros-chave como reescala a duração.
+
+    Um bloco de 5 s com saída em fade (4,4 → 5 s) acelerado a 2× dura 2,5 s: o
+    fade ficava depois do fim e nunca acontecia. Desacelerado a 0,5×, o bloco
+    sumia no meio e ficava invisível na outra metade.
+    """
+    from videomanager.domain.keyframe import Keyframe
+
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=20.0, width=160, height=90, fps=10.0)
+    saida = (Keyframe(4.4, opacity=1.0), Keyframe(5.0, opacity=0.0))
+    bloco = Clip(video, 0.0, 5.0, keyframes=saida)
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(bloco,)),)), None, [], {})
+    panel._timeline.select(bloco.clip_id)
+
+    QTest.mouseClick(panel._speed_btn, Qt.MouseButton.LeftButton)
+    popup = next(w for w in QApplication.topLevelWidgets() if type(w).__name__ == "_SpeedPopup" and w.isVisible())
+    popup._spin.setValue(2.0)
+    popup.close()
+
+    acelerado = panel._project.clips[0]
+    assert acelerado.duration == pytest.approx(2.5)
+    assert [k.time_offset for k in acelerado.keyframes] == pytest.approx([2.2, 2.5])
+    assert acelerado.transform_at(2.4).opacity < 1.0, "o fade de saída sumiu do bloco acelerado"
+
+
+def test_velocidade_nao_se_aplica_a_adicionais(panel):
+    texto = Clip(MediaRef(Path("Texto_x"), MediaKind.IMAGE, duration=5.0), 0.0, 5.0, overlay_type="text",
+                 text_content="x")
+    panel.install_project(Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(texto,)),)), None, [], {})
+    panel._timeline.select(texto.clip_id)
+    assert not panel._speed_btn.isEnabled()
