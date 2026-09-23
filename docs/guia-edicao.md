@@ -429,7 +429,8 @@ como estava.
   guarda a duração de cada quadro.
 - **Formato de vídeo** — MP4, MKV, WebM, MOV ou **GIF animado**. O GIF sai em
   loop infinito e com 256 cores; ele não guarda som, então a trilha de áudio
-  fica de fora, e não tem codec nem nível de qualidade para escolher (esses
+  fica de fora — e o GIF termina na última imagem, mesmo que a música vá além
+  —, e não tem codec nem nível de qualidade para escolher (esses
   campos somem). Cada quadro de um GIF é uma imagem inteira, então em
   **Automática** a tela vai a no máximo 640 px e a taxa a 15 quadros por
   segundo: numa edição de 4 s isso é a diferença entre 1,1 MB e 14,9 MB (na

@@ -33,7 +33,7 @@ def describe_export(
         if videos:
             parts.append(f"{videos} bloco(s) de imagem")
         parts.append(f"{project.width}×{project.height} · {project.fps:g} fps")
-        parts.append(f"{format_span(project.export_duration)} de duração")
+        parts.append(f"{format_span(project.video_duration)} de duração")
         return " · ".join(parts)
     codec_family = family or hwaccel.family_for(container)
     parts = [f".{container} ({hwaccel.family_label(codec_family)})"]

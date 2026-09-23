@@ -84,3 +84,38 @@ def test_imagem_parada_tambem_vira_gif(tools, tmp_path) -> None:
     subprocess.run(export_args(project, destino, tools, container="gif"), check=True, timeout=120,
                    **subprocess_kwargs())
     assert "format_name=gif" in _probe(tools, destino)
+
+
+def test_gif_termina_na_ultima_imagem_mesmo_com_musica_mais_longa(tools, tmp_path) -> None:
+    """O GIF não tem som, então a música não pode alongá-lo.
+
+    Um vídeo de 2 s com uma música de 5 s saía como um GIF de 5 s: três
+    segundos de tela preta no fim da animação, que ainda voltava a eles a cada
+    repetição do loop.
+    """
+    from videomanager.application.media.export_description import describe_export
+    from videomanager.domain.composition import Composition
+
+    fonte, musica = tmp_path / "fonte.mp4", tmp_path / "musica.m4a"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "testsrc2=s=160x90:r=10:d=2", "-c:v", "libx264", str(fonte)],
+                   check=True, timeout=120, **subprocess_kwargs())
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=d=5",
+                    str(musica)], check=True, timeout=120, **subprocess_kwargs())
+    project = Project(
+        tracks=(
+            Track(TrackKind.VIDEO, clips=(Clip(media_ref(probe_file(fonte, tools)), 0, 2.0),)),
+            Track(TrackKind.AUDIO, clips=(Clip(MediaRef(musica, MediaKind.AUDIO, duration=5.0, has_audio=True,
+                                                        channels=1), 0, 5.0),)),
+        ),
+        width=160, height=90, fps=10.0,
+    )
+    destino = tmp_path / "saida.gif"
+    subprocess.run(export_args(project, destino, tools, container="gif"), check=True, timeout=300,
+                   **subprocess_kwargs())
+
+    quadros = int(_probe(tools, destino).split("nb_read_frames=")[1].split("|")[0].split("\n")[0])
+    assert quadros == pytest.approx(20, abs=2), f"esperados ~20 quadros (2 s a 10 q/s), vieram {quadros}"
+    # A barra de progresso e o texto da janela contam a mesma duração.
+    assert Composition(project, container="gif").output_duration == pytest.approx(2.0)
+    assert "2,00 s de duração" in describe_export(project, "gif")

@@ -1814,7 +1814,7 @@ _GIF_DITHER = "dither=bayer:bayer_scale=5"
 
 def _gif_single_palette(project: Project) -> bool:
     """Se cabe montar uma paleta só para a animação inteira (ver o teto)."""
-    frames = max(1.0, project.export_duration * max(1.0, project.fps))
+    frames = max(1.0, project.video_duration * max(1.0, project.fps))
     return frames * project.width * project.height * 4 <= _GIF_PALETTE_BUDGET
 
 
@@ -1828,9 +1828,12 @@ def gif_args(
     """Grava a edição como GIF animado: 256 cores, em loop e sem som.
 
     O GIF não tem trilha de áudio — o som da edição fica de fora, e é isso que
-    a janela de exportação avisa.
+    a janela de exportação avisa. Pelo mesmo motivo ele termina na última
+    imagem: uma música mais longa que o vídeo deixava segundos de tela preta
+    no fim da animação.
     """
-    graph = build_graph(project, want_video=True, want_audio=False, text_assets=text_assets)
+    graph = build_graph(project, span=project.video_duration, want_video=True, want_audio=False,
+                        text_assets=text_assets)
     if not graph.video_label:
         raise ConversionError("Não há imagem na linha do tempo para exportar como GIF.")
     if _gif_single_palette(project):
