@@ -263,6 +263,15 @@ class _ExtrasColumn(QWidget):
         return QSize(max(hint.width(), _EXTRAS_WIDTH), hint.height())
 
 
+def _file_key(path: Path) -> tuple:
+    """Identidade de um arquivo em disco: o mesmo nome regravado é outro."""
+    try:
+        info = path.stat()
+    except OSError:
+        return (path,)
+    return (path, info.st_size, info.st_mtime_ns)
+
+
 def _scrollable(page: QWidget) -> QScrollArea:
     area = QScrollArea()
     area.setWidget(page)
@@ -432,6 +441,8 @@ class EditPanel(QWidget):
         self._keyframe_source: Path | None = None
         self._keyframe_token = 0
         self._keyframe_worker = None
+        # Mapas de keyframes já lidos, por arquivo (ver :meth:`_scan_keyframes`).
+        self._keyframe_maps: dict[tuple, tuple[float, ...]] = {}
         # Tela pedida, ou ``None`` para seguir o material. Mora aqui, e não no
         # projeto, porque é preferência de saída e não parte da montagem — ver
         # :meth:`_sync_canvas`.
@@ -4885,11 +4896,13 @@ class EditPanel(QWidget):
         return clip if clip and clip.media and clip.media.kind is MediaKind.VIDEO and not clip.is_transition else None
 
     def _scan_keyframes(self) -> None:
-        """Mapeia os keyframes da mídia única, quando ainda houver uma só.
+        """Mapeia os keyframes da mídia do bloco escolhido (ou da principal).
 
-        Só o corte rápido usa isso, e ele só existe enquanto a edição for um
-        recorte de um arquivo — daí o mapeamento não acontecer numa montagem com
-        várias mídias, onde não teria uso.
+        Servem à navegação por keyframe e ao ponto real do corte rápido. O mapa
+        fica guardado por arquivo: o ffprobe percorre o arquivo inteiro, e sem
+        a guarda cada clique alternando entre blocos de mídias diferentes
+        refazia esse percurso — num vídeo de horas, segundos de disco e CPU na
+        fila de fundo, à frente das miniaturas.
         """
         clip = self._keyframe_clip()
         source = clip.media.path if clip else None
@@ -4905,6 +4918,10 @@ class EditPanel(QWidget):
             button.setEnabled(False)
         if source is None:
             return
+        cached = self._keyframe_maps.get(_file_key(source))
+        if cached is not None:
+            self._on_keyframes(cached, source, self._keyframe_token)
+            return
         tools = self._ensure_tools()
         if tools is None:
             return
@@ -4919,6 +4936,7 @@ class EditPanel(QWidget):
             return
         self._keyframe_worker = None
         self._keyframes = tuple(times) if isinstance(times, tuple) else ()
+        self._keyframe_maps[_file_key(source)] = self._keyframes
         for button in (self._prev_key, self._next_key):
             button.setEnabled(bool(self._keyframes_for(self._keyframe_clip())))
 
