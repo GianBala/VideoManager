@@ -2004,6 +2004,7 @@ def test_preview_video_drag_does_not_drag_or_teleport_overlays(
     )
     panel._preview.mousePressEvent(click_img_event)
     assert panel._timeline.selected == 2
+    panel.shutdown()
 
 
 
@@ -2034,6 +2035,7 @@ def test_edit_panel_save_as_button(dummy_tools: FFmpegTools) -> None:
     panel.save_project_as = mock_save_as
     panel._save_as_btn.click()
     assert saved_as_called
+    panel.shutdown()
 
 
 def test_preview_drag_resize_animated_clip() -> None:
