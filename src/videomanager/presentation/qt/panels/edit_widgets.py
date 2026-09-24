@@ -2141,11 +2141,13 @@ class _FontSelectorWidget(QWidget):
 
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("🔍 Buscar fonte...")
+        self._search_input.setProperty("role", "picker")
         self._search_input.textChanged.connect(self._filter_fonts)
         c_layout.addWidget(self._search_input)
 
         self._font_list = QListWidget()
         self._font_list.setFixedHeight(140)
+        self._font_list.setProperty("role", "picker")
 
         seen: set[str] = set()
         all_families: list[str] = []
