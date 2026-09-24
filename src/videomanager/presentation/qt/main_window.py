@@ -99,7 +99,7 @@ class _ProbeAttempt(QObject):
         if self.window._probe_worker is self.worker:
             self.window._on_probed(result)
 
-    @Slot(str)
+    @Slot(object)
     def failed(self, message):
         if self.window._probe_worker is self.worker:
             self.window._on_probe_failed(message)
@@ -661,10 +661,10 @@ class MainWindow(QMainWindow):
         # janela é refeita para o painel continuar inteiro.
         self._balance_panes()
 
-    def _on_probe_failed(self, message: str) -> None:
+    def _on_probe_failed(self, message: object) -> None:
         self._probe_worker = None
         self._set_analyzing(False)
-        QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, message)
+        QMessageBox.warning(self, strings.DIALOG_ERROR_TITLE, str(message))
 
     # ------------------------------------------------------------------
     # Enfileiramento

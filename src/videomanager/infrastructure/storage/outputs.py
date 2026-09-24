@@ -2,6 +2,7 @@
 import time
 from pathlib import Path
 from videomanager.application.errors import ConversionError
+from videomanager.domain.i18n import Text
 from videomanager.application.ports.output import OutputLease
 from .output_paths import output_path
 
@@ -49,7 +50,7 @@ class FileOutputStore:
         lease: OutputLease | None = None,
     ):
         if not self.owns(destination, lease):
-            raise ConversionError('O destino reservado foi alterado por outra operação.')
+            raise ConversionError(Text('OUTPUT_LEASE_CHANGED'))
         # Antivírus, indexador e OneDrive abrem o arquivo recém-criado por um
         # instante; no Windows a troca falha com "arquivo em uso" (WinError 32)
         # e a conversão inteira terminava em erro. Algumas tentativas curtas

@@ -52,6 +52,7 @@ from videomanager.domain.timing import format_span
 from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_step
 from videomanager.domain.timing import keyframe_at_or_before
+from videomanager.domain.i18n import Text
 from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.panels.edit_widgets import _index_of
 from videomanager.presentation.qt.ports import DesktopRuntimePort
@@ -159,6 +160,28 @@ def rate_options(pool: list[MediaRef], rate_choice: float | None,
         rates = {rate for rate in rates if abs(rate - rate_choice) > 1e-3} | {rate_choice}
     return [(strings.EDIT_CANVAS_RATE_AUTO, None)] + [
         (strings.EDIT_CANVAS_FPS.format(fps=format_rate(rate)), rate) for rate in sorted(rates)]
+
+
+def _fast_plan(target: TrimTarget) -> str:
+    return strings.EDIT_PLAN_FAST.format(
+        container=target.container, duration=format_span(target.output_duration)
+    )
+
+
+def _drift_text(target: TrimTarget, fps: float) -> str:
+    if target.anchor is None:
+        return ""
+    if target.drift < frame_step(fps):
+        return strings.EDIT_DRIFT_NONE
+    return strings.EDIT_DRIFT.format(
+        time=format_timecode(target.anchor), delta=format_span(target.drift)
+    )
+
+
+def _export_warning(container: str, project: Project, interpolating: bool) -> str:
+    if interpolating:
+        return strings.EDIT_INTERPOLATE_WARN.format(memory=format_size(interpolation_bytes(project)))
+    return strings.EXPORT_GIF_NOTE if container == "gif" else ""
 
 
 def _gif_canvas(width: int, height: int) -> tuple[int, int]:
@@ -823,11 +846,8 @@ class ExportDialog(QDialog):
             target = self._trim_target(proj)
             if target:
                 container = target.container
-                plan = strings.EDIT_PLAN_FAST.format(
-                    container=target.container,
-                    duration=format_span(target.output_duration),
-                )
-                warning = self._drift_text(target, proj.fps)
+                plan = _fast_plan(target)
+                warning = _drift_text(target, proj.fps)
             else:
                 plan = ""
                 warning = ""
@@ -843,11 +863,7 @@ class ExportDialog(QDialog):
                 family=codec_family,
                 quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
             )
-            warning = strings.EXPORT_GIF_NOTE if container == "gif" else ""
-            if interpolating:
-                warning = strings.EDIT_INTERPOLATE_WARN.format(
-                    memory=format_size(interpolation_bytes(proj))
-                )
+            warning = _export_warning(container, proj, interpolating)
 
         if hasattr(self, "_ext_label"):
             self._ext_label.setText(f".{container}")
@@ -890,15 +906,6 @@ class ExportDialog(QDialog):
             quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
         )
         self._size_label.setText(format_size(est_bytes, estimated=True))
-
-    def _drift_text(self, target: TrimTarget, fps: float) -> str:
-        if target.anchor is None:
-            return ""
-        if target.drift < frame_step(fps):
-            return strings.EDIT_DRIFT_NONE
-        return strings.EDIT_DRIFT.format(
-            time=format_timecode(target.anchor), delta=format_span(target.drift)
-        )
 
     # ------------------------------------------------------------------
     # Enfileirar
@@ -946,31 +953,23 @@ class ExportDialog(QDialog):
         interpolating = getattr(target, "interpolate", False)
         if not is_fast and not audio_only:
             self._settings.default_export_quality = self._quality_choice
+        # Descrição e aviso ficam na fila depois de a janela fechar: guardados
+        # como texto refeito na exibição, acompanham a troca de idioma — com os
+        # mesmos cálculos que a janela acabou de mostrar.
         if is_fast and isinstance(target, TrimTarget):
-            description = strings.EDIT_PLAN_FAST.format(
-                container=target.container,
-                duration=format_span(target.output_duration),
-            )
+            description = Text.of(_fast_plan, target)
+            warning = Text.of(_drift_text, target, proj.fps)
         elif audio_only:
-            description = describe_export(
-                proj,
-                target.container,
-                self._settings.hardware_encoder,
-                False,
-                audio_only=True,
-                audio_codec=target.audio_codec,
-            )
+            description = Text.of(describe_export, proj, target.container, self._settings.hardware_encoder,
+                                  False, audio_only=True, audio_codec=target.audio_codec)
+            warning = None
         else:
-            description = describe_export(
-                proj,
-                target.container,
-                self._settings.hardware_encoder,
-                interpolating,
-                family=target.family,
-                quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
-            )
+            description = Text.of(describe_export, proj, target.container, self._settings.hardware_encoder,
+                                  interpolating, family=target.family,
+                                  quality=self._quality_choice or hwaccel.QUALITY_BALANCED)
+            warning = Text.of(_export_warning, target.container, proj, interpolating)
 
         self.created_job.description = description
-        self.created_job.warnings = (self._warning.text(),) if self._warning.text() else ()
+        self.created_job.warnings = (warning,) if warning is not None and str(warning) else ()
 
         self.accept()

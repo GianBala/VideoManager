@@ -11,6 +11,7 @@ from videomanager.domain.project import Project
 from videomanager.domain.timing import CutMode
 from videomanager.domain.timing import TrimTarget
 from videomanager.domain.timing import keyframe_at_or_before
+from videomanager.domain.i18n import Text
 from videomanager.application.errors import ConversionError
 from videomanager.application.errors import VideoManagerError
 from videomanager.application.jobs.models import Job
@@ -51,7 +52,7 @@ class ProcessingService:
                project_path: Path | None = None, probed: dict[Path, LocalMedia] | None = None) -> Job:
         project = project.for_export()
         if project.is_empty:
-            raise ConversionError('O projeto não tem clipes para exportar.')
+            raise ConversionError(Text('ERROR_PROJECT_EMPTY'))
         cache = probed or {}
         # A trilha de vídeo inferior define a referência principal da montagem.
         ordered = [c for t in reversed(project.video_tracks) if t.visible for c in t.sorted_clips()]
@@ -99,11 +100,12 @@ class ProcessingService:
         if isinstance(target, VideoTarget) and (not media.has_video or media.video_is_cover):
             # Uma capa embutida (MP3, M4A, FLAC) aparece como trilha de vídeo,
             # mas convertê-la gerava um "vídeo" de um quadro só.
-            raise ConversionError('não tem trilha de vídeo')
+            raise ConversionError(Text('ERROR_NO_VIDEO_TRACK'))
         if isinstance(target, VideoTarget) and not container_accepts_video(target.container, target.video_codec):
-            raise ConversionError(f'{target.video_codec.upper()} não cabe em .{target.container}')
+            raise ConversionError(Text('ERROR_CODEC_NOT_IN_CONTAINER', codec=target.video_codec.upper(),
+                                         container=target.container))
         if isinstance(target, AudioTarget) and not media.has_audio:
-            raise ConversionError('não tem trilha de áudio')
+            raise ConversionError(Text('ERROR_NO_AUDIO_TRACK'))
         directory = media.path.parent if same_folder else fallback
         fallback_used = not self.catalog.writable(directory)
         if fallback_used:

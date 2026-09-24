@@ -37,6 +37,7 @@ from dataclasses import dataclass, replace
 
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
+from videomanager.domain.i18n import t
 
 from videomanager.application.encoding import SOFTWARE as SOFTWARE
 from videomanager.application.encoding import AUTO as AUTO
@@ -44,12 +45,11 @@ from videomanager.application.encoding import QUALITY_BALANCED as QUALITY_BALANC
 from videomanager.application.encoding import QUALITY_HIGH as QUALITY_HIGH
 from videomanager.application.encoding import QUALITY_ECONOMY as QUALITY_ECONOMY
 from videomanager.application.encoding import DEFAULT_QUALITY as DEFAULT_QUALITY
-from videomanager.application.encoding import QUALITY_LABELS as QUALITY_LABELS
 from videomanager.application.encoding import quality_label as quality_label
 from videomanager.application.encoding import FAMILY_NAMES as FAMILY_NAMES
 from videomanager.application.encoding import family_for as family_for
 from videomanager.application.encoding import family_label as family_label
-from videomanager.application.encoding import CHOICES as CHOICES
+from videomanager.application.encoding import choices as choices
 
 # Preferências que o usuário pode escolher. "auto" tenta as placas na ordem em
 # que estão aqui e fica com a primeira que abrir.
@@ -396,15 +396,12 @@ def describe(
     """Frase para a tela dizendo o que **vai** acontecer, não o que se pediu."""
     encoder = resolve(family, preference, tools, quality=quality)
     if preference == SOFTWARE:
-        return f"Usando {encoder.label}."
+        return t("ENCODER_USING", encoder=encoder.label)
     if encoder.name.startswith("lib"):
         if tools is None:
-            return "O ffmpeg ainda não foi localizado; a exportação usará software."
-        return (
-            "Nenhuma placa disponível respondeu ao teste — a exportação vai usar "
-            f"{encoder.label}."
-        )
-    return f"Placa em uso: {encoder.label}."
+            return t("ENCODER_NO_FFMPEG")
+        return t("ENCODER_NO_GPU", encoder=encoder.label)
+    return t("ENCODER_GPU_IN_USE", encoder=encoder.label)
 
 
 def encode_args(
@@ -444,10 +441,9 @@ __all__ = [
     'QUALITY_HIGH',
     'QUALITY_ECONOMY',
     'DEFAULT_QUALITY',
-    'QUALITY_LABELS',
     'quality_label',
     'FAMILY_NAMES',
     'family_for',
     'family_label',
-    'CHOICES',
+    'choices',
 ]

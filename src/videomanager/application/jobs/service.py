@@ -5,6 +5,7 @@ from videomanager.application.jobs.models import JobStatus
 from videomanager.application.events import DownloadResult
 from videomanager.application.events import Progress
 from videomanager.application.events import ProgressStage
+from videomanager.domain.i18n import Text
 
 
 class JobService:
@@ -59,7 +60,7 @@ class JobService:
             job.result_size = size
         return job
 
-    def fail(self, job_id: int, attempt: int, message: str, log=()) -> Job | None:
+    def fail(self, job_id: int, attempt: int, message: str | Text, log=()) -> Job | None:
         job = self.active(job_id, attempt)
         if job:
             job.status, job.error, job.log = JobStatus.FAILED, message, tuple(log)

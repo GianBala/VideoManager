@@ -9,6 +9,7 @@ from videomanager.domain.selection import AudioRequest
 from videomanager.domain.selection import LOSSLESS_AUDIO
 from videomanager.application.formatting import format_bitrate
 from videomanager.application.format_labels import resolution_label
+from videomanager.domain.i18n import Text, t
 
 _MP4_MUXABLE_VIDEO = {"H.264", "HEVC", "AV1", "VP9", "MPEG-4", "Dolby Vision"}
 
@@ -35,7 +36,9 @@ class ContainerPlan:
     container: str
     video: VideoChoice | None
     audio: AudioChoice | None
-    warnings: tuple[str, ...] = ()
+    # Texto guardado: o aviso vai junto da tarefa para a fila e precisa
+    # acompanhar a troca de idioma, números inclusive.
+    warnings: tuple[Text, ...] = ()
 
     @property
     def merge_output_format(self) -> str | None:
@@ -76,7 +79,7 @@ def plan_container(
     (sem perda, mesma qualidade) → trocar de container (sem perda, arquivo
     diferente do pedido) → e nunca recodificar.
     """
-    warnings: list[str] = []
+    warnings: list[Text] = []
 
     if container == CONTAINER_AUTO or container == "mkv":
         # MKV aceita tudo, e no modo automático o próprio yt-dlp escolhe um
@@ -97,50 +100,36 @@ def plan_container(
     if video and video.family and video.family not in muxable_video:
         alternative = _first_compatible_video(matrix, safe_video, video.height)
         if alternative:
-            warnings.append(
-                f"{video.family} não cabe em .{container}: usando "
-                f"{alternative.family} em {resolution_label(alternative)} "
-                "(sem recodificar)."
-            )
+            warnings.append(Text(
+                "POLICY_VIDEO_SWAP", family=video.family, container=container,
+                alternative=alternative.family, resolution=Text.of(resolution_label, alternative),
+            ))
             video = alternative
         else:
-            warnings.append(
-                f"{video.family} não cabe em .{container} e não há alternativa "
-                "compatível nesta mídia. Salvando em .mkv, que aceita qualquer "
-                "codec — sem recodificar nem perder qualidade."
-            )
+            warnings.append(Text("POLICY_VIDEO_MKV", family=video.family, container=container))
             return ContainerPlan("mkv", video, audio, tuple(warnings))
     elif video and video.family and video.family not in safe_video:
-        warnings.append(
-            f"{video.family} em .{container} gera arquivo válido, mas alguns "
-            "aparelhos e TVs não reproduzem. .mkv ou H.264 são mais seguros."
-        )
+        warnings.append(Text("POLICY_VIDEO_RISKY", family=video.family, container=container))
 
     # --- áudio ---
     if audio and audio.family and audio.family not in muxable_audio:
         alternative = _first_compatible_audio(matrix, safe_audio)
         if alternative:
-            warnings.append(
-                f"Trilha {audio.family} não cabe em .{container}: usando "
-                f"{alternative.family} {format_bitrate(alternative.bitrate)} "
-                "(sem recodificar)."
-            )
+            warnings.append(Text(
+                "POLICY_AUDIO_SWAP", family=audio.family, container=container,
+                alternative=alternative.family, bitrate=Text.of(format_bitrate, alternative.bitrate),
+            ))
             audio = alternative
         else:
-            warnings.append(
-                f"A única trilha de áudio é {audio.family}, incompatível com "
-                f".{container}. Salvando em .mkv para preservar o áudio original."
-            )
+            warnings.append(Text("POLICY_AUDIO_MKV", family=audio.family, container=container))
             return ContainerPlan("mkv", video, audio, tuple(warnings))
     elif audio and audio.family and audio.family not in safe_audio:
         alternative = _first_compatible_audio(matrix, safe_audio)
         if alternative:
-            warnings.append(
-                f"Trilha {alternative.family} "
-                f"{format_bitrate(alternative.bitrate)} escolhida em vez de "
-                f"{audio.family}: {audio.family} em .{container} tem suporte "
-                "irregular nos players. A troca é sem recodificar."
-            )
+            warnings.append(Text(
+                "POLICY_AUDIO_RISKY", family=audio.family, container=container,
+                alternative=alternative.family, bitrate=Text.of(format_bitrate, alternative.bitrate),
+            ))
             audio = alternative
 
     return ContainerPlan(container, video, audio, tuple(warnings))
@@ -163,13 +152,8 @@ def audio_quality_warning(matrix: FormatMatrix, codec: str, quality: str) -> str
 
     source = matrix.best_audio_bitrate
     if source and requested > source * 1.1:
-        return (
-            f"A melhor trilha desta mídia tem {format_bitrate(source)}. "
-            f"Gerar um {codec.upper()} de {int(requested)} kbps só aumenta o "
-            "arquivo, sem recuperar qualidade — a compressão original é "
-            "irreversível. Considere “Original (sem perda)” ou um valor próximo "
-            f"de {format_bitrate(source)}."
-        )
+        return t("POLICY_AUDIO_BITRATE", source=format_bitrate(source), codec=codec.upper(),
+                 requested=int(requested))
     return None
 
 
@@ -177,10 +161,10 @@ def describe_request(request: Request, plan: ContainerPlan | None) -> str:
     """Resumo curto do que será baixado, para a coluna de destino na fila."""
     if isinstance(request, AudioRequest):
         if request.codec == "best":
-            return "Áudio · original (sem perda)"
+            return t("DESC_DOWNLOAD_AUDIO_BEST")
         if request.codec in LOSSLESS_AUDIO:
-            return f"Áudio · {request.codec.upper()}"
-        return f"Áudio · {request.codec.upper()} {request.quality} kbps"
+            return t("DESC_DOWNLOAD_AUDIO", codec=request.codec.upper())
+        return t("DESC_DOWNLOAD_AUDIO_RATE", codec=request.codec.upper(), quality=request.quality)
 
     parts: list[str] = []
     choice = plan.video if plan else request.video
@@ -189,7 +173,7 @@ def describe_request(request: Request, plan: ContainerPlan | None) -> str:
         if choice.family:
             parts.append(choice.family)
     elif request.max_height:
-        parts.append(f"até {request.max_height}p")
+        parts.append(t("DESC_UP_TO", height=request.max_height))
     container = plan.container if plan else request.container
     parts.append(".mkv" if container == CONTAINER_AUTO else f".{container}")
     return " · ".join(parts)

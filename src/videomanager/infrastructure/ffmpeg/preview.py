@@ -34,6 +34,7 @@ from pathlib import Path
 from videomanager.infrastructure.ffmpeg.command_assets import filter_script
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.errors import VideoManagerError
+from videomanager.domain.i18n import Text
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
 
@@ -58,7 +59,7 @@ def _run_raw(command: list[str], timeout: int, register: Register | None = None,
         proc = subprocess.Popen(command, **subprocess_kwargs())
     except OSError as exc:
         if strict:
-            raise VideoManagerError("Não foi possível iniciar o FFmpeg para atualizar a prévia.") from exc
+            raise VideoManagerError(Text("PREVIEW_START_FAILED")) from exc
         return b""
     if register is not None:
         register(proc)
@@ -70,21 +71,21 @@ def _run_raw(command: list[str], timeout: int, register: Register | None = None,
         proc.kill()
         proc.communicate()
         if strict:
-            raise VideoManagerError("A atualização da prévia excedeu o prazo. Tente novamente.")
+            raise VideoManagerError(Text("PREVIEW_TIMEOUT"))
         return b""
     if strict and proc.returncode != 0:
         raise VideoManagerError(_preview_error(stderr or b""))
     return stdout or b"" if proc.returncode == 0 else b""
 
 
-def _preview_error(stderr: bytes) -> str:
+def _preview_error(stderr: bytes) -> Text:
     # Nunca publicar caminhos, comandos ou URLs da mídia no diagnóstico.
     detail = stderr[-8192:].lower()
     if b"no such file" in detail or b"error opening input" in detail:
-        return "Não foi possível ler uma mídia da prévia. Confira os arquivos do projeto."
+        return Text("PREVIEW_READ_FAILED")
     if b"no such filter" in detail or b"error initializing filter" in detail:
-        return "O FFmpeg não conseguiu aplicar um efeito da prévia. Confira a versão instalada."
-    return "Não foi possível renderizar a prévia. Confira as mídias e os efeitos do projeto."
+        return Text("PREVIEW_FILTER_FAILED")
+    return Text("PREVIEW_RENDER_FAILED")
 
 
 class _DiagnosticTail:
@@ -129,7 +130,7 @@ def frame_from_command(
     width, height = size
     frame = RawFrame(_run(command, timeout, register, strict=strict), width, height)
     if strict and not frame.is_complete:
-        raise VideoManagerError("A prévia não retornou um quadro completo. Confira a mídia nesse instante.")
+        raise VideoManagerError(Text("PREVIEW_INCOMPLETE"))
     return frame if frame.is_complete else None
 
 
@@ -428,13 +429,13 @@ def _jpeg_end(data: bytearray, start: int) -> int | None:
     if size - start < 2:
         return None
     if data[start] != 0xFF or data[start + 1] != 0xD8:
-        raise VideoManagerError("Fluxo de quadros da prévia inválido.")
+        raise VideoManagerError(Text("PREVIEW_STREAM_INVALID"))
     index = start + 2
     while True:
         if index + 1 >= size:
             return None
         if data[index] != 0xFF:
-            raise VideoManagerError("Fluxo de quadros da prévia inválido.")
+            raise VideoManagerError(Text("PREVIEW_STREAM_INVALID"))
         marker = data[index + 1]
         if marker == 0xFF:
             index += 1  # byte de preenchimento
@@ -653,7 +654,7 @@ class FramePump:
         try:
             process = subprocess.Popen(command, **subprocess_kwargs())
         except OSError as exc:
-            raise VideoManagerError("Não foi possível iniciar a reprodução da prévia.") from exc
+            raise VideoManagerError(Text("PREVIEW_PLAYBACK_START_FAILED")) from exc
         diagnostic = _DiagnosticTail(getattr(process, "stderr", None))
 
         with self._lock:

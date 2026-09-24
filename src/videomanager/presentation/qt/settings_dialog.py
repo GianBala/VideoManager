@@ -163,7 +163,7 @@ class SettingsDialog(QDialog):
         self._add_row(form, strings.SETTINGS_THEME, self._theme)
 
         self._encoder = QComboBox()
-        for value, label in hwaccel.CHOICES:
+        for value, label in hwaccel.choices():
             self._encoder.addItem(label, value)
         self._encoder.setCurrentIndex(
             max(0, self._encoder.findData(self._settings.hardware_encoder))

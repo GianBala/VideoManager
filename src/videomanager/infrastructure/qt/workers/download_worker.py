@@ -10,6 +10,8 @@ from videomanager.infrastructure.yt_dlp.selector import build_opts
 from videomanager.application.errors import BinaryNotFoundError
 from videomanager.application.errors import JobCancelled
 from videomanager.application.errors import VideoManagerError
+from videomanager.application.errors import error_message
+from videomanager.domain.i18n import Text
 from videomanager.application.jobs.models import Job
 from videomanager.infrastructure.qt.workers.signals import DownloadSignals
 from videomanager.infrastructure.qt.workers.signals import emit_safely
@@ -25,7 +27,7 @@ class DownloadWorker(QRunnable):
         request = job.request
         tools = find_tools()
         if tools is None:
-            raise BinaryNotFoundError("FFmpeg não disponível.")
+            raise BinaryNotFoundError(Text("FFMPEG_UNAVAILABLE"))
         opts, _ = build_opts(request.selection, request.media, request.preferences, tools, request.destination, request.temporary)
         self._downloader = Downloader(opts, on_progress=self._emit_progress)
         self._cancel_requested = False
@@ -66,12 +68,12 @@ class DownloadWorker(QRunnable):
         except JobCancelled:
             emit_safely(self.signals.cancelled, job_id)
         except VideoManagerError as exc:
-            emit_safely(self.signals.failed, job_id, str(exc))
+            emit_safely(self.signals.failed, job_id, error_message(exc))
         except Exception as exc:  # noqa: BLE001
             emit_safely(
                 self.signals.failed,
                 job_id,
-                f"Erro inesperado ({type(exc).__name__}): {exc}",
+                Text("ERROR_UNEXPECTED", kind=type(exc).__name__, detail=str(exc)),
             )
         else:
             emit_safely(self.signals.finished, job_id, result)
