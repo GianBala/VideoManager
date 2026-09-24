@@ -1988,6 +1988,11 @@ class EditPanel(QWidget):
             ):
                 self._canvas_choice = dialog.chosen_canvas
                 self._rate_choice = dialog.chosen_rate
+                # A proporção acompanha a tela, como na lista do painel: uma tela
+                # de outra proporção ficava fora da lista filtrada, que passava a
+                # dizer "Automática" com a tela fixada.
+                self._aspect_choice = (format_aspect_ratio(*self._canvas_choice)
+                                       if self._canvas_choice else None)
                 self._sync_canvas()
                 self._after_edit()
             self.jobs_ready.emit([dialog.created_job])
@@ -3226,7 +3231,8 @@ class EditPanel(QWidget):
                 box.clear()
                 for label, data in options:
                     box.addItem(label, data)
-            # A escolha em vigor sempre está na lista (ver canvas_options).
+            # A escolha em vigor sempre está na lista (ver canvas_options):
+            # todo caminho que muda a tela ajusta a proporção junto.
             box.setCurrentIndex(max(0, _index_of(box, self._canvas_choice)))
         finally:
             self._syncing = False
