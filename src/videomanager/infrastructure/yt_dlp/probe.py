@@ -20,6 +20,7 @@ from videomanager.application.errors import DrmProtectedError
 from videomanager.application.errors import NoFormatsError
 from videomanager.application.errors import ProbeError
 from videomanager.application.errors import UnsupportedUrlError
+from videomanager.domain.i18n import Text, t
 from videomanager.infrastructure.yt_dlp.extras import js_runtime_opts
 from videomanager.infrastructure.yt_dlp.formats import build_matrix
 from videomanager.domain.formats import MediaInfo
@@ -52,11 +53,11 @@ class _QuietLogger:
         self.messages.append(msg)
 
     def warning(self, msg: str) -> None:
-        self.messages.append(f"aviso: {msg}")
+        self.messages.append(t("LOG_WARNING", message=msg))
         _LOG.warning("yt-dlp: %s", msg)
 
     def error(self, msg: str) -> None:
-        self.messages.append(f"erro: {msg}")
+        self.messages.append(t("LOG_ERROR", message=msg))
         _LOG.error("yt-dlp: %s", msg)
 
 
@@ -100,7 +101,7 @@ _LOGIN_HINTS = (
 )
 
 
-def _translate_error(exc: Exception, action: str = "analisar a URL") -> ProbeError:
+def _translate_error(exc: Exception, action: Text | None = None) -> ProbeError:
     """Converte um erro do yt-dlp em algo que o usuário consiga agir sobre.
 
     ``action`` nomeia a etapa na mensagem sem tradução conhecida: o download
@@ -111,40 +112,27 @@ def _translate_error(exc: Exception, action: str = "analisar a URL") -> ProbeErr
     lowered = message.lower()
 
     if isinstance(exc, UnsupportedError) or "unsupported url" in lowered:
-        return UnsupportedUrlError(
-            "Nenhum extrator reconhece esta URL. Confira o endereço; se o site "
-            "for novo, atualizar a engine em Configurações pode resolver."
-        )
+        return UnsupportedUrlError(Text("PROBE_UNSUPPORTED"))
 
     if "drm" in lowered:
-        return DrmProtectedError(
-            "Esta mídia é protegida por DRM e não pode ser baixada."
-        )
+        return DrmProtectedError(Text("PROBE_DRM"))
 
     if any(hint in lowered for hint in _LOGIN_HINTS):
-        return ProbeError(
-            "Esta mídia exige conta conectada (privada, de membros ou com "
-            "restrição de idade). Em Configurações, escolha o navegador em que "
-            "você já está logado para que os cookies sejam usados."
-        )
+        return ProbeError(Text("PROBE_LOGIN"))
 
     if isinstance(exc, GeoRestrictedError) or "not available in your country" in lowered:
-        return ProbeError(
-            "Esta mídia está bloqueada na sua região."
-        )
+        return ProbeError(Text("PROBE_GEO"))
 
     if "video unavailable" in lowered or "has been removed" in lowered:
-        return ProbeError("Esta mídia não está mais disponível.")
+        return ProbeError(Text("PROBE_UNAVAILABLE"))
 
     if any(hint in lowered for hint in ("timed out", "timeout", "connection", "network", "resolve")):
-        return ProbeError(
-            "Não foi possível conectar. Verifique sua conexão e tente novamente."
-        )
+        return ProbeError(Text("PROBE_NETWORK"))
 
     # Sem tradução conhecida: entrega a mensagem original, limpa do prefixo que o
     # yt-dlp acrescenta. Uma mensagem técnica é melhor que uma genérica.
     cleaned = re.sub(r"^ERROR:\s*", "", message).strip()
-    return ProbeError(f"Falha ao {action}: {cleaned}")
+    return ProbeError(Text("PROBE_FAILED", action=action or Text("ACTION_ANALYZE"), detail=cleaned))
 
 
 def _subtitle_tracks(info: dict[str, Any]) -> tuple[SubtitleTrack, ...]:
@@ -210,7 +198,7 @@ def media_from_info(info: dict[str, Any], url: str = "") -> MediaInfo:
     duration = info.get("duration")
     return MediaInfo(
         url=str(info.get("webpage_url") or url),
-        title=str(info.get("title") or "Sem título"),
+        title=str(info.get("title") or t("MEDIA_UNTITLED")),
         matrix=matrix,
         media_id=str(info.get("id") or ""),
         extractor=str(info.get("extractor_key") or info.get("extractor") or ""),
@@ -235,7 +223,7 @@ def probe(
     """
     url = url.strip()
     if not url:
-        raise ProbeError("Informe uma URL.")
+        raise ProbeError(Text("ERROR_URL_EMPTY"))
 
     settings = settings or Settings()
     try:
@@ -247,33 +235,25 @@ def probe(
     except (DownloadError, ExtractorError) as exc:
         raise _translate_error(exc) from exc
     except OSError as exc:
-        raise ProbeError(f"Falha de rede ao analisar a URL: {exc}") from exc
+        raise ProbeError(Text("PROBE_NETWORK_FAILED", error=str(exc))) from exc
 
     if not isinstance(info, dict):
-        raise ProbeError("O extrator não devolveu informação utilizável.")
+        raise ProbeError(Text("PROBE_NO_INFO"))
 
     if info.get("_type") in ("playlist", "multi_video"):
         playlist = _as_playlist(info, url)
         if not playlist.entries:
-            raise NoFormatsError("Esta playlist está vazia ou é inacessível.")
+            raise NoFormatsError(Text("PROBE_EMPTY_PLAYLIST"))
         return playlist
 
     media = media_from_info(info, url)
 
     if media.matrix.is_empty:
         if media.matrix.drm_blocked:
-            raise DrmProtectedError(
-                "Todos os formatos desta mídia são protegidos por DRM."
-            )
+            raise DrmProtectedError(Text("PROBE_ALL_DRM"))
         if media.is_live:
-            raise NoFormatsError(
-                "Esta transmissão ao vivo ainda não oferece formatos para baixar. "
-                "Tente novamente depois que ela começar."
-            )
-        raise NoFormatsError(
-            "A URL foi reconhecida, mas nenhum formato utilizável foi oferecido. "
-            "Se a mídia exige login, configure o navegador para leitura de cookies."
-        )
+            raise NoFormatsError(Text("PROBE_LIVE_NOT_STARTED"))
+        raise NoFormatsError(Text("PROBE_NO_FORMATS"))
 
     return media
 

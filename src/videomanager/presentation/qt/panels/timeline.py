@@ -628,7 +628,7 @@ class Timeline(QWidget):
         painter.drawText(
             rect.adjusted(10, 0, right_margin, 0),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            track.name,
+            track.title,
         )
 
         # Botão de visibilidade (olho): para vídeo e adicionais

@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 from videomanager.application.errors import ConversionError
+from videomanager.domain.i18n import Text, t
 from videomanager.application.jobs.requests import ConversionTarget
 
 def output_path(
@@ -34,17 +35,15 @@ def output_path(
     clean_custom = custom_stem.strip() if custom_stem else ""
     stem = clean_custom if clean_custom else f"{source.stem}{suffix}"
     if any(char in stem for char in ('/', '\\', '\0')) or stem in ('.', '..'):
-        raise ConversionError("Use somente um nome de arquivo, sem caminhos ou separadores.")
+        raise ConversionError(Text("OUTPUT_BAD_NAME"))
     candidate = directory / f"{stem}.{target.extension}"
     if candidate.resolve() == source.resolve():
-        candidate = directory / f"{stem} (convertido).{target.extension}"
+        candidate = directory / f"{stem}{t('OUTPUT_CONVERTED_SUFFIX')}.{target.extension}"
 
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise ConversionError(
-            f"Não foi possível usar a pasta de destino {directory}: {exc}"
-        ) from exc
+        raise ConversionError(Text("OUTPUT_DIR_FAILED", directory=directory, error=str(exc))) from exc
 
     counter = 2
     while True:
@@ -55,6 +54,4 @@ def output_path(
             candidate = directory / f"{stem} ({counter}).{target.extension}"
             counter += 1
         except OSError as exc:
-            raise ConversionError(
-                f"Não foi possível criar o arquivo de saída em {directory}: {exc}"
-            ) from exc
+            raise ConversionError(Text("OUTPUT_CREATE_FAILED", directory=directory, error=str(exc))) from exc

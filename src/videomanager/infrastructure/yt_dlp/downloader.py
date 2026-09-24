@@ -21,6 +21,8 @@ from yt_dlp.utils import DownloadCancelled, DownloadError, ExtractorError
 
 from videomanager.application.errors import DownloadFailedError
 from videomanager.application.errors import JobCancelled
+from videomanager.application.errors import error_message
+from videomanager.domain.i18n import Text, t
 from videomanager.infrastructure.yt_dlp.extras import TolerantEmbedThumbnailPP
 from videomanager.infrastructure.yt_dlp.extras import split_thumbnail_postprocessor
 from videomanager.infrastructure.yt_dlp.probe import _translate_error
@@ -32,20 +34,15 @@ from videomanager.application.events import DownloadResult as DownloadResult
 
 ProgressCallback = Callable[[Progress], None]
 
-# A fila distingue "baixando" de "processando" para escolher a situação exibida.
-# A constante existe para que essa decisão não dependa de comparar um texto de
-# interface: traduzir a palavra quebraria a fila em silêncio.
-PHASE_DOWNLOADING = "Baixando"
-
 _PHASE_LABELS = {
-    "FFmpegMerger": "Juntando vídeo e áudio",
-    "FFmpegExtractAudio": "Extraindo áudio",
-    "FFmpegVideoConvertor": "Convertendo vídeo",
-    "FFmpegVideoRemuxer": "Trocando o container",
-    "FFmpegMetadata": "Gravando metadados",
-    "EmbedThumbnail": "Embutindo a capa",
-    "FFmpegEmbedSubtitle": "Embutindo legendas",
-    "MoveFiles": "Movendo para a pasta de destino",
+    "FFmpegMerger": "PHASE_MERGING",
+    "FFmpegExtractAudio": "PHASE_EXTRACTING_AUDIO",
+    "FFmpegVideoConvertor": "PHASE_CONVERTING_VIDEO",
+    "FFmpegVideoRemuxer": "PHASE_REMUXING",
+    "FFmpegMetadata": "PHASE_METADATA",
+    "EmbedThumbnail": "PHASE_THUMBNAIL",
+    "FFmpegEmbedSubtitle": "PHASE_SUBTITLES",
+    "MoveFiles": "PHASE_MOVING",
 }
 
 
@@ -70,11 +67,12 @@ class _JobLogger:
     def info(self, msg: str) -> None:
         self._add(msg)
 
+    # O log é registro do que aconteceu: a linha sai no idioma do momento.
     def warning(self, msg: str) -> None:
-        self._add(f"aviso: {msg}")
+        self._add(t("LOG_WARNING", message=msg))
 
     def error(self, msg: str) -> None:
-        self._add(f"erro: {msg}")
+        self._add(t("LOG_ERROR", message=msg))
 
 
 def _percent(downloaded: int | None, total: int | None) -> float | None:
@@ -141,7 +139,7 @@ class Downloader:
         status = data.get("status")
         if status == "finished":
             self._on_progress(
-                Progress(phase="Download concluído, processando", percent=100.0, indeterminate=True)
+                Progress(phase=Text("PHASE_DOWNLOADED"), percent=100.0, indeterminate=True)
             )
             return
         if status == "error":
@@ -167,7 +165,7 @@ class Downloader:
 
         self._on_progress(
             Progress(
-                phase=PHASE_DOWNLOADING,
+                phase=Text("PHASE_DOWNLOADING"),
                 stage=ProgressStage.DOWNLOAD,
                 percent=percent,
                 downloaded_bytes=downloaded if isinstance(downloaded, int) else None,
@@ -191,7 +189,7 @@ class Downloader:
         if self._on_progress is None or data.get("status") != "started":
             return
         name = str(data.get("postprocessor") or "")
-        label = _PHASE_LABELS.get(name, "Processando")
+        label = Text(_PHASE_LABELS.get(name, "PHASE_PROCESSING"))
         self._on_progress(Progress(phase=label, percent=None, indeterminate=True))
 
     # -- execução ---------------------------------------------------------
@@ -238,13 +236,10 @@ class Downloader:
             # DownloadError, então a checagem de cancelamento vem primeiro.
             if self._cancelled:
                 raise JobCancelled("Download cancelado.") from exc
-            translated = _translate_error(exc, "baixar")
-            raise DownloadFailedError(str(translated)) from exc
+            translated = _translate_error(exc, Text("ACTION_DOWNLOAD"))
+            raise DownloadFailedError(error_message(translated)) from exc
         except OSError as exc:
-            raise DownloadFailedError(
-                f"Falha ao gravar o arquivo: {exc}. Verifique espaço em disco e "
-                "permissões da pasta de destino."
-            ) from exc
+            raise DownloadFailedError(Text("DOWNLOAD_WRITE_FAILED", error=str(exc))) from exc
 
         if self._cancelled:
             raise JobCancelled("Download cancelado.")

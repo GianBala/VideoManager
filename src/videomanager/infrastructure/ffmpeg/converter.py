@@ -37,6 +37,7 @@ from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
 from videomanager.application.events import Progress
 from videomanager.application.errors import ConversionError
+from videomanager.domain.i18n import Text
 from videomanager.infrastructure.system.process import ProcessControl, terminate_and_wait, terminate_async
 from videomanager.domain.composition import Composition
 from videomanager.infrastructure.ffmpeg.composer import export_args
@@ -113,7 +114,7 @@ ConversionTarget = AudioTarget | VideoTarget | TrimTarget | Composition
 def probe_file(path: Path, tools: FFmpegTools, *, control: ProcessControl | None = None) -> LocalMedia:
     """Inspeciona um arquivo local com ffprobe."""
     if not path.is_file():
-        raise ConversionError(f"Arquivo não encontrado: {path}")
+        raise ConversionError(Text("CONVERT_FILE_NOT_FOUND", path=path))
 
     command = [
         tools.ffprobe_str,
@@ -126,17 +127,15 @@ def probe_file(path: Path, tools: FFmpegTools, *, control: ProcessControl | None
     try:
         proc = (control or ProcessControl()).run(command, timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:
-        raise ConversionError(f"Falha ao inspecionar o arquivo: {exc}") from exc
+        raise ConversionError(Text("CONVERT_INSPECT_FAILED", error=str(exc))) from exc
 
     if proc.returncode != 0:
-        raise ConversionError(
-            f"O ffprobe não reconheceu “{path.name}” como arquivo de mídia."
-        )
+        raise ConversionError(Text("CONVERT_NOT_MEDIA", name=path.name))
 
     try:
         data = json.loads(proc.stdout or b"{}")
     except json.JSONDecodeError as exc:
-        raise ConversionError("Resposta do ffprobe ilegível.") from exc
+        raise ConversionError(Text("CONVERT_PROBE_UNREADABLE")) from exc
 
     container = data.get("format") or {}
     streams: list[LocalStream] = []
@@ -252,9 +251,7 @@ def build_audio_args(
 ) -> list[str]:
     """Argumentos do ffmpeg para extrair/converter o áudio."""
     if not media.has_audio:
-        raise ConversionError(
-            f"“{media.path.name}” não tem trilha de áudio para converter."
-        )
+        raise ConversionError(Text("CONVERT_NO_AUDIO", name=media.path.name))
 
     args = [
         tools.ffmpeg_str,
@@ -273,7 +270,7 @@ def build_audio_args(
     else:
         encoder = _AUDIO_ENCODERS.get(target.codec)
         if encoder is None:
-            raise ConversionError(f"Formato de áudio não suportado: {target.codec}")
+            raise ConversionError(Text("CONVERT_AUDIO_FORMAT_UNSUPPORTED", codec=target.codec))
         if encoder == "pcm_s16le" and media.audio and media.audio.codec.lower().startswith(_HIGH_RES_PCM):
             # WAV é anunciado como "sem perda": uma origem de 24 bits ou
             # ponto flutuante reduzida a 16 bits perdia resolução em silêncio.
@@ -318,9 +315,7 @@ def build_video_args(
 ) -> list[str]:
     """Argumentos do ffmpeg para converter vídeo."""
     if not media.has_video:
-        raise ConversionError(
-            f"“{media.path.name}” não tem trilha de vídeo. Use a conversão para áudio."
-        )
+        raise ConversionError(Text("CONVERT_NO_VIDEO", name=media.path.name))
 
     codec = resolved_video_codec(media, target)
     device_args: list[str] = []
@@ -348,7 +343,7 @@ def build_video_args(
         else:
             encoder = _VIDEO_ENCODERS.get(codec)
             if encoder is None:
-                raise ConversionError(f"Codec de vídeo não suportado: {codec}")
+                raise ConversionError(Text("CONVERT_VIDEO_CODEC_UNSUPPORTED", codec=codec))
             video_encoder_args = ["-c:v", encoder, "-crf", str(target.crf)]
             if encoder in ("libx264", "libx265"):
                 # yuv420p garante reprodução em reprodutores legados e navegadores
@@ -395,7 +390,7 @@ def build_video_args(
         else:
             encoder = _AUDIO_ENCODERS.get(audio_codec)
             if encoder is None:
-                raise ConversionError(f"Codec de áudio não suportado: {audio_codec}")
+                raise ConversionError(Text("CONVERT_AUDIO_CODEC_UNSUPPORTED", codec=audio_codec))
             args += ["-c:a", encoder, "-b:a", f"{target.audio_bitrate}k"]
 
     if target.container == "mp4":
@@ -459,8 +454,8 @@ def output_duration(media: LocalMedia | None, target: ConversionTarget) -> float
 # ``if`` no meio do laço de progresso, para acrescentar um alvo novo não exigir
 # mexer no código que lê o ffmpeg.
 _PHASES = {
-    TrimTarget: "Recortando",
-    Composition: "Exportando",
+    TrimTarget: "PHASE_TRIMMING",
+    Composition: "PHASE_EXPORTING",
 }
 
 _PROGRESS_LINE = re.compile(r"^(\w+)=(.*)$")
@@ -567,7 +562,7 @@ class Converter:
             percent = min(100.0, seconds * 100.0 / duration)
         self._on_progress(
             Progress(
-                phase=_PHASES.get(type(self._target), "Convertendo"),
+                phase=Text(_PHASES.get(type(self._target), "PHASE_CONVERTING")),
                 percent=percent,
                 downloaded_bytes=size,
                 indeterminate=percent is None,
@@ -622,7 +617,7 @@ class Converter:
         except OSError as exc:
             render_target.unlink(missing_ok=True)
             self._outputs.abort(self._destination, lease=self._lease)
-            raise ConversionError(f"Não foi possível iniciar o ffmpeg: {exc}") from exc
+            raise ConversionError(Text("CONVERT_START_FAILED", error=str(exc))) from exc
 
         with self._lock:
             self._process = process
@@ -682,11 +677,9 @@ class Converter:
         self._postprocess.check()
         if process.returncode != 0:
             detail = _last_error_line(stderr)
-            raise ConversionError(f"O ffmpeg falhou na conversão: {detail}")
+            raise ConversionError(Text("CONVERT_FAILED", detail=detail))
         if not render_target.is_file() or render_target.stat().st_size == 0:
-            raise ConversionError(
-                "O ffmpeg terminou sem erro mas não gerou o arquivo de saída."
-            )
+            raise ConversionError(Text("CONVERT_NO_OUTPUT"))
 
         is_video = not isinstance(self._target, AudioTarget)
         audio_only = isinstance(self._target, Composition) and self._target.audio_only
@@ -703,7 +696,7 @@ class Converter:
         return self._destination
 
 
-def _last_error_line(stderr: str) -> str:
+def _last_error_line(stderr: str) -> str | Text:
     """Última linha significativa do stderr — onde o ffmpeg diz a causa."""
     lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
-    return lines[-1] if lines else "erro não informado"
+    return lines[-1] if lines else Text("ERROR_NO_DETAIL")

@@ -7,6 +7,7 @@ from videomanager.domain.timing import TrimTarget
 from videomanager.domain.compatibility import can_copy_audio
 from videomanager.domain.compatibility import resolved_video_codec
 from videomanager.domain.compatibility import resolved_audio_codec
+from videomanager.domain.i18n import t
 from videomanager.application.jobs.requests import ConversionTarget
 from videomanager.application.media.export_description import describe_export
 from videomanager.application.media.trim_description import describe_trim
@@ -28,23 +29,23 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
         return describe_trim(media, target)
     if isinstance(target, AudioTarget):
         if can_copy_audio(media, target.codec):
-            return f"{target.codec.upper()} · cópia direta (sem recodificar)"
+            return t("DESC_AUDIO_COPY", codec=target.codec.upper())
         if target.is_lossless:
-            return f"{target.codec.upper()} · sem perda"
+            return t("DESC_AUDIO_LOSSLESS", codec=target.codec.upper())
         return f"{target.codec.upper()} · {target.bitrate} kbps"
 
     parts = [f".{target.container}"]
     codec = resolved_video_codec(media, target)
     if codec == "copy":
-        parts.append("vídeo copiado (sem recodificar)")
+        parts.append(t("DESC_VIDEO_COPY"))
     else:
-        parts.append(f"recodifica em {codec.upper()}")
+        parts.append(t("DESC_REENCODE", codec=codec.upper()))
         if target.hardware != hwaccel.SOFTWARE and codec in ("h264", "hevc"):
-            parts.append("placa de vídeo, se disponível")
+            parts.append(t("DESC_GPU"))
     audio_codec = resolved_audio_codec(media, target)
     if media.has_audio and audio_codec != "copy":
         # Só se diz quando há custo: "áudio copiado" seria ruído em toda linha.
-        parts.append(f"áudio em {audio_codec.upper()}")
+        parts.append(t("DESC_AUDIO_TO", codec=audio_codec.upper()))
     if target.height:
         parts.append(f"{target.height}p")
     if target.fps:
@@ -53,7 +54,7 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
         # Só o MKV guarda todas as faixas; nos outros a saída leva o primeiro
         # vídeo e o primeiro áudio. Dizer antes evita descobrir depois.
         if sum(1 for stream in media.streams if stream.kind == "audio") > 1:
-            parts.append("somente a 1ª faixa de áudio")
+            parts.append(t("DESC_FIRST_AUDIO_ONLY"))
         if any(stream.kind == "subtitle" for stream in media.streams):
-            parts.append("legendas não incluídas")
+            parts.append(t("DESC_NO_SUBTITLES"))
     return " · ".join(parts)

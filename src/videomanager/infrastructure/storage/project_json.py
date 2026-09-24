@@ -15,6 +15,7 @@ from pathlib import Path
 
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.errors import ProjectError
+from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
@@ -187,8 +188,8 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
 
 def _validate_project(data: dict[str, object]) -> None:
     """Valida o documento inteiro antes de construir ou substituir a edição."""
-    def fail(field: str) -> None:
-        raise ProjectError(f"Estrutura do arquivo de projeto inválida: {field}.")
+    def fail(field: str | Text) -> None:
+        raise ProjectError(Text("PROJECT_INVALID", field=field))
 
     def number(obj, name, *, minimum=None, positive=False, integer=False):
         if name not in obj:
@@ -216,41 +217,41 @@ def _validate_project(data: dict[str, object]) -> None:
                 fail(name)
 
     if not isinstance(data, dict):
-        fail("documento")
+        fail(Text("PROJECT_FIELD_DOCUMENT"))
     version = data.get("version", 1)
     if type(version) is not int or not 1 <= version <= PROJECT_VERSION:
-        raise ProjectError(f"Versão de projeto {version} não é suportada por esta versão do aplicativo.")
+        raise ProjectError(Text("PROJECT_VERSION_UNSUPPORTED", version=version))
     for name in ("width", "height", "fps", "text_reference_width", "text_reference_height"):
         number(data, name, positive=True, integer=name != "fps")
     tracks = data.get("tracks", [])
     if not isinstance(tracks, list):
-        fail("trilhas")
+        fail(Text("PROJECT_FIELD_TRACKS"))
     clip_ids, track_ids = set(), set()
     for track in tracks:
         if not isinstance(track, dict):
-            fail("trilha")
+            fail(Text("PROJECT_FIELD_TRACK"))
         number(track, "track_id", positive=True, integer=True)
         if "track_id" in track:
             if track["track_id"] in track_ids:
-                fail("ID de trilha duplicado")
+                fail(Text("PROJECT_FIELD_TRACK_ID"))
             track_ids.add(track["track_id"])
         if track.get("kind", "VIDEO") not in TrackKind.__members__:
-            fail("tipo de trilha")
+            fail(Text("PROJECT_FIELD_TRACK_KIND"))
         booleans(track, ("muted", "visible"))
         strings(track, ("name",))
         clips = track.get("clips", [])
         if not isinstance(clips, list):
-            fail("clipes")
+            fail(Text("PROJECT_FIELD_CLIPS"))
         for clip in clips:
             if not isinstance(clip, dict):
-                fail("clipe")
+                fail(Text("PROJECT_FIELD_CLIP"))
             number(clip, "clip_id", positive=True, integer=True)
             if "clip_id" in clip:
                 if clip["clip_id"] in clip_ids:
-                    fail("ID de clipe duplicado")
+                    fail(Text("PROJECT_FIELD_CLIP_ID"))
                 clip_ids.add(clip["clip_id"])
             if "duration" not in clip:
-                fail("duração do clipe")
+                fail(Text("PROJECT_FIELD_CLIP_DURATION"))
             for name in ("duration", "speed", "scale", "scale_x", "scale_y"):
                 number(clip, name, positive=True)
             for name in ("start", "stroke_width", "chromakey_similarity", "chromakey_blend"):
@@ -272,10 +273,10 @@ def _validate_project(data: dict[str, object]) -> None:
                     fail(name)
             if "keyframes" in clip:
                 if not isinstance(clip["keyframes"], list):
-                    fail("quadros-chave")
+                    fail(Text("PROJECT_FIELD_KEYFRAMES"))
                 for kf in clip["keyframes"]:
                     if not isinstance(kf, dict):
-                        fail("quadro-chave")
+                        fail(Text("PROJECT_FIELD_KEYFRAME"))
                     number(kf, "time_offset", minimum=0 if data.get("version", 1) == 1 else None)
                     for kf_num in ("x", "y", "rotation"):
                         number(kf, kf_num)
@@ -284,7 +285,7 @@ def _validate_project(data: dict[str, object]) -> None:
                     if "opacity" in kf:
                         number(kf, "opacity", minimum=0)
                         if kf["opacity"] > 1:
-                            fail("opacidade do quadro-chave")
+                            fail(Text("PROJECT_FIELD_KEYFRAME_OPACITY"))
                     strings(kf, ("easing",))
             booleans(
                 clip,
@@ -300,12 +301,12 @@ def _validate_project(data: dict[str, object]) -> None:
             )
             strings(clip, ("overlay_type", "text_content", "font_family", "text_color", "stroke_color", "filter_name", "transition_name", "chromakey_color"))
             if clip.get("overlay_type", "none") not in ("none", "image", "text", "filter", "transition"):
-                fail("tipo de sobreposição")
+                fail(Text("PROJECT_FIELD_OVERLAY"))
             media = clip.get("media")
             if not isinstance(media, dict) or not isinstance(media.get("path"), str) or not media["path"]:
-                fail("caminho da mídia")
+                fail(Text("PROJECT_FIELD_MEDIA_PATH"))
             if media.get("kind", "VIDEO") not in MediaKind.__members__:
-                fail("tipo de mídia")
+                fail(Text("PROJECT_FIELD_MEDIA_KIND"))
             strings(media, ("rel_path",))
             booleans(media, ("has_audio",))
             for name in ("duration", "width", "height", "fps", "channels"):
@@ -326,7 +327,7 @@ def project_from_dict(data: dict[str, object], base_dir: Path | None = None,
         )
         return _project_from_dict(data, base_dir, tools)
     except (ValueError, TypeError, KeyError, OverflowError, OSError) as exc:
-        raise ProjectError(f"Estrutura do arquivo de projeto inválida: {exc}") from exc
+        raise ProjectError(Text("PROJECT_INVALID_DETAIL", error=str(exc))) from exc
 
 
 def _project_from_dict(
@@ -338,9 +339,7 @@ def _project_from_dict(
     missing_files: list[Path] = []
     version = data.get("version", 1)
     if not isinstance(version, int) or version > PROJECT_VERSION:
-        raise ProjectError(
-            f"Versão de projeto {version} não é suportada por esta versão do aplicativo."
-        )
+        raise ProjectError(Text("PROJECT_VERSION_UNSUPPORTED", version=version))
 
     width = int(data.get("width", 1920))
     height = int(data.get("height", 1080))
@@ -348,7 +347,7 @@ def _project_from_dict(
 
     tracks_raw = data.get("tracks", [])
     if not isinstance(tracks_raw, list):
-        raise ProjectError("Estrutura do arquivo de projeto corrompida: trilhas inválidas.")
+        raise ProjectError(Text("PROJECT_TRACKS_CORRUPT"))
 
     tracks: list[Track] = []
     for t_data in tracks_raw:
@@ -481,7 +480,7 @@ def save_project(project: Project, path: Path) -> None:
             os.fsync(handle.fileno())
         tmp_path.replace(path)
     except (OSError, ValueError) as exc:
-        raise ProjectError(f"Não foi possível salvar o projeto em {path}: {exc}") from exc
+        raise ProjectError(Text("PROJECT_SAVE_FAILED", path=path, error=str(exc))) from exc
     finally:
         if tmp_path is not None:
             try:
@@ -532,18 +531,18 @@ def _backup_previous_version(path: Path) -> None:
 def load_project(path: Path, tools: FFmpegTools | None = None) -> tuple[Project, list[Path]]:
     """Abre o arquivo de projeto e retorna (projeto, arquivos_ausentes)."""
     if not path.is_file():
-        raise ProjectError(f"Arquivo de projeto não encontrado: {path}")
+        raise ProjectError(Text("PROJECT_NOT_FOUND", path=path))
 
     try:
         content = path.read_text(encoding="utf-8")
         data = json.loads(content)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ProjectError(f"Arquivo de projeto corrompido ou inválido: {exc}") from exc
+        raise ProjectError(Text("PROJECT_CORRUPT", error=str(exc))) from exc
     except OSError as exc:
-        raise ProjectError(f"Erro ao ler arquivo de projeto: {exc}") from exc
+        raise ProjectError(Text("PROJECT_READ_FAILED", error=str(exc))) from exc
 
     if not isinstance(data, dict):
-        raise ProjectError("Formato de projeto inválido.")
+        raise ProjectError(Text("PROJECT_FORMAT_INVALID"))
 
     return project_from_dict(data, base_dir=path.parent, tools=tools)
 

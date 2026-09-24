@@ -41,6 +41,7 @@ from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
 from videomanager.application.errors import ConversionError
+from videomanager.domain.i18n import Text
 
 if TYPE_CHECKING:  # pragma: no cover - só para o verificador de tipos
     from videomanager.domain.media import LocalMedia
@@ -115,7 +116,7 @@ def keyframe_times(
     try:
         proc = subprocess.Popen(command, **subprocess_kwargs())
     except OSError as exc:
-        raise ConversionError(f"Falha ao mapear os keyframes: {exc}") from exc
+        raise ConversionError(Text("TRIM_KEYFRAMES_FAILED", error=str(exc))) from exc
     if register is not None:
         register(proc)
     try:
@@ -123,19 +124,15 @@ def keyframe_times(
     except subprocess.TimeoutExpired as exc:
         proc.kill()
         proc.communicate()
-        raise ConversionError(
-            "O ffprobe passou do tempo ao mapear os keyframes deste arquivo."
-        ) from exc
+        raise ConversionError(Text("TRIM_KEYFRAMES_TIMEOUT")) from exc
     except OSError as exc:
         # O processo pode ter ficado de pé: matá-lo antes de subir o erro.
         proc.kill()
         proc.communicate()
-        raise ConversionError(f"Falha ao mapear os keyframes: {exc}") from exc
+        raise ConversionError(Text("TRIM_KEYFRAMES_FAILED", error=str(exc))) from exc
 
     if proc.returncode != 0:
-        raise ConversionError(
-            "O ffprobe não conseguiu mapear os keyframes deste arquivo."
-        )
+        raise ConversionError(Text("TRIM_KEYFRAMES_UNREADABLE"))
 
     times: list[float] = []
     for line in (stdout or b"").decode("utf-8", "replace").splitlines():
@@ -190,23 +187,17 @@ def encode_audio_args(container: str) -> list[str]:
 
 def _validate(media: LocalMedia, target: TrimTarget) -> None:
     if not target.segments:
-        raise ConversionError("Não há nenhum trecho para exportar.")
+        raise ConversionError(Text("TRIM_NO_SEGMENTS"))
     for segment in target.segments:
         if not segment.is_usable:
-            raise ConversionError(
-                f"O trecho {segment.label} é curto demais para virar um arquivo."
-            )
+            # O rótulo leva tempos com separador decimal: refeito na exibição.
+            raise ConversionError(Text("TRIM_SEGMENT_TOO_SHORT", segment=Text.of(lambda s=segment: s.label)))
     if not has_real_video(media) and not media.has_audio:
-        raise ConversionError(
-            f"“{media.path.name}” não tem trilha de vídeo nem de áudio para recortar."
-        )
+        raise ConversionError(Text("TRIM_NO_TRACKS", name=media.path.name))
     if target.joins and target.mode is CutMode.FAST:
         # Recusado aqui, e não silenciosamente recodificado: a promessa de
         # "sem recodificar" não pode ser quebrada sem o usuário saber.
-        raise ConversionError(
-            "Juntar vários trechos num arquivo só exige recodificar. Escolha o "
-            "corte exato, ou exporte cada trecho em um arquivo."
-        )
+        raise ConversionError(Text("TRIM_JOIN_NEEDS_REENCODE"))
 
 
 def tail_args(

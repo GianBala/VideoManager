@@ -37,7 +37,7 @@ from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.keyframe import ClipTransform
 from videomanager.domain.geometry import image_base_size, natural_image_size
-from videomanager.domain.i18n import decimal
+from videomanager.domain.i18n import decimal, t, variants
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import interpolate_keyframes
 from videomanager.domain.timing import source_time, available_duration, frame_index
@@ -356,9 +356,9 @@ class Clip:
     @property
     def gain_label(self) -> str:
         if self.detached:
-            return "áudio separado"
+            return t("CLIP_DETACHED")
         if self.muted:
-            return "mudo"
+            return t("CLIP_MUTED")
         if abs(self.gain_db) < 0.05:
             return ""
         return f"{decimal(self.gain_db, sign=True)} dB"
@@ -496,6 +496,17 @@ class Track:
 
     def __post_init__(self) -> None:
         _track_ids.reserve(self.track_id)
+
+    @property
+    def title(self) -> str:
+        """O nome como aparece na tela.
+
+        O nome é dado do projeto e não se traduz; só o padrão "Vídeo N", que foi
+        o aplicativo quem escolheu, sai no idioma da tela. Senão um projeto
+        criado em português mostraria "Vídeo 1" no meio da interface em inglês.
+        """
+        number = _default_number(self.kind, self.name)
+        return self.name if number is None else f"{t(_KIND_KEYS[self.kind])} {number}"
 
     @property
     def duration(self) -> float:
@@ -1322,7 +1333,7 @@ class Project:
                                     muted=track.muted, visible=track.visible))
                 tracks.append(replace(track, clips=others))
             else:
-                default = re.fullmatch(rf"{TrackKind.ADDITIONAL.value.capitalize()} \d+", track.name or "")
+                default = _default_number(TrackKind.ADDITIONAL, track.name) is not None
                 tracks.append(replace(track, kind=TrackKind.VIDEO, clips=images,
                                       name=video_name() if default or not track.name else track.name))
         return replace(self, tracks=tuple(tracks))
@@ -1375,24 +1386,36 @@ def accepts(kind: TrackKind, clip: Clip) -> bool:
     return clip.media.kind is MediaKind.AUDIO or clip.audio_only
 
 
+_KIND_KEYS = {
+    TrackKind.VIDEO: "TRACK_VIDEO",
+    TrackKind.AUDIO: "TRACK_AUDIO",
+    TrackKind.ADDITIONAL: "TRACK_ADDITIONAL",
+}
+
+
+def _default_number(kind: TrackKind, name: str | None) -> int | None:
+    """O N de um nome no padrão "Espécie N", escrito em qualquer idioma."""
+    for label in variants(_KIND_KEYS[kind]):
+        match = re.fullmatch(rf"{re.escape(label)} (\d+)", (name or "").strip())
+        if match:
+            return int(match.group(1))
+    return None
+
+
 def _free_name(kind: TrackKind, names: Iterable[str]) -> str:
-    """Nome da trilha nova: o primeiro número livre da espécie.
+    """Nome da trilha nova: o primeiro número livre da espécie, no idioma da tela.
 
     Contar quantas trilhas existem repetia nome depois de apagar uma do meio:
     com "Vídeo 1" e "Vídeo 3" na tela, a conta dava 3 e a nova nascia "Vídeo 3"
     também. Nomes escolhidos pelo usuário não entram na conta — só os do
-    padrão "Espécie N".
+    padrão "Espécie N", nos dois idiomas: a trilha criada depois da troca não
+    pode repetir o número de uma "Vídeo 1" criada antes dela.
     """
-    label = kind.value.capitalize()
-    used = {
-        int(match.group(1))
-        for match in (re.fullmatch(rf"{label} (\d+)", (name or "").strip()) for name in names)
-        if match
-    }
+    used = {number for number in (_default_number(kind, name) for name in names) if number is not None}
     number = 1
     while number in used:
         number += 1
-    return f"{label} {number}"
+    return f"{t(_KIND_KEYS[kind])} {number}"
 
 
 def _default_name(project: Project, kind: TrackKind) -> str:
@@ -1408,8 +1431,8 @@ def new_project(media: MediaRef | None = None) -> Project:
     """
     project = Project(
         tracks=(
-            Track(kind=TrackKind.VIDEO, name="Vídeo 1"),
-            Track(kind=TrackKind.AUDIO, name="Áudio 1"),
+            Track(kind=TrackKind.VIDEO, name=_free_name(TrackKind.VIDEO, ())),
+            Track(kind=TrackKind.AUDIO, name=_free_name(TrackKind.AUDIO, ())),
         )
     )
     if media is None:

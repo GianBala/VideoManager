@@ -59,6 +59,7 @@ from videomanager.infrastructure.ffmpeg.composer import segment_bounds
 from videomanager.infrastructure.ffmpeg.composer import segment_video_args
 from videomanager.application.events import Progress
 from videomanager.application.errors import ConversionError
+from videomanager.domain.i18n import Text
 from videomanager.application.errors import JobCancelled
 from videomanager.infrastructure.ffmpeg.thumbnail import embed_thumbnail
 from videomanager.infrastructure.system.memory import available_bytes
@@ -101,7 +102,7 @@ _STEP_TIMEOUT = 1800
 # ``converter.py`` de propósito: esta exportação custa dezenas de vezes o tempo
 # de uma normal, e dizer **por quê** é o que separa "está travado" de "está
 # fazendo a coisa cara que eu pedi".
-_PHASE = "Interpolando"
+_PHASE = "PHASE_INTERPOLATING"
 
 
 class ParallelExport:
@@ -143,7 +144,7 @@ class ParallelExport:
         # sobre a duração do projeto: com quatro processos correndo, o progresso
         # de um só contaria um quarto da verdade.
         self._done: dict[int, float] = {}
-        self._errors: list[str] = []
+        self._errors: list[str | Text] = []
 
     # -- controle ---------------------------------------------------------
 
@@ -162,7 +163,7 @@ class ParallelExport:
             if process.poll() is None:
                 terminate_async(process)
 
-    def _fail(self, detalhe: str) -> None:
+    def _fail(self, detalhe: str | Text) -> None:
         """Registra a falha de um trecho e derruba os irmãos.
 
         Cada trecho carrega um ``minterpolate`` inteiro, e a interpolação custa
@@ -218,15 +219,11 @@ class ParallelExport:
         # derruba os irmãos, e ler o cancelamento primeiro faria toda falha de
         # trecho aparecer como "Cancelado", sem causa nenhuma na tela.
         if self._errors:
-            raise ConversionError(
-                f"O ffmpeg falhou ao interpolar um dos trechos: {self._errors[0]}"
-            )
+            raise ConversionError(Text("PARALLEL_SEGMENT_FAILED", detail=self._errors[0]))
         self._check_cancelled()
         faltando = [p for p in partes if not p.exists()]
         if faltando:
-            raise ConversionError(
-                "Um dos trechos da exportação não foi gerado; nada foi gravado."
-            )
+            raise ConversionError(Text("PARALLEL_SEGMENT_MISSING"))
 
         lista = temp / "trechos.txt"
         # **Só o nome do arquivo**, não o caminho inteiro. O demuxer resolve
@@ -239,7 +236,7 @@ class ParallelExport:
             "".join(f"file '{p.name}'\n" for p in partes), encoding="utf-8"
         )
         video = temp / f"video.{self._composition.container}"
-        self._step(concat_args(lista, video, self._tools), "emendar os trechos")
+        self._step(concat_args(lista, video, self._tools), Text("STEP_CONCAT"))
         # Os trechos já viraram um arquivo só: mantê-los até o fim dobraria o
         # espaço que a exportação ocupa no pico, sem servir para nada.
         for parte in partes:
@@ -256,12 +253,12 @@ class ParallelExport:
             container=self._composition.container,
          text_assets=self._text_assets)
         if args is not None:
-            self._step(args, "gerar o som")
+            self._step(args, Text("STEP_AUDIO"))
         else:
             som = None  # type: ignore[assignment]
 
         pronto = temp / f"pronto.{self._composition.container}"
-        self._step(mux_args(video, som, pronto, self._tools), "juntar imagem e som")
+        self._step(mux_args(video, som, pronto, self._tools), Text("STEP_MUX"))
         self._check_cancelled()
         if not self._composition.audio_only:
             embed_thumbnail(pronto, self._tools, control=self._postprocess)
@@ -357,7 +354,7 @@ class ParallelExport:
         if process.returncode != 0 and not self._aborted:
             self._fail(_last_line(cauda))
 
-    def _step(self, args: list[str], what: str, *, timeout: int = _STEP_TIMEOUT) -> None:
+    def _step(self, args: list[str], what: Text, *, timeout: int = _STEP_TIMEOUT) -> None:
         """Um passo curto e sem progresso — emendar, gerar som, juntar.
 
         Registrado na mesma lista dos trechos e com prazo, coisas que faltavam
@@ -370,12 +367,12 @@ class ParallelExport:
         with filter_script(args) as prepared:
             self._step_command(prepared, what, timeout=timeout)
 
-    def _step_command(self, args: list[str], what: str, *, timeout: int) -> None:
+    def _step_command(self, args: list[str], what: Text, *, timeout: int) -> None:
         self._check_cancelled()
         try:
             proc = subprocess.Popen(args, **subprocess_kwargs())
         except OSError as exc:
-            raise ConversionError(f"Não foi possível {what}: {exc}") from exc
+            raise ConversionError(Text("STEP_START_FAILED", step=what, error=str(exc))) from exc
 
         with self._lock:
             self._processes[_STEP_SLOT] = proc
@@ -386,10 +383,7 @@ class ParallelExport:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate()
-            raise ConversionError(
-                f"O ffmpeg passou de {timeout // 60} min para {what} e foi "
-                "interrompido."
-            ) from None
+            raise ConversionError(Text("STEP_TIMEOUT", minutes=timeout // 60, step=what)) from None
         finally:
             terminate_and_wait(proc)
             if proc.stdout is not None:
@@ -402,7 +396,7 @@ class ParallelExport:
         self._check_cancelled()
         if proc.returncode != 0:
             detalhe = (stderr or b"").decode("utf-8", "replace").strip()
-            raise ConversionError(f"O ffmpeg falhou ao {what}: {detalhe[-300:]}")
+            raise ConversionError(Text("STEP_FAILED", step=what, detail=detalhe[-300:]))
 
     # -- progresso --------------------------------------------------------
 
@@ -419,7 +413,7 @@ class ParallelExport:
         percent = min(100.0, seconds * 100.0 * share / duracao) if duracao else None
         self._on_progress(
             Progress(
-                phase=_PHASE,
+                phase=Text(_PHASE),
                 percent=percent,
                 downloaded_bytes=None,
                 indeterminate=percent is None,
@@ -445,7 +439,7 @@ _MARCAS_DE_ERRO = ("error", "invalid", "failed", "unable", "cannot", "not suppor
                    "no space", "killed", "out of memory")
 
 
-def _last_line(cauda: deque[str]) -> str:
+def _last_line(cauda: deque[str]) -> str | Text:
     """A linha da cauda do stderr que explica a falha do trecho.
 
     A última linha nem sempre é a causa: um trecho que morreu sem mensagem
@@ -457,7 +451,7 @@ def _last_line(cauda: deque[str]) -> str:
         if any(marca in texto.lower() for marca in _MARCAS_DE_ERRO):
             return texto
     uteis = [texto.strip() for texto in cauda if texto.strip()]
-    return " | ".join(uteis[-2:]) if uteis else "sem detalhes do ffmpeg"
+    return " | ".join(uteis[-2:]) if uteis else Text("PARALLEL_NO_DETAIL")
 
 __all__ = [
     'FFmpegTools',

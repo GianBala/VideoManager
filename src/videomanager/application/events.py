@@ -4,6 +4,8 @@ from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
 
+from videomanager.domain.i18n import Text
+
 class ProgressStage(Enum):
     DOWNLOAD = "download"
     PROCESSING = "processing"
@@ -18,7 +20,7 @@ class Progress:
     faria a barra andar para trás quando a estimativa fosse corrigida.
     """
 
-    phase: str  # texto pronto para exibir ("Baixando", "Convertendo"…)
+    phase: str | Text  # texto a exibir ("Baixando", "Convertendo"…), traduzido ao desenhar
     percent: float | None = None
     downloaded_bytes: int | None = None
     total_bytes: int | None = None

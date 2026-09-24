@@ -14,6 +14,7 @@ from pathlib import Path
 
 from videomanager.application.events import Progress
 from videomanager.application.jobs.requests import JobRequest
+from videomanager.domain.i18n import Text
 
 
 class JobStatus(Enum):
@@ -66,7 +67,10 @@ class Job:
 
     url: str
     title: str
-    description: str
+    # Descrição, erro e avisos são ``Text`` quando nascem do catálogo: a tarefa
+    # fica na fila depois de uma troca de idioma e a tela converte na hora de
+    # desenhar, no idioma daquele momento.
+    description: str | Text
     kind: JobKind = JobKind.DOWNLOAD
     request: JobRequest | None = field(default=None, repr=False)
     attempt_id: int = 0
@@ -81,9 +85,9 @@ class Job:
     # levantava ``FileNotFoundError`` de dentro do modelo se o arquivo saísse do
     # lugar nesse intervalo.
     result_size: int | None = None
-    error: str | None = None
+    error: str | Text | None = None
     log: tuple[str, ...] = ()
-    warnings: tuple[str, ...] = ()
+    warnings: tuple[str | Text, ...] = ()
 
     @property
     def percent(self) -> float | None:

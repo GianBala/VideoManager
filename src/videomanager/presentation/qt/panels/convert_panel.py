@@ -38,6 +38,7 @@ from videomanager.domain.targets import AUDIO_TARGETS
 from videomanager.domain.targets import VIDEO_CONTAINERS
 from videomanager.domain.media import AudioTarget
 from videomanager.domain.media import LocalMedia
+from videomanager.domain.i18n import Text
 from videomanager.domain.compatibility import container_accepts_video
 from videomanager.domain.media import VideoTarget
 from videomanager.application.media.conversion_description import describe_target
@@ -546,7 +547,8 @@ class ConvertPanel(QWidget):
         for media in self._media:
             try:
                 job, used_fallback = self._processing.convert(media, target, same_folder=use_same_folder, fallback=fallback_dir)
-                job.description = describe_target(media, target)
+                # Refeita na exibição: a tarefa fica na fila depois da troca de idioma.
+                job.description = Text.of(describe_target, media, target)
                 jobs.append(job)
                 fallback_used = fallback_used or used_fallback
             except VideoManagerError as exc:

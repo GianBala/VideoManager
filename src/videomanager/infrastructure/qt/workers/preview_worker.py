@@ -19,6 +19,8 @@ from PySide6.QtCore import QRunnable, Slot
 
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.errors import VideoManagerError
+from videomanager.application.errors import error_message
+from videomanager.domain.i18n import Text
 from videomanager.application.media.preview import PreviewFrameInbox
 from dataclasses import replace
 
@@ -116,7 +118,7 @@ class FrameWorker(QRunnable):
                 )
         except (VideoManagerError, OSError, subprocess.SubprocessError) as exc:
             if not self._guard.cancelled:
-                message = str(exc) if isinstance(exc, VideoManagerError) else "Não foi possível atualizar a prévia."
+                message = error_message(exc) if isinstance(exc, VideoManagerError) else Text("PREVIEW_UPDATE_FAILED")
                 emit_safely(self.signals.failed, self._token, message)
         finally:
             self._guard.release()
@@ -394,7 +396,7 @@ class PlaybackWorker(QRunnable):
                     emit_safely(self.signals.frame, self._token, self._inbox)
         except (VideoManagerError, OSError, subprocess.SubprocessError) as exc:
             if not self._cancelled:
-                message = str(exc) if isinstance(exc, VideoManagerError) else "A reprodução da prévia foi interrompida por uma falha."
+                message = error_message(exc) if isinstance(exc, VideoManagerError) else Text("PREVIEW_PLAYBACK_INTERRUPTED")
                 emit_safely(self.signals.failed, self._token, message)
         finally:
             if self._cancelled:

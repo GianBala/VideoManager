@@ -2527,7 +2527,7 @@ class EditPanel(QWidget):
                 )
             self._act(
                 menu,
-                strings.EDIT_DELETE_TRACK.format(name=track.name),
+                strings.EDIT_DELETE_TRACK.format(name=track.title),
                 lambda: self._remove_track(track_index),
                 tip=strings.EDIT_DELETE_TRACK_TIP,
             )
@@ -2691,7 +2691,7 @@ class EditPanel(QWidget):
                 self,
                 strings.EDIT_DELETE_TRACK_TITLE,
                 strings.EDIT_DELETE_TRACK_BODY.format(
-                    name=track.name, count=len(track.clips)
+                    name=track.title, count=len(track.clips)
                 ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             )
@@ -3472,14 +3472,14 @@ class EditPanel(QWidget):
         elif current and self._frame_error_token != token and not self._timeline.is_scrubbing:
             self._prime_playback()
 
-    def _on_preview_failed(self, token: int, message: str) -> None:
+    def _on_preview_failed(self, token: int, message: object) -> None:
         if self._closed or token not in (self._frame_token, self._play_token):
             return
         self._frame_error_token = token
         if token == self._play_token and self._playing:
             self._stop_playback()
         self._loading_timer.stop()
-        self._loading_label.setText(message)
+        self._loading_label.setText(str(message))
 
     def _on_frame(self, token: int, frame: object) -> None:
         if isinstance(frame, PreviewFrameInbox):

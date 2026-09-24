@@ -4,6 +4,7 @@ import tempfile
 from videomanager.infrastructure.system.binaries import find_tools
 from videomanager.infrastructure.ffmpeg.converter import probe_file
 from videomanager.application.errors import BinaryNotFoundError
+from videomanager.domain.i18n import Text
 
 
 class FFmpegCatalog:
@@ -31,7 +32,7 @@ class FFmpegCatalog:
     def inspect(self, path):
         tools = self.tools_provider()
         if tools is None:
-            raise BinaryNotFoundError('FFmpeg não disponível.')
+            raise BinaryNotFoundError(Text('FFMPEG_UNAVAILABLE'))
         return probe_file(path, tools)
 
 __all__ = [
