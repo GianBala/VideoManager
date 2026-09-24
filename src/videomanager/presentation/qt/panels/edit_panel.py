@@ -4831,8 +4831,11 @@ class EditPanel(QWidget):
             else ""
         )
         # Até 40 px ele encolhe em tela estreita; acima do próprio texto, não:
-        # vazio, sem projeto, empurrava o nome do bloco 16 px para o lado.
-        self._count_label.setMinimumWidth(min(40, self._count_label.sizeHint().width()))
+        # vazio, sem projeto, empurrava o nome do bloco 16 px para o lado. A
+        # medida é a do texto, e não o sizeHint, que já vem inflado pelo mínimo
+        # em vigor — voltando ao vazio depois de um projeto, os 40 px ficavam.
+        texto = self._count_label.fontMetrics().horizontalAdvance(self._count_label.text())
+        self._count_label.setMinimumWidth(min(40, texto))
         self._slideshow_button.setEnabled(slideshow_canvas(self._project) is not None)
         self._refresh_canvas_controls()
         self._lock_readouts()
