@@ -997,9 +997,19 @@ class Timeline(QWidget):
         # bordas: entre dois blocos encostados, medir só a distância entregava
         # a faixa inteira à ponta final do primeiro, e a alça inicial do
         # segundo nunca era alcançável.
-        rects = {clip.clip_id: self._clip_rect(index, clip) for clip in self._project.tracks[index].clips}
+        #
+        # Só os blocos perto do ponteiro entram na conta: isto roda a cada
+        # movimento do mouse, e medir todos custava o dobro da varredura antiga
+        # numa trilha longa (1,4 contra 0,75 ms com 300 blocos). A margem cobre
+        # a alça e a largura mínima de 3 px; o marcador tem largura mínima
+        # maior que a duração e entra sempre.
+        margin = (_HANDLE_GRAB + 3) * self._seconds_per_pixel()
+        moment = self._time_of(x)
+        near = [clip for clip in self._project.tracks[index].clips
+                if clip.is_transition or clip.start - margin <= moment <= clip.end + margin]
+        rects = {clip.clip_id: self._clip_rect(index, clip) for clip in near}
         ordered = sorted(
-            self._project.tracks[index].clips,
+            near,
             key=lambda item: (not item.is_transition,
                               not rects[item.clip_id].left() <= x <= rects[item.clip_id].right()),
         )
@@ -1243,7 +1253,8 @@ class Timeline(QWidget):
                     # bloco animado andava aos saltos de 8 px.
                     continue
                 targets += [clip.start, clip.end]
-                targets += [clip.start + kf.time_offset for kf in clip.visible_keyframes]
+                for kf in clip.visible_keyframes:
+                    targets.append(clip.start + kf.time_offset)
         return targets
 
     def _snap(self, moment: float, moving: Clip) -> float:
