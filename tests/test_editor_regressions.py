@@ -647,6 +647,27 @@ def test_salvar_e_desfazer_apos_mudar_resolucao_preserva_controles_e_texto(panel
     assert saved == panel._project
 
 
+def test_projeto_reaberto_segue_o_material_no_que_foi_gravado_automatico(panel, tmp_path):
+    from videomanager.domain.project import Project
+    ntsc = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, width=640, height=360, fps=30000 / 1001, duration=2)
+    fluido = MediaRef(Path('/m/b.mp4'), MediaKind.VIDEO, width=1280, height=720, fps=60.0, duration=2)
+    trilha = Track(TrackKind.VIDEO, clips=(Clip(ntsc, 0, 2),))
+    # Gravado com a tela e a taxa do próprio material: volta automático, e um
+    # clipe maior e mais fluido acrescentado depois sobe a edição, como antes
+    # de fechar. Fixado, ficava preso a 640 × 360 e 29,97 e perdia o corte rápido.
+    panel.install_project(Project(tracks=(trilha,), width=640, height=360, fps=30000 / 1001),
+                          tmp_path / 'a.vmp', [ntsc], {})
+    assert (panel._canvas_choice, panel._rate_choice) == (None, None)
+    panel._pool.append(fluido)
+    panel._insert_media_ref(fluido)
+    assert (panel._project.width, panel._project.height, panel._project.fps) == (1280, 720, 60.0)
+    # O que difere do material foi escolha de alguém, e continua fixo.
+    panel.install_project(Project(tracks=(trilha,), width=1920, height=1080, fps=50.0),
+                          tmp_path / 'b.vmp', [ntsc], {})
+    assert (panel._canvas_choice, panel._rate_choice) == ((1920, 1080), 50.0)
+    assert (panel._project.width, panel._project.height, panel._project.fps) == (1920, 1080, 50.0)
+
+
 def test_insercao_automatica_evita_trilha_oculta_e_muda(panel):
     from videomanager.domain.project import Project
     media = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, has_audio=True, duration=2)
