@@ -579,3 +579,20 @@ def test_tela_escolhida_fora_das_predefinidas_aparece_como_escolhida(qapp: QAppl
     assert dialog.chosen_canvas is None
     efetivo = dialog._effective_project()
     assert (efetivo.width, efetivo.height) == (1920, 1080)
+
+
+def test_opcoes_desligadas_dizem_por_que(qapp: QApplication) -> None:
+    """Corte rápido e interpolação desligados explicam o motivo na dica.
+
+    As explicações existiam em strings.py sem uso: a caixa ficava cinza sem
+    dizer que a edição não é um recorte ou que nenhum bloco está abaixo da taxa.
+    """
+    from videomanager.presentation.qt import strings
+
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=10.0, width=1920, height=1080, fps=30.0)
+    montagem = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0, 2.0), Clip(video, 2.0, 2.0, in_point=5.0))),),
+                       width=1920, height=1080, fps=30.0)
+    dialog = ExportDialog(project=montagem, settings=Settings(), pool=[video], probed={},
+                          processing=build_processing_service(), runtime=build_desktop_runtime(audio_enabled=False))
+    assert not dialog._fast.isEnabled() and dialog._fast.toolTip() == strings.EDIT_FAST_UNAVAILABLE
+    assert not dialog._interpolate.isEnabled() and dialog._interpolate.toolTip() == strings.EDIT_INTERPOLATE_OFF
