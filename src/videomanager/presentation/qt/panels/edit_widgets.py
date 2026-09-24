@@ -1686,7 +1686,9 @@ class _ClipPropertiesWidget(QWidget):
         else:
             self._btn_kf_toggle.setText("◇")
             self._btn_kf_toggle.setToolTip(strings.EDIT_KEYFRAME_ADD)
-            self._btn_kf_toggle.setStyleSheet("")
+            # Só a letra, igual à do estado marcado: as cores ficam com o tema,
+            # e o símbolo não muda de tamanho nem de peso ao alternar ◇/◆.
+            self._btn_kf_toggle.setStyleSheet("QPushButton { font-weight: bold; font-size: 14px; }")
 
         count = len(self._clip.visible_keyframes)
         if self._clip.has_keyframes:
