@@ -58,6 +58,20 @@ def desktop_app(tmp_path_factory):
     patch.undo()
 
 
+@pytest.fixture(autouse=True)
+def sem_sondagem_de_placa(monkeypatch):
+    """Testes não sondam a placa de vídeo em segundo plano.
+
+    A janela agenda a sondagem dos encoders de placa para 1,5 s depois de
+    criada, numa thread. Um teste que criasse a janela deixava o temporizador
+    armado, e a sondagem de verdade gravava o resultado no meio de outro teste:
+    ``test_hwaccel``, que conta as próprias sondagens, passava ou falhava
+    conforme o tempo entre os arquivos — e o build recusava empacotar.
+    """
+    from videomanager.presentation.qt.main_window import MainWindow
+    monkeypatch.setattr(MainWindow, "_warm_hardware_probe", lambda self: None)
+
+
 @pytest.fixture
 def isolated_audio(monkeypatch):
     from videomanager.infrastructure.qt.audio import AudioPreview
