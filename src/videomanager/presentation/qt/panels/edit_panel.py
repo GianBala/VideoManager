@@ -218,6 +218,12 @@ _TIMELINE_MIN_HEIGHT = 150
 # segue mais larga que a imagem 16:9 que cabe na altura.
 _EXTRAS_WIDTH = 400
 
+# Largura que o monitor defende quando a janela estreita: até ela, quem cede
+# são as colunas laterais, até o mínimo delas. É a largura em que a barra de
+# transporte cabe numa linha, e o piso que o monitor tinha quando a aba ainda
+# não cabia em tela estreita.
+_PLAYER_WIDTH = 1040
+
 # Vagas de ffmpeg da aba (ver o construtor). Números pequenos e de propósito: o
 # que limita aqui não é o processador, é a memória — cada worker decodifica
 # vídeo, e o material que se edita costuma ser o mais pesado que a máquina tem.
@@ -256,6 +262,37 @@ def _file_key(path: Path) -> tuple:
     except OSError:
         return (path,)
     return (path, info.st_size, info.st_mtime_ns)
+
+
+class _TopSplitter(QSplitter):
+    """Divisor de cima, em que a prévia é a última a perder largura.
+
+    O QSplitter mantém as colunas que não esticam na largura delas e tira a
+    falta da que estica, até o mínimo dela — que precisa ser baixo para a aba
+    caber em 1280 px. Com o piso antigo de 1040 px no monitor eram as colunas
+    que cediam; sem ele, a janela estreita encolhia a prévia com a biblioteca e
+    os Adicionais na largura cheia (em 1680 px, 92 px a menos de imagem).
+    """
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        # Só a largura da janela reparte as colunas. Mover o divisor vertical
+        # também chega aqui, e desfazia a largura que o usuário arrastou.
+        if event.size().width() == event.oldSize().width():
+            return
+        sizes = self.sizes()
+        short = _PLAYER_WIDTH - sizes[2]
+        if short <= 0:
+            return
+        # Por igual entre as duas colunas, como o próprio QSplitter reparte,
+        # sem passar do mínimo de nenhuma.
+        spare = {i: sizes[i] - self.widget(i).minimumWidth() for i in (0, 1)}
+        for n, i in enumerate(sorted(spare, key=spare.get)):
+            take = max(0, min(spare[i], math.ceil(short / (2 - n))))
+            sizes[i] -= take
+            sizes[2] += take
+            short -= take
+        self.setSizes(sizes)
 
 
 class _ScrollPage(QScrollArea):
@@ -606,7 +643,7 @@ class EditPanel(QWidget):
 
         # Divisor horizontal superior (estilo CapCut): biblioteca de mídias à
         # esquerda e monitor de vídeo com controles de transporte à direita.
-        self._top_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._top_splitter = _TopSplitter(Qt.Orientation.Horizontal)
         self._top_splitter.setChildrenCollapsible(False)
 
         self._media_box = self._build_media_box()
