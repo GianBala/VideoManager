@@ -1108,3 +1108,51 @@ def test_mapa_de_keyframes_e_lido_uma_vez_por_arquivo(monkeypatch, wait_until):
         assert sorted(lidos) == ["dois.mp4", "um.mp4"]
     finally:
         painel.shutdown()
+
+
+def test_mapa_de_keyframes_que_falhou_e_lido_de_novo(monkeypatch, wait_until):
+    """Uma leitura que falhou não fica guardada como "sem keyframes".
+
+    O worker entrega o mapa vazio quando o ffprobe erra ou passa do prazo; se
+    ele ficasse guardado, uma falha de passagem (disco de rede, máquina
+    ocupada) desligava a navegação por keyframe daquele arquivo até fechar o
+    aplicativo.
+    """
+    from PySide6.QtCore import QRunnable
+    from videomanager.application.capabilities import FFmpegTools
+    from videomanager.domain.project import Project
+    from videomanager.infrastructure.qt.workers.signals import PreviewSignals
+
+    lidos = []
+
+    class Leitura(QRunnable):
+        def __init__(self, path, tools):
+            super().__init__()
+            self.path, self.signals = path, PreviewSignals()
+
+        def cancel(self):
+            pass
+
+        def run(self):
+            lidos.append(self.path.name)
+            self.signals.keyframes.emit(() if lidos.count("um.mp4") == 1 and self.path.name == "um.mp4" else (0.0, 2.0))
+            self.signals.done.emit()
+
+    tools = FFmpegTools(Path("/bin/false"), Path("/bin/false"), "teste")
+    runtime = build_desktop_runtime(audio_enabled=False)
+    monkeypatch.setattr(runtime, "keyframe_worker", Leitura)
+    painel = EditPanel(Settings(), ensure_tools=lambda: tools, editor=build_editor_service(),
+                       processing=build_processing_service(), runtime=runtime)
+    try:
+        um = Clip(MediaRef(Path("/tmp/um.mp4"), MediaKind.VIDEO, duration=5.0, fps=10.0), 0.0, 5.0)
+        dois = Clip(MediaRef(Path("/tmp/dois.mp4"), MediaKind.VIDEO, duration=5.0, fps=10.0), 5.0, 5.0)
+        painel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(um, dois)),)), None, [], {})
+        painel._timeline.select(um.clip_id)
+        wait_until(lambda: lidos == ["um.mp4"] and painel._keyframe_worker is None)
+        painel._timeline.select(dois.clip_id)
+        wait_until(lambda: painel._keyframes == (0.0, 2.0))
+        painel._timeline.select(um.clip_id)
+        wait_until(lambda: painel._keyframes == (0.0, 2.0))
+        assert lidos == ["um.mp4", "dois.mp4", "um.mp4"]
+    finally:
+        painel.shutdown()
