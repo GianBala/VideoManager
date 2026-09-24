@@ -468,6 +468,24 @@ def test_lista_de_fontes_tem_linhas_com_folga(qapp: QApplication) -> None:
         selector.deleteLater()
 
 
+def test_botao_de_quadro_chave_tem_a_mesma_letra_marcado_e_desmarcado(qapp: QApplication) -> None:
+    # O estado marcado tem letra própria; tirando só as cores do desmarcado, a
+    # letra saiu junto e o símbolo mudava de tamanho e de peso ao alternar.
+    from videomanager.domain.keyframe import Keyframe
+    from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=5.0, width=640, height=360, fps=30.0)
+    widget = _ClipPropertiesWidget()
+    widget.load_clip(Clip(video, 0.0, 5.0, keyframes=(Keyframe(1.0, opacity=0.5),)), 640, 360)
+    fontes = []
+    for instante in (1.0, 3.0):
+        widget.set_playhead_position(instante)
+        botao = widget._btn_kf_toggle
+        botao.ensurePolished()
+        fontes.append((botao.text(), botao.font().bold(), botao.font().pixelSize()))
+    assert fontes == [("◆", True, 14), ("◇", True, 14)]
+    widget.deleteLater()
+
+
 def test_font_selector_popular_fonts_and_search(qapp: QApplication) -> None:
     selector = _FontSelectorWidget("Sans Serif")
     # Verify popular fonts exist
