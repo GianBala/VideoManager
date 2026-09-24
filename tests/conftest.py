@@ -89,6 +89,11 @@ def idioma_padrao():
     """
     yield
     from videomanager.domain import i18n
+    # Com PySide6, a troca também devolve os textos do módulo strings; sem ele
+    # (o job internal da CI) só existe o idioma do núcleo.
+    if importlib.util.find_spec("PySide6") is not None:
+        from videomanager.presentation.qt.i18n import apply_language
+        apply_language(i18n.PORTUGUESE)
     i18n.set_language(i18n.PORTUGUESE)
 
 
