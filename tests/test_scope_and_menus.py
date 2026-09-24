@@ -304,6 +304,11 @@ def test_edit_panel_rotulo_de_contagem_so_encolhe_o_que_tem(qapp: QApplication, 
         video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=5.0, width=160, height=90, fps=10.0)
         panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0.0, 5.0),)),)), None, [video], {})
         assert rotulo.text() and rotulo.minimumWidth() == 40
+        # E de volta ao vazio, o piso sai de novo: medido pelo sizeHint, que já
+        # vinha inflado pelos 40 px em vigor, ele ficava.
+        from videomanager.domain.project import new_project
+        panel.install_project(new_project(), None, [], {})
+        assert rotulo.text() == "" and rotulo.minimumWidth() < 40
     finally:
         panel.shutdown()
 
