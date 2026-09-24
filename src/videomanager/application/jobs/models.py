@@ -85,9 +85,6 @@ class Job:
     log: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
-    # Guardado para permitir "Tentar de novo" sem reconstruir o pedido.
-    source_label: str = ""
-
     @property
     def percent(self) -> float | None:
         return self.progress.percent if self.progress else None
