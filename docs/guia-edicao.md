@@ -134,6 +134,12 @@ O relógio de posição e o contador de quadros usam fonte monoespaçada com
 largura travada no maior valor daquele projeto, para a barra inteira não
 tremer a cada troca de dígito durante a reprodução.
 
+Numa janela estreita (tela de notebook, ou escala de 125% ou mais no Windows),
+os controles da direita da barra — keyframe, Loop, ímã e volume — descem para
+uma segunda linha, as listas de tela e proporção encolhem e as abas de
+Adicionais rolam por dentro: a aba inteira cabe a partir de 1280 × 720 sem
+rolagem lateral.
+
 ## A linha do tempo
 
 ### Barra de ferramentas da linha do tempo
@@ -172,7 +178,8 @@ Da esquerda para a direita:
   **meio** de um vizinho, os dois **trocam de lugar**, sem sobrepor um
   terceiro. O intervalo vazio entre o par é preservado.
 - **Arrastar as pontas (alças)** de um bloco — ajusta o corte daquele lado,
-  com o mesmo imã.
+  com o mesmo imã. Entre dois blocos encostados, o lado da emenda em que o
+  ponteiro está decide qual bloco é aparado.
 - **Clique simples** no vazio da trilha ou na régua de tempo — move o cursor
   de reprodução para ali. Na trilha vazia a seleção é desfeita; **na régua ela
   é mantida**, para posicionar o corte do bloco escolhido (por exemplo, um
@@ -276,7 +283,8 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
   - **◀ ◇ ▶** vão ao quadro-chave anterior, adicionam ou removem um quadro-chave
     no cursor e vão ao próximo. Cada quadro-chave é um losango na parte de
     baixo do bloco, na linha do tempo — amarelo, ou azul quando o cursor está
-    sobre ele —, e o ímã da linha do tempo também os reconhece.
+    sobre ele —, e o ímã da linha do tempo também os reconhece (os dos outros
+    blocos: os do bloco arrastado andam junto com ele).
   - Num bloco ainda **sem** quadros-chave, mudar um valor vale para o bloco
     inteiro. Num bloco animado, altera **só o instante atual**, criando ou
     atualizando o quadro-chave dali. Marque **Editar toda a animação** para
