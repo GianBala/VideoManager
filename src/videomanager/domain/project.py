@@ -147,10 +147,6 @@ class MediaRef:
             return IMAGE_DURATION
         return self.duration or IMAGE_DURATION
 
-    @property
-    def label(self) -> str:
-        return f"{self.name}  ·  {self.kind.value}"
-
 
 def display_width(width: int | None, sar: float | None) -> int | None:
     """Largura com que a imagem é exibida, dado o pixel do arquivo.
