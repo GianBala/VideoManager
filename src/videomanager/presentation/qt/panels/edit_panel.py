@@ -4857,7 +4857,10 @@ class EditPanel(QWidget):
             return
         self._keyframe_worker = None
         self._keyframes = tuple(times) if isinstance(times, tuple) else ()
-        self._keyframe_maps[_file_key(source)] = self._keyframes
+        # Mapa vazio não fica guardado: é também o que chega quando o ffprobe
+        # falha ou passa do prazo, e a próxima escolha do bloco tenta de novo.
+        if self._keyframes:
+            self._keyframe_maps[_file_key(source)] = self._keyframes
         for button in (self._prev_key, self._next_key):
             button.setEnabled(bool(self._keyframes_for(self._keyframe_clip())))
 
