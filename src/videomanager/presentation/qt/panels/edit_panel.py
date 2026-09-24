@@ -833,7 +833,7 @@ class EditPanel(QWidget):
 
         row_size = QHBoxLayout()
         row_size.setSpacing(6)
-        lbl_size = QLabel("Tamanho:")
+        lbl_size = QLabel(strings.EDIT_FONT_SIZE)
         row_size.addWidget(lbl_size)
 
         btn_dec = QPushButton("-")
@@ -874,7 +874,7 @@ class EditPanel(QWidget):
 
         row_style = QHBoxLayout()
         row_style.setSpacing(4)
-        self._bold_btn = QPushButton("B")
+        self._bold_btn = QPushButton(strings.EDIT_FONT_BOLD)
         self._bold_btn.setCheckable(True)
         b_font = self._bold_btn.font()
         b_font.setBold(True)
@@ -883,7 +883,7 @@ class EditPanel(QWidget):
         self._bold_btn.toggled.connect(lambda _: self._on_text_style_changed())
         row_style.addWidget(self._bold_btn)
 
-        self._italic_btn = QPushButton("I")
+        self._italic_btn = QPushButton(strings.EDIT_FONT_ITALIC)
         self._italic_btn.setCheckable(True)
         i_font = self._italic_btn.font()
         i_font.setItalic(True)
