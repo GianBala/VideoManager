@@ -105,6 +105,7 @@ from videomanager.domain.project import next_clip_id
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
+from videomanager.domain.i18n import decimal
 from videomanager.domain.timing import format_span
 from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_index
@@ -3087,11 +3088,11 @@ class EditPanel(QWidget):
         self._syncing = True
         try:
             if clip is not None:
-                self._volume_btn.setText(f"🔊 {clip.gain_db:+.1f} dB".replace(".", ","))
-                self._speed_btn.setText(f"⚡ {clip.speed:.1f}x".replace(".", ","))
+                self._volume_btn.setText(f"🔊 {decimal(clip.gain_db, sign=True)} dB")
+                self._speed_btn.setText(f"⚡ {decimal(clip.speed)}x")
             else:
-                self._volume_btn.setText("🔊 0,0 dB")
-                self._speed_btn.setText("⚡ 1,0x")
+                self._volume_btn.setText(f"🔊 {decimal(0.0)} dB")
+                self._speed_btn.setText(f"⚡ {decimal(1.0)}x")
             self._sync_extras_controls(clip)
         finally:
             self._syncing = False
