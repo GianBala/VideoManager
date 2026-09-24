@@ -902,30 +902,14 @@ class Timeline(QWidget):
             badges.append(clip.gain_label)
 
         if clip.overlay_type == "text":
-            text = f"🔤 {clip.text_content or 'Texto'}"
+            text = f"🔤 {clip.text_content or strings.EDIT_CLIP_TEXT}"
         elif clip.overlay_type == "filter":
-            fname = clip.filter_name
-            f_labels = {
-                "pb": "P&B",
-                "sepia": "Sépia",
-                "vinheta": "Vinheta",
-                "inverter": "Inversão",
-                "contraste": "Contraste",
-            }
-            text = f"🎨 {f_labels.get(fname, fname or 'Filtro')}"
+            name = strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
+            text = f"🎨 {name}"
         elif clip.overlay_type == "transition":
-            tname = clip.transition_name
-            t_labels = {
-                "fade": "Fade",
-                "fadeblack": "Fade para Preto",
-                "fadewhite": "Fade para Branco",
-                "dissolve": "Dissolve",
-                "wipeleft": "Wipe para Esquerda",
-                "wiperight": "Wipe para Direita",
-                "slideleft": "Slide para Esquerda",
-                "slideright": "Slide para Direita",
-            }
-            text = f"⏳ {t_labels.get(tname, tname or 'Transição')}"
+            name = strings.EDIT_TRANSITIONS.get(clip.transition_name,
+                                                ("", clip.transition_name or strings.EDIT_CLIP_TRANSITION))[1]
+            text = f"⏳ {name}"
         elif clip.overlay_type == "image" or clip.is_image:
             text = f"🖼️ {clip.media.name}"
         else:

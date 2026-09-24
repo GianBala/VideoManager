@@ -361,6 +361,37 @@ EDIT_FILTER_SEPIA = "Sépia"
 EDIT_FILTER_VIGNETTE = "Vinheta"
 EDIT_FILTER_INVERT = "Inversão"
 EDIT_FILTER_CONTRAST = "Alto Contraste"
+# Filtros e transições por identificador gravado no projeto, com o ícone que os
+# acompanha nos botões. Uma tabela só para a aba de Adicionais, a linha do tempo
+# e a aba Propriedades: eram quatro cópias, e acrescentar uma transição exigia
+# lembrar de todas.
+EDIT_FILTERS = {
+    "pb": ("🎬", EDIT_FILTER_BW),
+    "sepia": ("☕", EDIT_FILTER_SEPIA),
+    "contraste": ("⚡", EDIT_FILTER_CONTRAST),
+    "vinheta": ("🎯", EDIT_FILTER_VIGNETTE),
+    "inverter": ("🔄", EDIT_FILTER_INVERT),
+}
+EDIT_TRANSITIONS = {
+    "fade": ("🌑", "Fade"),
+    "fadeblack": ("⬛", "Fade para Preto"),
+    "fadewhite": ("⬜", "Fade para Branco"),
+    "dissolve": ("🎬", "Dissolve"),
+    "wipeleft": ("◀", "Wipe para Esquerda"),
+    "wiperight": ("▶", "Wipe para Direita"),
+    "slideleft": ("◀", "Slide para Esquerda"),
+    "slideright": ("▶", "Slide para Direita"),
+}
+EDIT_CHOOSE_FILTER = "Escolha um efeito visual:"
+EDIT_CHOOSE_TRANSITION = "Escolha uma transição de vídeo:"
+EDIT_EXTRA_DURATION = "Duração:"
+EDIT_INSERT_TRANSITION = "+ Inserir Transição"
+EDIT_UPDATE_TRANSITION = "✓ Atualizar Transição Selecionada"
+EDIT_INSERT_NEW_TRANSITION = "+ Inserir como Nova Transição"
+EDIT_CLIP_TEXT = "Texto"
+EDIT_CLIP_FILTER = "Filtro"
+EDIT_CLIP_TRANSITION = "Transição"
+EDIT_TRANSITION_TITLE = "Transição: {name}"
 EDIT_SPEED = "Velocidade"
 EDIT_SPEED_TIP = "Ajustar velocidade de reprodução do bloco (0.1x a 10.0x)"
 EDIT_SPEED_NORMAL = "Normal (1,0x)"
