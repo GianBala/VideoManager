@@ -269,6 +269,21 @@ def test_edit_panel_previa_e_a_ultima_a_perder_largura(qapp: QApplication, dummy
         panel.shutdown()
 
 
+def test_edit_panel_rotulo_de_contagem_so_encolhe_o_que_tem(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    from videomanager.domain.project import Clip, MediaKind, MediaRef, Project, Track
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
+    try:
+        # Vazio, sem projeto, o piso de 40 px empurrava o nome do bloco para o
+        # lado; com texto, ele é o que deixa o rótulo encolher em tela estreita.
+        rotulo = panel._count_label
+        assert rotulo.text() == "" and rotulo.minimumWidth() < 40
+        video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=5.0, width=160, height=90, fps=10.0)
+        panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0.0, 5.0),)),)), None, [video], {})
+        assert rotulo.text() and rotulo.minimumWidth() == 40
+    finally:
+        panel.shutdown()
+
+
 def test_edit_panel_track_reordered_undo_redo(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
