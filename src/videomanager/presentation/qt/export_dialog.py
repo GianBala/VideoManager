@@ -497,7 +497,6 @@ class ExportDialog(QDialog):
             widget.setVisible(not gif and not self._audio_only_check.isChecked())
         if gif and self._fast.isChecked():
             self._fast.setChecked(False)
-        self._fast.setToolTip(strings.EXPORT_GIF_NO_FAST if gif else strings.EDIT_MODE_TIP)
 
     def _sync_codecs(self) -> None:
         """Repopula o combo de codecs conforme o container selecionado."""
@@ -735,6 +734,14 @@ class ExportDialog(QDialog):
         self._interpolate.setEnabled(can_interp)
         if not can_interp and self._interpolate.isChecked():
             self._interpolate.setChecked(False)
+        # A opção desligada diz por quê: uma caixa cinza sem explicação parece
+        # defeito, e o motivo — a edição não é um recorte, nenhum bloco está
+        # abaixo da taxa — não é visível daqui.
+        if self._container_choice == "gif" and not audio_only:
+            self._fast.setToolTip(strings.EXPORT_GIF_NO_FAST)
+        else:
+            self._fast.setToolTip(strings.EDIT_MODE_TIP if can_fast else strings.EDIT_FAST_UNAVAILABLE)
+        self._interpolate.setToolTip(strings.EDIT_INTERPOLATE_TIP if can_interp else strings.EDIT_INTERPOLATE_OFF)
 
         # Atualiza o texto do item "Automática" em proporção, tela e taxa
         if self._aspect_box.count() > 0 and self._aspect_box.itemData(0) is None:
