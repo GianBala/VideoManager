@@ -272,7 +272,32 @@ class _TopSplitter(QSplitter):
     caber em 1280 px. Com o piso antigo de 1040 px no monitor eram as colunas
     que cediam; sem ele, a janela estreita encolhia a prévia com a biblioteca e
     os Adicionais na largura cheia (em 1680 px, 92 px a menos de imagem).
+
+    A largura que cada coluna quer fica guardada à parte, e a divisão é refeita
+    a partir dela a cada largura de janela. O ``setSizes`` grava o que recebe
+    como a largura desejada: fazendo a conta sobre ele, as colunas encolhidas
+    numa janela estreita não voltavam a crescer — nem quando a janela só passou
+    estreita por um instante, como na primeira disposição da aba escondida.
     """
+
+    def __init__(self, orientation: Qt.Orientation) -> None:
+        super().__init__(orientation)
+        self._wanted: list[int] | None = None
+        # Arrastar é escolha do usuário: passa a ser a largura desejada.
+        self.splitterMoved.connect(lambda *_: setattr(self, "_wanted", self.sizes()[:2]))
+
+    def _natural(self) -> list[int]:
+        if self._wanted is None:
+            self._wanted = [self.widget(i).sizeHint().width() for i in (0, 1)]
+        return self._wanted
+
+    def setSizes(self, sizes) -> None:  # noqa: N802
+        # Pedido de fora (a aba Propriedades alarga a coluna dela) também é
+        # escolha, mas só da coluna que ele mudou.
+        current = self.sizes()
+        self._wanted = [new if new != old else want
+                        for new, old, want in zip(sizes[:2], current[:2], self._natural())]
+        super().setSizes(sizes)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -280,19 +305,17 @@ class _TopSplitter(QSplitter):
         # também chega aqui, e desfazia a largura que o usuário arrastou.
         if event.size().width() == event.oldSize().width():
             return
-        sizes = self.sizes()
-        short = _PLAYER_WIDTH - sizes[2]
-        if short <= 0:
-            return
+        total = sum(self.sizes())
+        columns = [max(self.widget(i).minimumWidth(), width) for i, width in enumerate(self._natural())]
+        short = _PLAYER_WIDTH - (total - sum(columns))
         # Por igual entre as duas colunas, como o próprio QSplitter reparte,
         # sem passar do mínimo de nenhuma.
-        spare = {i: sizes[i] - self.widget(i).minimumWidth() for i in (0, 1)}
+        spare = {i: columns[i] - self.widget(i).minimumWidth() for i in (0, 1)}
         for n, i in enumerate(sorted(spare, key=spare.get)):
             take = max(0, min(spare[i], math.ceil(short / (2 - n))))
-            sizes[i] -= take
-            sizes[2] += take
+            columns[i] -= take
             short -= take
-        self.setSizes(sizes)
+        QSplitter.setSizes(self, [*columns, total - sum(columns)])
 
 
 class _ScrollPage(QScrollArea):

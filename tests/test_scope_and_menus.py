@@ -269,6 +269,30 @@ def test_edit_panel_previa_e_a_ultima_a_perder_largura(qapp: QApplication, dummy
         panel.shutdown()
 
 
+def test_edit_panel_colunas_voltam_a_largura_natural_ao_alargar(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
+    try:
+        panel.show()
+        panel.resize(1920, 900)
+        qapp.processEvents()
+        natural = panel._top_splitter.sizes()[:2]
+        # Largas, as colunas têm a largura que pedem — o painel nasce pequeno e
+        # cresce depois, e essa primeira passagem já as prendia no mínimo.
+        assert natural == [panel._media_box.sizeHint().width(), panel._extras_box.sizeHint().width()]
+        # Estreita, as colunas cedem para a prévia; alargando de novo, voltam.
+        # Gravadas pelo setSizes, ficavam no mínimo depois de qualquer passagem
+        # por uma janela estreita — inclusive a primeira disposição da aba
+        # escondida, que o grab() da janela provoca.
+        panel.resize(1280, 900)
+        qapp.processEvents()
+        assert panel._top_splitter.sizes()[:2] != natural
+        panel.resize(1920, 900)
+        qapp.processEvents()
+        assert panel._top_splitter.sizes()[:2] == natural
+    finally:
+        panel.shutdown()
+
+
 def test_edit_panel_rotulo_de_contagem_so_encolhe_o_que_tem(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     from videomanager.domain.project import Clip, MediaKind, MediaRef, Project, Track
     panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
