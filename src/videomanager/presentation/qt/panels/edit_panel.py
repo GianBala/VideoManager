@@ -1901,7 +1901,6 @@ class EditPanel(QWidget):
         row.addStretch(1)
         self._count_label = QLabel("")
         self._count_label.setProperty("role", "dim")
-        self._count_label.setMinimumWidth(40)
         row.addWidget(self._count_label)
         # O bloco escolhido tinha uma faixa só para ele, com dois campos de
         # timecode e o nome do arquivo. Os campos saíram — as pontas se
@@ -4802,6 +4801,9 @@ class EditPanel(QWidget):
             if loaded
             else ""
         )
+        # Até 40 px ele encolhe em tela estreita; acima do próprio texto, não:
+        # vazio, sem projeto, empurrava o nome do bloco 16 px para o lado.
+        self._count_label.setMinimumWidth(min(40, self._count_label.sizeHint().width()))
         self._slideshow_button.setEnabled(slideshow_canvas(self._project) is not None)
         self._refresh_canvas_controls()
         self._lock_readouts()
