@@ -348,6 +348,28 @@ class TestCustoDaInterpolacao:
         texto = filtros(projeto_4k, interpolate=True)
         assert texto.index("scale=1920:1080") < texto.index("minterpolate")
 
+    def test_bloco_ampliado_interpola_no_tamanho_em_que_aparece(self) -> None:
+        # Encolhido até o encaixe e ampliado depois, o material perdia o
+        # detalhe que a ampliação mostra (medido: SSIM 0,991 → 0,946 com escala
+        # 2). Encolhe só até o maior tamanho em que o bloco aparece.
+        from dataclasses import replace as mudar
+        def grafo(escala: float) -> str:
+            bloco = mudar(clip(self.material(3840, 2160)), scale=escala, scale_x=escala, scale_y=escala)
+            texto = filtros(Project(tracks=(video_track(bloco),), width=1920, height=1080, fps=60.0), interpolate=True)
+            return texto[:texto.index("minterpolate")]
+        assert "scale=" not in grafo(2.0), "4K em escala 2 aparece em 4K: nada a encolher"
+        assert "scale=2880:1620" in grafo(1.5)
+
+    def test_bloco_ampliado_conta_o_quadro_em_que_aparece(self) -> None:
+        # O aviso e o plano dos trechos paralelos contam o mesmo quadro que o
+        # grafo entrega ao filtro — ampliado, mas nunca maior que o material.
+        from dataclasses import replace as mudar
+        def custo(material: MediaRef, escala: float) -> int:
+            bloco = mudar(clip(material), scale=escala, scale_x=escala, scale_y=escala)
+            return interpolation_bytes(Project(tracks=(video_track(bloco),), width=1920, height=1080, fps=60.0))
+        assert custo(self.material(3840, 2160), 2.0) == 4 * custo(self.material(3840, 2160), 1.0)
+        assert custo(self.material(1920, 1080), 2.0) == custo(self.material(1920, 1080), 1.0)
+
     def test_material_menor_que_a_tela_interpola_antes_de_crescer(self) -> None:
         # O movimento está nos pixels originais: ampliar primeiro só faria o
         # filtro estimar movimento em pixels que o próprio scale inventou, pelo

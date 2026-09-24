@@ -378,6 +378,16 @@ class Clip:
         return bool(self.keyframes)
 
     @property
+    def peak_scale(self) -> tuple[float, float]:
+        """A maior escala que o bloco atinge em cada eixo, parado ou animado.
+
+        É o tamanho em que a imagem dele aparece no máximo: o que o compositor
+        entrega à interpolação e o que a estimativa de memória conta.
+        """
+        return (max([self.scale_x, *(k.scale_x for k in self.keyframes)]),
+                max([self.scale_y, *(k.scale_y for k in self.keyframes)]))
+
+    @property
     def base_transform(self) -> ClipTransform:
         """Transformação estática base do clipe."""
         return ClipTransform(
