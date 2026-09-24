@@ -37,6 +37,7 @@ from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.keyframe import ClipTransform
 from videomanager.domain.geometry import image_base_size, natural_image_size
+from videomanager.domain.i18n import decimal
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import interpolate_keyframes
 from videomanager.domain.timing import source_time, available_duration, frame_index
@@ -364,13 +365,13 @@ class Clip:
             return "mudo"
         if abs(self.gain_db) < 0.05:
             return ""
-        return f"{self.gain_db:+.1f} dB".replace(".", ",")
+        return f"{decimal(self.gain_db, sign=True)} dB"
 
     @property
     def speed_label(self) -> str:
         if abs(self.speed - 1.0) < 0.05:
             return ""
-        return f"{self.speed:.1f}x".replace(".", ",")
+        return f"{decimal(self.speed)}x"
 
     @property
     def has_keyframes(self) -> bool:
