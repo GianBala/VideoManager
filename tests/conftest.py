@@ -79,6 +79,19 @@ def sem_sondagem_de_placa(monkeypatch):
     monkeypatch.setattr(MainWindow, "_warm_hardware_probe", lambda self: None)
 
 
+@pytest.fixture(autouse=True)
+def idioma_padrao():
+    """Todo teste termina em português, o idioma padrão.
+
+    O idioma é estado do processo inteiro: um teste que trocasse para o inglês
+    e falhasse antes de desfazer deixaria os seguintes comparando texto no
+    idioma errado — falhando longe da causa.
+    """
+    yield
+    from videomanager.domain import i18n
+    i18n.set_language(i18n.PORTUGUESE)
+
+
 @pytest.fixture
 def isolated_audio(monkeypatch):
     from videomanager.infrastructure.qt.audio import AudioPreview
