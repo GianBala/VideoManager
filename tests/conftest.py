@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import sys
@@ -67,7 +68,13 @@ def sem_sondagem_de_placa(monkeypatch):
     armado, e a sondagem de verdade gravava o resultado no meio de outro teste:
     ``test_hwaccel``, que conta as próprias sondagens, passava ou falhava
     conforme o tempo entre os arquivos — e o build recusava empacotar.
+
+    Sem PySide6 não há janela para sondar. O job ``internal`` da CI roda
+    domínio, aplicação e arquitetura só com o pytest, e importar a janela ali
+    derrubava todos esses testes antes de começarem.
     """
+    if importlib.util.find_spec("PySide6") is None:
+        return
     from videomanager.presentation.qt.main_window import MainWindow
     monkeypatch.setattr(MainWindow, "_warm_hardware_probe", lambda self: None)
 
