@@ -435,8 +435,12 @@ def test_media_list_delete_shortcut_and_context_menu(qapp: QApplication, dummy_t
         assert len(panel._pool) == 2
         assert panel._media_list.count() == 2
 
-        # 1. Test context menu text is "Deletar  (Del)"
-        assert strings.EDIT_MEDIA_REMOVE == "Deletar  (Del)"
+        # 1. O menu do botão direito é montado de verdade sobre uma mídia —
+        # conferir só a constante deixou passar um texto inexistente, que
+        # levantava AttributeError e impedia o menu de aparecer.
+        menu = panel.build_media_menu(panel._media_list.visualItemRect(panel._media_list.item(0)).center())
+        assert [a.text() for a in menu.actions()] == [
+            strings.EDIT_INSERT, strings.EDIT_MEDIA_REMOVE, "", strings.EDIT_CLEAR_UNUSED]
 
         # 2. Test deleting selected item with focus on _media_list
         panel._media_list.setCurrentRow(0)

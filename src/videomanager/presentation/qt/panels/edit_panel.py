@@ -2280,6 +2280,9 @@ class EditPanel(QWidget):
                 self._remove_media_ref(ref)
 
     def _show_media_context_menu(self, pos: QPoint) -> None:
+        self.build_media_menu(pos).exec(self._media_list.mapToGlobal(pos))
+
+    def build_media_menu(self, pos: QPoint) -> QMenu:
         item = self._media_list.itemAt(pos)
         if item is not None and not item.isSelected():
             self._media_list.setCurrentItem(item)
@@ -2287,7 +2290,7 @@ class EditPanel(QWidget):
         if item is not None:
             ref = item.data(Qt.ItemDataRole.UserRole)
             if isinstance(ref, MediaRef):
-                insert_action = menu.addAction(strings.EDIT_MEDIA_INSERT)
+                insert_action = menu.addAction(strings.EDIT_INSERT)
                 insert_action.triggered.connect(lambda: self._insert_media_ref(ref))
 
                 remove_action = menu.addAction(strings.EDIT_MEDIA_REMOVE)
@@ -2296,8 +2299,7 @@ class EditPanel(QWidget):
 
         clear_unused_action = menu.addAction(strings.EDIT_CLEAR_UNUSED)
         clear_unused_action.triggered.connect(self._clear_unused_media)
-
-        menu.exec(self._media_list.mapToGlobal(pos))
+        return menu
 
     def _insert_media_ref(self, reference: MediaRef) -> None:
         self._remember()
