@@ -187,6 +187,14 @@ QPushButton[role="spin-tool"]:pressed {{ background: {accent}; color: {accent_te
    aplicação, as oito transições pediam 18 px a mais, tirados da prévia. */
 QPushButton[role="option"] {{ text-align: left; padding: 6px 10px; font-size: 12px; }}
 QPushButton[role="option"]:checked {{ border: 2px solid {accent}; font-weight: 600; }}
+/* Lista de escolha aberta dentro de um painel (fontes): sem moldura própria,
+   a do painel já separa, e linhas com folga — sem o padding de item, a lista
+   espremia oito nomes no espaço de cinco e a escolhida não se destacava. */
+QListWidget[role="picker"] {{ background: transparent; border: none; }}
+QListWidget[role="picker"]::item {{ padding: 4px 6px; border-radius: 3px; }}
+QListWidget[role="picker"]::item:hover {{ background: {surface_alt}; }}
+QListWidget[role="picker"]::item:selected {{ background: {accent}; color: {accent_text}; }}
+QLineEdit[role="picker"] {{ padding: 4px 6px; font-size: 11px; }}
 /* Botão curto de atalho de valor (tamanhos de fonte, predefinições). */
 QPushButton[role="chip"] {{ padding: 2px 4px; font-size: 11px; }}
 /* Painel suspenso sem moldura de janela (volume e velocidade do bloco). */
