@@ -258,13 +258,25 @@ def _file_key(path: Path) -> tuple:
     return (path, info.st_size, info.st_mtime_ns)
 
 
-def _scrollable(page: QWidget) -> QScrollArea:
-    area = QScrollArea()
-    area.setWidget(page)
-    area.setWidgetResizable(True)
-    area.setFrameShape(QScrollArea.Shape.NoFrame)
-    area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    return area
+class _ScrollPage(QScrollArea):
+    """Aba de Adicionais que rola quando falta altura, sem pedir menos que antes.
+
+    O ``sizeHint`` do QScrollArea tem teto de 24 linhas de texto, e o divisor
+    vertical reparte a altura na proporção das dicas: com o teto, a área de
+    cima pedia menos do que o conteúdo e a prévia nascia mais baixa que antes
+    de a aba rolar. A dica é a da página inteira; o mínimo continua o da
+    rolagem, que é o que deixa a aba caber em tela baixa.
+    """
+
+    def __init__(self, page: QWidget) -> None:
+        super().__init__()
+        self.setWidget(page)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return self.widget().sizeHint()
 
 
 def _bounded_pool(parent: QObject, threads: int) -> QThreadPool:
@@ -796,9 +808,9 @@ class EditPanel(QWidget):
         # Roláveis: a aba de transições pede 405 px de altura e, fixa, era o piso
         # da metade de cima inteira — numa tela de 768 px sobrava uma trilha só
         # à vista. A aba Propriedades já rola por conta própria.
-        self._extras_tabs.addTab(_scrollable(self._build_text_tab()), strings.EDIT_TAB_TEXT)
-        self._extras_tabs.addTab(_scrollable(self._build_filters_tab()), strings.EDIT_TAB_FILTERS)
-        self._extras_tabs.addTab(_scrollable(self._build_transitions_tab()), strings.EDIT_TAB_TRANSITIONS)
+        self._extras_tabs.addTab(_ScrollPage(self._build_text_tab()), strings.EDIT_TAB_TEXT)
+        self._extras_tabs.addTab(_ScrollPage(self._build_filters_tab()), strings.EDIT_TAB_FILTERS)
+        self._extras_tabs.addTab(_ScrollPage(self._build_transitions_tab()), strings.EDIT_TAB_TRANSITIONS)
         self._extras_tabs.setTabsClosable(False)
         self._properties_widget = _ClipPropertiesWidget()
         self._properties_widget.property_changed.connect(self._on_properties_changed)
@@ -1270,7 +1282,7 @@ class EditPanel(QWidget):
 
         hint = QLabel(strings.EDIT_TRANSITION_TRACK_HINT)
         hint.setWordWrap(True)
-        hint.setProperty("role", "dim")
+        hint.setProperty("role", "note")
         layout.addWidget(hint)
 
         layout.addStretch(1)

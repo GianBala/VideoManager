@@ -228,6 +228,22 @@ def test_edit_panel_splitter_anti_overlap_bounds(qapp: QApplication, dummy_tools
         panel.shutdown()
 
 
+def test_edit_panel_abas_roladas_nao_encolhem_a_previa(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    from PySide6.QtWidgets import QScrollArea
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
+    try:
+        # As abas de Adicionais rolam sem pedir menos altura que o conteúdo: o
+        # divisor vertical reparte pela dica, e com o teto de 24 linhas do
+        # QScrollArea a prévia nascia mais baixa que antes de a aba rolar.
+        paginas = [panel._extras_tabs.widget(i) for i in range(panel._extras_tabs.count())]
+        roladas = [p for p in paginas if isinstance(p, QScrollArea)]
+        assert roladas
+        for pagina in roladas:
+            assert pagina.sizeHint() == pagina.widget().sizeHint()
+    finally:
+        panel.shutdown()
+
+
 def test_edit_panel_track_reordered_undo_redo(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
