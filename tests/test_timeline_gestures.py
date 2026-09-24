@@ -88,6 +88,26 @@ def test_bloco_animado_acompanha_o_arrasto_sem_grudar_nos_proprios_quadros_chave
     assert panel._project.clips[0].start > 2.0 + 30 * timeline._seconds_per_pixel()
 
 
+def test_alca_gruda_nos_proprios_quadros_chave(panel):
+    """Aparando pela alça, os quadros-chave do bloco continuam no ímã.
+
+    Ali eles não andam com a ponta — ``resized`` os mantém no mesmo instante —,
+    e são o alvo de quem quer cortar exatamente onde a animação acaba. Tirá-los
+    do ímã junto com o arrasto do bloco inteiro fazia a ponta passar reto.
+    """
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=20.0, width=160, height=90, fps=10.0)
+    bloco = Clip(video, 0.0, 5.0, keyframes=(Keyframe(0.0, opacity=1.0), Keyframe(3.0, opacity=0.0)))
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(bloco,)),)), None, [], {})
+    timeline = panel._timeline
+    timeline.set_view(0.0, 10.0)
+    fim = round(timeline._x_of(5.0)) - 2
+    alvo = round(timeline._x_of(3.0)) + 3
+
+    _drag(timeline, QPoint(fim, round(timeline._lane_rect(0).center().y())), fim - alvo, dx=-1)
+
+    assert panel._project.clips[0].end == pytest.approx(3.0, abs=1e-9)
+
+
 def test_duracao_do_filtro_pelo_campo_nao_invade_o_bloco_seguinte(panel):
     """O campo de duração da aba Filtros respeita o vizinho, como a alça.
 
