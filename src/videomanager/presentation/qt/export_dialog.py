@@ -148,9 +148,15 @@ def canvas_options(pool: list[MediaRef], aspect_choice: str | None,
 
 def rate_options(pool: list[MediaRef], rate_choice: float | None,
                  extra: tuple[float, ...] = ()) -> list[tuple[str, float | None]]:
-    """Automática, a taxa em vigor, as taxas do material e as usuais."""
-    rates = {round(ref.fps, 3) for ref in pool if ref.has_video and ref.fps}
-    rates |= set(RATE_PRESETS) | set(extra) | ({rate_choice} if rate_choice else set())
+    """Automática, a taxa em vigor, as taxas do material e as usuais.
+
+    A taxa em vigor entra com o valor exato (24000/1001, não 23,976) e toma o
+    lugar da gêmea arredondada do acervo: com as duas, a lista mostrava o
+    mesmo rótulo duas vezes.
+    """
+    rates = {round(ref.fps, 3) for ref in pool if ref.has_video and ref.fps} | set(RATE_PRESETS) | set(extra)
+    if rate_choice:
+        rates = {rate for rate in rates if abs(rate - rate_choice) > 1e-3} | {rate_choice}
     return [(strings.EDIT_CANVAS_RATE_AUTO, None)] + [
         (strings.EDIT_CANVAS_FPS.format(fps=format_rate(rate)), rate) for rate in sorted(rates)]
 

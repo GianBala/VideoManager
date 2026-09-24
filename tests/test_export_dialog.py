@@ -574,6 +574,15 @@ def test_tela_escolhida_fora_das_predefinidas_aparece_como_escolhida(qapp: QAppl
     assert dialog._canvas_box.currentData() == (1920, 1440)
     assert dialog._rate_box.currentData() == 23.976
 
+    # A taxa exata em vigor não aparece duplicada ao lado da arredondada.
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=5.0, width=1920, height=1080, fps=24000 / 1001)
+    exata = ExportDialog(project=project, settings=Settings(), pool=[foto, video], probed={},
+                         initial_rate=24000 / 1001, processing=build_processing_service(),
+                         runtime=build_desktop_runtime(audio_enabled=False))
+    rotulos = [exata._rate_box.itemText(i) for i in range(1, exata._rate_box.count())]
+    assert len(rotulos) == len(set(rotulos))
+    assert exata._rate_box.currentData() == 24000 / 1001
+
     dialog._canvas_box.setCurrentIndex(0)
 
     assert dialog.chosen_canvas is None
