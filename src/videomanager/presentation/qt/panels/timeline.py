@@ -1259,7 +1259,11 @@ class Timeline(QWidget):
 
     def _snap(self, moment: float, moving: Clip) -> float:
         tolerance = _SNAP_PIXELS * self._seconds_per_pixel()
-        best = min(self._snap_targets(moving), key=lambda value: abs(value - moment))
+        # Na alça, os quadros-chave do próprio bloco ficam parados no tempo da
+        # edição (``Project.resized`` os mantém onde estavam) e voltam a ser
+        # alvo: é o que deixa aparar a ponta exatamente onde a animação acaba.
+        own = [moving.start + kf.time_offset for kf in moving.visible_keyframes]
+        best = min(self._snap_targets(moving) + own, key=lambda value: abs(value - moment))
         return best if abs(best - moment) <= tolerance else moment
 
     def _snap_start(self, start: float, moving: Clip) -> float:
