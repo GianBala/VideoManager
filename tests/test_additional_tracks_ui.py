@@ -454,6 +454,20 @@ def test_media_list_delete_shortcut_and_context_menu(qapp: QApplication, dummy_t
         panel.shutdown()
 
 
+def test_lista_de_fontes_tem_linhas_com_folga(qapp: QApplication) -> None:
+    # Sem o padding de item a lista espremia oito nomes no espaço de cinco,
+    # e o estilo fixo que o dava saiu junto com as cores escuras.
+    from videomanager.presentation.qt.theme import stylesheet
+    for tema in ("dark", "light"):
+        selector = _FontSelectorWidget("Sans Serif")
+        selector.setStyleSheet(stylesheet(tema))
+        selector._toggle_list()
+        qapp.processEvents()
+        lista = selector._font_list
+        assert lista.visualItemRect(lista.item(0)).height() >= lista.fontMetrics().height() + 8
+        selector.deleteLater()
+
+
 def test_font_selector_popular_fonts_and_search(qapp: QApplication) -> None:
     selector = _FontSelectorWidget("Sans Serif")
     # Verify popular fonts exist
