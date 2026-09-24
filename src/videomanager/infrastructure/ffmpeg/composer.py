@@ -733,15 +733,22 @@ def _video_chain(
         mw = clip.media.width if clip.media else None
         mh = clip.media.height if clip.media else None
         base_w, base_h = fit_size(mw, mh, project.width, project.height)
-        if _interpolates(piece, fps, interpolate) and mw and mh and mw * mh > base_w * base_h:
+        if _interpolates(piece, fps, interpolate) and mw and mh:
             # A regra de ``_rate_first`` vale aqui também: o ``minterpolate``
             # reserva memória pelo quadro que recebe, e um 4K com qualquer
             # posição, escala ou opacidade numa tela 1080p era interpolado em
             # 4K — 5,6 GB por bloco onde o aviso anunciava 1,6, multiplicados
-            # pelos trechos paralelos planejados com o número menor. As escalas
-            # abaixo partem de ``base_w``/``base_h``, então encolher antes não
-            # muda o resultado.
-            steps.append(f"scale={base_w}:{base_h}")
+            # pelos trechos paralelos planejados com o número menor. Encolhe até
+            # o encaixe na tela, ampliado pela maior escala do bloco quando ele
+            # cresce: encolhido até o encaixe e ampliado depois, o material
+            # perdia o detalhe que a ampliação mostra (medido: SSIM 0,991 →
+            # 0,946 com escala 2). As escalas abaixo são absolutas, então o
+            # resultado não muda de tamanho.
+            peak_x, peak_y = clip.peak_scale
+            work_w = max(2, int(round(base_w * max(1.0, peak_x) / 2.0) * 2))
+            work_h = max(2, int(round(base_h * max(1.0, peak_y) / 2.0) * 2))
+            if mw * mh > work_w * work_h:
+                steps.append(f"scale={work_w}:{work_h}")
         steps.append(_rate_chain(piece, fps, interpolate))
         steps.append("format=rgba")
         if has_anim_scale:
