@@ -13,6 +13,7 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QGuiApplication,
                           QImage, QPainter, QPainterPath, QPen)
 
 from videomanager.application.errors import ConversionError
+from videomanager.domain.i18n import Text
 from videomanager.domain.project import Clip
 
 class QtTextRasterizer:
@@ -33,7 +34,7 @@ class QtTextRasterizer:
             if path.is_file():
                 return path
             if QGuiApplication.instance() is None:
-                raise ConversionError("A aplicação gráfica precisa estar inicializada para preparar textos.")
+                raise ConversionError(Text("TEXT_NEEDS_GUI"))
             return _render(clip, path)
 
 
@@ -88,7 +89,7 @@ def _render(clip: Clip, out_path: Path) -> Path:
     temporary = out_path.with_suffix(".tmp.png")
     try:
         if not img.save(str(temporary), "PNG"):
-            raise ConversionError("Não foi possível preparar a imagem do texto.")
+            raise ConversionError(Text("TEXT_IMAGE_FAILED"))
         temporary.replace(out_path)
     finally:
         temporary.unlink(missing_ok=True)

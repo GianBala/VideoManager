@@ -8,6 +8,8 @@ línguas lado a lado, para uma frase nova não nascer só numa delas.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 PORTUGUESE = "pt-BR"
 ENGLISH = "en"
 LANGUAGES = (PORTUGUESE, ENGLISH)
@@ -44,6 +46,11 @@ def t(key: str, /, **params: object) -> str:
     return _catalog[key][1 if _language == ENGLISH else 0].format(**params)
 
 
+def variants(key: str) -> tuple[str, ...]:
+    """O texto de ``key`` em todos os idiomas, para reconhecer o que já foi gravado."""
+    return _catalog[key]
+
+
 class Text:
     """Texto guardado que só vira ``str`` quando é mostrado.
 
@@ -52,20 +59,33 @@ class Text:
     idioma antigo até sumirem; ``str(texto)`` traduz no idioma daquele instante.
     """
 
-    __slots__ = ("key", "params")
+    __slots__ = ("_func", "_args", "_params")
 
     def __init__(self, key: str, /, **params: object) -> None:
-        self.key = key
-        self.params = params
+        self._func: Callable[..., object] = t
+        self._args: tuple[object, ...] = (key,)
+        self._params = params
+
+    @classmethod
+    def of(cls, func: Callable[..., object], /, *args: object, **kwargs: object) -> Text:
+        """O texto que ``func(*args, **kwargs)`` produz, refeito a cada exibição.
+
+        Para o que já tem quem o formate — uma duração, um tamanho, a descrição
+        inteira de uma tarefa —, e que guardado pronto manteria o separador
+        decimal e as palavras do idioma em que nasceu.
+        """
+        text = cls.__new__(cls)
+        text._func, text._args, text._params = func, args, kwargs
+        return text
 
     def __str__(self) -> str:
-        return t(self.key, **self.params)
+        return str(self._func(*self._args, **self._params))
 
     def __format__(self, spec: str) -> str:
         return format(str(self), spec)
 
     def __repr__(self) -> str:
-        return f"Text({self.key!r})"
+        return f"Text({str(self)!r})"
 
 
 def decimal_separator() -> str:

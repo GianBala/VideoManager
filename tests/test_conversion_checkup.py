@@ -390,4 +390,4 @@ def test_mensagem_do_trecho_aponta_a_causa_e_nao_a_estatistica() -> None:
                        "[libvpx-vp9 @ 000] CPB properties: bitrate max/min/avg: 0/0/0"])
     resposta = _last_line(sem_marca)
     assert "CPB properties" in resposta and "video:0KiB" in resposta
-    assert _last_line(deque()) == "sem detalhes do ffmpeg"
+    assert str(_last_line(deque())) == "sem detalhes do ffmpeg"

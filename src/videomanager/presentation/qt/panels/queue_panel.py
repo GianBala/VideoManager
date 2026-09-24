@@ -56,7 +56,7 @@ def status_text(job):
     if job.status is JobStatus.FAILED and job.error:
         return f"{strings.JOB_STATUS_LABELS['failed']}: {job.error}"
     if job.status.is_active and job.progress:
-        return job.progress.phase
+        return str(job.progress.phase)
     return strings.JOB_STATUS_LABELS[job.status.value]
 
 
@@ -96,7 +96,7 @@ class QueueModel(QAbstractTableModel):
             if column == _COL_TITLE:
                 return job.title
             if column == _COL_OUTPUT:
-                return job.description
+                return str(job.description)
             if column == _COL_STATUS:
                 return status_text(job)
             if column == _COL_PROGRESS:
@@ -106,11 +106,11 @@ class QueueModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.ToolTipRole:
             if column == _COL_STATUS and job.error:
-                return job.error
+                return str(job.error)
             if column == _COL_TITLE:
                 return job.url
             if column == _COL_OUTPUT and job.warnings:
-                return "\n".join(job.warnings)
+                return "\n".join(map(str, job.warnings))
 
         if role == Qt.ItemDataRole.TextAlignmentRole and column in (_COL_STATUS, _COL_SPEED):
             return int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -339,7 +339,7 @@ class QueuePanel(QGroupBox):
             menu.addSeparator()
             copy_error = QAction(strings.QUEUE_COPY_ERROR, menu)
             copy_error.triggered.connect(
-                lambda: QApplication.clipboard().setText(job.error or "")
+                lambda: QApplication.clipboard().setText(str(job.error or ""))
             )
             menu.addAction(copy_error)
 

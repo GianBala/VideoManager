@@ -14,6 +14,7 @@ from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 from videomanager.infrastructure.system import binaries
 from videomanager.application.errors import JobCancelled
 from videomanager.application.errors import VideoManagerError
+from videomanager.domain.i18n import t
 from videomanager.infrastructure.qt.workers.signals import emit_safely
 
 
@@ -107,7 +108,7 @@ class EngineUpdateWorker(QRunnable):
 
         if proc.returncode != 0:
             detail = (proc.stderr or b"").decode("utf-8", "replace").strip()
-            tail = detail.splitlines()[-3:] if detail else ["erro não informado"]
+            tail = detail.splitlines()[-3:] if detail else [t("ERROR_NO_DETAIL")]
             emit_safely(self.signals.failed, "\n".join(tail))
             return
 

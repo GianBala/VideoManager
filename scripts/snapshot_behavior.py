@@ -378,7 +378,7 @@ def secao_exportacao(midia_dir: Path) -> dict:
         dialogo._on_enqueue()
         job = dialogo.created_job
         return None if job is None else {"alvo": type(job.request.target).__name__, "campos": _normal(job.request.target),
-                                         "descricao": job.description, "avisos": list(job.warnings),
+                                         "descricao": str(job.description), "avisos": [str(a) for a in job.warnings],
                                          "devolvida": _normal([dialogo.chosen_canvas, dialogo.chosen_rate])}
 
     saida = {}

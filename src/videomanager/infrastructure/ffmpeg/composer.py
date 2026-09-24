@@ -40,6 +40,7 @@ from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
+from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import fit_size
 from videomanager.domain.project import Clip
@@ -319,7 +320,7 @@ def _input_args(
     if clip.overlay_type == "text":
         path = (text_assets or {}).get(clip.clip_id)
         if path is None:
-            raise ConversionError("Os recursos de texto não foram preparados para esta renderização.")
+            raise ConversionError(Text("COMPOSE_TEXT_ASSETS_MISSING"))
         return [
             "-loop", "1",
             "-framerate", f"{fps:.6f}",
@@ -1830,7 +1831,7 @@ def gif_args(
     graph = build_graph(project, span=project.video_duration, want_video=True, want_audio=False,
                         text_assets=text_assets)
     if not graph.video_label:
-        raise ConversionError("Não há imagem na linha do tempo para exportar como GIF.")
+        raise ConversionError(Text("COMPOSE_GIF_NO_IMAGE"))
     if _gif_single_palette(project):
         palette = (f"palettegen=stats_mode=diff[gifp];[gifb][gifp]"
                    f"paletteuse={_GIF_DITHER}:diff_mode=rectangle[out]")
@@ -1864,14 +1865,12 @@ def export_args(
     """Comando que grava o projeto inteiro em um arquivo."""
     project = project.for_export()
     if project.is_empty:
-        raise ConversionError("Não há nada na linha do tempo para exportar.")
+        raise ConversionError(Text("COMPOSE_NOTHING"))
 
     if audio_only:
         graph = build_graph(project, want_video=False, want_audio=True, text_assets=text_assets)
         if not graph.audio_label:
-            raise ConversionError(
-                "Não há blocos de áudio audíveis na linha do tempo para exportar."
-            )
+            raise ConversionError(Text("COMPOSE_NO_AUDIBLE"))
         args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y", *graph.inputs]
         filters = list(graph.filters)
         if filters:
@@ -1928,9 +1927,7 @@ def export_args(
     elif video_label:
         args += ["-an"]
     if not video_label and not graph.audio_label:
-        raise ConversionError(
-            "Todos os blocos estão mudos ou vazios: não há o que exportar."
-        )
+        raise ConversionError(Text("COMPOSE_ALL_MUTED"))
     return args + tail_args(container, destination, map_metadata=False)
 
 
@@ -2288,7 +2285,7 @@ def segment_video_args(
         project, at=at, span=span + _SEGMENT_TAIL, want_audio=False, interpolate=True
     , text_assets=text_assets)
     if not graph.video_label:
-        raise ConversionError("O trecho não tem imagem para exportar.")
+        raise ConversionError(Text("COMPOSE_SEGMENT_NO_IMAGE"))
     codec_family = family or hwaccel.family_for(container)
     encoder = hwaccel.resolve(codec_family, hardware, tools, quality=quality)
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y", "-progress", "pipe:1"]

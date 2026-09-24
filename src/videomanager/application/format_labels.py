@@ -3,6 +3,7 @@ from videomanager.application.formatting import DASH
 from videomanager.application.formatting import format_bitrate
 from videomanager.application.formatting import format_size
 from videomanager.domain.formats import VideoChoice
+from videomanager.domain.i18n import t
 
 
 def resolution_label(choice):
@@ -28,7 +29,7 @@ def choice_label(choice):
             parts.append(choice.language)
         if choice.is_extracted_from_video:
             source = f'{choice.best.height}p' if choice.best.height else choice.best.ext.upper()
-            parts.append(f'extraído do vídeo {source}')
+            parts.append(t('DESC_EXTRACTED_FROM', source=source))
     size = format_size(choice.best.filesize, estimated=choice.best.filesize_is_estimated)
     if size != DASH:
         parts.append(size)
