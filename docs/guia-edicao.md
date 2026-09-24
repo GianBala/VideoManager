@@ -283,8 +283,10 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
   - **◀ ◇ ▶** vão ao quadro-chave anterior, adicionam ou removem um quadro-chave
     no cursor e vão ao próximo. Cada quadro-chave é um losango na parte de
     baixo do bloco, na linha do tempo — amarelo, ou azul quando o cursor está
-    sobre ele —, e o ímã da linha do tempo também os reconhece (os dos outros
-    blocos: os do bloco arrastado andam junto com ele).
+    sobre ele —, e o ímã da linha do tempo também os reconhece: ao arrastar
+    um bloco, os dos outros blocos (os dele andam junto com ele); ao aparar
+    pela alça, também os do próprio bloco, que ali ficam parados — é o que deixa
+    cortar exatamente onde a animação acaba.
   - Num bloco ainda **sem** quadros-chave, mudar um valor vale para o bloco
     inteiro. Num bloco animado, altera **só o instante atual**, criando ou
     atualizando o quadro-chave dali. Marque **Editar toda a animação** para
@@ -418,8 +420,10 @@ A **Proporção** e a **Tela** do projeto também podem ser escolhidas nos
 seletores do topo — são as mesmas escolhas da janela de exportação, e valem
 para a prévia e para o arquivo. Elas são uma preferência de saída, como o corte
 rápido, e não uma alteração da montagem: não entram no histórico de desfazer.
-A tela resultante é gravada no `.vmp`, e ao abrir um projeto a escolha volta
-como estava.
+A tela resultante é gravada no `.vmp`. Ao abrir o projeto, tela e taxa iguais
+às que o material produz voltam como **Automática**, como estavam antes de
+fechar — um clipe maior ou mais fluido acrescentado depois sobe a edição, e o
+corte rápido continua disponível —; o que difere do material volta fixo.
 
 - **Proporção** — **Automática** (a da tela que o material produz, mostrada
   entre parênteses), 16:9, 4:3, 9:16 (vertical), 1:1 (quadrado) ou 21:9
