@@ -244,6 +244,31 @@ def test_edit_panel_abas_roladas_nao_encolhem_a_previa(qapp: QApplication, dummy
         panel.shutdown()
 
 
+def test_edit_panel_previa_e_a_ultima_a_perder_largura(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
+    try:
+        panel.show()
+        # Estreitando a janela, a biblioteca e os Adicionais cedem antes do
+        # monitor — em 1680 px a prévia perdia 92 px com as colunas cheias...
+        panel.resize(1680, 900)
+        qapp.processEvents()
+        assert panel._top_splitter.sizes()[2] >= 1040
+        # ... e ela só encolhe depois de as duas chegarem ao mínimo.
+        panel.resize(1280, 900)
+        qapp.processEvents()
+        media, extras, _ = panel._top_splitter.sizes()
+        assert (media, extras) == (panel._media_box.minimumWidth(), panel._extras_box.minimumWidth())
+        # Mudar só a altura (o divisor vertical) não desfaz a largura que o
+        # usuário arrastou.
+        panel._top_splitter.setSizes([media, extras + 100, panel._top_splitter.sizes()[2] - 100])
+        arrastado = panel._top_splitter.sizes()
+        panel.resize(1280, 800)
+        qapp.processEvents()
+        assert panel._top_splitter.sizes() == arrastado
+    finally:
+        panel.shutdown()
+
+
 def test_edit_panel_track_reordered_undo_redo(qapp: QApplication, dummy_tools: FFmpegTools) -> None:
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
