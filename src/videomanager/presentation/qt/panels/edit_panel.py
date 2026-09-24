@@ -395,9 +395,16 @@ class EditPanel(QWidget):
         self._pool_thumbnails.clear()
         self._pool_tokens.clear()
         self._probed = dict(probed)
-        self._canvas_choice = (project.width, project.height) if path else None
-        self._aspect_choice = format_aspect_ratio(project.width, project.height) if path else None
-        self._rate_choice = project.fps if path else None
+        # Tela e taxa gravadas iguais às que o material produz voltam
+        # automáticas, como estavam antes de fechar; só fica fixo o que difere
+        # dele. Fixando tudo, a edição reaberta ficava presa ao que era ao
+        # salvar — um clipe 4K ou de 60 fps acrescentado depois não subia nada
+        # — e perdia o corte rápido, que não copia dados para tela escolhida.
+        material = auto_canvas(project)
+        canvas = (project.width, project.height)
+        self._canvas_choice = canvas if path and canvas != (material.width, material.height) else None
+        self._aspect_choice = format_aspect_ratio(*self._canvas_choice) if self._canvas_choice else None
+        self._rate_choice = project.fps if path and abs(project.fps - material.fps) > 1e-6 else None
         self._keyframes = ()
         self._keyframe_source = None
         self._keyframe_token = next(self._tokens)
