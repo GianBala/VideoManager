@@ -234,7 +234,9 @@ def test_quadro_parado_monta_o_comando_fora_da_interface(monkeypatch):
     monkeypatch.setattr('videomanager.infrastructure.qt.workers.preview_worker.frame_from_command',
                         lambda *args, register, **kwargs: RawFrame(bytes(12), 2, 2))
     worker = build_desktop_runtime(audio_enabled=False).frame_worker(new_project(), 0.0, (2, 2), TOOLS, 7)
-    assert montado_em == [], "o comando foi montado na thread que pediu o quadro"
+    # Confere a thread, e não a lista inteira: um painel que outro teste deixou
+    # vivo pode pedir quadros nas threads dele enquanto este roda.
+    assert threading.current_thread() not in montado_em, "o comando foi montado na thread que pediu o quadro"
 
     quadros = []
     worker.signals.frame.connect(lambda token, frame: quadros.append(token))
@@ -242,5 +244,6 @@ def test_quadro_parado_monta_o_comando_fora_da_interface(monkeypatch):
     thread.start()
     thread.join(10)
     QCoreApplication.processEvents()
-    assert montado_em == [thread]
+    assert thread in montado_em
+    assert threading.current_thread() not in montado_em
     assert quadros == [7]
