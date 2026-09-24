@@ -1426,14 +1426,8 @@ class _ClipPropertiesWidget(QWidget):
 
         t_layout.addWidget(QLabel("Efeito:"))
         self._combo_trans_type = QComboBox()
-        self._combo_trans_type.addItem("🌑 Fade", "fade")
-        self._combo_trans_type.addItem("⬛ Fade para Preto", "fadeblack")
-        self._combo_trans_type.addItem("⬜ Fade para Branco", "fadewhite")
-        self._combo_trans_type.addItem("🎬 Dissolve", "dissolve")
-        self._combo_trans_type.addItem("◀ Wipe para Esquerda", "wipeleft")
-        self._combo_trans_type.addItem("▶ Wipe para Direita", "wiperight")
-        self._combo_trans_type.addItem("◀ Slide para Esquerda", "slideleft")
-        self._combo_trans_type.addItem("▶ Slide para Direita", "slideright")
+        for tid, (icon, name) in strings.EDIT_TRANSITIONS.items():
+            self._combo_trans_type.addItem(f"{icon} {name}", tid)
         self._combo_trans_type.currentIndexChanged.connect(self._on_trans_type_changed)
         t_layout.addWidget(self._combo_trans_type)
 
@@ -1486,18 +1480,9 @@ class _ClipPropertiesWidget(QWidget):
             self._proj_h = max(1, proj_h)
 
             if clip.overlay_type == "transition":
-                t_labels = {
-                    "fade": "Fade",
-                    "fadeblack": "Fade para Preto",
-                    "fadewhite": "Fade para Branco",
-                    "dissolve": "Dissolve",
-                    "wipeleft": "Wipe para Esquerda",
-                    "wiperight": "Wipe para Direita",
-                    "slideleft": "Slide para Esquerda",
-                    "slideright": "Slide para Direita",
-                }
                 tname = clip.transition_name or "fade"
-                name = f"Transição: {t_labels.get(tname, tname)}"
+                name = strings.EDIT_TRANSITION_TITLE.format(
+                    name=strings.EDIT_TRANSITIONS.get(tname, ("", tname))[1])
             else:
                 name = clip.media.name if clip.media else (clip.text_content or clip.overlay_type.title())
 
