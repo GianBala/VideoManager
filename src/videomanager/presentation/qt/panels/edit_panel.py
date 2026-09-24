@@ -1013,15 +1013,9 @@ class EditPanel(QWidget):
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(6)
 
-        layout.addWidget(QLabel("Escolha um efeito visual:"))
+        layout.addWidget(QLabel(strings.EDIT_CHOOSE_FILTER))
 
-        self._filter_specs = (
-            ("pb", "🎬 " + strings.EDIT_FILTER_BW),
-            ("sepia", "☕ " + strings.EDIT_FILTER_SEPIA),
-            ("contraste", "⚡ " + strings.EDIT_FILTER_CONTRAST),
-            ("vinheta", "🎯 " + strings.EDIT_FILTER_VIGNETTE),
-            ("inverter", "🔄 " + strings.EDIT_FILTER_INVERT),
-        )
+        self._filter_specs = tuple((fid, f"{icon} {name}") for fid, (icon, name) in strings.EDIT_FILTERS.items())
 
         self._filter_group = QButtonGroup(self)
         self._filter_group.setExclusive(True)
@@ -1037,7 +1031,7 @@ class EditPanel(QWidget):
             self._filter_buttons.append(btn)
 
         dur_row = QHBoxLayout()
-        dur_row.addWidget(QLabel("Duração:"))
+        dur_row.addWidget(QLabel(strings.EDIT_EXTRA_DURATION))
         self._filter_dur = QDoubleSpinBox()
         self._filter_dur.setRange(0.5, 3600.0)
         self._filter_dur.setValue(IMAGE_DURATION)
@@ -1234,18 +1228,9 @@ class EditPanel(QWidget):
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(6)
 
-        layout.addWidget(QLabel("Escolha uma transição de vídeo:"))
+        layout.addWidget(QLabel(strings.EDIT_CHOOSE_TRANSITION))
 
-        self._trans_specs = (
-            ("fade", "🌑 Fade"),
-            ("fadeblack", "⬛ Fade para Preto"),
-            ("fadewhite", "⬜ Fade para Branco"),
-            ("dissolve", "🎬 Dissolve"),
-            ("wipeleft", "◀ Wipe para Esquerda"),
-            ("wiperight", "▶ Wipe para Direita"),
-            ("slideleft", "◀ Slide para Esquerda"),
-            ("slideright", "▶ Slide para Direita"),
-        )
+        self._trans_specs = tuple((tid, f"{icon} {name}") for tid, (icon, name) in strings.EDIT_TRANSITIONS.items())
         self._selected_trans_name = "fade"
 
         self._trans_group = QButtonGroup(self)
@@ -1262,7 +1247,7 @@ class EditPanel(QWidget):
             self._trans_buttons.append(btn)
 
         dur_row = QHBoxLayout()
-        dur_row.addWidget(QLabel("Duração:"))
+        dur_row.addWidget(QLabel(strings.EDIT_EXTRA_DURATION))
         self._trans_dur = QDoubleSpinBox()
         self._trans_dur.setRange(MIN_TRANSITION_DURATION, 5.0)
         self._trans_dur.setValue(1.0)
@@ -1290,12 +1275,12 @@ class EditPanel(QWidget):
 
         layout.addStretch(1)
 
-        self._apply_trans_btn = QPushButton("+ Inserir Transição")
+        self._apply_trans_btn = QPushButton(strings.EDIT_INSERT_TRANSITION)
         self._apply_trans_btn.setProperty("role", "primary")
         self._apply_trans_btn.clicked.connect(self._handle_apply_or_update_transition)
         layout.addWidget(self._apply_trans_btn)
 
-        self._insert_new_trans_btn = QPushButton("+ Inserir como Nova Transição")
+        self._insert_new_trans_btn = QPushButton(strings.EDIT_INSERT_NEW_TRANSITION)
         self._insert_new_trans_btn.clicked.connect(lambda: self._insert_transition_clip(self._selected_trans_name))
         self._insert_new_trans_btn.setVisible(False)
         layout.addWidget(self._insert_new_trans_btn)
@@ -1509,7 +1494,7 @@ class EditPanel(QWidget):
             self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)
             self._insert_new_filter_btn.setVisible(False)
             if hasattr(self, "_apply_trans_btn"):
-                self._apply_trans_btn.setText("+ Inserir Transição")
+                self._apply_trans_btn.setText(strings.EDIT_INSERT_TRANSITION)
                 self._insert_new_trans_btn.setVisible(False)
         elif clip is not None and clip.overlay_type == "filter":
             self._extras_tabs.setCurrentIndex(1)
@@ -1524,7 +1509,7 @@ class EditPanel(QWidget):
             self._insert_text_btn.setText(strings.EDIT_INSERT_TEXT)
             self._insert_new_text_btn.setVisible(False)
             if hasattr(self, "_apply_trans_btn"):
-                self._apply_trans_btn.setText("+ Inserir Transição")
+                self._apply_trans_btn.setText(strings.EDIT_INSERT_TRANSITION)
                 self._insert_new_trans_btn.setVisible(False)
         elif clip is not None and clip.overlay_type == "transition":
             self._extras_tabs.setCurrentIndex(2)
@@ -1538,7 +1523,7 @@ class EditPanel(QWidget):
                 clip.transition_affects_additionals
             )
             if hasattr(self, "_apply_trans_btn"):
-                self._apply_trans_btn.setText("✓ Atualizar Transição Selecionada")
+                self._apply_trans_btn.setText(strings.EDIT_UPDATE_TRANSITION)
                 self._insert_new_trans_btn.setVisible(True)
             self._insert_text_btn.setText(strings.EDIT_INSERT_TEXT)
             self._insert_new_text_btn.setVisible(False)
@@ -1550,7 +1535,7 @@ class EditPanel(QWidget):
             self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)
             self._insert_new_filter_btn.setVisible(False)
             if hasattr(self, "_apply_trans_btn"):
-                self._apply_trans_btn.setText("+ Inserir Transição")
+                self._apply_trans_btn.setText(strings.EDIT_INSERT_TRANSITION)
                 self._insert_new_trans_btn.setVisible(False)
 
     def _build_player(self) -> QWidget:
