@@ -97,6 +97,9 @@ QWidget[role="plain"] {{ background: transparent; }}
 
 QLabel {{ background: transparent; }}
 QLabel[role="dim"] {{ color: {text_dim}; }}
+/* Nota ao pé de uma coluna estreita (aba Transições): menor que o texto dos
+   controles, para a coluna não pedir altura que a prévia ao lado perderia. */
+QLabel[role="note"] {{ color: {text_dim}; font-size: 11px; }}
 QLabel[role="title"] {{ font-size: 13pt; font-weight: 600; }}
 QLabel[role="live"] {{ color: {accent_text}; background: {error};
     border-radius: 4px; padding: 2px 6px; font-weight: 700; font-size: 8pt; }}
@@ -180,11 +183,12 @@ QPushButton[role="spin-tool"]:hover {{ border-color: {accent}; }}
 QPushButton[role="spin-tool"]:pressed {{ background: {accent}; color: {accent_text}; }}
 
 /* Escolha entre opções (filtros, transições, fonte): texto à esquerda e a
-   marcada com a borda da cor de destaque. */
-QPushButton[role="option"] {{ text-align: left; padding: 6px 10px; }}
+   marcada com a borda da cor de destaque. Letra de 12 px: com a do resto da
+   aplicação, as oito transições pediam 18 px a mais, tirados da prévia. */
+QPushButton[role="option"] {{ text-align: left; padding: 6px 10px; font-size: 12px; }}
 QPushButton[role="option"]:checked {{ border: 2px solid {accent}; font-weight: 600; }}
 /* Botão curto de atalho de valor (tamanhos de fonte, predefinições). */
-QPushButton[role="chip"] {{ padding: 2px 4px; font-size: 9pt; }}
+QPushButton[role="chip"] {{ padding: 2px 4px; font-size: 11px; }}
 /* Painel suspenso sem moldura de janela (volume e velocidade do bloco). */
 QDialog[role="popup"] {{ background: {surface}; border: 1px solid {border}; border-radius: 8px; }}
 
