@@ -23,11 +23,14 @@ def interpolation_bytes(project: Project) -> int:
     O total soma os blocos porque o grafo instancia **um filtro por bloco**, e
     todos vivem enquanto a exportação existe. Cada um conta pelo quadro que
     recebe, que é o menor entre material e tela — a mesma regra de
-    :func:`_rate_first`.
+    :func:`_rate_first` —, com a tela ampliada pela maior escala do bloco quando
+    ele cresce: um bloco ampliado é interpolado no tamanho em que aparece, para
+    não perder o detalhe.
     """
     total = 0
     for clip in _interpolated_clips(project):
-        pixels = project.width * project.height
+        peak_x, peak_y = clip.peak_scale
+        pixels = int(project.width * project.height * max(1.0, peak_x) * max(1.0, peak_y))
         if clip.media.width and clip.media.height:
             pixels = min(pixels, clip.media.width * clip.media.height)
         total += pixels * _INTERPOLATE_BYTES_PER_PIXEL
