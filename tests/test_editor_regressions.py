@@ -668,6 +668,32 @@ def test_projeto_reaberto_segue_o_material_no_que_foi_gravado_automatico(panel, 
     assert (panel._project.width, panel._project.height, panel._project.fps) == (1920, 1080, 50.0)
 
 
+def test_tela_de_outra_proporcao_escolhida_na_exportacao_aparece_na_lista(panel, monkeypatch):
+    # A janela devolve a tela sem a proporção: com 16:9 escolhida no painel, uma
+    # tela 9:16 ficava fora da lista filtrada, que passava a dizer "Automática"
+    # com a tela fixada (e, antes disso, a escolha voltava sozinha ao
+    # automático na edição seguinte).
+    from PySide6.QtWidgets import QDialog
+    from videomanager.domain.project import Project
+    import videomanager.presentation.qt.panels.edit_panel as modulo
+
+    class Janela:
+        def __init__(self, *args, **kwargs):
+            self.created_job, self.chosen_canvas, self.chosen_rate = object(), (1080, 1920), None
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+    video = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, width=1920, height=1080, fps=30.0, duration=2)
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0, 2),)),)), None, [video], {})
+    panel._canvas_choice, panel._aspect_choice = (1920, 1080), '16:9'
+    panel._after_edit()
+    monkeypatch.setattr(modulo, 'ExportDialog', Janela)
+    panel._open_export_dialog()
+    assert (panel._aspect_choice, panel._canvas_box.currentData()) == ('9:16', (1080, 1920))
+    assert (panel._project.width, panel._project.height) == (1080, 1920)
+
+
 def test_insercao_automatica_evita_trilha_oculta_e_muda(panel):
     from videomanager.domain.project import Project
     media = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, has_audio=True, duration=2)
