@@ -15,6 +15,11 @@ de quadros. Para cada cena, a mediana das repetições de:
   ``engasgos`` (> 66 ms) entre quadros;
 - ``emenda_loop_ms``: o intervalo no quadro em que o loop volta ao começo.
 
+Com ``--trocar-idioma``, cada reprodução medida troca a interface para o
+inglês 1 s depois do play e de volta 1,5 s depois: a troca não pode parar o
+fluxo nem abrir outro, e o que ela custa aparece nas mesmas medidas — compare
+com uma execução sem a opção.
+
 Números absolutos mudam de máquina para máquina: compare com a base, na mesma
 máquina e sem outra carga. Uma contagem que não termina num instante fixo mede
 a espera do próprio script — foi o que fez 127 × 120 quadros parecer regressão.
@@ -53,6 +58,8 @@ def _midia(pasta: Path, tools) -> dict[str, Path]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repeticoes", type=int, default=3)
+    parser.add_argument("--trocar-idioma", action="store_true",
+                        help="troca o idioma durante cada reprodução medida (1 s e 2,5 s depois do play)")
     args = parser.parse_args()
     perfil = Path(tempfile.mkdtemp(prefix="vm-reproducao-"))
     for chave in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
@@ -127,6 +134,11 @@ def main() -> int:
             mostrados.clear()
             inicio = playback_clock()
             painel._toggle_play()
+            if args.trocar_idioma:
+                from videomanager.domain import i18n
+                from videomanager.presentation.qt.i18n import apply_language
+                QTimer.singleShot(1000, lambda: apply_language(i18n.ENGLISH))
+                QTimer.singleShot(2500, lambda: apply_language(i18n.PORTUGUESE))
             rodar(4200)
             painel._toggle_play()
             tocando = [(t - inicio, s) for t, s, p in mostrados if p]

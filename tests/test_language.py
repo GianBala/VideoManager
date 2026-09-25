@@ -251,7 +251,7 @@ _IGUAIS = {
     "PROFILE_MP3_320", "STATUS_FFMPEG", "CONVERT_PICK_TIP", "CONVERT_REMOVE_TIP", "EDIT_CHANNELS_MONO",
     "EXPORT_CONTAINERS", "EXPORT_VIDEO_CODECS", "EXPORT_AUDIO_FORMATS", "EXPORT_ASPECTS", "EDIT_PREV_KEY_SHORT",
     "EDIT_NEXT_KEY_SHORT", "EDIT_LOOP", "EDIT_FONT_BOLD", "EDIT_FONT_ITALIC", "EDIT_TRANSITIONS",
-    "EDIT_CANVAS_FPS", "PROP_CLIP_ID", "EDIT_SLIDESHOW",
+    "EDIT_CANVAS_FPS", "PROP_CLIP_ID", "EDIT_SLIDESHOW", "LANGUAGE_NAMES",
 }
 
 
@@ -260,7 +260,25 @@ def test_ingles_sem_resto_de_portugues():
     restos = []
     for nome in en:
         for original, traduzido in zip(_textos(pt[nome]), _textos(en[nome])):
-            igual = traduzido == original and re.search(r"[^\W\d_]", re.sub(r"\{[^}]*\}", "", original))
-            if _PORTUGUES.search(traduzido) or (igual and nome not in _IGUAIS):
+            if traduzido == original:
+                # "Português (Brasil)" fica igual de propósito, e com acento.
+                if nome not in _IGUAIS and re.search(r"[^\W\d_]", re.sub(r"\{[^}]*\}", "", original)):
+                    restos.append(f"{nome}: {traduzido!r}")
+            elif _PORTUGUES.search(traduzido):
                 restos.append(f"{nome}: {traduzido!r}")
     assert restos == []
+
+
+def test_cada_idioma_aparece_no_proprio_nome():
+    assert list(strings.LANGUAGE_NAMES) == list(i18n.LANGUAGES)
+
+
+def test_aviso_de_biblioteca_faltando_sai_no_idioma_das_preferencias():
+    """Sai antes de existir janela, e portanto antes de qualquer troca."""
+    from videomanager.preflight import format_instructions
+    assert format_instructions(["libxcb-cursor0"]).startswith(
+        "O Video Manager não pôde abrir: falta biblioteca de sistema")
+    i18n.set_language(i18n.ENGLISH)
+    texto = format_instructions(["libxcb-cursor0", "libxcb-xkb1"])
+    assert texto.startswith("Video Manager could not start: system libraries")
+    assert "sudo apt install -y libxcb-cursor0 libxcb-xkb1" in texto

@@ -264,3 +264,131 @@ def test_aba_propriedades_sem_bloco_trocada_ao_vivo_igual_a_nova(desktop_app, ps
     finally:
         ao_vivo.deleteLater()
         nova.deleteLater()
+
+
+# --- a escolha do idioma ----------------------------------------------------
+
+class _SemFerramentas:
+    """Runtime sem ffmpeg: o diálogo de configurações não sonda a placa."""
+
+    def __init__(self, runtime):
+        self._runtime = runtime
+
+    def __getattr__(self, nome):
+        return getattr(self._runtime, nome)
+
+    def find_tools(self):
+        return None
+
+
+def test_idioma_nas_configuracoes_logo_abaixo_do_tema(desktop_app):
+    from videomanager.presentation.qt.settings_dialog import SettingsDialog
+    dialogo = SettingsDialog(Settings(language=i18n.ENGLISH),
+                             runtime=_SemFerramentas(build_desktop_runtime(audio_enabled=False)))
+    try:
+        formulario = dialogo._theme.parentWidget().layout()
+        assert formulario.getWidgetPosition(dialogo._language)[0] == formulario.getWidgetPosition(dialogo._theme)[0] + 1
+        assert dialogo._language.maximumWidth() == dialogo._theme.maximumWidth()
+        # Cada idioma no próprio nome, qualquer que seja o de agora.
+        assert [dialogo._language.itemText(i) for i in range(dialogo._language.count())] == [
+            "Português (Brasil)", "English"]
+        assert dialogo.result_settings().language == i18n.ENGLISH
+        dialogo._language.setCurrentIndex(0)
+        assert dialogo.result_settings().language == i18n.PORTUGUESE
+    finally:
+        dialogo.deleteLater()
+
+
+def test_ok_nas_configuracoes_troca_o_idioma_com_a_janela_aberta(janelas, monkeypatch):
+    from dataclasses import replace
+
+    from videomanager.presentation.qt import main_window as modulo
+    janela = janelas()
+    escolhas = []
+
+    class Dialogo:
+        DialogCode = modulo.SettingsDialog.DialogCode
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return escolhas.pop(0)
+
+        def result_settings(self):
+            return replace(janela._settings, language=i18n.ENGLISH)
+
+    monkeypatch.setattr(modulo, "SettingsDialog", Dialogo)
+    monkeypatch.setattr(janela, "_save_settings", lambda: None)
+    escolhas.append(Dialogo.DialogCode.Rejected)
+    janela._open_settings()
+    assert janela._tabs.tabText(_EDITOR) == "Editar"
+    escolhas.append(Dialogo.DialogCode.Accepted)
+    janela._open_settings()
+    assert janela._tabs.tabText(_EDITOR) == "Edit"
+    assert janela._settings.language == i18n.ENGLISH
+
+
+def test_textos_e_numeros_do_proprio_qt_seguem_o_idioma(desktop_app):
+    """OK e Cancelar vêm do Qt, e o separador dos campos numéricos também:
+    sem a tradução e o locale, saíam em inglês e no formato do sistema."""
+    from PySide6.QtWidgets import QDialogButtonBox, QDoubleSpinBox
+    cancelar = QDialogButtonBox.StandardButton.Cancel
+    caixa = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | cancelar)
+    campo = QDoubleSpinBox()
+    campo.setValue(0.5)
+    try:
+        idioma.apply_language(i18n.PORTUGUESE)
+        assert (caixa.button(cancelar).text(), campo.text()) == ("Cancelar", "0,50")
+        idioma.apply_language(i18n.ENGLISH)
+        assert (caixa.button(cancelar).text(), campo.text()) == ("Cancel", "0.50")
+        idioma.apply_language(i18n.PORTUGUESE)
+        assert (caixa.button(cancelar).text(), campo.text()) == ("Cancelar", "0,50")
+    finally:
+        caixa.deleteLater()
+        campo.deleteLater()
+
+
+def test_widget_solto_durante_a_troca_acompanha_a_janela_em_que_entrar(desktop_app):
+    """A aba Propriedades nasce solta e só entra na janela ao ser aberta: se
+    a troca a marcasse com locale próprio, ela ficaria no idioma daquela troca."""
+    from PySide6.QtWidgets import QDoubleSpinBox, QVBoxLayout
+    janela = QWidget()
+    solto = QDoubleSpinBox()
+    solto.setValue(0.5)
+    try:
+        idioma.apply_language(i18n.ENGLISH)
+        QVBoxLayout(janela).addWidget(solto)
+        idioma.apply_language(i18n.PORTUGUESE)
+        assert solto.text() == "0,50"
+    finally:
+        janela.deleteLater()
+
+
+def test_abre_direto_no_idioma_das_preferencias(tmp_path):
+    """Abrir em inglês é nascer em inglês, sem passar por troca nenhuma."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    (tmp_path / "settings.json").write_text(json.dumps({"language": "en"}), encoding="utf-8")
+    script = (
+        "from pathlib import Path\n"
+        "from videomanager.infrastructure.storage import settings\n"
+        f"settings.config_dir = lambda: Path({str(tmp_path)!r})\n"
+        "from videomanager.presentation.qt import i18n\n"
+        "trocas = []\n"
+        "original = i18n._reapply\n"
+        "i18n._reapply = lambda: (trocas.append(len(i18n._bound)), original())\n"
+        "from videomanager.app import build_app\n"
+        "app, janela = build_app([], audio_enabled=False)\n"
+        "print(janela._tabs.tabText(2), janela._tabs.tabText(1), trocas)\n"
+    )
+    raiz = Path(__file__).resolve().parents[1]
+    ambiente = {**os.environ, "QT_QPA_PLATFORM": "offscreen", "PYTHONPATH": str(raiz / "src"),
+                "XDG_DATA_HOME": str(tmp_path / "dados")}
+    saida = subprocess.run([sys.executable, "-c", script], env=ambiente, capture_output=True, text=True,
+                           timeout=120, cwd=raiz)
+    # A única troca é a da abertura, antes de existir widget: nada a reaplicar.
+    assert saida.stdout.split() == ["Edit", "Convert", "[0]"], saida.stderr[-2000:]

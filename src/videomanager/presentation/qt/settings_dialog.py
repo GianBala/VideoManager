@@ -161,6 +161,13 @@ class SettingsDialog(QDialog):
         self._theme.setFixedWidth(FIELD_WIDTH)
         self._add_row(form, strings.SETTINGS_THEME, self._theme)
 
+        self._language = QComboBox()
+        for code, name in strings.LANGUAGE_NAMES.items():
+            self._language.addItem(name, code)
+        self._language.setCurrentIndex(max(0, self._language.findData(self._settings.language)))
+        self._language.setFixedWidth(FIELD_WIDTH)
+        self._add_row(form, strings.SETTINGS_LANGUAGE, self._language)
+
         self._encoder = QComboBox()
         for value, label in hwaccel.choices():
             self._encoder.addItem(label, value)
@@ -294,6 +301,7 @@ class SettingsDialog(QDialog):
         updated.download_dir = self._dest.text().strip() or self._settings.download_dir
         updated.separate_by_site = self._separate.isChecked()
         updated.theme = self._theme.currentData() or "dark"
+        updated.language = self._language.currentData() or self._settings.language
         updated.hardware_encoder = (
             self._encoder.currentData() or hwaccel.SOFTWARE
         )

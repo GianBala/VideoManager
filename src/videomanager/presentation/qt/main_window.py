@@ -55,7 +55,7 @@ from videomanager.domain.selection import VideoRequest
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
-from videomanager.presentation.qt.i18n import bind, on_language_change
+from videomanager.presentation.qt.i18n import apply_language, bind, on_language_change
 from videomanager.presentation.qt.ffmpeg_setup import ensure_ffmpeg
 from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
@@ -836,6 +836,7 @@ class MainWindow(QMainWindow):
             if app is not None:
                 app.setPalette(qpalette(self._settings.theme))
                 app.setStyleSheet(stylesheet(self._settings.theme))
+        apply_language(self._settings.language)
         self._update_status()
 
     def _update_engine(self) -> None:

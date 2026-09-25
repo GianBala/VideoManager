@@ -1,4 +1,4 @@
-"""Textos da aplicação: o que a tarefa guarda acompanha a troca de idioma."""
+"""Textos da aplicação: o que a tarefa guarda acompanha a troca de idioma, e o idioma escolhido."""
 
 from __future__ import annotations
 
@@ -42,3 +42,12 @@ def test_erro_guardado_na_tarefa_segue_o_idioma_da_tela():
 
 def test_mensagem_de_excecao_sem_catalogo_continua_texto():
     assert error_message(OSError("disco cheio")) == "disco cheio"
+
+
+def test_idioma_das_preferencias_volta_ao_padrao_quando_esta_versao_nao_o_tem():
+    from videomanager.application.preferences import Preferences
+    assert Preferences().language == i18n.PORTUGUESE
+    assert Preferences.from_dict({"language": "en"}).language == i18n.ENGLISH
+    # Aplicar um idioma desconhecido recusaria abrir o aplicativo.
+    for invalido in ("fr", "", "EN", 3, None):
+        assert Preferences.from_dict({"language": invalido}).language == i18n.PORTUGUESE

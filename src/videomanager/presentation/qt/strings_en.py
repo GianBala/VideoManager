@@ -651,6 +651,8 @@ SETTINGS_ENCODER_TEST_TIP = (
     "encoders that don't open on this machine."
 )
 SETTINGS_THEME = "Theme"
+SETTINGS_LANGUAGE = "Language"
+LANGUAGE_NAMES = {"pt-BR": "Português (Brasil)", "en": "English"}
 THEME_DARK = "Dark"
 THEME_LIGHT = "Light"
 
