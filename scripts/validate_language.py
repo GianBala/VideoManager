@@ -75,9 +75,11 @@ _LISTAS_DE_DADO = ("_FontSelectorWidget",)
 # O que as próprias cenas trazem: título e autor da mídia analisada, nome das
 # tarefas, das trilhas e dos itens da playlist, conteúdo do texto, faixas de
 # áudio (bitrate · codec · tamanho). E nomes próprios, que nenhuma língua
-# traduz: navegadores de onde ler cookies, placas de vídeo, códigos de idioma.
+# traduz: navegadores de onde ler cookies, placas de vídeo, códigos de idioma
+# e o nome de cada idioma, escrito nele mesmo.
 _DADOS_DA_CENA = re.compile(
     r"^(Big Buck Bunny.*|Blender( · .*)?|Vídeo [AB]|Olá|Trilha da câmera|\d+\. Item \d+.*"
+    r"|Português \(Brasil\)|English"
     r"|\d+ kbps · \w+ · [\d.,]+ \w?B"
     r"|Brave|Chrome|Chromium|Edge|Firefox|Opera|Safari|Vivaldi|Whale"
     r"|NVIDIA \(NVENC\)|Intel \(Quick Sync\)|AMD \(AMF\)|VAAPI \(Linux\)"

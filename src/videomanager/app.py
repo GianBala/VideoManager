@@ -16,7 +16,9 @@ from PySide6.QtWidgets import QApplication
 from videomanager import APP_DISPLAY_NAME
 from videomanager import APP_NAME
 from videomanager import __version__
+from videomanager.domain import i18n
 from videomanager.preflight import check_or_explain
+from videomanager.presentation.qt.i18n import apply_language
 from videomanager.presentation.qt.main_window import MainWindow
 from videomanager.bootstrap import build_desktop_runtime
 from videomanager.bootstrap import build_editor_service
@@ -164,6 +166,8 @@ def build_app(argv: list[str] | None = None, *, audio_enabled: bool = True) -> t
     settings = load_preferences()
     app.setPalette(qpalette(settings.theme))
     app.setStyleSheet(stylesheet(settings.theme))
+    # Antes da janela: abrir em inglês é já nascer em inglês, sem troca nenhuma.
+    apply_language(settings.language)
 
     window = MainWindow(settings, editor=build_editor_service(), processing=build_processing_service(),
                         downloads=build_download_service(), runtime=build_desktop_runtime(audio_enabled=audio_enabled))
@@ -211,6 +215,13 @@ def _smoke_check(app: QApplication, window: MainWindow) -> None:
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
         if not probe.save(buffer, 'JPG') or QImage.fromData(bytes(encoded.data()), 'JPG').isNull():
             raise RuntimeError('Suporte a JPEG do Qt ausente do pacote.')
+        # Os textos do próprio Qt (OK, Cancelar, o menu dos campos) vêm de um
+        # arquivo de tradução do pacote; sem ele saem em inglês no meio da
+        # interface em português, sem erro nenhum.
+        from PySide6.QtCore import QCoreApplication
+        apply_language(i18n.PORTUGUESE)
+        if QCoreApplication.translate('QPlatformTheme', 'Cancel') != 'Cancelar':
+            raise RuntimeError('Tradução do Qt para o português ausente do pacote.')
         tools = find_tools()
         if tools is None:
             raise RuntimeError('FFmpeg/ffprobe ausentes; provisione ou inclua no PATH.')
@@ -326,7 +337,9 @@ def _argument(name: str) -> str | None:
 
 def main() -> int:
     # Antes de tocar no Qt: se falta biblioteca do sistema, a criação do
-    # QApplication aborta o processo e não sobra chance de explicar nada.
+    # QApplication aborta o processo e não sobra chance de explicar nada. A
+    # explicação sai no idioma das preferências, que não dependem do Qt.
+    i18n.set_language(load_preferences().language)
     problem = check_or_explain()
     if problem:
         print(problem, file=sys.stderr)
