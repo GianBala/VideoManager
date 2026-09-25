@@ -131,6 +131,23 @@ def panel(monkeypatch):
     instance.shutdown()
 
 
+def test_aba_propriedades_nunca_aberta_morre_com_o_painel():
+    """Solta até a primeira abertura, ela era uma janela de topo que
+    sobrevivia ao painel — uma a cada janela aberta e fechada."""
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent
+    panel = EditPanel(Settings(), ensure_tools=lambda: None, editor=build_editor_service(),
+                      processing=build_processing_service(), runtime=build_desktop_runtime())
+    propriedades = panel._properties_widget
+    panel.show()
+    QCoreApplication.processEvents()
+    assert not propriedades.isWindow() and not propriedades.isVisible()
+    panel.shutdown()
+    panel.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not shiboken6.isValid(propriedades)
+
+
 def test_inserir_colar_transformar_e_apagar_exige_salvar(panel, tmp_path):
     panel._text_input.setText("Título")
     panel._insert_text_clip()
