@@ -43,7 +43,11 @@ stateDiagram-v2
 
 `ProgressStage` diferencia download e processamento. O texto de `phase`
 serve à exibição, sem comandar estados. `JobStatus` usa códigos estáveis;
-`strings.JOB_STATUS_LABELS` e o painel da fila apresentam rótulos em pt-BR.
+`strings.JOB_STATUS_LABELS` e o painel da fila apresentam os rótulos no
+idioma da interface. Descrição, avisos, erro e fase são guardados como
+`Text` (`domain/i18n.py`), que se traduz na hora de desenhar: uma tarefa
+criada em português aparece em inglês depois da troca. O log é registro
+histórico — as linhas ficam no idioma em que foram escritas.
 
 Cada `begin` incrementa `attempt_id` e limpa progresso, resultado, erro e
 log anteriores. Um evento só é aceito se pertence à tentativa atual e a tarefa

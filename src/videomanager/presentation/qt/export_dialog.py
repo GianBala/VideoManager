@@ -52,10 +52,15 @@ from videomanager.domain.timing import format_span
 from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_step
 from videomanager.domain.timing import keyframe_at_or_before
+from videomanager.domain.i18n import Text
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.panels.edit_widgets import _index_of
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
-_CANVAS_PRESETS: tuple[tuple[int, int], ...] = (
+# Telas oferecidas além das que o próprio material traz, no painel e aqui. São
+# os formatos que os aparelhos e os sites esperam — não uma tabela de tudo que
+# existe.
+CANVAS_PRESETS: tuple[tuple[int, int], ...] = (
     (3840, 2160),  # 4K UHD 16:9
     (2560, 1440),  # 2K QHD 16:9
     (1920, 1080),  # Full HD 16:9
@@ -71,7 +76,7 @@ _CANVAS_PRESETS: tuple[tuple[int, int], ...] = (
     (2560, 1080),  # Ultrawide 21:9
 )
 
-_RATE_PRESETS: tuple[float, ...] = (24.0, 25.0, 30.0, 50.0, 60.0)
+RATE_PRESETS: tuple[float, ...] = (24.0, 25.0, 30.0, 50.0, 60.0)
 
 # Taxas usuais de GIF. São baixas de propósito: cada quadro do GIF é uma imagem
 # inteira, então dobrar a taxa dobra o arquivo. Todas dividem 100 sem sobra, que
@@ -85,40 +90,77 @@ _GIF_RATE_PRESETS: tuple[float, ...] = (10.0, 12.5, 20.0, 25.0)
 _GIF_MAX_EDGE = 640
 _GIF_MAX_RATE = 15.0
 
-_CONTAINER_PRESETS: tuple[tuple[str, str], ...] = (
-    ("MP4 (.mp4)", "mp4"),
-    ("MKV (.mkv)", "mkv"),
-    ("WebM (.webm)", "webm"),
-    ("QuickTime (.mov)", "mov"),
-    ("GIF animado (.gif)", "gif"),
-)
-
-_VIDEO_CODEC_PRESETS: tuple[tuple[str, str], ...] = (
-    ("H.264 / AVC (padrão universal)", "h264"),
-    ("HEVC / H.265 (alta eficiência)", "hevc"),
-    ("AV1 (alta compressão)", "av1"),
-    ("VP9 (web)", "vp9"),
-)
-
-_QUALITY_PRESETS: tuple[tuple[str, str], ...] = (
-    (strings.EXPORT_QUALITY_BALANCED, hwaccel.QUALITY_BALANCED),
-    (strings.EXPORT_QUALITY_HIGH, hwaccel.QUALITY_HIGH),
-    (strings.EXPORT_QUALITY_ECONOMY, hwaccel.QUALITY_ECONOMY),
-)
-
-_AUDIO_FORMAT_PRESETS: tuple[tuple[str, str], ...] = (
-    ("MP3 (.mp3 - 192 kbps)", "mp3"),
-    ("AAC / M4A (.m4a - 192 kbps)", "m4a"),
-    ("FLAC (.flac - sem perdas)", "flac"),
-    ("WAV (.wav - PCM sem perdas)", "wav"),
-    ("Opus (.opus - 128 kbps)", "opus"),
-    ("OGG Vorbis (.ogg)", "ogg"),
-)
+def _quality_presets() -> tuple[tuple[str, str], ...]:
+    # Função, e não constante: os rótulos montados no import ficariam no
+    # idioma da abertura.
+    return (
+        (strings.EXPORT_QUALITY_BALANCED, hwaccel.QUALITY_BALANCED),
+        (strings.EXPORT_QUALITY_HIGH, hwaccel.QUALITY_HIGH),
+        (strings.EXPORT_QUALITY_ECONOMY, hwaccel.QUALITY_ECONOMY),
+    )
 
 
-def _index_of(box: QComboBox, value: object) -> int:
-    """Retorna o índice do item com o dado associado, ou -1."""
-    return next((i for i in range(box.count()) if box.itemData(i) == value), -1)
+def canvas_options(pool: list[MediaRef], aspect_choice: str | None,
+                   canvas_choice: tuple[int, int] | None) -> list[tuple[str, tuple[int, int] | None]]:
+    """Automática, a tela em vigor, os tamanhos do material e os formatos comuns.
+
+    Os tamanhos das mídias importadas vêm antes dos formatos comuns porque são
+    os únicos que não custam nada: qualquer outro obriga a redimensionar todo
+    bloco. A tela em vigor entra mesmo fora das duas listas — projeto reaberto,
+    slideshow —: sem ela a lista mostrava "Automática" enquanto a saída usava
+    a tela escolhida, e voltar ao automático de verdade não era possível.
+    Uma lista só para o painel e para esta janela.
+    """
+    sizes = sorted(((ref.width, ref.height) for ref in pool if ref.has_video and ref.width and ref.height),
+                   key=lambda size: -size[0] * size[1])
+    options: list[tuple[str, tuple[int, int] | None]] = [(strings.EDIT_CANVAS_AUTO, None)]
+    seen: set[tuple[int, int]] = set()
+    for width, height in ([canvas_choice] if canvas_choice else []) + [*sizes, *CANVAS_PRESETS]:
+        aspect = format_aspect_ratio(width, height)
+        if (width, height) in seen or (aspect_choice and aspect != aspect_choice):
+            continue
+        seen.add((width, height))
+        label = (f"{aspect} · {width} × {height}" if aspect and not aspect_choice
+                 else strings.EDIT_CANVAS_SIZE.format(width=width, height=height))
+        options.append((label, (width, height)))
+    return options
+
+
+def rate_options(pool: list[MediaRef], rate_choice: float | None,
+                 extra: tuple[float, ...] = ()) -> list[tuple[str, float | None]]:
+    """Automática, a taxa em vigor, as taxas do material e as usuais.
+
+    A taxa em vigor entra com o valor exato (24000/1001, não 23,976) e toma o
+    lugar da gêmea arredondada do acervo: com as duas, a lista mostrava o
+    mesmo rótulo duas vezes.
+    """
+    rates = {round(ref.fps, 3) for ref in pool if ref.has_video and ref.fps} | set(RATE_PRESETS) | set(extra)
+    if rate_choice:
+        rates = {rate for rate in rates if abs(rate - rate_choice) > 1e-3} | {rate_choice}
+    return [(strings.EDIT_CANVAS_RATE_AUTO, None)] + [
+        (strings.EDIT_CANVAS_FPS.format(fps=format_rate(rate)), rate) for rate in sorted(rates)]
+
+
+def _fast_plan(target: TrimTarget) -> str:
+    return strings.EDIT_PLAN_FAST.format(
+        container=target.container, duration=format_span(target.output_duration)
+    )
+
+
+def _drift_text(target: TrimTarget, fps: float) -> str:
+    if target.anchor is None:
+        return ""
+    if target.drift < frame_step(fps):
+        return strings.EDIT_DRIFT_NONE
+    return strings.EDIT_DRIFT.format(
+        time=format_timecode(target.anchor), delta=format_span(target.drift)
+    )
+
+
+def _export_warning(container: str, project: Project, interpolating: bool) -> str:
+    if interpolating:
+        return strings.EDIT_INTERPOLATE_WARN.format(memory=format_size(interpolation_bytes(project)))
+    return strings.EXPORT_GIF_NOTE if container == "gif" else ""
 
 
 def _gif_canvas(width: int, height: int) -> tuple[int, int]:
@@ -195,9 +237,9 @@ class ExportDialog(QDialog):
         summary_group = QGroupBox(strings.EXPORT_SUMMARY_GROUP)
         summary_box = QVBoxLayout(summary_group)
         summary_box.setSpacing(4)
-        summary_text = (
-            f"Duração total: <b>{format_span(self._project.export_duration)}</b> · "
-            f"{len(self._project.tracks)} trilha(s) · {len(self._project.clips)} bloco(s)"
+        summary_text = strings.EXPORT_SUMMARY.format(
+            duration=format_span(self._project.export_duration),
+            tracks=len(self._project.tracks), clips=len(self._project.clips),
         )
         summary_label = QLabel(summary_text)
         summary_label.setTextFormat(Qt.TextFormat.RichText)
@@ -321,19 +363,19 @@ class ExportDialog(QDialog):
             else None
         )
         if source_init:
-            default_stem = f"{source_init.stem}_editado"
+            default_stem = f"{source_init.stem}{strings.EXPORT_DEFAULT_SUFFIX}"
         elif self._project_path:
-            default_stem = f"{self._project_path.stem}_editado"
+            default_stem = f"{self._project_path.stem}{strings.EXPORT_DEFAULT_SUFFIX}"
         else:
-            default_stem = "video_editado"
+            default_stem = strings.EXPORT_DEFAULT_STEM
 
         name_row = QHBoxLayout()
         name_row.setSpacing(8)
-        name_label = QLabel("Nome do arquivo:")
+        name_label = QLabel(strings.EXPORT_FILENAME)
         name_row.addWidget(name_label)
 
         self._filename_edit = QLineEdit(default_stem)
-        self._filename_edit.setPlaceholderText("Nome do arquivo (sem extensão)")
+        self._filename_edit.setPlaceholderText(strings.EXPORT_FILENAME_PLACEHOLDER)
         name_row.addWidget(self._filename_edit, 1)
 
         self._ext_label = QLabel(".mp4")
@@ -381,13 +423,8 @@ class ExportDialog(QDialog):
         # Opções de proporção
         self._aspect_box.blockSignals(True)
         self._aspect_box.clear()
-        aspect_options = [
-            (strings.EXPORT_ASPECT_AUTO, None),
-            ("16:9 (Widescreen)", "16:9"),
-            ("4:3 (Tradicional)", "4:3"),
-            ("9:16 (Vertical / Shorts / Reels)", "9:16"),
-            ("1:1 (Quadrado)", "1:1"),
-            ("21:9 (Ultrawide)", "21:9"),
+        aspect_options = [(strings.EXPORT_ASPECT_AUTO, None)] + [
+            (label, value) for value, label in strings.EXPORT_ASPECTS.items()
         ]
         for label, val in aspect_options:
             self._aspect_box.addItem(label, val)
@@ -401,38 +438,7 @@ class ExportDialog(QDialog):
     def _sync_canvas_box(self) -> None:
         self._canvas_box.blockSignals(True)
         self._canvas_box.clear()
-        options_canvas: list[tuple[str, tuple[int, int] | None]] = [
-            (strings.EDIT_CANVAS_AUTO, None)
-        ]
-        seen: set[tuple[int, int]] = set()
-        sizes = [
-            (ref.width, ref.height)
-            for ref in self._pool
-            if ref.has_video and ref.width and ref.height
-        ]
-        ordered = sorted(sizes, key=lambda s: -s[0] * s[1])
-        all_candidates = [*ordered, *_CANVAS_PRESETS]
-        if self._aspect_choice:
-            filtered = [
-                (w, h)
-                for (w, h) in all_candidates
-                if format_aspect_ratio(w, h) == self._aspect_choice
-            ]
-        else:
-            filtered = all_candidates
-
-        for w, h in filtered:
-            if (w, h) in seen:
-                continue
-            seen.add((w, h))
-            aspect = format_aspect_ratio(w, h)
-            label = (
-                f"{aspect} · {w} × {h}"
-                if aspect and not self._aspect_choice
-                else strings.EDIT_CANVAS_SIZE.format(width=w, height=h)
-            )
-            options_canvas.append((label, (w, h)))
-        for label, val in options_canvas:
+        for label, val in canvas_options(self._pool, self._aspect_choice, self._canvas_choice):
             self._canvas_box.addItem(label, val)
 
         idx_c = _index_of(self._canvas_box, self._canvas_choice)
@@ -445,7 +451,7 @@ class ExportDialog(QDialog):
         # Container de vídeo
         self._container_box.blockSignals(True)
         self._container_box.clear()
-        for label, val in _CONTAINER_PRESETS:
+        for val, label in strings.EXPORT_CONTAINERS.items():
             self._container_box.addItem(label, val)
         idx_ct = _index_of(self._container_box, self._container_choice)
         self._container_box.setCurrentIndex(max(0, idx_ct))
@@ -457,7 +463,7 @@ class ExportDialog(QDialog):
         # Qualidade de vídeo
         self._quality_box.blockSignals(True)
         self._quality_box.clear()
-        for label, val in _QUALITY_PRESETS:
+        for label, val in _quality_presets():
             self._quality_box.addItem(label, val)
         idx_q = _index_of(self._quality_box, self._quality_choice)
         self._quality_box.setCurrentIndex(max(0, idx_q))
@@ -466,7 +472,7 @@ class ExportDialog(QDialog):
         # Formato de áudio (somente áudio)
         self._audio_format_box.blockSignals(True)
         self._audio_format_box.clear()
-        for label, val in _AUDIO_FORMAT_PRESETS:
+        for val, label in strings.EXPORT_AUDIO_FORMATS.items():
             self._audio_format_box.addItem(label, val)
         idx_af = _index_of(self._audio_format_box, self._audio_format_choice)
         self._audio_format_box.setCurrentIndex(max(0, idx_af))
@@ -479,16 +485,8 @@ class ExportDialog(QDialog):
         """Repopula as taxas — o GIF traz as dele, mais baixas."""
         self._rate_box.blockSignals(True)
         self._rate_box.clear()
-        options_rate: list[tuple[str, float | None]] = [
-            (strings.EDIT_CANVAS_RATE_AUTO, None)
-        ]
-        rates = {round(ref.fps, 3) for ref in self._pool if ref.has_video and ref.fps}
-        presets = set(_RATE_PRESETS)
-        if self._container_choice == "gif":
-            presets |= set(_GIF_RATE_PRESETS)
-        for r in sorted(rates | presets):
-            options_rate.append((strings.EDIT_CANVAS_FPS.format(fps=format_rate(r)), r))
-        for label, val in options_rate:
+        extra = _GIF_RATE_PRESETS if self._container_choice == "gif" else ()
+        for label, val in rate_options(self._pool, self._rate_choice, extra):
             self._rate_box.addItem(label, val)
         idx_r = _index_of(self._rate_box, self._rate_choice)
         self._rate_box.setCurrentIndex(max(0, idx_r))
@@ -502,7 +500,6 @@ class ExportDialog(QDialog):
             widget.setVisible(not gif and not self._audio_only_check.isChecked())
         if gif and self._fast.isChecked():
             self._fast.setChecked(False)
-        self._fast.setToolTip(strings.EXPORT_GIF_NO_FAST if gif else strings.EDIT_MODE_TIP)
 
     def _sync_codecs(self) -> None:
         """Repopula o combo de codecs conforme o container selecionado."""
@@ -515,7 +512,7 @@ class ExportDialog(QDialog):
 
         self._video_codec_box.blockSignals(True)
         self._video_codec_box.clear()
-        for label, val in _VIDEO_CODEC_PRESETS:
+        for val, label in strings.EXPORT_VIDEO_CODECS.items():
             if val in allowed:
                 self._video_codec_box.addItem(label, val)
         # Tenta restaurar o codec anterior; se não couber, pega o primeiro
@@ -582,7 +579,7 @@ class ExportDialog(QDialog):
                 else None
             )
             if cur_aspect != self._aspect_choice:
-                for w, h in _CANVAS_PRESETS:
+                for w, h in CANVAS_PRESETS:
                     if format_aspect_ratio(w, h) == self._aspect_choice:
                         self._canvas_choice = (w, h)
                         break
@@ -740,6 +737,14 @@ class ExportDialog(QDialog):
         self._interpolate.setEnabled(can_interp)
         if not can_interp and self._interpolate.isChecked():
             self._interpolate.setChecked(False)
+        # A opção desligada diz por quê: uma caixa cinza sem explicação parece
+        # defeito, e o motivo — a edição não é um recorte, nenhum bloco está
+        # abaixo da taxa — não é visível daqui.
+        if self._container_choice == "gif" and not audio_only:
+            self._fast.setToolTip(strings.EXPORT_GIF_NO_FAST)
+        else:
+            self._fast.setToolTip(strings.EDIT_MODE_TIP if can_fast else strings.EDIT_FAST_UNAVAILABLE)
+        self._interpolate.setToolTip(strings.EDIT_INTERPOLATE_TIP if can_interp else strings.EDIT_INTERPOLATE_OFF)
 
         # Atualiza o texto do item "Automática" em proporção, tela e taxa
         if self._aspect_box.count() > 0 and self._aspect_box.itemData(0) is None:
@@ -815,11 +820,8 @@ class ExportDialog(QDialog):
             target = self._trim_target(proj)
             if target:
                 container = target.container
-                plan = strings.EDIT_PLAN_FAST.format(
-                    container=target.container,
-                    duration=format_span(target.output_duration),
-                )
-                warning = self._drift_text(target, proj.fps)
+                plan = _fast_plan(target)
+                warning = _drift_text(target, proj.fps)
             else:
                 plan = ""
                 warning = ""
@@ -835,11 +837,7 @@ class ExportDialog(QDialog):
                 family=codec_family,
                 quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
             )
-            warning = strings.EXPORT_GIF_NOTE if container == "gif" else ""
-            if interpolating:
-                warning = strings.EDIT_INTERPOLATE_WARN.format(
-                    memory=format_size(interpolation_bytes(proj))
-                )
+            warning = _export_warning(container, proj, interpolating)
 
         if hasattr(self, "_ext_label"):
             self._ext_label.setText(f".{container}")
@@ -859,7 +857,12 @@ class ExportDialog(QDialog):
         source_size = getattr(local, "size", None)
         source_dur = getattr(local, "duration", None)
 
-        export_duration = target.output_duration if (is_fast and target) else proj.export_duration
+        if is_fast and target:
+            export_duration = target.output_duration
+        elif self._container_choice == "gif" and not audio_only:
+            export_duration = proj.video_duration
+        else:
+            export_duration = proj.export_duration
         codec_family = ("gif" if self._container_choice == "gif"
                         else self._codec_choice or hwaccel.family_for(self._container_choice or "mp4"))
 
@@ -878,15 +881,6 @@ class ExportDialog(QDialog):
         )
         self._size_label.setText(format_size(est_bytes, estimated=True))
 
-    def _drift_text(self, target: TrimTarget, fps: float) -> str:
-        if target.anchor is None:
-            return ""
-        if target.drift < frame_step(fps):
-            return strings.EDIT_DRIFT_NONE
-        return strings.EDIT_DRIFT.format(
-            time=format_timecode(target.anchor), delta=format_span(target.drift)
-        )
-
     # ------------------------------------------------------------------
     # Enfileirar
     # ------------------------------------------------------------------
@@ -895,7 +889,7 @@ class ExportDialog(QDialog):
         tools = self._ensure_tools() if self._ensure_tools else None
         if tools is None:
             QMessageBox.warning(
-                self, strings.DIALOG_ERROR_TITLE, "FFmpeg não disponível."
+                self, strings.DIALOG_ERROR_TITLE, strings.DIALOG_FFMPEG_UNAVAILABLE
             )
             return
 
@@ -933,31 +927,23 @@ class ExportDialog(QDialog):
         interpolating = getattr(target, "interpolate", False)
         if not is_fast and not audio_only:
             self._settings.default_export_quality = self._quality_choice
+        # Descrição e aviso ficam na fila depois de a janela fechar: guardados
+        # como texto refeito na exibição, acompanham a troca de idioma — com os
+        # mesmos cálculos que a janela acabou de mostrar.
         if is_fast and isinstance(target, TrimTarget):
-            description = strings.EDIT_PLAN_FAST.format(
-                container=target.container,
-                duration=format_span(target.output_duration),
-            )
+            description = Text.of(_fast_plan, target)
+            warning = Text.of(_drift_text, target, proj.fps)
         elif audio_only:
-            description = describe_export(
-                proj,
-                target.container,
-                self._settings.hardware_encoder,
-                False,
-                audio_only=True,
-                audio_codec=target.audio_codec,
-            )
+            description = Text.of(describe_export, proj, target.container, self._settings.hardware_encoder,
+                                  False, audio_only=True, audio_codec=target.audio_codec)
+            warning = None
         else:
-            description = describe_export(
-                proj,
-                target.container,
-                self._settings.hardware_encoder,
-                interpolating,
-                family=target.family,
-                quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
-            )
+            description = Text.of(describe_export, proj, target.container, self._settings.hardware_encoder,
+                                  interpolating, family=target.family,
+                                  quality=self._quality_choice or hwaccel.QUALITY_BALANCED)
+            warning = Text.of(_export_warning, target.container, proj, interpolating)
 
         self.created_job.description = description
-        self.created_job.warnings = (self._warning.text(),) if self._warning.text() else ()
+        self.created_job.warnings = (warning,) if warning is not None and str(warning) else ()
 
         self.accept()

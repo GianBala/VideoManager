@@ -134,6 +134,12 @@ O relógio de posição e o contador de quadros usam fonte monoespaçada com
 largura travada no maior valor daquele projeto, para a barra inteira não
 tremer a cada troca de dígito durante a reprodução.
 
+Numa janela estreita (tela de notebook, ou escala de 125% ou mais no Windows),
+os controles da direita da barra — keyframe, Loop, ímã e volume — descem para
+uma segunda linha, as listas de tela e proporção encolhem e as abas de
+Adicionais rolam por dentro: a aba inteira cabe a partir de 1280 × 720 sem
+rolagem lateral.
+
 ## A linha do tempo
 
 ### Barra de ferramentas da linha do tempo
@@ -172,7 +178,8 @@ Da esquerda para a direita:
   **meio** de um vizinho, os dois **trocam de lugar**, sem sobrepor um
   terceiro. O intervalo vazio entre o par é preservado.
 - **Arrastar as pontas (alças)** de um bloco — ajusta o corte daquele lado,
-  com o mesmo imã.
+  com o mesmo imã. Entre dois blocos encostados, o lado da emenda em que o
+  ponteiro está decide qual bloco é aparado.
 - **Clique simples** no vazio da trilha ou na régua de tempo — move o cursor
   de reprodução para ali. Na trilha vazia a seleção é desfeita; **na régua ela
   é mantida**, para posicionar o corte do bloco escolhido (por exemplo, um
@@ -276,7 +283,10 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
   - **◀ ◇ ▶** vão ao quadro-chave anterior, adicionam ou removem um quadro-chave
     no cursor e vão ao próximo. Cada quadro-chave é um losango na parte de
     baixo do bloco, na linha do tempo — amarelo, ou azul quando o cursor está
-    sobre ele —, e o ímã da linha do tempo também os reconhece.
+    sobre ele —, e o ímã da linha do tempo também os reconhece: ao arrastar
+    um bloco, os dos outros blocos (os dele andam junto com ele); ao aparar
+    pela alça, também os do próprio bloco, que ali ficam parados — é o que deixa
+    cortar exatamente onde a animação acaba.
   - Num bloco ainda **sem** quadros-chave, mudar um valor vale para o bloco
     inteiro. Num bloco animado, altera **só o instante atual**, criando ou
     atualizando o quadro-chave dali. Marque **Editar toda a animação** para
@@ -314,11 +324,12 @@ posição relativos do texto, incluindo contorno e animação.
 
 Os botões **🔊 dB** e **⚡ velocidade**, na barra da linha do tempo, abrem um
 painel curto para o bloco selecionado. A velocidade vai de 0,1× a 10×, com
-atalhos (0,5×, 1×, 1,5×, 2×, 4×); o bloco encurta ou alonga na trilha. Se a
+atalhos (0,5×, 1×, 1,5×, 2×, 4×); o bloco encurta ou alonga na trilha, e a
+animação por quadros-chave encurta ou alonga junto. Se a
 nova duração passaria por cima do bloco seguinte, a velocidade é recusada com
 **um** aviso por sessão do painel — mova o vizinho ou escolha outro valor. O
-áudio separado de um vídeo acelerado acompanha a mesma velocidade. Fotos não
-têm velocidade.
+áudio separado de um vídeo acelerado acompanha a mesma velocidade. Fotos,
+textos, filtros e transições não têm velocidade.
 
 ### Menu de contexto (botão direito)
 
@@ -409,8 +420,10 @@ A **Proporção** e a **Tela** do projeto também podem ser escolhidas nos
 seletores do topo — são as mesmas escolhas da janela de exportação, e valem
 para a prévia e para o arquivo. Elas são uma preferência de saída, como o corte
 rápido, e não uma alteração da montagem: não entram no histórico de desfazer.
-A tela resultante é gravada no `.vmp`, e ao abrir um projeto a escolha volta
-como estava.
+A tela resultante é gravada no `.vmp`. Ao abrir o projeto, tela e taxa iguais
+às que o material produz voltam como **Automática**, como estavam antes de
+fechar — um clipe maior ou mais fluido acrescentado depois sobe a edição, e o
+corte rápido continua disponível —; o que difere do material volta fixo.
 
 - **Proporção** — **Automática** (a da tela que o material produz, mostrada
   entre parênteses), 16:9, 4:3, 9:16 (vertical), 1:1 (quadrado) ou 21:9
@@ -429,7 +442,8 @@ como estava.
   guarda a duração de cada quadro.
 - **Formato de vídeo** — MP4, MKV, WebM, MOV ou **GIF animado**. O GIF sai em
   loop infinito e com 256 cores; ele não guarda som, então a trilha de áudio
-  fica de fora, e não tem codec nem nível de qualidade para escolher (esses
+  fica de fora — e o GIF termina na última imagem, mesmo que a música vá além
+  —, e não tem codec nem nível de qualidade para escolher (esses
   campos somem). Cada quadro de um GIF é uma imagem inteira, então em
   **Automática** a tela vai a no máximo 640 px e a taxa a 15 quadros por
   segundo: numa edição de 4 s isso é a diferença entre 1,1 MB e 14,9 MB (na

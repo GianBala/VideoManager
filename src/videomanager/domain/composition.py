@@ -31,4 +31,6 @@ class Composition:
     def output_duration(self) -> float:
         if self.audio_only:
             return self.project.audible_duration
+        if self.container == "gif":
+            return self.project.video_duration
         return self.project.export_duration

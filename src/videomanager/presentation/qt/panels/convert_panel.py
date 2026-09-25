@@ -38,6 +38,7 @@ from videomanager.domain.targets import AUDIO_TARGETS
 from videomanager.domain.targets import VIDEO_CONTAINERS
 from videomanager.domain.media import AudioTarget
 from videomanager.domain.media import LocalMedia
+from videomanager.domain.i18n import Text
 from videomanager.domain.compatibility import container_accepts_video
 from videomanager.domain.media import VideoTarget
 from videomanager.application.media.conversion_description import describe_target
@@ -50,14 +51,23 @@ from videomanager.domain.selection import AUDIO_BITRATES
 from videomanager.domain.selection import LOSSLESS_AUDIO
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import align_label_column, bind, on_language_change, retext_items
 from videomanager.presentation.qt.theme import FIELD_WIDTH
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 from videomanager.presentation.qt.tasks import WorkerRunner
 
-_RESIZE_OPTIONS = ((None, strings.CONVERT_KEEP), (2160, "2160p"), (1440, "1440p"),
-                   (1080, "1080p"), (720, "720p"), (480, "480p"), (360, "360p"))
-_VIDEO_CODECS = (("copy", "Copiar (sem recodificar)"), ("h264", "H.264"),
-                 ("hevc", "HEVC"), ("vp9", "VP9"), ("av1", "AV1"))
+# Os rótulos que vêm do catálogo são lidos na hora (ver ``_resize_label`` e
+# ``_codec_label``): montados no import, ficariam no idioma da abertura.
+_RESIZE_OPTIONS = (None, 2160, 1440, 1080, 720, 480, 360)
+_VIDEO_CODECS = (("copy", None), ("h264", "H.264"), ("hevc", "HEVC"), ("vp9", "VP9"), ("av1", "AV1"))
+
+
+def _resize_label(height: int | None) -> str:
+    return strings.CONVERT_KEEP if height is None else f"{height}p"
+
+
+def _codec_label(value: str) -> str | None:
+    return strings.CONVERT_COPY_CODEC if value == "copy" else None
 
 
 # Altura mínima da lista de arquivos: cabem quatro linhas, e ela cresce com o
@@ -142,7 +152,7 @@ class ConvertPanel(QWidget):
 
         # Criados antes dos controles de alvo: a montagem deles já chama
         # _update_plan, que mexe nos dois.
-        self._start = QPushButton(strings.CONVERT_START)
+        self._start = bind(QPushButton(), "setText", lambda: strings.CONVERT_START)
         self._start.setProperty("role", "primary")
         self._start.clicked.connect(self._start_conversion)
         self._plan = QLabel("")
@@ -154,7 +164,7 @@ class ConvertPanel(QWidget):
         self._align_label_column()
 
         actions = QHBoxLayout()
-        self._same_folder = QCheckBox(strings.CONVERT_SAME_FOLDER)
+        self._same_folder = bind(QCheckBox(), "setText", lambda: strings.CONVERT_SAME_FOLDER)
         self._same_folder.setChecked(True)
         actions.addWidget(self._same_folder)
         actions.addStretch(1)
@@ -162,13 +172,22 @@ class ConvertPanel(QWidget):
         layout.addLayout(actions)
 
         self._update_plan()
+        on_language_change(self._retranslate)
+
+    def _retranslate(self) -> None:
+        retext_items(self._video_codec, _codec_label)
+        retext_items(self._resize, _resize_label)
+        self._align_label_column()
+        # O plano, o tamanho estimado e a descrição de cada arquivo levam texto
+        # e números do idioma.
+        self._update_plan()
 
     # ------------------------------------------------------------------
     # Construção
     # ------------------------------------------------------------------
 
     def _build_files_group(self) -> QGroupBox:
-        group = QGroupBox(strings.CONVERT_FILES_GROUP)
+        group = bind(QGroupBox(), "setTitle", lambda: strings.CONVERT_FILES_GROUP)
         box = QVBoxLayout(group)
         box.setSpacing(8)
 
@@ -179,16 +198,16 @@ class ConvertPanel(QWidget):
         box.addWidget(self._list, 1)
 
         row = QHBoxLayout()
-        pick = QPushButton(strings.CONVERT_PICK)
-        pick.setToolTip(f"{strings.CONVERT_PICK} (Ctrl+O)")
+        pick = bind(QPushButton(), "setText", lambda: strings.CONVERT_PICK)
+        bind(pick, "setToolTip", lambda: strings.CONVERT_PICK_TIP.format(label=strings.CONVERT_PICK))
         pick.clicked.connect(self._choose_files)
         row.addWidget(pick)
-        self._remove = QPushButton(strings.CONVERT_REMOVE)
-        self._remove.setToolTip(f"{strings.CONVERT_REMOVE} (Del)")
+        self._remove = bind(QPushButton(), "setText", lambda: strings.CONVERT_REMOVE)
+        bind(self._remove, "setToolTip", lambda: strings.CONVERT_REMOVE_TIP.format(label=strings.CONVERT_REMOVE))
         self._remove.clicked.connect(self._remove_selected)
         self._remove.setEnabled(False)
         row.addWidget(self._remove)
-        self._clear_btn = QPushButton(strings.CONVERT_CLEAR)
+        self._clear_btn = bind(QPushButton(), "setText", lambda: strings.CONVERT_CLEAR)
         self._clear_btn.clicked.connect(self.clear_files)
         self._clear_btn.setEnabled(False)
         row.addWidget(self._clear_btn)
@@ -204,17 +223,17 @@ class ConvertPanel(QWidget):
             self._clear_btn.setEnabled(bool(self._media) or self._inspection_worker is not None)
 
     def _build_target_group(self) -> QGroupBox:
-        group = QGroupBox(strings.CONVERT_TARGET_GROUP)
+        group = bind(QGroupBox(), "setTitle", lambda: strings.CONVERT_TARGET_GROUP)
         outer = QVBoxLayout(group)
         outer.setSpacing(8)
 
         modes = QHBoxLayout()
         modes.setContentsMargins(0, 0, 0, 0)
         modes.setSpacing(18)
-        self._to_audio = QRadioButton(strings.CONVERT_TO_AUDIO)
+        self._to_audio = bind(QRadioButton(), "setText", lambda: strings.CONVERT_TO_AUDIO)
         self._to_audio.setChecked(True)
         self._to_audio.toggled.connect(self._on_mode_changed)
-        self._to_video = QRadioButton(strings.CONVERT_TO_VIDEO)
+        self._to_video = bind(QRadioButton(), "setText", lambda: strings.CONVERT_TO_VIDEO)
         modes.addWidget(self._to_audio)
         modes.addWidget(self._to_video)
         modes.addStretch(1)
@@ -235,7 +254,7 @@ class ConvertPanel(QWidget):
         index = self._audio_codec.findData(self._settings.default_audio_format)
         self._audio_codec.setCurrentIndex(max(0, index))
         self._audio_codec.currentIndexChanged.connect(self._update_plan)
-        self._add_row(form, strings.LABEL_AUDIO_FORMAT, self._audio_codec)
+        self._add_row(form, lambda: strings.LABEL_AUDIO_FORMAT, self._audio_codec)
 
         self._audio_bitrate = QComboBox()
         for value in AUDIO_BITRATES:
@@ -243,28 +262,28 @@ class ConvertPanel(QWidget):
         index = self._audio_bitrate.findData(self._settings.default_audio_quality)
         self._audio_bitrate.setCurrentIndex(max(0, index))
         self._audio_bitrate.currentIndexChanged.connect(self._update_plan)
-        self._add_row(form, strings.LABEL_AUDIO_QUALITY, self._audio_bitrate)
+        self._add_row(form, lambda: strings.LABEL_AUDIO_QUALITY, self._audio_bitrate)
 
         self._container = QComboBox()
         for value in VIDEO_CONTAINERS:
             self._container.addItem(f".{value}", value)
-        self._add_row(form, strings.LABEL_CONTAINER, self._container)
+        self._add_row(form, lambda: strings.LABEL_CONTAINER, self._container)
 
         self._video_codec = QComboBox()
         for value, label in _VIDEO_CODECS:
-            self._video_codec.addItem(label, value)
+            self._video_codec.addItem(label or _codec_label(value), value)
         self._video_codec.currentIndexChanged.connect(self._update_plan)
-        self._add_row(form, strings.LABEL_CODEC, self._video_codec)
+        self._add_row(form, lambda: strings.LABEL_CODEC, self._video_codec)
         # Conectado depois de o seletor de codec existir: a troca de container
         # decide quais codecs continuam oferecidos.
         self._container.currentIndexChanged.connect(self._on_container_changed)
         self._sync_codec_choices()
 
         self._resize = QComboBox()
-        for value, label in _RESIZE_OPTIONS:
-            self._resize.addItem(label, value)
+        for value in _RESIZE_OPTIONS:
+            self._resize.addItem(_resize_label(value), value)
         self._resize.currentIndexChanged.connect(self._update_plan)
-        self._add_row(form, strings.CONVERT_RESIZE, self._resize)
+        self._add_row(form, lambda: strings.CONVERT_RESIZE, self._resize)
 
         for combo in (self._audio_codec, self._audio_bitrate, self._container,
                       self._video_codec, self._resize):
@@ -297,8 +316,8 @@ class ConvertPanel(QWidget):
         if not container_accepts_video(container, current):
             self._video_codec.setCurrentIndex(self._video_codec.findData("copy"))
 
-    def _add_row(self, form: QFormLayout, text: str, field: QWidget) -> QLabel:
-        label = QLabel(text)
+    def _add_row(self, form: QFormLayout, text: Callable[[], str], field: QWidget) -> QLabel:
+        label = bind(QLabel(), "setText", text)
         self._labels.append(label)
         form.addRow(label, field)
         return label
@@ -309,9 +328,7 @@ class ConvertPanel(QWidget):
         As linhas de áudio e as de vídeo se revezam conforme o modo; sem largura
         comum, trocar de modo deslocaria os campos de lado.
         """
-        width = max(label.sizeHint().width() for label in self._labels)
-        for label in self._labels:
-            label.setMinimumWidth(width)
+        align_label_column(self._labels)
 
     def _on_mode_changed(self) -> None:
         audio = self._to_audio.isChecked()
@@ -347,9 +364,7 @@ class ConvertPanel(QWidget):
 
     def _choose_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
-            self, strings.CONVERT_PICK, str(Path.home()),
-            "Mídia (*.mp4 *.mkv *.webm *.avi *.mov *.flv *.wmv *.m4v *.ts "
-            "*.mp3 *.m4a *.aac *.opus *.ogg *.flac *.wav *.wma);;Todos (*)",
+            self, strings.CONVERT_PICK, str(Path.home()), strings.CONVERT_FILE_FILTER,
         )
         if paths:
             self.add_files([Path(p) for p in paths])
@@ -515,7 +530,7 @@ class ConvertPanel(QWidget):
             plan_str = strings.CONVERT_PLAN.format(plan=unique_plans[0])
         else:
             plan_str = strings.CONVERT_PLAN.format(
-                plan=f"{unique_plans[0]} (e outros formatos distintos entre os {len(self._media)} arquivos)"
+                plan=strings.CONVERT_PLAN_MIXED.format(plan=unique_plans[0], count=len(self._media))
             )
         self._plan.setText(f"{plan_str}\n• {size_info}")
         self._plan.setVisible(True)
@@ -546,7 +561,8 @@ class ConvertPanel(QWidget):
         for media in self._media:
             try:
                 job, used_fallback = self._processing.convert(media, target, same_folder=use_same_folder, fallback=fallback_dir)
-                job.description = describe_target(media, target)
+                # Refeita na exibição: a tarefa fica na fila depois da troca de idioma.
+                job.description = Text.of(describe_target, media, target)
                 jobs.append(job)
                 fallback_used = fallback_used or used_fallback
             except VideoManagerError as exc:
@@ -556,13 +572,12 @@ class ConvertPanel(QWidget):
             QMessageBox.information(
                 self,
                 strings.DIALOG_INFO_TITLE,
-                f"A pasta de origem não permite escrita. "
-                f"Os arquivos serão salvos na pasta de downloads:\n{fallback_dir}",
+                strings.CONVERT_FALLBACK.format(folder=fallback_dir),
             )
         if skipped:
             QMessageBox.warning(
                 self, strings.DIALOG_WARNING_TITLE,
-                "Ignorados:\n\n" + "\n".join(skipped),
+                strings.CONVERT_SKIPPED + "\n\n" + "\n".join(skipped),
             )
         if jobs:
             self.jobs_ready.emit(jobs)

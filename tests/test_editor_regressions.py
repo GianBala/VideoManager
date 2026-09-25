@@ -131,6 +131,27 @@ def panel(monkeypatch):
     instance.shutdown()
 
 
+def test_aba_propriedades_nunca_aberta_nao_pesa_na_abertura_e_morre_com_o_painel():
+    """Montada dentro da janela desde a criação, a aba custava 105 ms a mais na
+    abertura (cada widget inserido já herdava estilo e fonte da árvore);
+    solta e sem laço com o painel, sobrevivia a ele — uma a cada janela
+    aberta e fechada."""
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent
+    panel = EditPanel(Settings(), ensure_tools=lambda: None, editor=build_editor_service(),
+                      processing=build_processing_service(), runtime=build_desktop_runtime())
+    propriedades = panel._properties_widget
+    panel.show()
+    QCoreApplication.processEvents()
+    assert propriedades.parentWidget() is None and not propriedades.isVisible()
+    panel.shutdown()
+    panel.deleteLater()
+    # O painel sai na primeira entrega; a aba, pelo destroyed dele, na seguinte.
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not shiboken6.isValid(propriedades)
+
+
 def test_inserir_colar_transformar_e_apagar_exige_salvar(panel, tmp_path):
     panel._text_input.setText("Título")
     panel._insert_text_clip()
@@ -647,6 +668,53 @@ def test_salvar_e_desfazer_apos_mudar_resolucao_preserva_controles_e_texto(panel
     assert saved == panel._project
 
 
+def test_projeto_reaberto_segue_o_material_no_que_foi_gravado_automatico(panel, tmp_path):
+    from videomanager.domain.project import Project
+    ntsc = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, width=640, height=360, fps=30000 / 1001, duration=2)
+    fluido = MediaRef(Path('/m/b.mp4'), MediaKind.VIDEO, width=1280, height=720, fps=60.0, duration=2)
+    trilha = Track(TrackKind.VIDEO, clips=(Clip(ntsc, 0, 2),))
+    # Gravado com a tela e a taxa do próprio material: volta automático, e um
+    # clipe maior e mais fluido acrescentado depois sobe a edição, como antes
+    # de fechar. Fixado, ficava preso a 640 × 360 e 29,97 e perdia o corte rápido.
+    panel.install_project(Project(tracks=(trilha,), width=640, height=360, fps=30000 / 1001),
+                          tmp_path / 'a.vmp', [ntsc], {})
+    assert (panel._canvas_choice, panel._rate_choice) == (None, None)
+    panel._pool.append(fluido)
+    panel._insert_media_ref(fluido)
+    assert (panel._project.width, panel._project.height, panel._project.fps) == (1280, 720, 60.0)
+    # O que difere do material foi escolha de alguém, e continua fixo.
+    panel.install_project(Project(tracks=(trilha,), width=1920, height=1080, fps=50.0),
+                          tmp_path / 'b.vmp', [ntsc], {})
+    assert (panel._canvas_choice, panel._rate_choice) == ((1920, 1080), 50.0)
+    assert (panel._project.width, panel._project.height, panel._project.fps) == (1920, 1080, 50.0)
+
+
+def test_tela_de_outra_proporcao_escolhida_na_exportacao_aparece_na_lista(panel, monkeypatch):
+    # A janela devolve a tela sem a proporção: com 16:9 escolhida no painel, uma
+    # tela 9:16 ficava fora da lista filtrada, que passava a dizer "Automática"
+    # com a tela fixada (e, antes disso, a escolha voltava sozinha ao
+    # automático na edição seguinte).
+    from PySide6.QtWidgets import QDialog
+    from videomanager.domain.project import Project
+    import videomanager.presentation.qt.panels.edit_panel as modulo
+
+    class Janela:
+        def __init__(self, *args, **kwargs):
+            self.created_job, self.chosen_canvas, self.chosen_rate = object(), (1080, 1920), None
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+    video = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, width=1920, height=1080, fps=30.0, duration=2)
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0, 2),)),)), None, [video], {})
+    panel._canvas_choice, panel._aspect_choice = (1920, 1080), '16:9'
+    panel._after_edit()
+    monkeypatch.setattr(modulo, 'ExportDialog', Janela)
+    panel._open_export_dialog()
+    assert (panel._aspect_choice, panel._canvas_box.currentData()) == ('9:16', (1080, 1920))
+    assert (panel._project.width, panel._project.height) == (1080, 1920)
+
+
 def test_insercao_automatica_evita_trilha_oculta_e_muda(panel):
     from videomanager.domain.project import Project
     media = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, has_audio=True, duration=2)
@@ -802,9 +870,12 @@ def test_editor_estreito_permite_alcancar_controles_e_status(panel, desktop_app,
     try:
         desktop_app.processEvents()
         area = wrapper.findChild(QScrollArea)
-        assert area.horizontalScrollBar().isVisible()
-        area.horizontalScrollBar().setValue(area.horizontalScrollBar().maximum())
-        desktop_app.processEvents()
+        # Cabe sem rolagem lateral: a barra de transporte quebra em duas linhas
+        # em vez de levar o volume (e o Exportar) para fora da vista.
+        assert not area.horizontalScrollBar().isVisible()
+        for controle in (panel._mute, panel._export_button):
+            centro = controle.mapTo(area.viewport(), controle.rect().center())
+            assert area.viewport().rect().contains(centro)
         volume = panel._mute
         center = volume.mapTo(area.viewport(), volume.rect().center())
         assert area.viewport().rect().contains(center)
@@ -1040,3 +1111,95 @@ def test_barra_de_rolagem_e_divisoria_nao_desselecionam(panel):
     panel.eventFilter(panel._scroll, event)
     panel.eventFilter(panel._split_view.handle(1), event)
     assert panel._timeline.selected == clip_a.clip_id
+
+
+def test_mapa_de_keyframes_e_lido_uma_vez_por_arquivo(monkeypatch, wait_until):
+    """Alternar a seleção entre blocos de mídias diferentes não relê os arquivos.
+
+    O ffprobe percorre o arquivo inteiro para mapear os keyframes; sem guardar
+    o mapa, cada clique alternando entre dois blocos refazia essa leitura na
+    fila de fundo, à frente das miniaturas.
+    """
+    from PySide6.QtCore import QRunnable
+    from videomanager.application.capabilities import FFmpegTools
+    from videomanager.domain.project import Project
+    from videomanager.infrastructure.qt.workers.signals import PreviewSignals
+
+    lidos = []
+
+    class Leitura(QRunnable):
+        def __init__(self, path, tools):
+            super().__init__()
+            self.path, self.signals = path, PreviewSignals()
+
+        def cancel(self):
+            pass
+
+        def run(self):
+            lidos.append(self.path.name)
+            self.signals.keyframes.emit((0.0, 2.0))
+            self.signals.done.emit()
+
+    tools = FFmpegTools(Path("/bin/false"), Path("/bin/false"), "teste")
+    runtime = build_desktop_runtime(audio_enabled=False)
+    monkeypatch.setattr(runtime, "keyframe_worker", Leitura)
+    painel = EditPanel(Settings(), ensure_tools=lambda: tools, editor=build_editor_service(),
+                       processing=build_processing_service(), runtime=runtime)
+    try:
+        um = Clip(MediaRef(Path("/tmp/um.mp4"), MediaKind.VIDEO, duration=5.0, fps=10.0), 0.0, 5.0)
+        dois = Clip(MediaRef(Path("/tmp/dois.mp4"), MediaKind.VIDEO, duration=5.0, fps=10.0), 5.0, 5.0)
+        painel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(um, dois)),)), None, [], {})
+        for bloco in (um, dois, um, dois, um):
+            painel._timeline.select(bloco.clip_id)
+            wait_until(lambda: painel._keyframes == (0.0, 2.0))
+        assert sorted(lidos) == ["dois.mp4", "um.mp4"]
+    finally:
+        painel.shutdown()
+
+
+def test_mapa_de_keyframes_que_falhou_e_lido_de_novo(monkeypatch, wait_until):
+    """Uma leitura que falhou não fica guardada como "sem keyframes".
+
+    O worker entrega o mapa vazio quando o ffprobe erra ou passa do prazo; se
+    ele ficasse guardado, uma falha de passagem (disco de rede, máquina
+    ocupada) desligava a navegação por keyframe daquele arquivo até fechar o
+    aplicativo.
+    """
+    from PySide6.QtCore import QRunnable
+    from videomanager.application.capabilities import FFmpegTools
+    from videomanager.domain.project import Project
+    from videomanager.infrastructure.qt.workers.signals import PreviewSignals
+
+    lidos = []
+
+    class Leitura(QRunnable):
+        def __init__(self, path, tools):
+            super().__init__()
+            self.path, self.signals = path, PreviewSignals()
+
+        def cancel(self):
+            pass
+
+        def run(self):
+            lidos.append(self.path.name)
+            self.signals.keyframes.emit(() if lidos.count("um.mp4") == 1 and self.path.name == "um.mp4" else (0.0, 2.0))
+            self.signals.done.emit()
+
+    tools = FFmpegTools(Path("/bin/false"), Path("/bin/false"), "teste")
+    runtime = build_desktop_runtime(audio_enabled=False)
+    monkeypatch.setattr(runtime, "keyframe_worker", Leitura)
+    painel = EditPanel(Settings(), ensure_tools=lambda: tools, editor=build_editor_service(),
+                       processing=build_processing_service(), runtime=runtime)
+    try:
+        um = Clip(MediaRef(Path("/tmp/um.mp4"), MediaKind.VIDEO, duration=5.0, fps=10.0), 0.0, 5.0)
+        dois = Clip(MediaRef(Path("/tmp/dois.mp4"), MediaKind.VIDEO, duration=5.0, fps=10.0), 5.0, 5.0)
+        painel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(um, dois)),)), None, [], {})
+        painel._timeline.select(um.clip_id)
+        wait_until(lambda: lidos == ["um.mp4"] and painel._keyframe_worker is None)
+        painel._timeline.select(dois.clip_id)
+        wait_until(lambda: painel._keyframes == (0.0, 2.0))
+        painel._timeline.select(um.clip_id)
+        wait_until(lambda: painel._keyframes == (0.0, 2.0))
+        assert lidos == ["um.mp4", "dois.mp4", "um.mp4"]
+    finally:
+        painel.shutdown()

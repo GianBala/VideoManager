@@ -95,6 +95,35 @@ def test_gif_com_pausa_no_fim_mostra_o_ultimo_quadro(tools, tmp_path, pausa):
     assert sum(parado) / len(parado) > 8, f"tela preta com pausa de {pausa} cs no fim"
 
 
+@pytest.mark.parametrize(("name", "extra"), [
+    # Um keyframe só, no começo: a busca para o fim volta ao instante zero.
+    ("gop_longo.mp4", ("-c:v", "libx264", "-g", "200", "-crf", "0", "-pix_fmt", "yuv444p")),
+    # Sem índice: a busca não sai do começo.
+    ("longo.gif", ()),
+])
+def test_fim_de_arquivo_longo_mostra_o_ultimo_quadro(tools, tmp_path, name, extra):
+    """O último quadro vem do fim do arquivo, e não do começo da leitura.
+
+    A leitura do fim pedia "8 s a partir de 12 s", e o ffprobe conta esse fim a
+    partir do primeiro pacote lido — o keyframe anterior à busca. Num arquivo
+    de 20 s com GOP longo (ou num GIF, que não tem índice) ela terminava no nono
+    segundo, e a agulha no último quadro mostrava o quadro 89 no lugar do 199.
+    """
+    path = tmp_path / name
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=black:s=64x36:r=10:d=20", "-vf",
+                    "geq=lum='40+N*0.9':cb=128:cr=128,format=yuv444p", *extra, str(path)],
+                   check=True, timeout=120, **subprocess_kwargs())
+    media = media_ref(probe_file(path, tools))
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(media, 0, media.duration),)),),
+                      width=64, height=36, fps=10.0)
+    data = subprocess.run(frame_command(project, last_frame_time(project.duration, 10.0), SIZE, tools),
+                          check=True, timeout=60, **subprocess_kwargs()).stdout
+    red = sum(data[0::3]) / (len(data) / 3)
+    shown = (red * 219 / 255 + 16 - 40) / 0.9
+    assert shown == pytest.approx(199, abs=4), f"a agulha no fim mostrou o quadro {shown:.0f}"
+
+
 def test_gif_de_passo_irregular_mostra_o_ultimo_quadro(tools, tmp_path):
     """O fim de um GIF não pode ficar preto (o caso que apareceu no uso real).
 

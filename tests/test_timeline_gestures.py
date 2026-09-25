@@ -1,0 +1,188 @@
+"""Gestos de mouse na linha do tempo, com eventos reais sobre o painel.
+
+Os dois casos daqui não levantavam erro nenhum: a alça simplesmente pegava o
+bloco errado, e o bloco animado andava aos saltos.
+"""
+
+from pathlib import Path
+
+import pytest
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
+from videomanager.bootstrap import build_desktop_runtime, build_editor_service, build_processing_service
+from videomanager.domain.keyframe import Keyframe
+from videomanager.domain.project import Clip, MediaKind, MediaRef, Project, Track, TrackKind
+from videomanager.infrastructure.storage.settings import Settings
+from videomanager.presentation.qt.panels.edit_panel import EditPanel
+
+pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+@pytest.fixture
+def panel():
+    painel = EditPanel(settings=Settings(), ensure_tools=lambda: None, editor=build_editor_service(),
+                       processing=build_processing_service(), runtime=build_desktop_runtime(audio_enabled=False))
+    painel.resize(1600, 900)
+    painel.show()
+    # Janela ativa: sem ela o Qt não entrega os atalhos de teclado do painel.
+    painel.activateWindow()
+    QApplication.processEvents()
+    yield painel
+    painel.shutdown()
+
+
+def _drag(timeline, start: QPoint, steps: int, dx: int = 1) -> list[QPoint]:
+    QTest.mousePress(timeline, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    points = []
+    for step in range(1, steps + 1):
+        point = QPoint(start.x() + step * dx, start.y())
+        QTest.mouseMove(timeline, point)
+        points.append(point)
+    QTest.mouseRelease(timeline, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, points[-1])
+    return points
+
+
+def test_alca_inicial_de_bloco_encostado_no_anterior_e_alcancavel(panel):
+    """Entre dois blocos encostados, o lado direito da emenda pega o segundo.
+
+    Medindo só a distância, a faixa inteira de ±8 px ia para a ponta final do
+    primeiro: aparar o começo do segundo pela alça era impossível.
+    """
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=20.0, width=160, height=90, fps=10.0)
+    primeiro, segundo = Clip(video, 0.0, 5.0), Clip(video, 5.0, 5.0, in_point=5.0)
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(primeiro, segundo)),)), None, [], {})
+    timeline = panel._timeline
+    timeline.set_view(0.0, 10.0)
+    emenda = round(timeline._x_of(5.0))
+    y = round(timeline._lane_rect(0).center().y())
+
+    _drag(timeline, QPoint(emenda + 3, y), 50)
+
+    antes, depois = panel._project.tracks[0].sorted_clips()
+    assert (antes.start, antes.end) == (0.0, 5.0), "a ponta do primeiro bloco não podia mudar"
+    assert depois.start > 5.3, "a alça inicial do segundo bloco não foi arrastada"
+    assert depois.end == pytest.approx(10.0)
+
+
+def test_bloco_animado_acompanha_o_arrasto_sem_grudar_nos_proprios_quadros_chave(panel):
+    """O ímã não pode atrair o bloco para os próprios quadros-chave.
+
+    Eles andam junto com o bloco: um quadro-chave no começo virava alvo a
+    cada movimento, e o bloco só saía do lugar quando a mão passava da
+    tolerância do ímã — aos saltos de 8 px.
+    """
+    texto = Clip(MediaRef(Path("Texto_x"), MediaKind.IMAGE, duration=5.0), 2.0, 3.0, overlay_type="text",
+                 text_content="x", keyframes=(Keyframe(0.0, opacity=0.0), Keyframe(0.5, opacity=1.0)))
+    panel.install_project(Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(texto,)),)), None, [], {})
+    timeline = panel._timeline
+    timeline.set_view(0.0, 10.0)
+    inicio = QPoint(round(timeline._x_of(3.0)), round(timeline._lane_rect(0).center().y()))
+
+    posicoes = []
+    timeline.clip_moved.connect(lambda *_: posicoes.append(panel._project.clips[0].start))
+    _drag(timeline, inicio, 40)
+
+    assert len(set(posicoes)) >= 30, f"o bloco andou só {len(set(posicoes))} vezes em 36 movimentos"
+    assert panel._project.clips[0].start > 2.0 + 30 * timeline._seconds_per_pixel()
+
+
+def test_alca_gruda_nos_proprios_quadros_chave(panel):
+    """Aparando pela alça, os quadros-chave do bloco continuam no ímã.
+
+    Ali eles não andam com a ponta — ``resized`` os mantém no mesmo instante —,
+    e são o alvo de quem quer cortar exatamente onde a animação acaba. Tirá-los
+    do ímã junto com o arrasto do bloco inteiro fazia a ponta passar reto.
+    """
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=20.0, width=160, height=90, fps=10.0)
+    bloco = Clip(video, 0.0, 5.0, keyframes=(Keyframe(0.0, opacity=1.0), Keyframe(3.0, opacity=0.0)))
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(bloco,)),)), None, [], {})
+    timeline = panel._timeline
+    timeline.set_view(0.0, 10.0)
+    fim = round(timeline._x_of(5.0)) - 2
+    alvo = round(timeline._x_of(3.0)) + 3
+
+    _drag(timeline, QPoint(fim, round(timeline._lane_rect(0).center().y())), fim - alvo, dx=-1)
+
+    assert panel._project.clips[0].end == pytest.approx(3.0, abs=1e-9)
+
+
+def test_duracao_do_filtro_pelo_campo_nao_invade_o_bloco_seguinte(panel):
+    """O campo de duração da aba Filtros respeita o vizinho, como a alça.
+
+    Aplicada direto no bloco, a duração sobrepunha dois filtros na mesma
+    trilha — o estado que nenhum outro gesto permite criar.
+    """
+    def filtro(nome, inicio):
+        return Clip(MediaRef(Path(f"Filtro_{nome}"), MediaKind.IMAGE, duration=5.0), inicio, 5.0,
+                    overlay_type="filter", filter_name=nome)
+
+    primeiro, segundo = filtro("pb", 0.0), filtro("sepia", 5.0)
+    panel.install_project(Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(primeiro, segundo)),)), None, [], {})
+    panel._timeline.select(primeiro.clip_id)
+
+    panel._filter_dur.setValue(8.0)
+
+    antes, depois = panel._project.tracks[0].sorted_clips()
+    assert antes.end == pytest.approx(5.0) and depois.start == pytest.approx(5.0)
+    assert panel._filter_dur.value() == pytest.approx(5.0), "o campo anuncia uma duração que não existe"
+    panel._filter_dur.setValue(3.0)
+    assert panel._project.tracks[0].sorted_clips()[0].end == pytest.approx(3.0)
+
+
+def test_tesoura_sem_selecao_corta_o_bloco_sob_uma_transicao(panel):
+    """A tesoura sem bloco escolhido corta o vídeo mesmo sob o marcador.
+
+    O marcador cobre metade de cada bloco que une e vinha antes do bloco da
+    direita na trilha: achado primeiro, a tesoura desistia sem cortar nada.
+    """
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=20.0, width=160, height=90, fps=10.0)
+    esquerda, direita = Clip(video, 0.0, 5.0), Clip(video, 5.0, 5.0, in_point=5.0)
+    marcador = Clip(MediaRef(Path("Transição_x"), MediaKind.IMAGE, duration=1.0), 4.5, 1.0,
+                    overlay_type="transition", transition_name="fade",
+                    transition_left_id=esquerda.clip_id, transition_right_id=direita.clip_id)
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(esquerda, marcador, direita)),)),
+                          None, [], {})
+    panel._timeline.select(-1)
+    panel._timeline.set_position(5.2)
+    panel._timeline.setFocus()
+
+    QTest.keyClick(panel._timeline, Qt.Key.Key_S)
+
+    blocos = [c for c in panel._project.clips if not c.is_transition]
+    assert len(blocos) == 3, "a tesoura não cortou o bloco sob a transição"
+
+
+def test_velocidade_leva_a_animacao_junto_com_o_conteudo(panel):
+    """Mudar a velocidade reescala os quadros-chave como reescala a duração.
+
+    Um bloco de 5 s com saída em fade (4,4 → 5 s) acelerado a 2× dura 2,5 s: o
+    fade ficava depois do fim e nunca acontecia. Desacelerado a 0,5×, o bloco
+    sumia no meio e ficava invisível na outra metade.
+    """
+    from videomanager.domain.keyframe import Keyframe
+
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=20.0, width=160, height=90, fps=10.0)
+    saida = (Keyframe(4.4, opacity=1.0), Keyframe(5.0, opacity=0.0))
+    bloco = Clip(video, 0.0, 5.0, keyframes=saida)
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(bloco,)),)), None, [], {})
+    panel._timeline.select(bloco.clip_id)
+
+    QTest.mouseClick(panel._speed_btn, Qt.MouseButton.LeftButton)
+    popup = next(w for w in QApplication.topLevelWidgets() if type(w).__name__ == "_SpeedPopup" and w.isVisible())
+    popup._spin.setValue(2.0)
+    popup.close()
+
+    acelerado = panel._project.clips[0]
+    assert acelerado.duration == pytest.approx(2.5)
+    assert [k.time_offset for k in acelerado.keyframes] == pytest.approx([2.2, 2.5])
+    assert acelerado.transform_at(2.4).opacity < 1.0, "o fade de saída sumiu do bloco acelerado"
+
+
+def test_velocidade_nao_se_aplica_a_adicionais(panel):
+    texto = Clip(MediaRef(Path("Texto_x"), MediaKind.IMAGE, duration=5.0), 0.0, 5.0, overlay_type="text",
+                 text_content="x")
+    panel.install_project(Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(texto,)),)), None, [], {})
+    panel._timeline.select(texto.clip_id)
+    assert not panel._speed_btn.isEnabled()

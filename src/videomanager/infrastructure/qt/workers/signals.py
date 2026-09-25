@@ -33,7 +33,7 @@ class ProbeSignals(QObject):
     done = Signal()
     # MediaInfo ou PlaylistInfo
     finished = Signal(object)
-    failed = Signal(str)
+    failed = Signal(object)  # mensagem: str ou Text
 
 
 class DownloadSignals(QObject):
@@ -41,7 +41,7 @@ class DownloadSignals(QObject):
 
     progress = Signal(int, object)  # job_id, Progress
     finished = Signal(int, object)  # job_id, DownloadResult
-    failed = Signal(int, str)  # job_id, mensagem
+    failed = Signal(int, object)  # job_id, mensagem (str ou Text)
     cancelled = Signal(int)  # job_id
 
 
@@ -50,7 +50,7 @@ class ConvertSignals(QObject):
 
     progress = Signal(int, object)  # job_id, Progress
     finished = Signal(int, object)  # job_id, Path
-    failed = Signal(int, str)
+    failed = Signal(int, object)  # job_id, mensagem (str ou Text)
     cancelled = Signal(int)
 
 
@@ -62,7 +62,7 @@ class PreviewSignals(QObject):
     do atual e apareceria na tela como um salto para trás.
     """
 
-    failed = Signal(int, str)  # token, diagnóstico seguro e traduzido
+    failed = Signal(int, object)  # token, diagnóstico seguro (str ou Text)
     cancelled = Signal(int)
     frame = Signal(int, object)  # token, RawFrame
     primed = Signal(int)  # token; primeiro quadro de reprodução já está em memória

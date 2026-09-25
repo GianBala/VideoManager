@@ -22,7 +22,7 @@ from videomanager.infrastructure.ffmpeg.converter import build_args
 from videomanager.domain.compatibility import can_copy_audio
 from videomanager.application.media.conversion_description import describe_target
 from videomanager.domain.compatibility import needs_video_reencode
-from videomanager.infrastructure.ffmpeg.converter import output_path
+from videomanager.infrastructure.storage.output_paths import output_path
 from videomanager.application.errors import ConversionError
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")

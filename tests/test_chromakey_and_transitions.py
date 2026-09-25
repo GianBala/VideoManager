@@ -22,7 +22,7 @@ from videomanager.domain.project import TrackKind
 from videomanager.infrastructure.storage.project_json import load_project
 from videomanager.infrastructure.storage.project_json import save_project
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
-from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget
+from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget, _clip_name
 from videomanager.presentation.qt.panels.timeline import Timeline
 from videomanager.presentation.qt.theme import DARK
 
@@ -734,6 +734,39 @@ def test_properties_widget_title_truncation_and_close(qapp: QApplication) -> Non
     w.close_requested.connect(lambda: closed.append(True))
     w.close_requested.emit()
     assert len(closed) == 1
+
+
+def test_aba_propriedades_nasce_como_fica_depois_de_uma_troca(qapp: QApplication) -> None:
+    """Sem bloco, o cabeçalho refeito na troca de idioma era outro que o do nascimento."""
+    w = _ClipPropertiesWidget()
+    antes = (w._title_lbl.text(), w._title_lbl.toolTip(), w._lbl_clip_type.text())
+    w._retranslate()
+    assert (w._title_lbl.text(), w._title_lbl.toolTip(), w._lbl_clip_type.text()) == antes
+    w.deleteLater()
+
+
+def test_bloco_sem_arquivo_aparece_pelo_conteudo_e_nao_pelo_identificador(pseudo) -> None:
+    """O caminho de texto, filtro e transição é identificador, gravado na inserção."""
+    from videomanager.domain import i18n
+    from videomanager.presentation.qt.i18n import apply_language
+
+    def bloco(caminho, **campos):
+        return Clip(media=MediaRef(path=Path(caminho), kind=MediaKind.IMAGE, duration=3.0), start=0.0,
+                    duration=3.0, **campos)
+
+    # O texto mudou depois de inserido; filtro e transição nasceram com outro rótulo.
+    texto = bloco("Texto_Título", overlay_type="text", text_content="Meu vídeo")
+    filtro = bloco("Filtro_🎬 Preto e Branco", overlay_type="filter", filter_name="sepia")
+    transicao = bloco("Transição_🌑 Fade", overlay_type="transition", transition_name="fadeblack")
+    assert [_clip_name(c) for c in (texto, filtro, transicao)] == [
+        "Meu vídeo", "Sépia", "Transição: Fade para Preto"]
+
+    w = _ClipPropertiesWidget()
+    w.load_clip(filtro, 1920, 1080)
+    assert w._title_lbl.text() == "Propriedades: Sépia"
+    apply_language(i18n.ENGLISH)
+    assert "⟦Sépia⟧" in w._title_lbl.text()
+    w.deleteLater()
 
 
 def test_properties_widget_edita_se_transicao_afeta_adicionais(

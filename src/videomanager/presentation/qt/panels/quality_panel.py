@@ -11,6 +11,8 @@ também em H.264).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -48,12 +50,10 @@ from videomanager.application.media.download_policy import audio_quality_warning
 from videomanager.application.media.download_policy import plan_container
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import align_label_column, bind, on_language_change, retext_items
 from videomanager.presentation.qt.theme import FIELD_WIDTH
 from videomanager.application.format_labels import resolution_label
 from videomanager.application.format_labels import choice_label
-
-_BEST_AVAILABLE = "Melhor disponível"
-
 
 def _make_form(parent: QWidget | None = None) -> QFormLayout:
     form = QFormLayout(parent)
@@ -97,6 +97,7 @@ class QualityPanel(QWidget):
 
         self._align_label_column()
         self.set_matrix(FormatMatrix())
+        on_language_change(self._retranslate)
 
     # ------------------------------------------------------------------
     # Construção
@@ -110,7 +111,7 @@ class QualityPanel(QWidget):
         melhor. Juntos, o rótulo "O que baixar" ainda divide a coluna de rótulos
         com os campos que ele comanda.
         """
-        group = QGroupBox(strings.QUALITY_GROUP)
+        group = bind(QGroupBox(), "setTitle", lambda: strings.QUALITY_GROUP)
         outer = QVBoxLayout(group)
         outer.setSpacing(8)
 
@@ -118,8 +119,8 @@ class QualityPanel(QWidget):
         box = QHBoxLayout()
         box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(18)
-        self._radio_video = QRadioButton(strings.MODE_VIDEO)
-        self._radio_audio = QRadioButton(strings.MODE_AUDIO)
+        self._radio_video = bind(QRadioButton(), "setText", lambda: strings.MODE_VIDEO)
+        self._radio_audio = bind(QRadioButton(), "setText", lambda: strings.MODE_AUDIO)
         # Grupo explícito: a exclusividade entre botões de rádio vale por widget
         # pai, e depender do pai quebraria calado se outro rádio aparecesse
         # neste mesmo grupo um dia.
@@ -131,7 +132,7 @@ class QualityPanel(QWidget):
         box.addWidget(self._radio_video)
         box.addWidget(self._radio_audio)
         box.addStretch(1)
-        self._add_row(mode_form, strings.MODE_LABEL, box)
+        self._add_row(mode_form, lambda: strings.MODE_LABEL, box)
         outer.addLayout(mode_form)
 
         self._stack = QStackedWidget()
@@ -149,57 +150,68 @@ class QualityPanel(QWidget):
         return group
 
     def _add_row(
-        self, form: QFormLayout, text: str, field: QWidget | QLayout
+        self, form: QFormLayout, text: Callable[[], str] | None, field: QWidget | QLayout
     ) -> QLabel:
         """Adiciona uma linha guardando o rótulo, para alinhá-lo depois."""
-        label = QLabel(text)
+        label = bind(QLabel(), "setText", text) if text else QLabel()
         self._labels.append(label)
         form.addRow(label, field)
         return label
 
     def _align_label_column(self) -> None:
-        width = max(label.sizeHint().width() for label in self._labels)
-        for label in self._labels:
-            label.setMinimumWidth(width)
+        align_label_column(self._labels)
+
+    def _retranslate(self) -> None:
+        # Os itens que vêm do catálogo trocam de texto; o dado e a escolha
+        # ficam. As medidas e os avisos dependem do texto, e são refeitos.
+        retext_items(self._resolution, lambda data: strings.QUALITY_BEST_AVAILABLE if data is None
+                     else resolution_label(data) if isinstance(data, VideoChoice) else None)
+        retext_items(self._fps, lambda data: strings.ANY_FPS if data is None else None)
+        retext_items(self._codec, lambda data: strings.ANY_CODEC if data is None else None)
+        retext_items(self._container, lambda data: strings.CONTAINER_AUTO_LABEL if data == CONTAINER_AUTO else None)
+        retext_items(self._audio_codec, lambda data: strings.AUDIO_CODEC_BEST if data == "best" else None)
+        retext_items(self._audio_track, lambda data: strings.QUALITY_BEST_AVAILABLE if data is None
+                     else choice_label(data))
+        self._align_label_column()
+        self._update_audio_source_hint()
+        self._refresh_warnings()
+        self._update_estimated_size()
 
     def _build_video_page(self) -> QWidget:
         page = QWidget()
         page.setProperty("role", "plain")
         form = _make_form(page)
 
-        self._resolution = QComboBox()
-        self._resolution.setToolTip(strings.TIP_RESOLUTION)
+        self._resolution = bind(QComboBox(), "setToolTip", lambda: strings.TIP_RESOLUTION)
         self._resolution.currentIndexChanged.connect(self._on_resolution_changed)
-        self._add_row(form, strings.LABEL_RESOLUTION, self._resolution)
+        self._add_row(form, lambda: strings.LABEL_RESOLUTION, self._resolution)
 
         self._fps = QComboBox()
         self._fps.currentIndexChanged.connect(self._on_fps_changed)
-        self._add_row(form, strings.LABEL_FPS, self._fps)
+        self._add_row(form, lambda: strings.LABEL_FPS, self._fps)
 
-        self._codec = QComboBox()
-        self._codec.setToolTip(strings.TIP_CODEC)
+        self._codec = bind(QComboBox(), "setToolTip", lambda: strings.TIP_CODEC)
         self._codec.currentIndexChanged.connect(self._on_codec_changed)
-        self._add_row(form, strings.LABEL_CODEC, self._codec)
+        self._add_row(form, lambda: strings.LABEL_CODEC, self._codec)
 
-        self._container = QComboBox()
-        self._container.setToolTip(strings.TIP_CONTAINER)
+        self._container = bind(QComboBox(), "setToolTip", lambda: strings.TIP_CONTAINER)
         for value in CONTAINERS:
             label = strings.CONTAINER_AUTO_LABEL if value == CONTAINER_AUTO else f".{value}"
             self._container.addItem(label, value)
         index = self._container.findData(self._settings.default_container)
         self._container.setCurrentIndex(max(0, index))
         self._container.currentIndexChanged.connect(self._emit_changed)
-        self._add_row(form, strings.LABEL_CONTAINER, self._container)
+        self._add_row(form, lambda: strings.LABEL_CONTAINER, self._container)
 
         self._audio_track = QComboBox()
         self._audio_track.currentIndexChanged.connect(self._emit_changed)
         self._audio_track_label = self._add_row(
-            form, strings.LABEL_AUDIO_TRACK, self._audio_track
+            form, lambda: strings.LABEL_AUDIO_TRACK, self._audio_track
         )
 
         self._video_size_label = QLabel("—")
         self._video_size_label.setProperty("role", "dim")
-        self._add_row(form, strings.LABEL_ESTIMATED_SIZE, self._video_size_label)
+        self._add_row(form, lambda: strings.LABEL_ESTIMATED_SIZE, self._video_size_label)
 
         for combo in (self._resolution, self._fps, self._codec, self._container, self._audio_track):
             combo.setFixedWidth(FIELD_WIDTH)
@@ -210,15 +222,14 @@ class QualityPanel(QWidget):
         page.setProperty("role", "plain")
         form = _make_form(page)
 
-        self._audio_codec = QComboBox()
-        self._audio_codec.setToolTip(strings.TIP_AUDIO_FORMAT)
+        self._audio_codec = bind(QComboBox(), "setToolTip", lambda: strings.TIP_AUDIO_FORMAT)
         for codec in AUDIO_CODECS:
             label = strings.AUDIO_CODEC_BEST if codec == "best" else codec.upper()
             self._audio_codec.addItem(label, codec)
         index = self._audio_codec.findData(self._settings.default_audio_format)
         self._audio_codec.setCurrentIndex(max(0, index))
         self._audio_codec.currentIndexChanged.connect(self._on_audio_codec_changed)
-        self._add_row(form, strings.LABEL_AUDIO_FORMAT, self._audio_codec)
+        self._add_row(form, lambda: strings.LABEL_AUDIO_FORMAT, self._audio_codec)
 
         self._audio_quality = QComboBox()
         for value in AUDIO_BITRATES:
@@ -226,17 +237,17 @@ class QualityPanel(QWidget):
         index = self._audio_quality.findData(self._settings.default_audio_quality)
         self._audio_quality.setCurrentIndex(max(0, index))
         self._audio_quality.currentIndexChanged.connect(self._emit_changed)
-        self._add_row(form, strings.LABEL_AUDIO_QUALITY, self._audio_quality)
+        self._add_row(form, lambda: strings.LABEL_AUDIO_QUALITY, self._audio_quality)
 
         self._audio_size_label = QLabel("—")
         self._audio_size_label.setProperty("role", "dim")
-        self._add_row(form, strings.LABEL_ESTIMATED_SIZE, self._audio_size_label)
+        self._add_row(form, lambda: strings.LABEL_ESTIMATED_SIZE, self._audio_size_label)
 
         # Sem rótulo, mas na coluna dos campos: é uma nota sobre o campo de cima.
         self._audio_source = QLabel("")
         self._audio_source.setProperty("role", "dim")
         self._audio_source.setMinimumWidth(FIELD_WIDTH)
-        self._add_row(form, "", self._audio_source)
+        self._add_row(form, None, self._audio_source)
 
         for combo in (self._audio_codec, self._audio_quality):
             combo.setFixedWidth(FIELD_WIDTH)
@@ -309,14 +320,16 @@ class QualityPanel(QWidget):
 
     def _populate_resolutions(self) -> None:
         self._resolution.clear()
-        self._resolution.addItem(_BEST_AVAILABLE, None)
+        self._resolution.addItem(strings.QUALITY_BEST_AVAILABLE, None)
         for height in available_heights(self._matrix):
             self._resolution.addItem(f"{height}p", height)
         # Opções sem altura conhecida (HLS) entram pelo rótulo próprio, que
-        # mostra bitrate — não podem simplesmente desaparecer da lista.
+        # mostra bitrate — não podem simplesmente desaparecer da lista. O dado
+        # é a própria escolha, e não o rótulo: o rótulo leva o separador
+        # decimal do idioma, e depois de uma troca não acharia mais a faixa.
         for choice in self._matrix.video:
             if choice.height is None:
-                self._resolution.addItem(resolution_label(choice), resolution_label(choice))
+                self._resolution.addItem(resolution_label(choice), choice)
 
         target = self._settings.default_height
         index = self._resolution.findData(target)
@@ -349,7 +362,7 @@ class QualityPanel(QWidget):
 
     def _populate_audio_tracks(self) -> None:
         self._audio_track.clear()
-        self._audio_track.addItem(_BEST_AVAILABLE, None)
+        self._audio_track.addItem(strings.QUALITY_BEST_AVAILABLE, None)
         for choice in self._matrix.audio:
             self._audio_track.addItem(choice_label(choice), choice)
 
@@ -454,10 +467,7 @@ class QualityPanel(QWidget):
                 messages.append(warning)
             choice = self.current_audio_choice()
             if choice is not None and choice.is_extracted_from_video:
-                messages.append(
-                    "Esta mídia não separa as trilhas: será preciso baixar o "
-                    "vídeo inteiro e extrair o áudio dele."
-                )
+                messages.append(strings.QUALITY_WARN_EXTRACTED)
         else:
             video = self.current_video_choice()
             if video is not None:
@@ -489,12 +499,9 @@ class QualityPanel(QWidget):
 
         if video.family != wanted:
             if reach is None:
-                return [f"Esta mídia não tem {wanted}: será baixado {video.family}."]
-            return [
-                f"Esta mídia não tem {wanted} em {resolution_label(video)}: será "
-                f"baixado {video.family}. Com {wanted}, a maior resolução "
-                f"disponível é {reach}p."
-            ]
+                return [strings.QUALITY_WARN_NO_FAMILY.format(family=wanted, actual=video.family)]
+            return [strings.QUALITY_WARN_NO_FAMILY_AT.format(
+                family=wanted, resolution=resolution_label(video), actual=video.family, reach=reach)]
 
         # O codec foi atendido, mas pode ser ele que está limitando a resolução
         # de quem pediu "Melhor disponível".
@@ -505,10 +512,7 @@ class QualityPanel(QWidget):
             and top is not None
             and reach < top
         ):
-            return [
-                f"{wanted} nesta mídia vai até {reach}p. Há {top}p, mas só em "
-                "outros codecs."
-            ]
+            return [strings.QUALITY_WARN_FAMILY_LIMIT.format(family=wanted, reach=reach, top=top)]
         return []
 
     # ------------------------------------------------------------------
@@ -519,13 +523,10 @@ class QualityPanel(QWidget):
         if not self._matrix.has_video:
             return None
         data = self._resolution.currentData()
-        if isinstance(data, str):
-            # Opção sem altura conhecida, identificada pelo próprio rótulo. Ela
-            # já é um stream concreto: não há codec nem framerate a combinar.
-            return next(
-                (c for c in self._matrix.video if resolution_label(c) == data),
-                self._matrix.video[0],
-            )
+        if isinstance(data, VideoChoice):
+            # Opção sem altura conhecida: já é um stream concreto, não há codec
+            # nem framerate a combinar.
+            return data
         # ``data`` é a altura escolhida, ou None em "Melhor disponível" — que
         # significa "a maior resolução", e não "ignore o resto do formulário":
         # sem passar codec e framerate adiante, pedir H.264 e receber o AV1 de

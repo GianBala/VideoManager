@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from videomanager.domain.timing import format_timecode
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import bind, on_language_change
 
 # Inatividade até a barra sumir. Curto o bastante para a imagem ficar limpa
 # depressa, longo o bastante para dar tempo de mirar um botão.
@@ -108,7 +109,7 @@ class FullscreenPreview(QWidget):
         # com ele e não segura a aplicação aberta depois de a janela principal
         # fechar.
         super().__init__(parent, Qt.WindowType.Window)
-        self.setWindowTitle(strings.EDIT_FULLSCREEN_TITLE)
+        bind(self, "setWindowTitle", lambda: strings.EDIT_FULLSCREEN_TITLE)
         self.setStyleSheet("background: #000000;")
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -136,6 +137,15 @@ class FullscreenPreview(QWidget):
 
         # Duração para a qual a largura dos relógios já foi calculada.
         self._locked = -1.0
+        self._state = (0.0, 0.0, False)
+        on_language_change(self._retranslate)
+
+    def _retranslate(self) -> None:
+        # Os relógios levam o separador decimal do idioma, e a largura travada
+        # deles é medida no texto: as duas coisas são refeitas.
+        self._locked = -1.0
+        self.set_state(*self._state)
+        self._refresh_mute()
 
     # ------------------------------------------------------------------
     # Montagem
@@ -165,12 +175,12 @@ class FullscreenPreview(QWidget):
         row.addWidget(self._play)
 
         for glyph, step, tip in (
-            ("◀|", -1, strings.EDIT_PREV_FRAME),
-            ("|▶", +1, strings.EDIT_NEXT_FRAME),
+            ("◀|", -1, lambda: strings.EDIT_PREV_FRAME),
+            ("|▶", +1, lambda: strings.EDIT_NEXT_FRAME),
         ):
             button = QPushButton(glyph)
             button.setFixedWidth(_BUTTON_WIDTH)
-            button.setToolTip(tip)
+            bind(button, "setToolTip", tip)
             button.clicked.connect(lambda _=False, s=step: self.stepped.emit(s))
             row.addWidget(button)
 
@@ -201,12 +211,12 @@ class FullscreenPreview(QWidget):
         self._volume = QSlider(Qt.Orientation.Horizontal)
         self._volume.setRange(0, 100)
         self._volume.setFixedWidth(110)
-        self._volume.setToolTip(strings.EDIT_VOLUME)
+        bind(self._volume, "setToolTip", lambda: strings.EDIT_VOLUME)
         self._volume.valueChanged.connect(self.volume_changed)
         row.addWidget(self._volume)
 
-        leave = QPushButton(strings.EDIT_EXIT_FULLSCREEN)
-        leave.setToolTip(strings.EDIT_EXIT_FULLSCREEN_TIP)
+        leave = bind(QPushButton(), "setText", lambda: strings.EDIT_EXIT_FULLSCREEN)
+        bind(leave, "setToolTip", lambda: strings.EDIT_EXIT_FULLSCREEN_TIP)
         leave.clicked.connect(self.close)
         row.addWidget(leave)
         return bar
@@ -243,6 +253,7 @@ class FullscreenPreview(QWidget):
         self._image.setPixmap(pixmap)
 
     def set_state(self, position: float, duration: float, playing: bool) -> None:
+        self._state = (position, duration, playing)
         if duration != self._locked:
             self._lock_readouts(duration)
         self._play.setText("❚❚" if playing else "▶")

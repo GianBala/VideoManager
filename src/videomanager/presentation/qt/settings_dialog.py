@@ -26,6 +26,7 @@ from videomanager.application import encoding as hwaccel
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import align_label_column
 from videomanager.presentation.qt.theme import FIELD_WIDTH
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
@@ -133,9 +134,7 @@ class SettingsDialog(QDialog):
         self._describe_encoder()
 
     def _align_label_column(self) -> None:
-        width = max((label.sizeHint().width() for label in self._labels), default=0)
-        for label in self._labels:
-            label.setMinimumWidth(width)
+        align_label_column(self._labels)
 
     def _build_general(self) -> QWidget:
         page, form = self._make_page()
@@ -162,8 +161,15 @@ class SettingsDialog(QDialog):
         self._theme.setFixedWidth(FIELD_WIDTH)
         self._add_row(form, strings.SETTINGS_THEME, self._theme)
 
+        self._language = QComboBox()
+        for code, name in strings.LANGUAGE_NAMES.items():
+            self._language.addItem(name, code)
+        self._language.setCurrentIndex(max(0, self._language.findData(self._settings.language)))
+        self._language.setFixedWidth(FIELD_WIDTH)
+        self._add_row(form, strings.SETTINGS_LANGUAGE, self._language)
+
         self._encoder = QComboBox()
-        for value, label in hwaccel.CHOICES:
+        for value, label in hwaccel.choices():
             self._encoder.addItem(label, value)
         self._encoder.setCurrentIndex(
             max(0, self._encoder.findData(self._settings.hardware_encoder))
@@ -277,7 +283,7 @@ class SettingsDialog(QDialog):
             self,
             strings.SETTINGS_COOKIES_FILE,
             self._cookies_file.text() or str(Path.home()),
-            "Cookies (*.txt);;Todos os arquivos (*)",
+            strings.SETTINGS_COOKIES_FILTER,
         )
         if chosen:
             self._cookies_file.setText(chosen)
@@ -295,6 +301,7 @@ class SettingsDialog(QDialog):
         updated.download_dir = self._dest.text().strip() or self._settings.download_dir
         updated.separate_by_site = self._separate.isChecked()
         updated.theme = self._theme.currentData() or "dark"
+        updated.language = self._language.currentData() or self._settings.language
         updated.hardware_encoder = (
             self._encoder.currentData() or hwaccel.SOFTWARE
         )
