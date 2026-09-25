@@ -5,7 +5,7 @@
 # Video Manager
 
 **Baixe, converta e edite vídeo — tudo em um só aplicativo.**<br>
-Desktop para Windows e Linux, em português, movido por [yt-dlp](https://github.com/yt-dlp/yt-dlp) e [ffmpeg](https://ffmpeg.org).
+Desktop para Windows e Linux, em português e inglês, movido por [yt-dlp](https://github.com/yt-dlp/yt-dlp) e [ffmpeg](https://ffmpeg.org).
 
 [![Testes](https://github.com/GianBala/Video_Manager/actions/workflows/tests.yml/badge.svg)](https://github.com/GianBala/Video_Manager/actions/workflows/tests.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
