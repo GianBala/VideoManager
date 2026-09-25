@@ -1220,7 +1220,9 @@ class _ClipPropertiesWidget(QWidget):
         header.addWidget(btn_close, 0)
         self._layout.addLayout(header)
 
-        self._lbl_clip_type = QLabel("")
+        # O mesmo que o cabeçalho mostra sem bloco (ver _refresh_header): vazio,
+        # a troca de idioma o preenchia e a janela trocada divergia da nova.
+        self._lbl_clip_type = QLabel(strings.EDIT_CLIP_NONE)
         self._lbl_clip_type.setProperty("role", "dim")
         self._layout.addWidget(self._lbl_clip_type)
 
