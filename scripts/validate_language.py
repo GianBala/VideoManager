@@ -33,6 +33,12 @@ Três modos, porque texto de outra largura muda o layout por razões legítimas:
 Diálogos e menus de contexto, que se montam ao abrir e já nascem no idioma do
 momento, passam no fim pela busca de texto do modo.
 
+Com ``--cortes``, em vez da troca, mede o texto que não cabe: cada cena em
+português, a mesma janela trocada ao vivo e uma janela nova em inglês, no
+tamanho de abertura, nos quatro do retrato e na largura mínima, e os
+diálogos. Relata o que corta em inglês e não corta em português — texto de
+outra largura que o layout não acomodou. Usa sempre a tradução de verdade.
+
 Mede ainda, por cena, o tempo da troca, as pinturas durante ela (têm de ser
 zero) e os efeitos colaterais: desfazer, alteração não salva, pedido de quadro,
 reprodução, aba e bloco escolhidos, workers da prévia. Sai com código 1 se
@@ -615,6 +621,31 @@ def _sob_demanda(app, r) -> dict:
     pega abertos —, então não há troca a conferir, só o texto: fora do
     catálogo (pseudoidioma) ou com cara de português (inglês).
     """
+    janela, raizes = _montar_sob_demanda(app, r)
+    textos = {}
+    for nome, raiz in raizes.items():
+        textos.update({f"{nome}:{chave}": valor for chave, valor in _retrato(raiz)["textos"].items()})
+        raiz.close()
+        raiz.deleteLater()
+    _fechar(app, janela)
+    return {"textos": textos}
+
+
+class _SemFerramentas:
+    """Runtime sem ffmpeg: o diálogo de configurações não sonda a placa em segundo plano."""
+
+    def __init__(self, runtime):
+        self._runtime = runtime
+
+    def __getattr__(self, nome):
+        return getattr(self._runtime, nome)
+
+    def find_tools(self):
+        return None
+
+
+def _montar_sob_demanda(app, r):
+    """Uma janela com o editor carregado, e os diálogos e menus abertos sobre ela."""
     from PySide6.QtWidgets import QMenu
 
     from videomanager.domain.formats import PlaylistEntry, PlaylistInfo
@@ -628,7 +659,7 @@ def _sob_demanda(app, r) -> dict:
     lista = editor._media_list
     itens = tuple(PlaylistEntry(f"https://exemplo/{i}", f"Item {i}", i) for i in range(1, 4))
     raizes = {
-        "configuracoes": SettingsDialog(janela._settings, janela, runtime=janela._runtime),
+        "configuracoes": SettingsDialog(janela._settings, janela, runtime=_SemFerramentas(janela._runtime)),
         "exportacao": ExportDialog(project=editor._project, settings=editor._settings, pool=editor._pool,
                                    probed=editor._probed, parent=editor, processing=editor._processing,
                                    runtime=editor._runtime),
@@ -642,13 +673,153 @@ def _sob_demanda(app, r) -> dict:
         if not isinstance(raiz, QMenu):
             raiz.show()
     _processar(app, 200)
-    textos = {}
-    for nome, raiz in raizes.items():
-        textos.update({f"{nome}:{chave}": valor for chave, valor in _retrato(raiz)["textos"].items()})
-        raiz.close()
-        raiz.deleteLater()
-    _fechar(app, janela)
-    return {"textos": textos}
+    return janela, raizes
+
+
+# ---------------------------------------------------------------------------
+# Corte: texto que não cabe
+# ---------------------------------------------------------------------------
+
+# O de abertura e os quatro do retrato (scripts/snapshot_behavior.py).
+TAMANHOS_CORTE = ((1180, 1000), (1920, 1080), (1680, 1050), (1366, 768), (1280, 720))
+
+
+def _cortados(raiz) -> dict[str, list]:
+    """Widgets visíveis cujo texto não cabe no espaço em que o estilo o desenha.
+
+    O texto é medido contra a área de desenho, e não contra a dica de tamanho:
+    a de um botão tem piso de 80 px no Fusion e a de um QLabel guarda o mínimo
+    em vigor — as duas acusariam corte onde não há.
+    """
+    # mightBeRichText mora no Qt do módulo QtGui, não no do QtCore.
+    from PySide6.QtGui import QTextDocument, Qt
+    from PySide6.QtWidgets import (QCheckBox, QComboBox, QGroupBox, QLabel, QLineEdit, QPushButton, QRadioButton,
+                                   QStyle, QStyleOptionButton, QStyleOptionComboBox, QStyleOptionGroupBox, QTabBar,
+                                   QWidget)
+    areas = {QPushButton: QStyle.SubElement.SE_PushButtonContents, QCheckBox: QStyle.SubElement.SE_CheckBoxContents,
+             QRadioButton: QStyle.SubElement.SE_RadioButtonContents}
+    saida = {}
+    for w in [raiz, *raiz.findChildren(QWidget)]:
+        if not w.isVisible() or w.width() <= 0 or w.height() <= 0:
+            continue
+        fm, estilo = w.fontMetrics(), w.style()
+        texto = None
+        if isinstance(w, QLabel) and w.text() and w.pixmap().isNull():
+            texto = w.text()
+            if w.wordWrap():
+                precisa, cabe = w.heightForWidth(w.width()), w.height()
+            else:
+                if Qt.mightBeRichText(texto):
+                    documento = QTextDocument()
+                    documento.setDefaultFont(w.font())
+                    documento.setHtml(texto)
+                    precisa = round(documento.idealWidth() - 2 * documento.documentMargin())
+                else:
+                    precisa = max(fm.horizontalAdvance(linha) for linha in texto.split("\n"))
+                cabe = w.contentsRect().width() - 2 * w.margin() - max(0, w.indent())
+        elif isinstance(w, tuple(areas)) and w.text():
+            texto = w.text()
+            opcao = QStyleOptionButton()
+            w.initStyleOption(opcao)
+            area = estilo.subElementRect(next(e for t, e in areas.items() if isinstance(w, t)), opcao, w)
+            icone = opcao.iconSize.width() + 4 if not opcao.icon.isNull() else 0
+            precisa, cabe = fm.horizontalAdvance(texto.replace("&&", "\0").replace("&", "").replace("\0", "&")) + icone, area.width()
+        elif isinstance(w, QComboBox) and w.currentText():
+            texto = w.currentText()
+            opcao = QStyleOptionComboBox()
+            w.initStyleOption(opcao)
+            area = estilo.subControlRect(QStyle.ComplexControl.CC_ComboBox, opcao,
+                                         QStyle.SubControl.SC_ComboBoxEditField, w)
+            icone = w.iconSize().width() + 4 if not w.itemIcon(w.currentIndex()).isNull() else 0
+            precisa, cabe = fm.horizontalAdvance(texto) + icone, area.width()
+        elif isinstance(w, QTabBar) and w.count():
+            texto = " | ".join(w.tabText(i) for i in range(w.count()))
+            precisa, cabe = w.sizeHint().width(), w.width()
+        elif isinstance(w, QGroupBox) and w.title():
+            texto = w.title()
+            opcao = QStyleOptionGroupBox()
+            w.initStyleOption(opcao)
+            area = estilo.subControlRect(QStyle.ComplexControl.CC_GroupBox, opcao,
+                                         QStyle.SubControl.SC_GroupBoxLabel, w)
+            precisa, cabe = area.right() + 1, w.width()
+        elif isinstance(w, QLineEdit) and not w.text() and w.placeholderText():
+            texto = w.placeholderText()
+            precisa, cabe = fm.horizontalAdvance(texto), w.contentsRect().width() - 8
+        if texto is not None and precisa > cabe + 1:
+            saida[f"{_caminho(w, raiz)}"] = [texto[:80], precisa, cabe]
+    return saida
+
+
+def _medir(app, raizes, tamanhos) -> dict:
+    principal = raizes[0]
+    saida = {}
+    for largura, altura in tamanhos:
+        principal.resize(largura, altura)
+        _processar(app, 120)
+        cortes = {}
+        for raiz in raizes:
+            cortes.update({f"{type(raiz).__name__}/{c}": v for c, v in _cortados(raiz).items()})
+        saida[f"{largura}x{altura}"] = {"real": [principal.width(), principal.height()], "cortes": cortes}
+    return saida
+
+
+def medir_cortes(app, nome: str, r: dict) -> dict:
+    """O que corta em inglês e não corta em português, em cada tamanho."""
+    from videomanager.domain import i18n
+    from videomanager.presentation.qt.i18n import apply_language
+
+    entrar = CENAS[nome]
+    extras = (lambda j: [j._edit._fullscreen]) if nome == "tela_cheia" else (lambda j: [])
+    a = _janela(app)
+    entrar(app, a, r)
+    _processar(app, 200)
+    minimo = a.minimumSizeHint()
+    tamanhos = (*TAMANHOS_CORTE, (minimo.width(), minimo.height()))
+    pt = _medir(app, [a, *extras(a)], tamanhos)
+    apply_language(i18n.ENGLISH)
+    _processar(app, 200)
+    vivo = _medir(app, [a, *extras(a)], tamanhos)
+    b = _janela(app)
+    entrar(app, b, r)
+    _processar(app, 200)
+    zero = _medir(app, [b, *extras(b)], tamanhos)
+    minimos = {"pt": [minimo.width(), minimo.height()],
+               "ingles_vivo": [a.minimumSizeHint().width(), a.minimumSizeHint().height()],
+               "ingles_do_zero": [b.minimumSizeHint().width(), b.minimumSizeHint().height()]}
+    apply_language(i18n.PORTUGUESE)
+    _fechar(app, a)
+    _fechar(app, b)
+    novos = {}
+    for rotulo, medida in pt.items():
+        for variante, en in (("ingles_vivo", vivo), ("ingles_do_zero", zero)):
+            so_en = {c: v for c, v in en[rotulo]["cortes"].items() if c not in medida["cortes"]}
+            if so_en:
+                novos.setdefault(rotulo, {})[variante] = so_en
+    return {"novos": novos, "minimos": minimos,
+            "cortes_pt": {rotulo: m["cortes"] for rotulo, m in pt.items() if m["cortes"]}}
+
+
+def cortes_sob_demanda(app, r) -> dict:
+    """Diálogos no tamanho em que abrem: o que corta em inglês e não em português."""
+    from PySide6.QtWidgets import QMenu
+
+    from videomanager.domain import i18n
+    from videomanager.presentation.qt.i18n import apply_language
+    medidas = {}
+    for codigo in (i18n.PORTUGUESE, i18n.ENGLISH):
+        apply_language(codigo)
+        janela, raizes = _montar_sob_demanda(app, r)
+        medidas[codigo] = {}
+        for nome, raiz in raizes.items():
+            if not isinstance(raiz, QMenu):
+                medidas[codigo][nome] = _cortados(raiz)
+            raiz.close()
+            raiz.deleteLater()
+        _fechar(app, janela)
+    apply_language(i18n.PORTUGUESE)
+    return {nome: {c: v for c, v in cortes.items() if c not in medidas[i18n.PORTUGUESE].get(nome, {})}
+            for nome, cortes in medidas[i18n.ENGLISH].items()
+            if any(c not in medidas[i18n.PORTUGUESE].get(nome, {}) for c in cortes)}
 
 
 def main() -> int:
@@ -660,6 +831,8 @@ def main() -> int:
     parser.add_argument("--cena", action="append", choices=sorted(CENAS), help="só estas cenas")
     parser.add_argument("--limite", type=int, default=12, help="diferenças mostradas por grupo")
     parser.add_argument("--json", type=Path, help="grava o resultado completo")
+    parser.add_argument("--cortes", action="store_true",
+                        help="em vez da troca, o texto que corta em inglês e não em português")
     args = parser.parse_args()
 
     perfil = Path(tempfile.mkdtemp(prefix="vm-idioma-"))
@@ -673,8 +846,10 @@ def main() -> int:
     app, primeira = build_app([], audio_enabled=False)
     primeira.close()
     primeira.deleteLater()
-    _instalar(args.modo)
+    _instalar("ingles" if args.cortes else args.modo)
     recursos = _recursos(perfil)
+    if args.cortes:
+        return _relatar_cortes(app, recursos, args)
 
     resultado = {}
     problemas = 0
@@ -713,6 +888,35 @@ def main() -> int:
     tempos += [c["volta"]["troca_ms"] for n, c in resultado.items() if n in CENAS]
     print(f"\ntroca: mediana {statistics.median(tempos):.1f} ms, máximo {max(tempos):.1f} ms")
     print(f"{problemas} problema(s).")
+    if args.json:
+        args.json.write_text(json.dumps(resultado, ensure_ascii=False, indent=1), encoding="utf-8")
+    return 1 if problemas else 0
+
+
+def _relatar_cortes(app, recursos, args) -> int:
+    resultado = {}
+    problemas = 0
+    for nome in args.cena or list(CENAS):
+        cena = medir_cortes(app, nome, recursos)
+        resultado[nome] = cena
+        minimos = cena["minimos"]
+        print(f"== {nome}: largura mínima pt {minimos['pt'][0]}, inglês {minimos['ingles_do_zero'][0]} "
+              f"(ao vivo {minimos['ingles_vivo'][0]})")
+        for rotulo, variantes in cena["novos"].items():
+            for variante, cortes in variantes.items():
+                problemas += len(cortes)
+                print(f"   {rotulo} {variante}: {len(cortes)}")
+                for caminho, (texto, precisa, cabe) in list(cortes.items())[:args.limite]:
+                    print(f"      {caminho.split('/')[-1]} {texto!r}: precisa {precisa}, cabe {cabe}")
+    if not args.cena:
+        dialogos = cortes_sob_demanda(app, recursos)
+        resultado["dialogos"] = dialogos
+        for nome, cortes in dialogos.items():
+            problemas += len(cortes)
+            print(f"== diálogo {nome}: {len(cortes)}")
+            for caminho, (texto, precisa, cabe) in list(cortes.items())[:args.limite]:
+                print(f"      {caminho.split('/')[-1]} {texto!r}: precisa {precisa}, cabe {cabe}")
+    print(f"\n{problemas} corte(s) só em inglês.")
     if args.json:
         args.json.write_text(json.dumps(resultado, ensure_ascii=False, indent=1), encoding="utf-8")
     return 1 if problemas else 0
