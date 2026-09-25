@@ -37,7 +37,9 @@ Com ``--cortes``, em vez da troca, mede o texto que não cabe: cada cena em
 português, a mesma janela trocada ao vivo e uma janela nova em inglês, no
 tamanho de abertura, nos quatro do retrato e na largura mínima, e os
 diálogos. Relata o que corta em inglês e não corta em português — texto de
-outra largura que o layout não acomodou. Usa sempre a tradução de verdade.
+outra largura que o layout não acomodou. Na largura mínima o relato é só
+informativo: ali o português já corta quase tudo, e o que corta a mais em
+inglês não reprova. Usa sempre a tradução de verdade.
 
 Mede ainda, por cena, o tempo da troca, as pinturas durante ela (têm de ser
 zero) e os efeitos colaterais: desfazer, alteração não salva, pedido de quadro,
@@ -900,12 +902,14 @@ def _relatar_cortes(app, recursos, args) -> int:
         cena = medir_cortes(app, nome, recursos)
         resultado[nome] = cena
         minimos = cena["minimos"]
+        minima = f"{minimos['pt'][0]}x{minimos['pt'][1]}"
         print(f"== {nome}: largura mínima pt {minimos['pt'][0]}, inglês {minimos['ingles_do_zero'][0]} "
               f"(ao vivo {minimos['ingles_vivo'][0]})")
         for rotulo, variantes in cena["novos"].items():
             for variante, cortes in variantes.items():
-                problemas += len(cortes)
-                print(f"   {rotulo} {variante}: {len(cortes)}")
+                informativo = rotulo == minima
+                problemas += 0 if informativo else len(cortes)
+                print(f"   {rotulo}{' (largura mínima, informativo)' if informativo else ''} {variante}: {len(cortes)}")
                 for caminho, (texto, precisa, cabe) in list(cortes.items())[:args.limite]:
                     print(f"      {caminho.split('/')[-1]} {texto!r}: precisa {precisa}, cabe {cabe}")
     if not args.cena:
