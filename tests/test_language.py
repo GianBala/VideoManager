@@ -282,3 +282,12 @@ def test_aviso_de_biblioteca_faltando_sai_no_idioma_das_preferencias():
     texto = format_instructions(["libxcb-cursor0", "libxcb-xkb1"])
     assert texto.startswith("Video Manager could not start: system libraries")
     assert "sudo apt install -y libxcb-cursor0 libxcb-xkb1" in texto
+
+
+def test_aviso_de_url_nao_reconhecida_aponta_o_menu_do_motor(desktop_app):
+    """Dizia "atualizar a engine em Configurações", onde não há como fazer isso."""
+    import importlib
+    importlib.import_module("videomanager.infrastructure")  # registra o catálogo da camada
+    for codigo in i18n.LANGUAGES:
+        idioma.apply_language(codigo)
+        assert strings.MENU_TOOLS.replace("&", "") in i18n.t("PROBE_UNSUPPORTED")
