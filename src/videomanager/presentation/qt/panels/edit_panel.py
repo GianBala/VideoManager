@@ -944,7 +944,10 @@ class EditPanel(QWidget):
         self._extras_tabs.addTab(_ScrollPage(self._build_filters_tab()), strings.EDIT_TAB_FILTERS)
         self._extras_tabs.addTab(_ScrollPage(self._build_transitions_tab()), strings.EDIT_TAB_TRANSITIONS)
         self._extras_tabs.setTabsClosable(False)
-        self._properties_widget = _ClipPropertiesWidget()
+        # Com pai desde já, e escondida até ser aberta: solta, ela era uma
+        # janela de topo que sobrevivia ao painel — uma a cada janela fechada.
+        self._properties_widget = _ClipPropertiesWidget(self._extras_tabs)
+        self._properties_widget.hide()
         self._properties_widget.property_changed.connect(self._on_properties_changed)
         self._properties_widget.animation_scope_changed.connect(
             lambda enabled: setattr(self._preview, "_whole_animation", enabled))
