@@ -251,3 +251,16 @@ def test_faixa_sem_altura_continua_escolhida_depois_da_troca(desktop_app):
     painel._retranslate()
     assert painel.current_video_choice() is escolhida
     assert "." in painel._resolution.itemText(sem_altura[-1])
+
+
+def test_aba_propriedades_sem_bloco_trocada_ao_vivo_igual_a_nova(desktop_app, pseudo):
+    """Solta até ser aberta, a aba ficava fora da comparação da janela inteira."""
+    from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget
+    ao_vivo = _ClipPropertiesWidget()
+    idioma.apply_language(i18n.ENGLISH)
+    nova = _ClipPropertiesWidget()
+    try:
+        assert _diferencas(_textos(ao_vivo), _textos(nova)) == []
+    finally:
+        ao_vivo.deleteLater()
+        nova.deleteLater()
