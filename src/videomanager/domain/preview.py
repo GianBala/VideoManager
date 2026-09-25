@@ -2,6 +2,15 @@
 from dataclasses import dataclass
 import math
 
+# Teto da taxa da prévia. Abaixo dele a reprodução usa **a taxa do próprio
+# projeto**: pedir ao ffmpeg a mesma taxa da origem faz o filtro ``fps`` não ter
+# o que duplicar nem descartar, e o movimento na tela é o do arquivo. Uma taxa
+# fixa mais baixa — havia 15 aqui — deixa a imagem visivelmente aos trancos num
+# vídeo de 30 ou 60 fps.
+#
+# O teto existe para material acima de 60 fps, onde o ganho é imperceptível e o
+# custo não é: cada quadro é uma imagem crua atravessando um cano. Medido nesta
+# máquina, 1920×1080 a 60 fps sustenta 355 MB/s sem atrasar.
 MAX_PREVIEW_FPS = 60
 
 

@@ -40,6 +40,7 @@ from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
+from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import fit_size
 from videomanager.domain.project import Clip
@@ -49,25 +50,12 @@ from videomanager.domain.project import TrackKind
 from videomanager.domain.project import TransitionContext
 from videomanager.infrastructure.ffmpeg.lastframe import last_frame_start
 from videomanager.infrastructure.ffmpeg.trimmer import encode_audio_args
-from videomanager.domain.timing import format_span
 from videomanager.domain.timing import frame_index
 from videomanager.domain.timing import frame_time
 from videomanager.domain.timing import last_frame_time
 from videomanager.infrastructure.ffmpeg.trimmer import tail_args
-
-from videomanager.domain.composition import Composition as Composition
-
-from videomanager.domain.export_policy import simple_trim as simple_trim
-from videomanager.domain.export_policy import as_trim_target as as_trim_target
-from videomanager.domain.export_policy import _interpolated_clips as _interpolated_clips
-from videomanager.domain.export_policy import can_interpolate as can_interpolate
-
-from videomanager.domain.geometry import image_base_size as image_base_size
-
-from videomanager.domain.render_cost import _INTERPOLATE_BYTES_PER_PIXEL as _INTERPOLATE_BYTES_PER_PIXEL
-from videomanager.domain.render_cost import interpolation_bytes as interpolation_bytes
-
-from videomanager.application.media.export_description import describe_export as describe_export
+from videomanager.domain.geometry import image_base_size
+from videomanager.domain.render_cost import interpolation_bytes
 
 # Formato interno do áudio. Fixá-lo antes da mixagem evita o erro mais comum de
 # ``amix``: entradas com taxas ou layouts diferentes, que ele recusa.
@@ -99,14 +87,6 @@ _MIN_CANVAS = 0.04
 # segundo cobre com folga os poucos quadros que o filtro não consegue produzir,
 # e nada disso aparece: a sobreposição é desligada no fim do bloco.
 _INTERPOLATE_TAIL = 0.5
-
-# Memória do ``minterpolate``, por pixel do quadro que ele **recebe**. Medido
-# nesta máquina, pico de RSS de uma exportação: 1589 MB a 1920×1080 (803 B/px) e
-# 5655 MB a 3840×2160 (715 B/px). Não cresce com a duração — 20 s a 1080p pediu
-# os mesmos 1,6 GB que 5 s —, e é por isso que o custo pode ser anunciado antes
-# de a exportação começar (ver :func:`interpolation_bytes`). O valor é o maior
-# dos dois: errar para cima só antecipa um aviso, errar para baixo derruba a
-# máquina.
 
 
 @dataclass(frozen=True)
@@ -340,7 +320,7 @@ def _input_args(
     if clip.overlay_type == "text":
         path = (text_assets or {}).get(clip.clip_id)
         if path is None:
-            raise ConversionError("Os recursos de texto não foram preparados para esta renderização.")
+            raise ConversionError(Text("COMPOSE_TEXT_ASSETS_MISSING"))
         return [
             "-loop", "1",
             "-framerate", f"{fps:.6f}",
@@ -751,11 +731,27 @@ def _video_chain(
         or clip.opacity < 1 - 1e-9
     )
     if has_transform:
-        steps.append(_rate_chain(piece, fps, interpolate))
-        steps.append("format=rgba")
         mw = clip.media.width if clip.media else None
         mh = clip.media.height if clip.media else None
         base_w, base_h = fit_size(mw, mh, project.width, project.height)
+        if _interpolates(piece, fps, interpolate) and mw and mh:
+            # A regra de ``_rate_first`` vale aqui também: o ``minterpolate``
+            # reserva memória pelo quadro que recebe, e um 4K com qualquer
+            # posição, escala ou opacidade numa tela 1080p era interpolado em
+            # 4K — 5,6 GB por bloco onde o aviso anunciava 1,6, multiplicados
+            # pelos trechos paralelos planejados com o número menor. Encolhe até
+            # o encaixe na tela, ampliado pela maior escala do bloco quando ele
+            # cresce: encolhido até o encaixe e ampliado depois, o material
+            # perdia o detalhe que a ampliação mostra (medido: SSIM 0,991 →
+            # 0,946 com escala 2). As escalas abaixo são absolutas, então o
+            # resultado não muda de tamanho.
+            peak_x, peak_y = clip.peak_scale
+            work_w = max(2, int(round(base_w * max(1.0, peak_x) / 2.0) * 2))
+            work_h = max(2, int(round(base_h * max(1.0, peak_y) / 2.0) * 2))
+            if mw * mh > work_w * work_h:
+                steps.append(f"scale={work_w}:{work_h}")
+        steps.append(_rate_chain(piece, fps, interpolate))
+        steps.append("format=rgba")
         if has_anim_scale:
             expr_sx = _keyframe_expr(clip.keyframes, "scale_x", origin, sx, time_var="t")
             expr_sy = _keyframe_expr(clip.keyframes, "scale_y", origin, sy, time_var="t")
@@ -1814,7 +1810,7 @@ _GIF_DITHER = "dither=bayer:bayer_scale=5"
 
 def _gif_single_palette(project: Project) -> bool:
     """Se cabe montar uma paleta só para a animação inteira (ver o teto)."""
-    frames = max(1.0, project.export_duration * max(1.0, project.fps))
+    frames = max(1.0, project.video_duration * max(1.0, project.fps))
     return frames * project.width * project.height * 4 <= _GIF_PALETTE_BUDGET
 
 
@@ -1828,11 +1824,14 @@ def gif_args(
     """Grava a edição como GIF animado: 256 cores, em loop e sem som.
 
     O GIF não tem trilha de áudio — o som da edição fica de fora, e é isso que
-    a janela de exportação avisa.
+    a janela de exportação avisa. Pelo mesmo motivo ele termina na última
+    imagem: uma música mais longa que o vídeo deixava segundos de tela preta
+    no fim da animação.
     """
-    graph = build_graph(project, want_video=True, want_audio=False, text_assets=text_assets)
+    graph = build_graph(project, span=project.video_duration, want_video=True, want_audio=False,
+                        text_assets=text_assets)
     if not graph.video_label:
-        raise ConversionError("Não há imagem na linha do tempo para exportar como GIF.")
+        raise ConversionError(Text("COMPOSE_GIF_NO_IMAGE"))
     if _gif_single_palette(project):
         palette = (f"palettegen=stats_mode=diff[gifp];[gifb][gifp]"
                    f"paletteuse={_GIF_DITHER}:diff_mode=rectangle[out]")
@@ -1866,14 +1865,12 @@ def export_args(
     """Comando que grava o projeto inteiro em um arquivo."""
     project = project.for_export()
     if project.is_empty:
-        raise ConversionError("Não há nada na linha do tempo para exportar.")
+        raise ConversionError(Text("COMPOSE_NOTHING"))
 
     if audio_only:
         graph = build_graph(project, want_video=False, want_audio=True, text_assets=text_assets)
         if not graph.audio_label:
-            raise ConversionError(
-                "Não há blocos de áudio audíveis na linha do tempo para exportar."
-            )
+            raise ConversionError(Text("COMPOSE_NO_AUDIBLE"))
         args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y", *graph.inputs]
         filters = list(graph.filters)
         if filters:
@@ -1924,21 +1921,26 @@ def export_args(
         filter_text = ";".join(filters)
         args += ["-filter_complex", filter_text]
     if video_label:
-        args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality]
-        if (
-            encoder.name in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi")
-            and container in ("mp4", "mov")
-        ):
-            args += ["-tag:v", "hvc1"]
+        args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality, *_hevc_tag(encoder.name, container)]
     if graph.audio_label:
         args += ["-map", graph.audio_label, *encode_audio_args(container)]
     elif video_label:
         args += ["-an"]
     if not video_label and not graph.audio_label:
-        raise ConversionError(
-            "Todos os blocos estão mudos ou vazios: não há o que exportar."
-        )
+        raise ConversionError(Text("COMPOSE_ALL_MUTED"))
     return args + tail_args(container, destination, map_metadata=False)
+
+
+def _hevc_tag(encoder: str, container: str) -> list[str]:
+    """Etiqueta ``hvc1`` do HEVC em MP4 e MOV.
+
+    Sem ela o ffmpeg grava ``hev1``, que o QuickTime, os aparelhos Apple e o
+    app Filmes e TV do Windows não abrem. Uma função só para a exportação e
+    para os trechos paralelos: com a regra repetida, o trecho paralelo em MOV
+    saía sem a etiqueta, e a emenda copia o que o trecho tiver.
+    """
+    hevc = encoder in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi")
+    return ["-tag:v", "hvc1"] if hevc and container in ("mp4", "mov") else []
 
 
 def _limited_inputs(inputs: list[str]) -> list[str]:
@@ -2283,7 +2285,7 @@ def segment_video_args(
         project, at=at, span=span + _SEGMENT_TAIL, want_audio=False, interpolate=True
     , text_assets=text_assets)
     if not graph.video_label:
-        raise ConversionError("O trecho não tem imagem para exportar.")
+        raise ConversionError(Text("COMPOSE_SEGMENT_NO_IMAGE"))
     codec_family = family or hwaccel.family_for(container)
     encoder = hwaccel.resolve(codec_family, hardware, tools, quality=quality)
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y", "-progress", "pipe:1"]
@@ -2295,9 +2297,7 @@ def segment_video_args(
         video_label = "[vhw]"
     filter_text = ";".join(filters)
     args += ["-filter_complex", filter_text]
-    args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality]
-    if encoder.name in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi") and container == "mp4":
-        args += ["-tag:v", "hvc1"]
+    args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality, *_hevc_tag(encoder.name, container)]
     # ``-t`` na saída, e não ``-frames:v``: a conta que interessa é a do tempo,
     # e é ela que faz a soma dos trechos bater com a duração do projeto.
     return args + [
@@ -2366,27 +2366,6 @@ def mux_args(
     # pacotes AAC e reordenação de B-frames. Preserve todos os pacotes prontos.
     args += ["-map_metadata", "-1", "-map_chapters", "-1"]
     return args + [str(destination)]
-
-
-__all__ = [
-    'simple_trim',
-    'as_trim_target',
-    'can_interpolate',
-    'Composition',
-    'FFmpegTools',
-    'ConversionError',
-    'fit_size',
-    'Clip',
-    'MediaKind',
-    'Project',
-    'TrackKind',
-    'format_span',
-    '_interpolated_clips',
-    'image_base_size',
-    '_INTERPOLATE_BYTES_PER_PIXEL',
-    'interpolation_bytes',
-    'describe_export',
-]
 
 
 def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[str], ...]:

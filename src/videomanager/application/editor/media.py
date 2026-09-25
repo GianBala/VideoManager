@@ -8,6 +8,7 @@ from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
 from videomanager.domain.project import Project
 from videomanager.domain.project import media_ref
+from videomanager.domain.i18n import Text
 from videomanager.application.errors import JobCancelled
 from videomanager.application.errors import VideoManagerError
 from videomanager.application.ports.editor import Cancellation
@@ -54,7 +55,7 @@ class ReadMedia:
                     reference = media_ref(local)
                     if project_path is None:
                         if require_duration and reference.kind is not MediaKind.IMAGE and not reference.duration:
-                            raise VideoManagerError('A mídia não informa duração.')
+                            raise VideoManagerError(Text('ERROR_MEDIA_NO_DURATION'))
                         result.references.append(reference)
                     result.probed[path] = local
             except JobCancelled:

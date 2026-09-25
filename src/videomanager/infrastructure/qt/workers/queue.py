@@ -8,6 +8,7 @@ from videomanager.application.jobs.models import Job
 from videomanager.application.jobs.models import JobStatus
 from videomanager.application.jobs.requests import ConversionRequest
 from videomanager.application.jobs.service import JobService
+from videomanager.application.errors import error_message
 from videomanager.infrastructure.storage.outputs import FileOutputStore
 from videomanager.infrastructure.qt.workers.convert_worker import ConvertWorker
 from videomanager.infrastructure.qt.workers.download_worker import DownloadWorker
@@ -41,7 +42,7 @@ class _Attempt(QObject):
         job = self.queue.service.finish(job_id, self.attempt, result, size=_size_of(path))
         self.queue._terminal(job, job_id, self)
 
-    @Slot(int, str)
+    @Slot(int, object)
     def failed(self, job_id, message):
         job = self.queue.service.fail(job_id, self.attempt, message, getattr(self.worker, 'log', ()))
         self.queue._terminal(job, job_id, self)
@@ -149,7 +150,7 @@ class JobQueue(QObject):
                 lease = FileOutputStore().reserve(Path(job.url), request.target, request.destination.parent,
                                           custom_stem=request.destination.stem)
             except Exception as exc:
-                self.service.retry_failed(job_id, str(exc))
+                self.service.retry_failed(job_id, error_message(exc))
                 self.job_changed.emit(job)
                 return
             self.service.replace_request(job_id, replace(request, destination=lease.path, lease=lease))

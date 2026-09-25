@@ -1,4 +1,4 @@
-"""Formatação de números para exibição, em pt-BR (vírgula decimal).
+"""Formatação de números para exibição, com o separador decimal do idioma.
 
 Todas as funções aceitam ``None`` e devolvem ``"—"``. Isso é deliberado: a
 maioria dos extratores omite tamanho, bitrate ou duração em algum formato, e a
@@ -10,15 +10,14 @@ from __future__ import annotations
 
 import math
 
+from videomanager.domain.i18n import decimal
+
 DASH = "—"
 
 
 def _decimal(value: float, places: int = 1) -> str:
-    """Formata com vírgula decimal, sem zero à direita inútil."""
-    text = f"{value:.{places}f}"
-    if "." in text:
-        text = text.rstrip("0").rstrip(".")
-    return text.replace(".", ",")
+    """Sem zero à direita inútil: "2 MB", e não "2,0 MB"."""
+    return decimal(value, places, trim=True)
 
 
 def format_size(num_bytes: int | float | None, *, estimated: bool = False) -> str:

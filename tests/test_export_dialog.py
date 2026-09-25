@@ -557,3 +557,51 @@ def test_export_dialog_gif_em_automatica_reduz_tela_e_taxa(qapp, sample_media, s
     dialog._container_box.setCurrentIndex(dialog._container_box.findData("mp4"))
     normal = dialog._effective_project()
     assert (normal.width, normal.height) == (1920, 1080) and normal.fps == 30.0
+
+
+def test_tela_escolhida_fora_das_predefinidas_aparece_como_escolhida(qapp: QApplication) -> None:
+    """A tela do slideshow (1920×1440) não está no acervo nem nas predefinidas.
+
+    A janela mostrava "Automática" com ela em vigor, e a exportação saía na
+    tela escolhida; como "Automática" já estava marcada, voltar ao automático
+    de verdade (1920×1080 sem vídeo) não era possível.
+    """
+    foto = MediaRef(Path("/tmp/foto.jpg"), MediaKind.IMAGE, width=4000, height=3000)
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(foto, 0, 5.0),)),))
+    dialog = ExportDialog(project=project, settings=Settings(), pool=[foto], probed={},
+                          initial_canvas=(1920, 1440), initial_rate=23.976,
+                          processing=build_processing_service(), runtime=build_desktop_runtime(audio_enabled=False))
+    assert dialog._canvas_box.currentData() == (1920, 1440)
+    assert dialog._rate_box.currentData() == 23.976
+
+    # A taxa exata em vigor não aparece duplicada ao lado da arredondada.
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=5.0, width=1920, height=1080, fps=24000 / 1001)
+    exata = ExportDialog(project=project, settings=Settings(), pool=[foto, video], probed={},
+                         initial_rate=24000 / 1001, processing=build_processing_service(),
+                         runtime=build_desktop_runtime(audio_enabled=False))
+    rotulos = [exata._rate_box.itemText(i) for i in range(1, exata._rate_box.count())]
+    assert len(rotulos) == len(set(rotulos))
+    assert exata._rate_box.currentData() == 24000 / 1001
+
+    dialog._canvas_box.setCurrentIndex(0)
+
+    assert dialog.chosen_canvas is None
+    efetivo = dialog._effective_project()
+    assert (efetivo.width, efetivo.height) == (1920, 1080)
+
+
+def test_opcoes_desligadas_dizem_por_que(qapp: QApplication) -> None:
+    """Corte rápido e interpolação desligados explicam o motivo na dica.
+
+    As explicações existiam em strings.py sem uso: a caixa ficava cinza sem
+    dizer que a edição não é um recorte ou que nenhum bloco está abaixo da taxa.
+    """
+    from videomanager.presentation.qt import strings
+
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=10.0, width=1920, height=1080, fps=30.0)
+    montagem = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0, 2.0), Clip(video, 2.0, 2.0, in_point=5.0))),),
+                       width=1920, height=1080, fps=30.0)
+    dialog = ExportDialog(project=montagem, settings=Settings(), pool=[video], probed={},
+                          processing=build_processing_service(), runtime=build_desktop_runtime(audio_enabled=False))
+    assert not dialog._fast.isEnabled() and dialog._fast.toolTip() == strings.EDIT_FAST_UNAVAILABLE
+    assert not dialog._interpolate.isEnabled() and dialog._interpolate.toolTip() == strings.EDIT_INTERPOLATE_OFF

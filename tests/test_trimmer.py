@@ -21,7 +21,7 @@ from videomanager.domain.media import LocalMedia
 from videomanager.domain.media import LocalStream
 from videomanager.infrastructure.ffmpeg.converter import build_args
 from videomanager.infrastructure.ffmpeg.converter import output_duration
-from videomanager.infrastructure.ffmpeg.converter import output_path
+from videomanager.infrastructure.storage.output_paths import output_path
 from videomanager.application.errors import ConversionError
 from videomanager.domain.timing import CutMode
 from videomanager.domain.timing import Segment

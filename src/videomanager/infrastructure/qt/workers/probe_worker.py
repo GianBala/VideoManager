@@ -10,6 +10,8 @@ from __future__ import annotations
 from PySide6.QtCore import QRunnable, Slot
 
 from videomanager.application.errors import VideoManagerError
+from videomanager.application.errors import error_message
+from videomanager.domain.i18n import Text
 from dataclasses import asdict
 from videomanager.application.preferences import Preferences
 from videomanager.infrastructure.storage.settings import Settings
@@ -41,8 +43,8 @@ class ProbeWorker(QRunnable):
         except VideoManagerError as exc:
             if self._cancelled:
                 return
-            # Erro previsto: a mensagem já está em pt-BR e pronta para exibir.
-            emit_safely(self.signals.failed, str(exc))
+            # Erro previsto: a mensagem já vem do catálogo, pronta para exibir.
+            emit_safely(self.signals.failed, error_message(exc))
         except Exception as exc:  # noqa: BLE001
             if self._cancelled:
                 return
@@ -51,7 +53,7 @@ class ProbeWorker(QRunnable):
             # nunca termina.
             emit_safely(
                 self.signals.failed,
-                f"Erro inesperado ao analisar a URL ({type(exc).__name__}): {exc}",
+                Text("ERROR_UNEXPECTED_PROBE", kind=type(exc).__name__, detail=str(exc)),
             )
         else:
             if not self._cancelled:

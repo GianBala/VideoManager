@@ -9,6 +9,8 @@ from videomanager.infrastructure.system.binaries import find_tools
 from videomanager.application.errors import BinaryNotFoundError
 from videomanager.application.errors import JobCancelled
 from videomanager.application.errors import VideoManagerError
+from videomanager.application.errors import error_message
+from videomanager.domain.i18n import Text
 from videomanager.application.jobs.models import Job
 from videomanager.infrastructure.qt.workers.signals import ConvertSignals
 from videomanager.infrastructure.qt.workers.signals import emit_safely
@@ -24,7 +26,7 @@ class ConvertWorker(QRunnable):
         self._cancel_requested = False
         tools = find_tools()
         if tools is None:
-            raise BinaryNotFoundError("FFmpeg não disponível.")
+            raise BinaryNotFoundError(Text("FFMPEG_UNAVAILABLE"))
         self._converter = Converter(
             media=job.request.media,
             target=job.request.target,
@@ -63,13 +65,13 @@ class ConvertWorker(QRunnable):
             # Também aqui: uma falha antes de o ffmpeg abrir (alvo impossível,
             # pasta sem permissão) não passa pela limpeza de saída parcial.
             self._converter.discard_reservation()
-            emit_safely(self.signals.failed, job_id, str(exc))
+            emit_safely(self.signals.failed, job_id, error_message(exc))
         except Exception as exc:  # noqa: BLE001
             self._converter.discard_reservation()
             emit_safely(
                 self.signals.failed,
                 job_id,
-                f"Erro inesperado ({type(exc).__name__}): {exc}",
+                Text("ERROR_UNEXPECTED", kind=type(exc).__name__, detail=str(exc)),
             )
         else:
             emit_safely(self.signals.finished, job_id, path)

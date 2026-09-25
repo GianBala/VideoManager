@@ -7,6 +7,7 @@ para que baste remuxar.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import Signal
@@ -14,14 +15,19 @@ from PySide6.QtWidgets import QGroupBox, QLabel, QPushButton, QVBoxLayout, QWidg
 
 from videomanager.domain.formats import Mode
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import bind
 
 
 @dataclass(frozen=True)
 class Profile:
-    """Uma configuração pronta, aplicada aos controles ao ser clicada."""
+    """Uma configuração pronta, aplicada aos controles ao ser clicada.
 
-    title: str
-    subtitle: str
+    Título e subtítulo são lidos do catálogo na hora de mostrar: guardados
+    como texto no import, ficariam no idioma da abertura.
+    """
+
+    title: Callable[[], str]
+    subtitle: Callable[[], str]
     mode: Mode
     height: int | None = None
     container: str = "auto"
@@ -31,29 +37,29 @@ class Profile:
 
 PROFILES = (
     Profile(
-        title=strings.PROFILE_MP4_1080,
-        subtitle=strings.PROFILE_MP4_1080_SUB,
+        title=lambda: strings.PROFILE_MP4_1080,
+        subtitle=lambda: strings.PROFILE_MP4_1080_SUB,
         mode=Mode.VIDEO,
         height=1080,
         container="mp4",
     ),
     Profile(
-        title=strings.PROFILE_MAX,
-        subtitle=strings.PROFILE_MAX_SUB,
+        title=lambda: strings.PROFILE_MAX,
+        subtitle=lambda: strings.PROFILE_MAX_SUB,
         mode=Mode.VIDEO,
         height=None,
         container="mkv",
     ),
     Profile(
-        title=strings.PROFILE_MP3_320,
-        subtitle=strings.PROFILE_MP3_320_SUB,
+        title=lambda: strings.PROFILE_MP3_320,
+        subtitle=lambda: strings.PROFILE_MP3_320_SUB,
         mode=Mode.AUDIO_ONLY,
         audio_codec="mp3",
         audio_quality="320",
     ),
     Profile(
-        title=strings.PROFILE_AUDIO_ORIGINAL,
-        subtitle=strings.PROFILE_AUDIO_ORIGINAL_SUB,
+        title=lambda: strings.PROFILE_AUDIO_ORIGINAL,
+        subtitle=lambda: strings.PROFILE_AUDIO_ORIGINAL_SUB,
         mode=Mode.AUDIO_ONLY,
         audio_codec="best",
     ),
@@ -66,18 +72,19 @@ class ProfilesPanel(QGroupBox):
     profile_chosen = Signal(object)  # Profile
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(strings.PROFILES_GROUP, parent)
+        super().__init__(parent)
+        bind(self, "setTitle", lambda: strings.PROFILES_GROUP)
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
 
-        hint = QLabel(strings.PROFILE_HINT)
+        hint = bind(QLabel(), "setText", lambda: strings.PROFILE_HINT)
         hint.setProperty("role", "dim")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
         self._buttons: list[QPushButton] = []
         for profile in PROFILES:
-            button = QPushButton(f"{profile.title}\n{profile.subtitle}")
+            button = bind(QPushButton(), "setText", lambda p=profile: f"{p.title()}\n{p.subtitle()}")
             button.setProperty("role", "profile")
             button.clicked.connect(lambda _=False, p=profile: self.profile_chosen.emit(p))
             layout.addWidget(button)

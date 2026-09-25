@@ -37,6 +37,7 @@ from videomanager import APP_NAME
 from videomanager.application.errors import BinaryDownloadError
 from videomanager.application.errors import BinaryNotFoundError
 from videomanager.application.errors import JobCancelled
+from videomanager.domain.i18n import Text
 
 from videomanager.application.capabilities import FFmpegTools as FFmpegTools
 
@@ -308,13 +309,10 @@ def probe_version(ffmpeg: Path) -> str:
             **subprocess_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        raise BinaryNotFoundError(f"Não foi possível executar o ffmpeg: {exc}") from exc
+        raise BinaryNotFoundError(Text("FFMPEG_RUN_FAILED", error=str(exc))) from exc
 
     if proc.returncode != 0:
-        raise BinaryNotFoundError(
-            "O ffmpeg encontrado não executou corretamente "
-            f"(código {proc.returncode}). O arquivo pode estar corrompido."
-        )
+        raise BinaryNotFoundError(Text("FFMPEG_BROKEN", code=proc.returncode))
     first_line = (proc.stdout or b"").decode("utf-8", "replace").splitlines()
     return first_line[0].strip() if first_line else "ffmpeg (versão desconhecida)"
 
@@ -324,10 +322,7 @@ def download_url() -> str:
     try:
         return _RELEASE_BASE + _ARCHIVES[key]
     except KeyError:
-        raise BinaryDownloadError(
-            f"Não há build automática de ffmpeg para esta plataforma ({key}). "
-            "Instale o ffmpeg manualmente e ele será detectado no PATH."
-        ) from None
+        raise BinaryDownloadError(Text("FFMPEG_NO_BUILD", platform=key)) from None
 
 
 def _stream_download(
@@ -345,10 +340,7 @@ def _stream_download(
             # pedido: sem ela, quem estiver no meio do caminho decide o que é
             # instalado.
             if urlparse(response.geturl()).scheme != "https":
-                raise BinaryDownloadError(
-                    "O download do ffmpeg foi redirecionado para uma conexão "
-                    "sem criptografia e foi interrompido."
-                )
+                raise BinaryDownloadError(Text("FFMPEG_INSECURE_REDIRECT"))
             raw_length = response.headers.get("Content-Length")
             total = int(raw_length) if raw_length and raw_length.isdigit() else None
             received = 0
@@ -366,11 +358,9 @@ def _stream_download(
                     if progress:
                         progress(received, total)
     except URLError as exc:
-        raise BinaryDownloadError(
-            f"Falha ao baixar o ffmpeg: {exc.reason}. Verifique a conexão."
-        ) from exc
+        raise BinaryDownloadError(Text("FFMPEG_DOWNLOAD_FAILED", reason=str(exc.reason))) from exc
     except OSError as exc:
-        raise BinaryDownloadError(f"Falha ao gravar o download do ffmpeg: {exc}") from exc
+        raise BinaryDownloadError(Text("FFMPEG_WRITE_FAILED", error=str(exc))) from exc
 
 
 def _extract_wanted(archive: Path, target_dir: Path) -> None:
@@ -409,15 +399,11 @@ def _extract_wanted(archive: Path, target_dir: Path) -> None:
                             with reader:
                                 write_member(base, reader)
     except (tarfile.TarError, zipfile.BadZipFile, OSError) as exc:
-        raise BinaryDownloadError(
-            f"O arquivo do ffmpeg baixado parece corrompido: {exc}"
-        ) from exc
+        raise BinaryDownloadError(Text("FFMPEG_ARCHIVE_CORRUPT", error=str(exc))) from exc
 
     missing = wanted - extracted
     if missing:
-        raise BinaryDownloadError(
-            "O arquivo baixado não continha: " + ", ".join(sorted(missing))
-        )
+        raise BinaryDownloadError(Text("FFMPEG_ARCHIVE_MISSING", names=", ".join(sorted(missing))))
 
 
 def download_tools(
@@ -450,10 +436,7 @@ def download_tools(
 
     found = _look_in(target)
     if not found:
-        raise BinaryDownloadError(
-            "Os binários foram extraídos mas não ficaram utilizáveis em "
-            f"{target}. Verifique as permissões da pasta."
-        )
+        raise BinaryDownloadError(Text("FFMPEG_EXTRACTED_UNUSABLE", path=target))
     probe_version(found[0])  # valida de verdade; levanta se não executar
     return FFmpegTools(found[0], found[1], "gerenciado")
 
@@ -469,10 +452,7 @@ def resolve(progress: ProgressCb | None = None, *, allow_download: bool = False)
     if tools:
         return tools
     if not allow_download:
-        raise BinaryNotFoundError(
-            "ffmpeg e ffprobe não foram encontrados. Eles são necessários para "
-            "juntar vídeo com áudio e para converter arquivos."
-        )
+        raise BinaryNotFoundError(Text("FFMPEG_NOT_FOUND"))
     return download_tools(progress)
 
 __all__ = [

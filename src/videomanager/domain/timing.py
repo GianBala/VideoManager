@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from videomanager.domain.media import LocalMedia
 from videomanager.domain.constants import MIN_SEGMENT
+from videomanager.domain.i18n import decimal, decimal_separator
 
 class CutMode(Enum):
     """Como o corte trata os quadros que não são keyframe."""
@@ -29,6 +30,9 @@ def available_duration(duration: float, in_point: float, speed: float) -> float:
     return max(0.0, duration - in_point) / speed
 
 
+# Aceita "12", "12,5", "1:23.45", "01:02:03,250" nos dois idiomas: o texto
+# mostrado usa o separador do idioma, mas o teclado numérico e o conteúdo colado
+# trazem qualquer um dos dois, e recusar o outro seria erro por um detalhe.
 _SECONDS = re.compile(r"^\d{1,2}(?:[.,]\d{1,6})?$")
 
 
@@ -65,7 +69,7 @@ def parse_timecode(text: str) -> float | None:
 
 
 def format_timecode(seconds: float | None, *, milliseconds: bool = True) -> str:
-    """Segundos como ``h:mm:ss,mmm`` — a forma que o campo de tempo aceita de volta.
+    """Segundos como ``h:mm:ss,mmm`` (ou ``.mmm`` em inglês) — a forma que o campo de tempo aceita de volta.
 
     Arredondado ao milissegundo, e não truncado: um instante marcado em 5,3 s
     chega aqui como 5,2999999 (é o que o float guarda), e truncar mostraria
@@ -80,7 +84,7 @@ def format_timecode(seconds: float | None, *, milliseconds: bool = True) -> str:
     minutes, rest = divmod(rest, 60_000)
     secs, millis = divmod(rest, 1000)
     base = f"{hours}:{minutes:02d}:{secs:02d}"
-    return f"{base},{millis:03d}" if milliseconds else base
+    return f"{base}{decimal_separator()}{millis:03d}" if milliseconds else base
 
 
 def format_span(seconds: float) -> str:
@@ -90,7 +94,7 @@ def format_span(seconds: float) -> str:
     da duração de um corte. Acima, o timecode sem a hora enquanto ela for zero.
     """
     if seconds < 60:
-        return f"{seconds:.2f}".replace(".", ",") + " s"
+        return decimal(seconds, 2) + " s"
     label = format_timecode(seconds)
     return label[2:] if label.startswith("0:") else label
 
