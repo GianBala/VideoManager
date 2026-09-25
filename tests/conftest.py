@@ -97,6 +97,38 @@ def idioma_padrao():
     i18n.set_language(i18n.PORTUGUESE)
 
 
+@pytest.fixture(autouse=True)
+def janelas_do_teste_apagadas():
+    """Apaga, no fim de cada teste, as janelas que ele deixou para trás.
+
+    Painel e janela criados num teste continuavam vivos até o fim da sessão:
+    na altura dos testes de idioma eram 703 janelas de topo e 35 mil widgets,
+    e a troca de idioma entrega os eventos do Qt a todos eles — um teste de
+    idioma levava 2 s em vez de 0,5 s. Só as janelas sem pai que nasceram
+    durante o teste: as dos fixtures de módulo e de sessão já existiam quando
+    ele começou, e as filhas (listas, menus) vão junto com a mãe.
+    """
+    if importlib.util.find_spec("PySide6") is None:
+        yield
+        return
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+
+    def janelas() -> dict[int, object]:
+        if QApplication.instance() is None:
+            return {}
+        return {shiboken6.getCppPointer(w)[0]: w for w in QApplication.topLevelWidgets() if w.parent() is None}
+
+    antes = set(janelas())
+    yield
+    novas = [janela for endereco, janela in janelas().items() if endereco not in antes]
+    for janela in novas:
+        janela.deleteLater()
+    if novas:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 def _pseudo(valor):
     if isinstance(valor, str):
         return f"⟦{valor}⟧"
