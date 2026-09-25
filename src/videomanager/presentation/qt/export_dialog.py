@@ -90,35 +90,14 @@ _GIF_RATE_PRESETS: tuple[float, ...] = (10.0, 12.5, 20.0, 25.0)
 _GIF_MAX_EDGE = 640
 _GIF_MAX_RATE = 15.0
 
-_CONTAINER_PRESETS: tuple[tuple[str, str], ...] = (
-    ("MP4 (.mp4)", "mp4"),
-    ("MKV (.mkv)", "mkv"),
-    ("WebM (.webm)", "webm"),
-    ("QuickTime (.mov)", "mov"),
-    ("GIF animado (.gif)", "gif"),
-)
-
-_VIDEO_CODEC_PRESETS: tuple[tuple[str, str], ...] = (
-    ("H.264 / AVC (padrão universal)", "h264"),
-    ("HEVC / H.265 (alta eficiência)", "hevc"),
-    ("AV1 (alta compressão)", "av1"),
-    ("VP9 (web)", "vp9"),
-)
-
-_QUALITY_PRESETS: tuple[tuple[str, str], ...] = (
-    (strings.EXPORT_QUALITY_BALANCED, hwaccel.QUALITY_BALANCED),
-    (strings.EXPORT_QUALITY_HIGH, hwaccel.QUALITY_HIGH),
-    (strings.EXPORT_QUALITY_ECONOMY, hwaccel.QUALITY_ECONOMY),
-)
-
-_AUDIO_FORMAT_PRESETS: tuple[tuple[str, str], ...] = (
-    ("MP3 (.mp3 - 192 kbps)", "mp3"),
-    ("AAC / M4A (.m4a - 192 kbps)", "m4a"),
-    ("FLAC (.flac - sem perdas)", "flac"),
-    ("WAV (.wav - PCM sem perdas)", "wav"),
-    ("Opus (.opus - 128 kbps)", "opus"),
-    ("OGG Vorbis (.ogg)", "ogg"),
-)
+def _quality_presets() -> tuple[tuple[str, str], ...]:
+    # Função, e não constante: os rótulos montados no import ficariam no
+    # idioma da abertura.
+    return (
+        (strings.EXPORT_QUALITY_BALANCED, hwaccel.QUALITY_BALANCED),
+        (strings.EXPORT_QUALITY_HIGH, hwaccel.QUALITY_HIGH),
+        (strings.EXPORT_QUALITY_ECONOMY, hwaccel.QUALITY_ECONOMY),
+    )
 
 
 def canvas_options(pool: list[MediaRef], aspect_choice: str | None,
@@ -258,9 +237,9 @@ class ExportDialog(QDialog):
         summary_group = QGroupBox(strings.EXPORT_SUMMARY_GROUP)
         summary_box = QVBoxLayout(summary_group)
         summary_box.setSpacing(4)
-        summary_text = (
-            f"Duração total: <b>{format_span(self._project.export_duration)}</b> · "
-            f"{len(self._project.tracks)} trilha(s) · {len(self._project.clips)} bloco(s)"
+        summary_text = strings.EXPORT_SUMMARY.format(
+            duration=format_span(self._project.export_duration),
+            tracks=len(self._project.tracks), clips=len(self._project.clips),
         )
         summary_label = QLabel(summary_text)
         summary_label.setTextFormat(Qt.TextFormat.RichText)
@@ -384,19 +363,19 @@ class ExportDialog(QDialog):
             else None
         )
         if source_init:
-            default_stem = f"{source_init.stem}_editado"
+            default_stem = f"{source_init.stem}{strings.EXPORT_DEFAULT_SUFFIX}"
         elif self._project_path:
-            default_stem = f"{self._project_path.stem}_editado"
+            default_stem = f"{self._project_path.stem}{strings.EXPORT_DEFAULT_SUFFIX}"
         else:
-            default_stem = "video_editado"
+            default_stem = strings.EXPORT_DEFAULT_STEM
 
         name_row = QHBoxLayout()
         name_row.setSpacing(8)
-        name_label = QLabel("Nome do arquivo:")
+        name_label = QLabel(strings.EXPORT_FILENAME)
         name_row.addWidget(name_label)
 
         self._filename_edit = QLineEdit(default_stem)
-        self._filename_edit.setPlaceholderText("Nome do arquivo (sem extensão)")
+        self._filename_edit.setPlaceholderText(strings.EXPORT_FILENAME_PLACEHOLDER)
         name_row.addWidget(self._filename_edit, 1)
 
         self._ext_label = QLabel(".mp4")
@@ -444,13 +423,8 @@ class ExportDialog(QDialog):
         # Opções de proporção
         self._aspect_box.blockSignals(True)
         self._aspect_box.clear()
-        aspect_options = [
-            (strings.EXPORT_ASPECT_AUTO, None),
-            ("16:9 (Widescreen)", "16:9"),
-            ("4:3 (Tradicional)", "4:3"),
-            ("9:16 (Vertical / Shorts / Reels)", "9:16"),
-            ("1:1 (Quadrado)", "1:1"),
-            ("21:9 (Ultrawide)", "21:9"),
+        aspect_options = [(strings.EXPORT_ASPECT_AUTO, None)] + [
+            (label, value) for value, label in strings.EXPORT_ASPECTS.items()
         ]
         for label, val in aspect_options:
             self._aspect_box.addItem(label, val)
@@ -477,7 +451,7 @@ class ExportDialog(QDialog):
         # Container de vídeo
         self._container_box.blockSignals(True)
         self._container_box.clear()
-        for label, val in _CONTAINER_PRESETS:
+        for val, label in strings.EXPORT_CONTAINERS.items():
             self._container_box.addItem(label, val)
         idx_ct = _index_of(self._container_box, self._container_choice)
         self._container_box.setCurrentIndex(max(0, idx_ct))
@@ -489,7 +463,7 @@ class ExportDialog(QDialog):
         # Qualidade de vídeo
         self._quality_box.blockSignals(True)
         self._quality_box.clear()
-        for label, val in _QUALITY_PRESETS:
+        for label, val in _quality_presets():
             self._quality_box.addItem(label, val)
         idx_q = _index_of(self._quality_box, self._quality_choice)
         self._quality_box.setCurrentIndex(max(0, idx_q))
@@ -498,7 +472,7 @@ class ExportDialog(QDialog):
         # Formato de áudio (somente áudio)
         self._audio_format_box.blockSignals(True)
         self._audio_format_box.clear()
-        for label, val in _AUDIO_FORMAT_PRESETS:
+        for val, label in strings.EXPORT_AUDIO_FORMATS.items():
             self._audio_format_box.addItem(label, val)
         idx_af = _index_of(self._audio_format_box, self._audio_format_choice)
         self._audio_format_box.setCurrentIndex(max(0, idx_af))
@@ -538,7 +512,7 @@ class ExportDialog(QDialog):
 
         self._video_codec_box.blockSignals(True)
         self._video_codec_box.clear()
-        for label, val in _VIDEO_CODEC_PRESETS:
+        for val, label in strings.EXPORT_VIDEO_CODECS.items():
             if val in allowed:
                 self._video_codec_box.addItem(label, val)
         # Tenta restaurar o codec anterior; se não couber, pega o primeiro
@@ -915,7 +889,7 @@ class ExportDialog(QDialog):
         tools = self._ensure_tools() if self._ensure_tools else None
         if tools is None:
             QMessageBox.warning(
-                self, strings.DIALOG_ERROR_TITLE, "FFmpeg não disponível."
+                self, strings.DIALOG_ERROR_TITLE, strings.DIALOG_FFMPEG_UNAVAILABLE
             )
             return
 

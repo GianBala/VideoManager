@@ -43,6 +43,7 @@ from videomanager.application.formatting import format_speed
 from videomanager.application.jobs.models import Job
 from videomanager.application.jobs.models import JobStatus
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import bind, on_language_change
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
 _COL_TITLE, _COL_OUTPUT, _COL_STATUS, _COL_PROGRESS, _COL_SPEED = range(5)
@@ -69,6 +70,15 @@ class QueueModel(QAbstractTableModel):
         self._jobs: list[Job] = []
         queue.job_added.connect(self._on_added)
         queue.job_changed.connect(self._on_changed)
+        on_language_change(self._retranslate)
+
+    def _retranslate(self) -> None:
+        # Cabeçalho e células leem o catálogo, e o texto guardado nas tarefas é
+        # convertido, na hora de desenhar: basta avisar a tabela.
+        last = self.columnCount() - 1
+        self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, last)
+        if self._jobs:
+            self.dataChanged.emit(self.index(0, 0), self.index(len(self._jobs) - 1, last))
 
     # -- interface do modelo ---------------------------------------------
 
@@ -245,7 +255,8 @@ class QueuePanel(QGroupBox):
         *,
         runtime: DesktopRuntimePort,
     ) -> None:
-        super().__init__(strings.QUEUE_GROUP, parent)
+        super().__init__(parent)
+        bind(self, "setTitle", lambda: strings.QUEUE_GROUP)
         self._runtime = runtime
         self._queue = queue
 
@@ -279,25 +290,31 @@ class QueuePanel(QGroupBox):
         self._table.setColumnWidth(_COL_STATUS, 170)
         self._table.setColumnWidth(_COL_PROGRESS, 120)
         self._table.setColumnWidth(_COL_SPEED, 150)
-        # Piso de quatro linhas inteiras, medido nas métricas reais do cabeçalho
-        # e das linhas: um número redondo escrito à mão cortava a última linha
-        # ao meio, e cortaria outra quantidade em cada tema ou fonte.
-        self._table.setMinimumHeight(
-            header.sizeHint().height()
-            + _MIN_ROWS * self._table.verticalHeader().defaultSectionSize()
-            + 2 * self._table.frameWidth()
-        )
+        self._fit_min_height()
+        # Depois do modelo, que avisa o cabeçalho do texto novo antes da medida.
+        on_language_change(self._fit_min_height)
         layout.addWidget(self._table, 1)
 
         actions = QHBoxLayout()
         actions.addStretch(1)
-        self._cancel_all = QPushButton(strings.QUEUE_CANCEL_ALL)
+        self._cancel_all = bind(QPushButton(), "setText", lambda: strings.QUEUE_CANCEL_ALL)
         self._cancel_all.clicked.connect(queue.cancel_all)
         actions.addWidget(self._cancel_all)
-        self._clear = QPushButton(strings.QUEUE_CLEAR_FINISHED)
+        self._clear = bind(QPushButton(), "setText", lambda: strings.QUEUE_CLEAR_FINISHED)
         self._clear.clicked.connect(self._clear_finished)
         actions.addWidget(self._clear)
         layout.addLayout(actions)
+
+    def _fit_min_height(self) -> None:
+        # Piso de quatro linhas inteiras, medido nas métricas reais do cabeçalho
+        # e das linhas: um número redondo escrito à mão cortava a última linha
+        # ao meio, e cortaria outra quantidade em cada tema ou fonte — ou
+        # idioma, quando o cabeçalho troca de texto.
+        self._table.setMinimumHeight(
+            self._table.horizontalHeader().sizeHint().height()
+            + _MIN_ROWS * self._table.verticalHeader().defaultSectionSize()
+            + 2 * self._table.frameWidth()
+        )
 
     # ------------------------------------------------------------------
 
@@ -381,7 +398,7 @@ class QueuePanel(QGroupBox):
         text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         text.setPlainText("\n".join(job.log))
         box.addWidget(text)
-        close = QPushButton("Fechar")
+        close = QPushButton(strings.QUEUE_LOG_CLOSE)
         close.clicked.connect(dialog.accept)
         box.addWidget(close, 0, Qt.AlignmentFlag.AlignRight)
         dialog.exec()

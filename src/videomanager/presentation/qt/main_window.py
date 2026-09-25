@@ -55,6 +55,7 @@ from videomanager.domain.selection import VideoRequest
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import bind, on_language_change
 from videomanager.presentation.qt.ffmpeg_setup import ensure_ffmpeg
 from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
@@ -159,6 +160,10 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._update_menu_scope(_TAB_DOWNLOAD)
         self._update_status()
+        on_language_change(self._retranslate)
+        # Rótulos e avisos mudam de altura com o texto: a altura que as abas
+        # pedem também, medida depois de todos os layouts assentarem.
+        on_language_change(self._balance_panes, after_layout=True)
         # Depois de a janela aparecer, e não durante a montagem: o que se ganha
         # é tempo na primeira exportação, e não vale pagá-lo na abertura.
         QTimer.singleShot(_PROBE_DELAY_MS, self._warm_hardware_probe)
@@ -238,6 +243,11 @@ class MainWindow(QMainWindow):
         layout.setSpacing(_TAB_SPACING)
         layout.addWidget(MainWindow._wrap_scrollable(inner, horizontal=horizontal))
         return tab
+
+    def _retranslate(self) -> None:
+        for index, text in enumerate((strings.TAB_DOWNLOAD, strings.TAB_CONVERT, strings.TAB_EDIT)):
+            self._tabs.setTabText(index, text)
+        self._update_status()
 
     def _on_split_moved(self, *_: int) -> None:
         self._split_by_user = not self._balancing
@@ -383,32 +393,30 @@ class MainWindow(QMainWindow):
         # nas mesmas colunas nas duas linhas.
         grid.setColumnStretch(1, 1)
 
-        url_label = QLabel(strings.URL_LABEL)
+        url_label = bind(QLabel(), "setText", lambda: strings.URL_LABEL)
         grid.addWidget(url_label, 0, 0)
-        self._url = QLineEdit()
-        self._url.setPlaceholderText(strings.URL_PLACEHOLDER)
+        self._url = bind(QLineEdit(), "setPlaceholderText", lambda: strings.URL_PLACEHOLDER)
         self._url.setClearButtonEnabled(True)
         self._url.returnPressed.connect(self._analyze)
         grid.addWidget(self._url, 0, 1)
 
-        self._paste = QPushButton(strings.URL_PASTE_AND_ANALYZE)
+        self._paste = bind(QPushButton(), "setText", lambda: strings.URL_PASTE_AND_ANALYZE)
         self._paste.clicked.connect(self._paste_and_analyze)
         grid.addWidget(self._paste, 0, 2)
 
-        self._analyze_button = QPushButton(strings.URL_ANALYZE)
+        self._analyze_button = bind(QPushButton(), "setText", lambda: strings.URL_ANALYZE)
         self._analyze_button.setProperty("role", "primary")
         self._analyze_button.setDefault(True)
         self._analyze_button.clicked.connect(self._analyze)
         grid.addWidget(self._analyze_button, 0, 3)
 
-        dest_label = QLabel(strings.DEST_LABEL)
+        dest_label = bind(QLabel(), "setText", lambda: strings.DEST_LABEL)
         grid.addWidget(dest_label, 1, 0)
-        self._dest = QLineEdit(self._settings.download_dir)
-        self._dest.setToolTip(strings.DEST_TOOLTIP)
+        self._dest = bind(QLineEdit(self._settings.download_dir), "setToolTip", lambda: strings.DEST_TOOLTIP)
         self._dest.editingFinished.connect(self._on_dest_edited)
         grid.addWidget(self._dest, 1, 1)
 
-        browse = QPushButton(strings.DEST_BROWSE)
+        browse = bind(QPushButton(), "setText", lambda: strings.DEST_BROWSE)
         browse.clicked.connect(self._choose_dest)
         # Logo abaixo de "Colar e analisar", na mesma coluna e com a mesma
         # largura: os dois botões formam uma pilha só, ao lado dos dois campos.
@@ -445,76 +453,76 @@ class MainWindow(QMainWindow):
         self._profiles.profile_chosen.connect(self._on_profile)
         layout.addWidget(self._profiles, 1)
 
-        self._add_button = QPushButton(strings.ADD_TO_QUEUE)
+        self._add_button = bind(QPushButton(), "setText", lambda: strings.ADD_TO_QUEUE)
         self._add_button.setProperty("role", "primary")
         self._add_button.setEnabled(False)
-        self._add_button.setToolTip(strings.ADD_TO_QUEUE_TIP)
+        bind(self._add_button, "setToolTip", lambda: strings.ADD_TO_QUEUE_TIP)
         self._add_button.clicked.connect(self._add_current_to_queue)
         layout.addWidget(self._add_button)
 
         return pane
 
     def _build_menu(self) -> None:
-        self._file_menu = self.menuBar().addMenu(strings.MENU_FILE)
+        self._file_menu = bind(self.menuBar().addMenu(""), "setTitle", lambda: strings.MENU_FILE)
         self._file_menu.aboutToShow.connect(self._on_file_menu_about_to_show)
-        self._tools_menu = self.menuBar().addMenu(strings.MENU_TOOLS)
-        self._help_menu = self.menuBar().addMenu(strings.MENU_HELP)
+        self._tools_menu = bind(self.menuBar().addMenu(""), "setTitle", lambda: strings.MENU_TOOLS)
+        self._help_menu = bind(self.menuBar().addMenu(""), "setTitle", lambda: strings.MENU_HELP)
 
         # Ações universais
-        self._quit_action = QAction(strings.ACTION_QUIT, self)
+        self._quit_action = bind(QAction(self), "setText", lambda: strings.ACTION_QUIT)
         self._quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         self._quit_action.triggered.connect(self.close)
 
-        self._settings_action = QAction(strings.ACTION_SETTINGS, self)
+        self._settings_action = bind(QAction(self), "setText", lambda: strings.ACTION_SETTINGS)
         self._settings_action.triggered.connect(self._open_settings)
 
-        self._about_action = QAction(strings.ACTION_ABOUT, self)
+        self._about_action = bind(QAction(self), "setText", lambda: strings.ACTION_ABOUT)
         self._about_action.triggered.connect(self._show_about)
         self._help_menu.addAction(self._about_action)
 
         # Ações da aba Download
-        self._open_download_dest = QAction(strings.ACTION_OPEN_DOWNLOAD_DEST, self)
+        self._open_download_dest = bind(QAction(self), "setText", lambda: strings.ACTION_OPEN_DOWNLOAD_DEST)
         self._open_download_dest.triggered.connect(
             lambda: QDesktopServices.openUrl(
                 QUrl.fromLocalFile(str(self._runtime.download_directory(self._settings)))
             )
         )
-        self._update_engine_action = QAction(strings.ACTION_UPDATE_ENGINE, self)
+        self._update_engine_action = bind(QAction(self), "setText", lambda: strings.ACTION_UPDATE_ENGINE)
         self._update_engine_action.triggered.connect(self._update_engine)
         if self._runtime.is_packaged():
             self._update_engine_action.setEnabled(False)
-            self._update_engine_action.setToolTip(strings.DIALOG_ENGINE_PACKAGED)
+            bind(self._update_engine_action, "setToolTip", lambda: strings.DIALOG_ENGINE_PACKAGED)
 
         # Ações da aba Converter
-        self._convert_add_action = QAction(strings.ACTION_CONVERT_ADD, self)
+        self._convert_add_action = bind(QAction(self), "setText", lambda: strings.ACTION_CONVERT_ADD)
         self._convert_add_action.triggered.connect(self._convert._choose_files)
 
-        self._convert_remove_action = QAction(strings.ACTION_CONVERT_REMOVE, self)
+        self._convert_remove_action = bind(QAction(self), "setText", lambda: strings.ACTION_CONVERT_REMOVE)
         self._convert_remove_action.triggered.connect(self._convert._remove_selected)
 
-        self._convert_clear_action = QAction(strings.ACTION_CONVERT_CLEAR, self)
+        self._convert_clear_action = bind(QAction(self), "setText", lambda: strings.ACTION_CONVERT_CLEAR)
         self._convert_clear_action.triggered.connect(self._convert.clear_files)
 
-        self._convert_open_dest = QAction(strings.ACTION_OPEN_CONVERT_DEST, self)
+        self._convert_open_dest = bind(QAction(self), "setText", lambda: strings.ACTION_OPEN_CONVERT_DEST)
         self._convert_open_dest.triggered.connect(self._open_convert_dest)
 
         # Ações da aba Editar
-        self._new_proj_action = QAction(strings.ACTION_NEW_PROJECT, self)
+        self._new_proj_action = bind(QAction(self), "setText", lambda: strings.ACTION_NEW_PROJECT)
         self._new_proj_action.triggered.connect(self._new_project)
 
-        self._open_proj_action = QAction(strings.ACTION_OPEN_PROJECT, self)
+        self._open_proj_action = bind(QAction(self), "setText", lambda: strings.ACTION_OPEN_PROJECT)
         self._open_proj_action.triggered.connect(self._open_project)
 
-        self._save_proj_action = QAction(strings.ACTION_SAVE_PROJECT, self)
+        self._save_proj_action = bind(QAction(self), "setText", lambda: strings.ACTION_SAVE_PROJECT)
         self._save_proj_action.triggered.connect(self._save_project)
 
-        self._save_as_proj_action = QAction(strings.ACTION_SAVE_PROJECT_AS, self)
+        self._save_as_proj_action = bind(QAction(self), "setText", lambda: strings.ACTION_SAVE_PROJECT_AS)
         self._save_as_proj_action.triggered.connect(self._save_project_as)
 
-        self._import_media_action = QAction(strings.ACTION_IMPORT_MEDIA, self)
+        self._import_media_action = bind(QAction(self), "setText", lambda: strings.ACTION_IMPORT_MEDIA)
         self._import_media_action.triggered.connect(self._edit.import_media_dialog)
 
-        self._export_action = QAction(strings.ACTION_EXPORT_VIDEO, self)
+        self._export_action = bind(QAction(self), "setText", lambda: strings.ACTION_EXPORT_VIDEO)
         self._export_action.triggered.connect(self._edit._open_export_dialog)
 
     def _on_file_menu_about_to_show(self) -> None:
@@ -635,12 +643,8 @@ class MainWindow(QMainWindow):
         self._set_analyzing(False)
 
     def _set_analyzing(self, busy: bool) -> None:
-        self._analyze_button.setText(
-            strings.URL_CANCEL if busy else strings.URL_ANALYZE
-        )
-        self._analyze_button.setToolTip(
-            strings.URL_CANCEL_TIP if busy else ""
-        )
+        bind(self._analyze_button, "setText", lambda: strings.URL_CANCEL if busy else strings.URL_ANALYZE)
+        bind(self._analyze_button, "setToolTip", lambda: strings.URL_CANCEL_TIP if busy else "")
         self._url.setEnabled(not busy)
         self._paste.setEnabled(not busy)
 
@@ -905,7 +909,8 @@ class MainWindow(QMainWindow):
         done = self._queue.count_by_status(JobStatus.DONE)
         parts = [strings.STATUS_COUNTS.format(active=active, pending=pending, done=done)]
         if self._tools is not None:
-            parts.append(strings.STATUS_FFMPEG.format(source=self._tools.source))
+            source = strings.FFMPEG_SOURCES.get(self._tools.source, self._tools.source)
+            parts.append(strings.STATUS_FFMPEG.format(source=source))
         self.statusBar().showMessage("  |  ".join(parts))
 
     def _new_project(self) -> None:
