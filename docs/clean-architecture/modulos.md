@@ -2,7 +2,8 @@
 
 Todos os caminhos abaixo são relativos a `src/videomanager/`. Os arquivos
 `__init__.py` das subpastas delimitam pacotes; não montam serviços nem executam
-I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicativo.
+I/O — os de `domain`, `application` e `infrastructure` só registram o catálogo
+de textos da camada. A tabela cobre os módulos de produção, incluindo as entradas do aplicativo.
 
 ## Inicialização
 
@@ -10,9 +11,9 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | --- | --- |
 | [__init__.py](../../src/videomanager/__init__.py) | Nome público, identificador do aplicativo e versão. |
 | [__main__.py](../../src/videomanager/__main__.py) | Entrada python -m videomanager e script inicial do PyInstaller; importa app.main de forma absoluta. |
-| [app.py](../../src/videomanager/app.py) | Preflight, QApplication, fontes, tema, ícone, integração desktop e montagem da janela; diagnóstico --smoke-test. |
+| [app.py](../../src/videomanager/app.py) | Preflight, QApplication, fontes, tema, idioma (aplicado antes da janela), ícone, integração desktop e montagem da janela; diagnóstico --smoke-test. |
 | [bootstrap.py](../../src/videomanager/bootstrap.py) | Constrói serviços e adaptadores; carrega preferências como DTO e injeta runtime, repositório e renderizador. |
-| [preflight.py](../../src/videomanager/preflight.py) | Detecta bibliotecas gráficas ausentes e produz diagnóstico antes da criação da QApplication. |
+| [preflight.py](../../src/videomanager/preflight.py) | Detecta bibliotecas gráficas ausentes e produz diagnóstico, no idioma das preferências, antes da criação da QApplication. |
 
 ## Domínio
 
@@ -30,10 +31,12 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [domain/media.py](../../src/videomanager/domain/media.py) | LocalMedia/LocalStream (rotação, capa embutida, duração por trilha, imagem estática × sequência) e alvos AudioTarget/VideoTarget, sem inspeção externa. |
 | [domain/preview.py](../../src/videomanager/domain/preview.py) | RawFrame RGB24, limites de fps, ajuste de dimensões e instantes de miniaturas. |
 | [domain/scrub.py](../../src/videomanager/domain/scrub.py) | Assinatura do que compõe um instante e trechos de assinatura constante, para validar quadros guardados. |
+| [domain/i18n.py](../../src/videomanager/domain/i18n.py) | Idioma atual, catálogos registrados por camada, texto imediato (`t`) e guardado para traduzir ao exibir (`Text`), e números com o separador decimal do idioma (`decimal`). |
 | [domain/project.py](../../src/videomanager/domain/project.py) | Project, Track, Clip, MediaRef e operações imutáveis: cortes, trilhas em qualquer ordem, transforms e quadros-chave, transições ligadas ao corte, tela (`auto_canvas`, `slideshow_canvas`), soltura de mídia (`with_dropped_clip`), migração das imagens para a trilha de vídeo, IDs e duração. |
 | [domain/render_cost.py](../../src/videomanager/domain/render_cost.py) | Estimativa calibrada de memória da interpolação a partir dos clipes e dimensões. |
 | [domain/selection.py](../../src/videomanager/domain/selection.py) | VideoRequest/AudioRequest e escolhas de container/qualidade de download. |
 | [domain/targets.py](../../src/videomanager/domain/targets.py) | Catálogo dos formatos de saída oferecidos pelo aplicativo. |
+| [domain/texts.py](../../src/videomanager/domain/texts.py) | Textos do domínio nos dois idiomas: espécies e nomes-padrão de trilha, rótulos de som do bloco. |
 | [domain/timing.py](../../src/videomanager/domain/timing.py) | Segment, TrimTarget, CutMode, timecodes, fps, keyframes e a aritmética temporal única (origem × edição, índice e instante de quadro, último quadro). |
 
 ## Aplicação
@@ -45,7 +48,7 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [application/editor/service.py](../../src/videomanager/application/editor/service.py) | Grava snapshots, aceita resultados de abrir/salvar e prepara recursos de texto por porta. |
 | [application/editor/session.py](../../src/videomanager/application/editor/session.py) | Proprietário do projeto atual, caminho, ponto salvo, histórico (60 estados), transações de gesto (`begin_edit`/`commit_edit`/`cancel_edit`) e gerações/revisões. |
 | [application/encoding.py](../../src/videomanager/application/encoding.py) | Nomes de hardware/famílias e opções de qualidade, sem sondar encoders. |
-| [application/errors.py](../../src/videomanager/application/errors.py) | Categorias de exceções da aplicação e mensagens de erro em pt-BR. |
+| [application/errors.py](../../src/videomanager/application/errors.py) | Categorias de exceções da aplicação e mensagem de erro para a tela (`error_message`), no idioma de quem a lê. |
 | [application/events.py](../../src/videomanager/application/events.py) | Progress, ProgressStage e DownloadResult independentes do provedor. |
 | [application/format_labels.py](../../src/videomanager/application/format_labels.py) | Rótulos de resolução e escolhas, reutilizados em descrições e apresentação. |
 | [application/formatting.py](../../src/videomanager/application/formatting.py) | Formatação compartilhada de tamanho, tempo, fps, bitrate e proporção de aspecto (`format_aspect_ratio`). |
@@ -66,7 +69,8 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [application/ports/output.py](../../src/videomanager/application/ports/output.py) | OutputLease: identidade e caminho do placeholder pertencente a uma operação. |
 | [application/ports/processing.py](../../src/videomanager/application/ports/processing.py) | MediaCatalog e OutputStore para inspeção, permissão, reserva, limpeza e publicação. |
 | [application/ports/rendering.py](../../src/videomanager/application/ports/rendering.py) | TextRasterizer e coleta de PNGs por ID de clipe. |
-| [application/preferences.py](../../src/videomanager/application/preferences.py) | DTO Preferences, valores padrão e leitura tolerante de campos, sem acesso a diretórios. |
+| [application/preferences.py](../../src/videomanager/application/preferences.py) | DTO Preferences, valores padrão e leitura tolerante de campos (idioma desconhecido volta ao padrão), sem acesso a diretórios. |
+| [application/texts.py](../../src/videomanager/application/texts.py) | Textos da aplicação nos dois idiomas: erros, rótulos de qualidade e de encoder, descrições de exportação, conversão, corte e download, avisos da negociação de container. |
 
 ## Infraestrutura
 
@@ -105,6 +109,7 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [infrastructure/system/logs.py](../../src/videomanager/infrastructure/system/logs.py) | Log em arquivo com rotação (`videomanager.log`, na pasta de logs do usuário) e registro de exceções não tratadas (slots Qt e threads). |
 | [infrastructure/system/memory.py](../../src/videomanager/infrastructure/system/memory.py) | Consulta de memória disponível em Linux/Windows para planejamento externo. |
 | [infrastructure/system/process.py](../../src/videomanager/infrastructure/system/process.py) | ProcessControl: execução registrada, cancelamento, timeout e encerramento. |
+| [infrastructure/texts.py](../../src/videomanager/infrastructure/texts.py) | Textos da infraestrutura nos dois idiomas: mensagens do ffmpeg, do yt-dlp, do disco e do sistema que chegam à tela, e as fases de progresso da fila. |
 | [infrastructure/yt_dlp/downloader.py](../../src/videomanager/infrastructure/yt_dlp/downloader.py) | Instância de YoutubeDL por tarefa, hooks, progresso, logs, cancelamento e resultado; registra a capa tolerante depois de montar as opções. |
 | [infrastructure/yt_dlp/extras.py](../../src/videomanager/infrastructure/yt_dlp/extras.py) | Opção `js_runtimes` conforme o ambiente e capa tolerante (`TolerantEmbedThumbnailPP`) que não derruba o download. |
 | [infrastructure/yt_dlp/formats.py](../../src/videomanager/infrastructure/yt_dlp/formats.py) | Normaliza dados brutos dos extratores, classifica presença de streams e monta FormatMatrix. |
@@ -122,6 +127,7 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [presentation/qt/ffmpeg_setup.py](../../src/videomanager/presentation/qt/ffmpeg_setup.py) | Diálogo de descoberta/provisionamento, conectado ao worker pelo runtime. |
 | [presentation/qt/fonts.py](../../src/videomanager/presentation/qt/fonts.py) | Carrega fontes empacotadas e substituição Calibri/Carlito após iniciar Qt. |
 | [presentation/qt/fullscreen_preview.py](../../src/videomanager/presentation/qt/fullscreen_preview.py) | Janela de prévia ampliada, controles e sincronização visual com o editor. |
+| [presentation/qt/i18n.py](../../src/videomanager/presentation/qt/i18n.py) | Troca de idioma com a janela aberta: tabelas de `strings`, textos presos em widgets (`bind`, `release`), refrescos (`on_language_change`, antes ou depois do layout), itens de lista pelo dado (`retext_items`), coluna de rótulos (`align_label_column`) e a tradução e o locale do próprio Qt. |
 | [presentation/qt/icons.py](../../src/videomanager/presentation/qt/icons.py) | Cria ícones usados nos controles. |
 | [presentation/qt/main_window.py](../../src/videomanager/presentation/qt/main_window.py) | Três abas, menus, destino, análise, playlists, configuração e coordenação da fila. |
 | [presentation/qt/panels/convert_panel.py](../../src/videomanager/presentation/qt/panels/convert_panel.py) | Lista de arquivos locais, escolha de alvo e submissão via ProcessingService. |
@@ -135,7 +141,8 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 | [presentation/qt/playlist_dialog.py](../../src/videomanager/presentation/qt/playlist_dialog.py) | Apresenta entradas e escolhas de download em lote. |
 | [presentation/qt/ports.py](../../src/videomanager/presentation/qt/ports.py) | Contrato DesktopRuntimePort consumido pelos widgets/controllers; não importa implementação. |
 | [presentation/qt/settings_dialog.py](../../src/videomanager/presentation/qt/settings_dialog.py) | Edita Preferences e apresenta capacidades/versões obtidas pelo runtime. |
-| [presentation/qt/strings.py](../../src/videomanager/presentation/qt/strings.py) | Textos dos controles, avisos e mapeamento de códigos de estado para rótulos. |
+| [presentation/qt/strings.py](../../src/videomanager/presentation/qt/strings.py) | Textos da interface em português: controles, avisos e mapeamento de códigos de estado para rótulos. |
+| [presentation/qt/strings_en.py](../../src/videomanager/presentation/qt/strings_en.py) | Os mesmos textos em inglês, com os mesmos nomes, parâmetros e estruturas. |
 | [presentation/qt/tasks.py](../../src/videomanager/presentation/qt/tasks.py) | WorkerRunner mantém QRunnable vivo até o término e solicita cancelamento. |
 | [presentation/qt/theme.py](../../src/videomanager/presentation/qt/theme.py) | Cores, QPalette, QSS e estilos compartilhados. |
 
@@ -144,7 +151,7 @@ I/O. A tabela cobre os módulos de produção, incluindo as entradas do aplicati
 - `resources/`: ícone PNG/SVG e fontes Carlito/Rapier com licença. Não contém estado do usuário.
 - `tests/`: domínio, aplicação, contratos, arquitetura e regressões de mídia/Qt; veja [testes](testes.md).
 - `packaging/`: especificação PyInstaller, provisionamento do ffmpeg e do Deno (`fetch_binaries.py`), gerador do ícone (`make_icon.py`), scripts Linux/Windows e diagnósticos do pacote (`smoke_run.sh`, `smoke_windows.ps1`).
-- `scripts/`: apoio à distribuição (`generate_appimage.sh`), comparação reproduzível de desempenho (`benchmark_architecture.py`) e ensaios opt-in que a suíte não alcança (`validate_audio.py`, `validate_scrub.py`, `validate_preview_gestures.py`, `validate_editor_responsiveness.py`); veja [testes](testes.md#medições-reproduzíveis). `capture_screenshots.py` gera as imagens do README em `docs/imagens/`.
+- `scripts/`: apoio à distribuição (`generate_appimage.sh`), comparação reproduzível de desempenho (`benchmark_architecture.py`) e ensaios opt-in que a suíte não alcança (`validate_audio.py`, `validate_scrub.py`, `validate_preview_gestures.py`, `validate_editor_responsiveness.py`, `validate_language.py`); veja [testes](testes.md#medições-reproduzíveis). `capture_screenshots.py` gera as imagens do README em `docs/imagens/`.
 - `.github/workflows/tests.yml`: a CI — núcleo sem dependências desktop e matriz Linux/Windows com o ffmpeg do sistema e o do pacote.
 - `vendor/`, `build/`, `dist/`: binários e artefatos locais, ignorados pelo Git.
 - `docs/`: manuais de uso e documentação técnica.
