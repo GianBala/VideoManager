@@ -4,6 +4,7 @@ from videomanager.application.jobs.models import Job
 from videomanager.application.jobs.requests import DownloadRequest
 from videomanager.application.ports.downloads import DownloadGateway
 from videomanager.application.preferences import Preferences
+from videomanager.domain.i18n import Text
 
 
 class DownloadService:
@@ -13,7 +14,7 @@ class DownloadService:
     def analyze(self, url: str, preferences: Preferences):
         url = url.strip()
         if not url:
-            raise ProbeError('Informe uma URL.')
+            raise ProbeError(Text('ERROR_URL_EMPTY'))
         return self.gateway.analyze(url, preferences)
 
     def prepare(self, request: DownloadRequest) -> Job:

@@ -435,8 +435,12 @@ def test_media_list_delete_shortcut_and_context_menu(qapp: QApplication, dummy_t
         assert len(panel._pool) == 2
         assert panel._media_list.count() == 2
 
-        # 1. Test context menu text is "Deletar  (Del)"
-        assert strings.EDIT_MEDIA_REMOVE == "Deletar  (Del)"
+        # 1. O menu do botão direito é montado de verdade sobre uma mídia —
+        # conferir só a constante deixou passar um texto inexistente, que
+        # levantava AttributeError e impedia o menu de aparecer.
+        menu = panel.build_media_menu(panel._media_list.visualItemRect(panel._media_list.item(0)).center())
+        assert [a.text() for a in menu.actions()] == [
+            strings.EDIT_INSERT, strings.EDIT_MEDIA_REMOVE, "", strings.EDIT_CLEAR_UNUSED]
 
         # 2. Test deleting selected item with focus on _media_list
         panel._media_list.setCurrentRow(0)
@@ -448,6 +452,38 @@ def test_media_list_delete_shortcut_and_context_menu(qapp: QApplication, dummy_t
         assert panel._media_list.count() == 1
     finally:
         panel.shutdown()
+
+
+def test_lista_de_fontes_tem_linhas_com_folga(qapp: QApplication) -> None:
+    # Sem o padding de item a lista espremia oito nomes no espaço de cinco,
+    # e o estilo fixo que o dava saiu junto com as cores escuras.
+    from videomanager.presentation.qt.theme import stylesheet
+    for tema in ("dark", "light"):
+        selector = _FontSelectorWidget("Sans Serif")
+        selector.setStyleSheet(stylesheet(tema))
+        selector._toggle_list()
+        qapp.processEvents()
+        lista = selector._font_list
+        assert lista.visualItemRect(lista.item(0)).height() >= lista.fontMetrics().height() + 8
+        selector.deleteLater()
+
+
+def test_botao_de_quadro_chave_tem_a_mesma_letra_marcado_e_desmarcado(qapp: QApplication) -> None:
+    # O estado marcado tem letra própria; tirando só as cores do desmarcado, a
+    # letra saiu junto e o símbolo mudava de tamanho e de peso ao alternar.
+    from videomanager.domain.keyframe import Keyframe
+    from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=5.0, width=640, height=360, fps=30.0)
+    widget = _ClipPropertiesWidget()
+    widget.load_clip(Clip(video, 0.0, 5.0, keyframes=(Keyframe(1.0, opacity=0.5),)), 640, 360)
+    fontes = []
+    for instante in (1.0, 3.0):
+        widget.set_playhead_position(instante)
+        botao = widget._btn_kf_toggle
+        botao.ensurePolished()
+        fontes.append((botao.text(), botao.font().bold(), botao.font().pixelSize()))
+    assert fontes == [("◆", True, 14), ("◇", True, 14)]
+    widget.deleteLater()
 
 
 def test_font_selector_popular_fonts_and_search(qapp: QApplication) -> None:
@@ -497,8 +533,10 @@ def test_font_size_controls_and_presets(qapp: QApplication, dummy_tools: FFmpegT
         inc_btns = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.text() == "+"]
         assert len(dec_btns) == 1
         assert len(inc_btns) == 1
-        assert "color: #ffffff" in dec_btns[0].styleSheet()
-        assert "color: #ffffff" in inc_btns[0].styleSheet()
+        # Estilo do tema (legível no claro e no escuro), e não cores fixas.
+        for botao in (dec_btns[0], inc_btns[0]):
+            assert botao.property("role") == "spin-tool"
+            assert botao.styleSheet() == ""
 
         # Step is 1 pt
         initial_val = panel._font_size_spin.value()
@@ -553,14 +591,18 @@ def test_filter_selection_highlight_style(qapp: QApplication, dummy_tools: FFmpe
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
-        # Check stylesheet of filter buttons
+        # A opção marcada ganha a borda de destaque do tema, sem pintar o
+        # fundo inteiro — e sem cores fixas, que no tema claro deixavam os
+        # botões pretos.
+        from videomanager.presentation.qt.theme import DARK, LIGHT, stylesheet
         for btn in panel._filter_buttons:
-            style = btn.styleSheet()
-            # Must have light blue border on checked
-            assert "border: 2px solid #38bdf8" in style
-            # Must NOT paint entire background purple
-            assert "#7b1fa2" not in style
-            assert "#9c27b0" not in style
+            assert btn.property("role") == "option"
+            assert btn.styleSheet() == ""
+        for tema, cores in (("dark", DARK), ("light", LIGHT)):
+            regra = next(linha for linha in stylesheet(tema).splitlines()
+                         if linha.startswith('QPushButton[role="option"]:checked'))
+            assert f"border: 2px solid {cores['accent']}" in regra
+            assert "background" not in regra
     finally:
         panel.shutdown()
 
@@ -1962,6 +2004,7 @@ def test_preview_video_drag_does_not_drag_or_teleport_overlays(
     )
     panel._preview.mousePressEvent(click_img_event)
     assert panel._timeline.selected == 2
+    panel.shutdown()
 
 
 
@@ -1992,6 +2035,7 @@ def test_edit_panel_save_as_button(dummy_tools: FFmpegTools) -> None:
     panel.save_project_as = mock_save_as
     panel._save_as_btn.click()
     assert saved_as_called
+    panel.shutdown()
 
 
 def test_preview_drag_resize_animated_clip() -> None:
@@ -2289,3 +2333,27 @@ def test_filter_clip_preserved_in_paused_frame_preview(
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
 pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+def test_opcao_escolhida_nas_abas_de_adicionais_tem_a_medida_de_marcada(qapp: QApplication,
+                                                                       dummy_tools: FFmpegTools) -> None:
+    """O estado marcado muda borda e peso da fonte, e o QPushButton não refaz a
+    dica de tamanho ao ser marcado: a opção escolhida ficava com a altura da
+    desmarcada, e a anterior com a da marcada."""
+    from videomanager.presentation.qt.theme import stylesheet
+    anterior = qapp.styleSheet()
+    qapp.setStyleSheet(stylesheet("dark"))
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(),
+                      processing=build_processing_service(), runtime=build_desktop_runtime())
+    try:
+        panel.show()
+        qapp.processEvents()
+        panel._select_filter("sepia")
+        alturas = dict(zip(panel._filter_specs, (b.sizeHint().height() for b in panel._filter_buttons)))
+        assert alturas["sepia"] > alturas["pb"]
+        panel._select_transition("wipeleft")
+        alturas = dict(zip(panel._trans_specs, (b.sizeHint().height() for b in panel._trans_buttons)))
+        assert alturas["wipeleft"] > alturas["fade"]
+    finally:
+        panel.shutdown()
+        qapp.setStyleSheet(anterior)

@@ -221,7 +221,7 @@ class TestPlanContainer:
         plano = plan_container(info.matrix, info.matrix.video[0], opus, "mp4")
         assert plano.audio is not None and plano.audio.family == "AAC"
         assert plano.container == "mp4"
-        assert any("sem recodificar" in aviso for aviso in plano.warnings)
+        assert any("sem recodificar" in str(aviso) for aviso in plano.warnings)
 
     def test_mp4_cai_para_mkv_quando_o_audio_nao_tem_alternativa(self) -> None:
         """Sem trilha compatível, trocar o container preserva o áudio original."""
@@ -567,3 +567,27 @@ def test_erro_sem_traducao_nomeia_a_etapa() -> None:
     erro = DownloadError("ERROR: Postprocessing: algo estranho")
     assert str(_translate_error(erro)) == "Falha ao analisar a URL: Postprocessing: algo estranho"
     assert str(_translate_error(erro, "baixar")) == "Falha ao baixar: Postprocessing: algo estranho"
+
+
+def test_plano_do_download_guarda_texto_que_acompanha_o_idioma() -> None:
+    """A descrição e os avisos vão com a tarefa para a fila, que continua na
+    tela depois de uma troca de idioma."""
+    from videomanager.domain import i18n
+    from videomanager.infrastructure.yt_dlp.gateway import YtDlpGateway
+
+    info = synthetic(
+        {"format_id": "v", "vcodec": "avc1", "acodec": "none", "height": 1080, "fps": 30},
+        {"format_id": "opus", "vcodec": "none", "acodec": "opus", "abr": 160},
+        {"format_id": "aac", "vcodec": "none", "acodec": "mp4a.40.2", "abr": 1500},
+    )
+    opus = next(c for c in info.matrix.audio if c.family == "Opus")
+    plano = YtDlpGateway().plan(info, VideoRequest(video=info.matrix.video[0], audio=opus, container="mp4"))
+    assert str(plano.description) == "1080p · H.264 · .mp4"
+    assert [str(aviso) for aviso in plano.warnings] == [
+        "Trilha AAC 1,5 Mbps escolhida em vez de Opus: Opus em .mp4 tem suporte irregular nos "
+        "players. A troca é sem recodificar."]
+    i18n.set_language(i18n.ENGLISH)
+    assert [str(aviso) for aviso in plano.warnings] == [
+        "AAC 1.5 Mbps audio chosen instead of Opus: Opus in .mp4 has patchy player support. "
+        "The swap involves no re-encoding."]
+    assert str(YtDlpGateway().plan(info, AudioRequest(codec="best")).description) == "Audio · original (lossless)"

@@ -15,6 +15,7 @@ from yt_dlp.postprocessor.embedthumbnail import EmbedThumbnailPP
 from yt_dlp.utils import PostProcessingError, prepend_extension, replace_extension
 
 from videomanager.infrastructure.system.binaries import find_js_runtime
+from videomanager.domain.i18n import t
 
 _LOG = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class TolerantEmbedThumbnailPP(EmbedThumbnailPP):
         try:
             return super().run(info)
         except PostProcessingError as exc:
-            self.report_warning(f"A capa não foi embutida: {exc}")
+            self.report_warning(t("THUMBNAIL_NOT_EMBEDDED", error=str(exc)))
             _LOG.warning("Capa não embutida em %s: %s", info.get("filepath"), exc)
             leftovers = []
             filepath = info.get("filepath")

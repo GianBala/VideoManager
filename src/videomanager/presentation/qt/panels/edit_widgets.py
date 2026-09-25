@@ -69,8 +69,40 @@ from videomanager.domain.project import MediaRef
 from videomanager.presentation.qt.panels.timeline import MEDIA_MIME
 
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import bind, on_language_change, retext_items
+from videomanager.domain.i18n import decimal
 
 _PREVIEW_MIN_HEIGHT = 160
+
+
+def _filter_label(filter_name: object) -> str | None:
+    """Ícone e nome do filtro, lidos na hora: o nome muda com o idioma."""
+    entry = strings.EDIT_FILTERS.get(filter_name)
+    return f"{entry[0]} {entry[1]}" if entry else None
+
+
+def _transition_label(transition: object) -> str | None:
+    """Ícone e nome da transição, lidos na hora: o nome muda com o idioma."""
+    entry = strings.EDIT_TRANSITIONS.get(transition)
+    return f"{entry[0]} {entry[1]}" if entry else None
+
+
+def _clip_name(clip: Clip) -> str:
+    """Nome do bloco para quem lê: o arquivo, o texto digitado, o filtro ou a transição.
+
+    O caminho de um bloco sem arquivo ("Filtro_🎬 Sépia") é identificador:
+    guarda o rótulo no idioma em que o bloco nasceu e o texto de quando ele
+    foi inserido. Mostrado como nome, editar o texto deixava o antigo na tela,
+    e a interface em inglês exibia "Transição_".
+    """
+    if clip.overlay_type == "text":
+        return clip.text_content or strings.EDIT_CLIP_TEXT
+    if clip.overlay_type == "filter":
+        return strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
+    if clip.overlay_type == "transition":
+        tname = clip.transition_name or "fade"
+        return strings.EDIT_TRANSITION_TITLE.format(name=strings.EDIT_TRANSITIONS.get(tname, ("", tname))[1])
+    return clip.media.name if clip.media else strings.PROP_KINDS.get(clip.overlay_type, clip.overlay_type)
 
 
 def _index_of(box: QComboBox, value: object) -> int:
@@ -94,12 +126,7 @@ class _VolumePopup(QDialog):
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setMinimumWidth(280)
-        self.setStyleSheet(
-            "QDialog { background: #222228; border: 1px solid #444450; border-radius: 8px; }"
-            " QLabel { color: #f0f0f0; }"
-            " QPushButton { background: #32323e; border: 1px solid #444454; border-radius: 4px; color: #fff; padding: 3px 6px; font-size: 11px; }"
-            " QPushButton:hover { background: #424252; border-color: #666678; }"
-        )
+        self.setProperty("role", "popup")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
@@ -127,6 +154,7 @@ class _VolumePopup(QDialog):
             btn = QPushButton(label)
             btn.setFixedHeight(26)
             btn.setMinimumWidth(50)
+            btn.setProperty("role", "chip")
             btn.clicked.connect(lambda _, v=db: self._spin.setValue(v))
             presets.addWidget(btn)
         layout.addLayout(presets)
@@ -148,12 +176,7 @@ class _SpeedPopup(QDialog):
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setMinimumWidth(320)
-        self.setStyleSheet(
-            "QDialog { background: #222228; border: 1px solid #444450; border-radius: 8px; }"
-            " QLabel { color: #f0f0f0; }"
-            " QPushButton { background: #32323e; border: 1px solid #444454; border-radius: 4px; color: #fff; padding: 3px 6px; font-size: 11px; }"
-            " QPushButton:hover { background: #424252; border-color: #666678; }"
-        )
+        self.setProperty("role", "popup")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
@@ -177,10 +200,11 @@ class _SpeedPopup(QDialog):
 
         presets = QHBoxLayout()
         presets.setSpacing(6)
-        for label, spd in (("0.5x", 0.5), ("1.0x", 1.0), ("1.5x", 1.5), ("2.0x", 2.0), ("4.0x", 4.0)):
-            btn = QPushButton(label)
+        for spd in (0.5, 1.0, 1.5, 2.0, 4.0):
+            btn = QPushButton(f"{decimal(spd)}x")
             btn.setFixedHeight(26)
             btn.setMinimumWidth(48)
+            btn.setProperty("role", "chip")
             btn.clicked.connect(lambda _, v=spd: self._spin.setValue(v))
             presets.addWidget(btn)
         layout.addLayout(presets)
@@ -190,6 +214,71 @@ class _SpeedPopup(QDialog):
     def closeEvent(self, event) -> None:  # noqa: N802
         self.finished.emit()
         super().closeEvent(event)
+
+
+class _TransportBar(QWidget):
+    """Barra de transporte que desce os controles da direita quando falta largura.
+
+    Numa linha só ela pede perto de 1000 px, e era esse o piso da aba inteira:
+    numa tela de notebook — 1366 px, ou 1920 px com a escala de 125% do
+    Windows — a aba não cabia e o botão Exportar ficava atrás de uma barra de
+    rolagem. Sem largura para uma linha, o grupo da direita desce para uma
+    segunda, e quem cede a altura dela é a prévia.
+    """
+
+    _SPACING = 6
+
+    def __init__(self, readouts: QWidget, controls: QWidget, extras: QWidget) -> None:
+        super().__init__()
+        self.setProperty("role", "plain")
+        self._groups = (readouts, controls, extras)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(4, 4, 4, 0)
+        column.setSpacing(4)
+        self._first, self._second = QHBoxLayout(), QHBoxLayout()
+        for row in (self._first, self._second):
+            row.setSpacing(self._SPACING)
+            column.addLayout(row)
+        self._first.addWidget(readouts)
+        self._first.addStretch(1)
+        self._first.addWidget(controls)
+        self._first.addStretch(1)
+        self._first.addWidget(extras)
+        self._second.addStretch(1)
+        self._wrapped = False
+
+    def _width(self, *groups: QWidget) -> int:
+        margins = self.layout().contentsMargins()
+        return (sum(group.sizeHint().width() for group in groups) + self._SPACING * (len(groups) - 1)
+                + margins.left() + margins.right())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        readouts, controls, extras = self._groups
+        return QSize(max(self._width(readouts, controls), self._width(extras)),
+                     super().minimumSizeHint().height())
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._apply_wrap(event.size().width())
+
+    def rewrap(self) -> None:
+        """Decide de novo a quebra: os grupos mudaram de largura com o texto.
+
+        Sem isto a quebra só era refeita num redimensionamento, e uma troca de
+        idioma deixava a barra numa linha só com os textos mais longos
+        cortados — ou em duas, sem precisar.
+        """
+        self._apply_wrap(self.width())
+
+    def _apply_wrap(self, width: int) -> None:
+        wrap = width < self._width(*self._groups)
+        if wrap == self._wrapped:
+            return
+        self._wrapped = wrap
+        extras = self._groups[2]
+        (self._first if wrap else self._second).removeWidget(extras)
+        (self._second if wrap else self._first).addWidget(extras)
+        self.updateGeometry()
 
 
 class _Preview(QLabel):
@@ -211,7 +300,7 @@ class _Preview(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setStyleSheet("background: #141418; border-radius: 8px;")
-        self.setText(strings.EDIT_EMPTY)
+        bind(self, "setText", lambda: strings.EDIT_EMPTY)
         self.setProperty("role", "dim")
         self._pixmap: QPixmap | None = None
         self._interaction_layers: tuple[QPixmap, ...] | None = None
@@ -297,7 +386,7 @@ class _Preview(QLabel):
         self._snap_guide_x = None
         self._snap_guide_y = None
         self._snap_guide_rot = None
-        self.setText(strings.EDIT_EMPTY)
+        bind(self, "setText", lambda: strings.EDIT_EMPTY)
         self.update()
 
     def set_interaction_layers(self, layers: tuple[QPixmap, ...] | None) -> None:
@@ -1082,12 +1171,35 @@ class _ClipPropertiesWidget(QWidget):
         self._scroll.setWidget(self._container)
 
         self._build_ui()
+        on_language_change(self._retranslate)
+
+    def _retranslate(self) -> None:
+        retext_items(self._combo_easing, strings.EDIT_EASINGS.get)
+        retext_items(self._combo_presets, strings.EDIT_ANIMATION_PRESETS.get)
+        retext_items(self._combo_trans_type, _transition_label)
+        self._refresh_header()
+        self._refresh_keyframe_controls()
+
+    def _refresh_header(self) -> None:
+        """Título, dica e espécie do bloco carregado, no idioma de agora."""
+        clip = self._clip
+        if clip is None:
+            self._title_lbl.setText(strings.PROP_TITLE)
+            self._title_lbl.setToolTip("")
+            self._lbl_clip_type.setText(strings.EDIT_CLIP_NONE)
+            return
+        kind = strings.PROP_KINDS.get(clip.overlay_type, clip.overlay_type)
+        name = _clip_name(clip)
+        display_name = name if len(name) <= 32 else f"{name[:29]}..."
+        self._title_lbl.setText(strings.PROP_TITLE_CLIP.format(name=display_name))
+        self._title_lbl.setToolTip(strings.PROP_TITLE_CLIP.format(name=name))
+        self._lbl_clip_type.setText(strings.PROP_CLIP_ID.format(id=clip.clip_id, kind=kind))
 
     def _build_ui(self) -> None:
         # Header com título e botão fechar
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        self._title_lbl = QLabel("Propriedades")
+        self._title_lbl = QLabel(strings.PROP_TITLE)
         self._title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._title_lbl.setMinimumWidth(0)
         f_title = self._title_lbl.font()
@@ -1097,7 +1209,7 @@ class _ClipPropertiesWidget(QWidget):
         header.addWidget(self._title_lbl, 1)
 
         btn_close = QPushButton("✕")
-        btn_close.setToolTip("Fechar aba de propriedades")
+        bind(btn_close, "setToolTip", lambda: strings.PROP_CLOSE_TIP)
         btn_close.setFixedSize(24, 24)
         btn_close.setStyleSheet(
             "QPushButton { border: none; background: transparent; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Ubuntu', sans-serif; font-size: 14px; font-weight: bold; border-radius: 4px; padding: 0px; margin: 0px; min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px; text-align: center; } "
@@ -1108,39 +1220,41 @@ class _ClipPropertiesWidget(QWidget):
         header.addWidget(btn_close, 0)
         self._layout.addLayout(header)
 
-        self._lbl_clip_type = QLabel("")
+        # O mesmo que o cabeçalho mostra sem bloco (ver _refresh_header): vazio,
+        # a troca de idioma o preenchia e a janela trocada divergia da nova.
+        self._lbl_clip_type = QLabel(strings.EDIT_CLIP_NONE)
         self._lbl_clip_type.setProperty("role", "dim")
         self._layout.addWidget(self._lbl_clip_type)
 
         # Grupo Transformação (Posição, Tamanho, Travar proporção, Escala, Rotação)
-        self._transform_group = QGroupBox("Transformação")
+        self._transform_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_TRANSFORM)
         grid = QGridLayout(self._transform_group)
         grid.setContentsMargins(6, 8, 6, 6)
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(6)
 
-        lbl_x = QLabel("Posição X:")
+        lbl_x = bind(QLabel(), "setText", lambda: strings.PROP_POS_X)
         self._spin_x = QSpinBox()
         self._spin_x.setRange(-10000, 10000)
         self._spin_x.setSuffix(" px")
         self._spin_x.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._spin_x.valueChanged.connect(self._on_x_changed)
 
-        lbl_y = QLabel("Posição Y:")
+        lbl_y = bind(QLabel(), "setText", lambda: strings.PROP_POS_Y)
         self._spin_y = QSpinBox()
         self._spin_y.setRange(-10000, 10000)
         self._spin_y.setSuffix(" px")
         self._spin_y.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._spin_y.valueChanged.connect(self._on_y_changed)
 
-        lbl_w = QLabel("Largura:")
+        lbl_w = bind(QLabel(), "setText", lambda: strings.PROP_WIDTH)
         self._spin_w = QSpinBox()
         self._spin_w.setRange(1, 20000)
         self._spin_w.setSuffix(" px")
         self._spin_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._spin_w.valueChanged.connect(self._on_w_changed)
 
-        lbl_h = QLabel("Altura:")
+        lbl_h = bind(QLabel(), "setText", lambda: strings.PROP_HEIGHT)
         self._spin_h = QSpinBox()
         self._spin_h.setRange(1, 20000)
         self._spin_h.setSuffix(" px")
@@ -1161,13 +1275,13 @@ class _ClipPropertiesWidget(QWidget):
         grid.addWidget(self._spin_h, 3, 1)
 
         # Trava de proporção
-        self._chk_lock_ratio = QCheckBox("Travar proporção")
+        self._chk_lock_ratio = bind(QCheckBox(), "setText", lambda: strings.PROP_LOCK_RATIO)
         self._chk_lock_ratio.setChecked(True)
         self._chk_lock_ratio.toggled.connect(self._on_lock_ratio_toggled)
         grid.addWidget(self._chk_lock_ratio, 4, 0, 1, 2)
 
         # Escala
-        lbl_scale = QLabel("Escala:")
+        lbl_scale = bind(QLabel(), "setText", lambda: strings.PROP_SCALE)
         self._spin_scale = QDoubleSpinBox()
         self._spin_scale.setRange(0.05, 10.00)
         self._spin_scale.setSingleStep(0.05)
@@ -1179,7 +1293,7 @@ class _ClipPropertiesWidget(QWidget):
         grid.addWidget(self._spin_scale, 5, 1)
 
         # Rotação
-        lbl_rot = QLabel("Rotação:")
+        lbl_rot = bind(QLabel(), "setText", lambda: strings.PROP_ROTATION)
         self._spin_rot = QDoubleSpinBox()
         self._spin_rot.setRange(0.0, 360.0)
         self._spin_rot.setSingleStep(1.0)
@@ -1203,7 +1317,7 @@ class _ClipPropertiesWidget(QWidget):
         grid.addLayout(row_presets, 7, 0, 1, 2)
 
         # Opacidade
-        lbl_opacity = QLabel(strings.EDIT_OPACITY)
+        lbl_opacity = bind(QLabel(), "setText", lambda: strings.EDIT_OPACITY)
         self._slider_opacity = QSlider(Qt.Orientation.Horizontal)
         self._slider_opacity.setRange(0, 100)
         self._slider_opacity.setValue(100)
@@ -1226,12 +1340,12 @@ class _ClipPropertiesWidget(QWidget):
         self._layout.addWidget(self._transform_group)
 
         # Grupo Animação / Quadros-chave
-        self._animation_group = QGroupBox(strings.EDIT_KEYFRAME_TITLE)
+        self._animation_group = bind(QGroupBox(), "setTitle", lambda: strings.EDIT_KEYFRAME_TITLE)
         anim_layout = QVBoxLayout(self._animation_group)
         anim_layout.setContentsMargins(6, 8, 6, 6)
         anim_layout.setSpacing(6)
-        self._whole_animation = QCheckBox(strings.EDIT_ANIMATION_GLOBAL)
-        self._whole_animation.setToolTip(strings.EDIT_ANIMATION_GLOBAL_TIP)
+        self._whole_animation = bind(QCheckBox(), "setText", lambda: strings.EDIT_ANIMATION_GLOBAL)
+        bind(self._whole_animation, "setToolTip", lambda: strings.EDIT_ANIMATION_GLOBAL_TIP)
         self._whole_animation.toggled.connect(self.animation_scope_changed)
         anim_layout.addWidget(self._whole_animation)
 
@@ -1240,26 +1354,26 @@ class _ClipPropertiesWidget(QWidget):
         row_kf.setSpacing(4)
 
         self._btn_kf_prev = QPushButton("◀")
-        self._btn_kf_prev.setToolTip(strings.EDIT_KEYFRAME_PREV)
+        bind(self._btn_kf_prev, "setToolTip", lambda: strings.EDIT_KEYFRAME_PREV)
         self._btn_kf_prev.setProperty("role", "transport")
         self._btn_kf_prev.setFixedSize(28, 26)
         self._btn_kf_prev.clicked.connect(self._on_prev_keyframe)
         row_kf.addWidget(self._btn_kf_prev)
 
         self._btn_kf_toggle = QPushButton("◇")
-        self._btn_kf_toggle.setToolTip(strings.EDIT_KEYFRAME_TOGGLE)
+        bind(self._btn_kf_toggle, "setToolTip", lambda: strings.EDIT_KEYFRAME_TOGGLE)
         self._btn_kf_toggle.setFixedSize(32, 26)
         self._btn_kf_toggle.clicked.connect(self._on_toggle_keyframe)
         row_kf.addWidget(self._btn_kf_toggle)
 
         self._btn_kf_next = QPushButton("▶")
-        self._btn_kf_next.setToolTip(strings.EDIT_KEYFRAME_NEXT)
+        bind(self._btn_kf_next, "setToolTip", lambda: strings.EDIT_KEYFRAME_NEXT)
         self._btn_kf_next.setProperty("role", "transport")
         self._btn_kf_next.setFixedSize(28, 26)
         self._btn_kf_next.clicked.connect(self._on_next_keyframe)
         row_kf.addWidget(self._btn_kf_next)
 
-        self._lbl_kf_status = QLabel("Sem quadros-chave")
+        self._lbl_kf_status = bind(QLabel(), "setText", lambda: strings.PROP_KEYFRAMES_NONE)
         self._lbl_kf_status.setProperty("role", "dim")
         row_kf.addWidget(self._lbl_kf_status, 1)
 
@@ -1268,13 +1382,10 @@ class _ClipPropertiesWidget(QWidget):
         # Curva de Interpolação (Easing)
         row_easing = QHBoxLayout()
         row_easing.setSpacing(6)
-        row_easing.addWidget(QLabel(strings.EDIT_KEYFRAME_EASING))
+        row_easing.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_KEYFRAME_EASING))
         self._combo_easing = QComboBox()
-        self._combo_easing.addItem("Linear (Constante)", "linear")
-        self._combo_easing.addItem("Suave ao Entrar (Ease In)", "ease_in")
-        self._combo_easing.addItem("Suave ao Sair (Ease Out)", "ease_out")
-        self._combo_easing.addItem("Suave Completo (Ease In-Out)", "ease_in_out")
-        self._combo_easing.addItem("Degrau (Hold)", "hold")
+        for easing, label in strings.EDIT_EASINGS.items():
+            self._combo_easing.addItem(label, easing)
         self._combo_easing.currentIndexChanged.connect(self._on_easing_changed)
         row_easing.addWidget(self._combo_easing, 1)
         anim_layout.addLayout(row_easing)
@@ -1282,17 +1393,10 @@ class _ClipPropertiesWidget(QWidget):
         # Presets de Efeitos Rápidos
         row_presets_anim = QHBoxLayout()
         row_presets_anim.setSpacing(6)
-        row_presets_anim.addWidget(QLabel("Efeito Rápido:"))
+        row_presets_anim.addWidget(bind(QLabel(), "setText", lambda: strings.PROP_QUICK_EFFECT))
         self._combo_presets = QComboBox()
-        self._combo_presets.addItem("— Selecionar preset —", "")
-        self._combo_presets.addItem(strings.EDIT_PRESET_SLIDE_UP, "slide_up")
-        self._combo_presets.addItem(strings.EDIT_PRESET_SLIDE_DOWN, "slide_down")
-        self._combo_presets.addItem(strings.EDIT_PRESET_SLIDE_LEFT, "slide_left")
-        self._combo_presets.addItem(strings.EDIT_PRESET_SLIDE_RIGHT, "slide_right")
-        self._combo_presets.addItem(strings.EDIT_PRESET_FADE_IN, "fade_in")
-        self._combo_presets.addItem(strings.EDIT_PRESET_ZOOM_IN, "zoom_in")
-        self._combo_presets.addItem(strings.EDIT_PRESET_SPIN_IN, "spin_in")
-        self._combo_presets.addItem(strings.EDIT_PRESET_CLEAR, "clear")
+        for preset, label in strings.EDIT_ANIMATION_PRESETS.items():
+            self._combo_presets.addItem(label, preset)
         self._combo_presets.currentIndexChanged.connect(self._on_preset_selected)
         row_presets_anim.addWidget(self._combo_presets, 1)
         anim_layout.addLayout(row_presets_anim)
@@ -1300,33 +1404,30 @@ class _ClipPropertiesWidget(QWidget):
         self._layout.addWidget(self._animation_group)
 
         # Grupo Chroma Key (Fundo Verde)
-        self._chromakey_group = QGroupBox("Fundo Verde (Chroma Key)")
+        self._chromakey_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_CHROMA)
         ck_layout = QVBoxLayout(self._chromakey_group)
         ck_layout.setContentsMargins(6, 8, 6, 6)
         ck_layout.setSpacing(6)
 
-        self._chk_chroma = QCheckBox("Ativar remoção de fundo verde")
+        self._chk_chroma = bind(QCheckBox(), "setText", lambda: strings.PROP_CHROMA_ENABLE)
         self._chk_chroma.toggled.connect(self._on_chroma_toggled)
         ck_layout.addWidget(self._chk_chroma)
 
         row_color = QHBoxLayout()
         row_color.setSpacing(6)
-        row_color.addWidget(QLabel("Cor a remover:"))
+        row_color.addWidget(bind(QLabel(), "setText", lambda: strings.PROP_CHROMA_COLOR))
         self._btn_chroma_color = QPushButton()
         self._btn_chroma_color.setFixedSize(40, 22)
-        self._btn_chroma_color.setToolTip("Clique para escolher a cor a ser removida")
+        bind(self._btn_chroma_color, "setToolTip", lambda: strings.PROP_CHROMA_COLOR_TIP)
         self._btn_chroma_color.clicked.connect(self._choose_chroma_color)
         row_color.addWidget(self._btn_chroma_color)
         row_color.addStretch(1)
 
-        for hex_col, c_tip in (
-            ("#00FF00", "Verde Padrão"),
-            ("#00B140", "Verde Studio"),
-            ("#0000FF", "Azul"),
-        ):
+        for hex_col in strings.PROP_CHROMA_PRESETS:
             btn_preset = QPushButton()
             btn_preset.setFixedSize(22, 22)
-            btn_preset.setToolTip(f"{c_tip} ({hex_col})")
+            bind(btn_preset, "setToolTip", lambda c=hex_col: strings.PROP_CHROMA_PRESET_TIP.format(
+                name=strings.PROP_CHROMA_PRESETS[c], color=c))
             btn_preset.setStyleSheet(
                 f"QPushButton {{ background: {hex_col}; border: 1px solid #555; border-radius: 3px; }} "
                 f"QPushButton:hover {{ border: 2px solid #fff; }}"
@@ -1337,7 +1438,7 @@ class _ClipPropertiesWidget(QWidget):
 
         row_sim = QHBoxLayout()
         row_sim.setSpacing(6)
-        row_sim.addWidget(QLabel("Tolerância:"))
+        row_sim.addWidget(bind(QLabel(), "setText", lambda: strings.PROP_CHROMA_TOLERANCE))
         self._slider_similarity = QSlider(Qt.Orientation.Horizontal)
         self._slider_similarity.setRange(1, 100)
         self._slider_similarity.setValue(25)
@@ -1355,7 +1456,7 @@ class _ClipPropertiesWidget(QWidget):
 
         row_blend = QHBoxLayout()
         row_blend.setSpacing(6)
-        row_blend.addWidget(QLabel("Suavização:"))
+        row_blend.addWidget(bind(QLabel(), "setText", lambda: strings.PROP_CHROMA_SMOOTHING))
         self._slider_blend = QSlider(Qt.Orientation.Horizontal)
         self._slider_blend.setRange(0, 100)
         self._slider_blend.setValue(10)
@@ -1374,27 +1475,21 @@ class _ClipPropertiesWidget(QWidget):
         self._layout.addWidget(self._chromakey_group)
 
         # Grupo Transição (quando um clipe de transição é selecionado)
-        self._transition_group = QGroupBox("Transição de Vídeo")
+        self._transition_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_TRANSITION)
         t_layout = QVBoxLayout(self._transition_group)
         t_layout.setContentsMargins(6, 8, 6, 6)
         t_layout.setSpacing(6)
 
-        t_layout.addWidget(QLabel("Efeito:"))
+        t_layout.addWidget(bind(QLabel(), "setText", lambda: strings.PROP_TRANSITION_EFFECT))
         self._combo_trans_type = QComboBox()
-        self._combo_trans_type.addItem("🌑 Fade", "fade")
-        self._combo_trans_type.addItem("⬛ Fade para Preto", "fadeblack")
-        self._combo_trans_type.addItem("⬜ Fade para Branco", "fadewhite")
-        self._combo_trans_type.addItem("🎬 Dissolve", "dissolve")
-        self._combo_trans_type.addItem("◀ Wipe para Esquerda", "wipeleft")
-        self._combo_trans_type.addItem("▶ Wipe para Direita", "wiperight")
-        self._combo_trans_type.addItem("◀ Slide para Esquerda", "slideleft")
-        self._combo_trans_type.addItem("▶ Slide para Direita", "slideright")
+        for tid in strings.EDIT_TRANSITIONS:
+            self._combo_trans_type.addItem(_transition_label(tid), tid)
         self._combo_trans_type.currentIndexChanged.connect(self._on_trans_type_changed)
         t_layout.addWidget(self._combo_trans_type)
 
         dur_row = QHBoxLayout()
         dur_row.setSpacing(6)
-        dur_row.addWidget(QLabel("Duração:"))
+        dur_row.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_EXTRA_DURATION))
         self._spin_trans_dur = QDoubleSpinBox()
         self._spin_trans_dur.setRange(MIN_TRANSITION_DURATION, 5.0)
         self._spin_trans_dur.setSingleStep(0.1)
@@ -1404,12 +1499,8 @@ class _ClipPropertiesWidget(QWidget):
         dur_row.addWidget(self._spin_trans_dur, 1)
         t_layout.addLayout(dur_row)
 
-        self._chk_trans_additionals = QCheckBox(
-            strings.EDIT_TRANSITION_AFFECT_ADDITIONALS
-        )
-        self._chk_trans_additionals.setToolTip(
-            strings.EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP
-        )
+        self._chk_trans_additionals = bind(QCheckBox(), "setText", lambda: strings.EDIT_TRANSITION_AFFECT_ADDITIONALS)
+        bind(self._chk_trans_additionals, "setToolTip", lambda: strings.EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP)
         self._chk_trans_additionals.toggled.connect(
             self._on_trans_additionals_toggled
         )
@@ -1421,9 +1512,7 @@ class _ClipPropertiesWidget(QWidget):
     def clear(self) -> None:
         self._clip_id = -1
         self._clip = None
-        self._title_lbl.setText("Propriedades")
-        self._title_lbl.setToolTip("")
-        self._lbl_clip_type.setText(strings.EDIT_CLIP_NONE)
+        self._refresh_header()
         self._transform_group.setVisible(False)
         self._animation_group.setVisible(False)
         self._chromakey_group.setVisible(False)
@@ -1440,26 +1529,7 @@ class _ClipPropertiesWidget(QWidget):
             self._proj_w = max(1, proj_w)
             self._proj_h = max(1, proj_h)
 
-            if clip.overlay_type == "transition":
-                t_labels = {
-                    "fade": "Fade",
-                    "fadeblack": "Fade para Preto",
-                    "fadewhite": "Fade para Branco",
-                    "dissolve": "Dissolve",
-                    "wipeleft": "Wipe para Esquerda",
-                    "wiperight": "Wipe para Direita",
-                    "slideleft": "Slide para Esquerda",
-                    "slideright": "Slide para Direita",
-                }
-                tname = clip.transition_name or "fade"
-                name = f"Transição: {t_labels.get(tname, tname)}"
-            else:
-                name = clip.media.name if clip.media else (clip.text_content or clip.overlay_type.title())
-
-            display_name = name if len(name) <= 32 else f"{name[:29]}..."
-            self._title_lbl.setText(f"Propriedades: {display_name}")
-            self._title_lbl.setToolTip(f"Propriedades: {name}")
-            self._lbl_clip_type.setText(f"ID #{clip.clip_id} · {clip.overlay_type.title() if clip.overlay_type != 'none' else 'Mídia'}")
+            self._refresh_header()
 
             # Calcular base_w e base_h
             if clip.overlay_type == "text":
@@ -1565,7 +1635,7 @@ class _ClipPropertiesWidget(QWidget):
 
     def _choose_chroma_color(self) -> None:
         cur_col = QColor(getattr(self, "_current_chroma_color", "#00FF00"))
-        chosen = QColorDialog.getColor(cur_col, self, "Escolher cor para remover")
+        chosen = QColorDialog.getColor(cur_col, self, strings.PROP_CHROMA_PICK_TITLE)
         if chosen.isValid():
             self._set_chroma_color(chosen.name().upper())
 
@@ -1656,20 +1726,19 @@ class _ClipPropertiesWidget(QWidget):
         else:
             self._btn_kf_toggle.setText("◇")
             self._btn_kf_toggle.setToolTip(strings.EDIT_KEYFRAME_ADD)
-            self._btn_kf_toggle.setStyleSheet(
-                "QPushButton { background: #2a2a35; color: #e4e4e7; border: 1px solid #444455; border-radius: 4px; font-weight: bold; font-size: 14px; }"
-                " QPushButton:hover { background: #3f3f4e; border-color: #71717a; }"
-            )
+            # Só a letra, igual à do estado marcado: as cores ficam com o tema,
+            # e o símbolo não muda de tamanho nem de peso ao alternar ◇/◆.
+            self._btn_kf_toggle.setStyleSheet("QPushButton { font-weight: bold; font-size: 14px; }")
 
         count = len(self._clip.visible_keyframes)
         if self._clip.has_keyframes:
-            self._lbl_kf_status.setText(f"{count} quadro(s)-chave")
+            self._lbl_kf_status.setText(strings.PROP_KEYFRAMES_COUNT.format(count=count))
             has_prev = any(k.time_offset < t_offset - 1e-8 for k in self._clip.visible_keyframes)
             has_next = any(k.time_offset > t_offset + 1e-8 for k in self._clip.visible_keyframes)
             self._btn_kf_prev.setEnabled(has_prev)
             self._btn_kf_next.setEnabled(has_next)
         else:
-            self._lbl_kf_status.setText("Sem quadros-chave")
+            self._lbl_kf_status.setText(strings.PROP_KEYFRAMES_NONE)
             self._btn_kf_prev.setEnabled(False)
             self._btn_kf_next.setEnabled(False)
 
@@ -2101,38 +2170,26 @@ class _FontSelectorWidget(QWidget):
         layout.setSpacing(2)
 
         self._toggle_btn = QPushButton(f"🔤 {initial_family}  ▾")
-        self._toggle_btn.setStyleSheet(
-            "QPushButton { text-align: left; padding: 5px 8px; border: 1px solid #444; border-radius: 4px; background: #2a2a32; color: #fff; } "
-            "QPushButton:hover { background: #353540; border-color: #666; }"
-        )
+        self._toggle_btn.setProperty("role", "option")
         self._toggle_btn.clicked.connect(self._toggle_list)
         layout.addWidget(self._toggle_btn)
 
         self._list_container = QFrame()
-        self._list_container.setStyleSheet(
-            "QFrame { background: #22222a; border: 1px solid #444450; border-radius: 4px; }"
-        )
+        self._list_container.setFrameShape(QFrame.Shape.StyledPanel)
         self._list_container.setVisible(False)
         c_layout = QVBoxLayout(self._list_container)
         c_layout.setContentsMargins(4, 4, 4, 4)
         c_layout.setSpacing(4)
 
         self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("🔍 Buscar fonte...")
-        self._search_input.setStyleSheet(
-            "QLineEdit { background: #1a1a22; border: 1px solid #444; border-radius: 3px; padding: 4px 6px; color: #fff; font-size: 11px; }"
-        )
+        bind(self._search_input, "setPlaceholderText", lambda: strings.EDIT_FONT_SEARCH)
+        self._search_input.setProperty("role", "picker")
         self._search_input.textChanged.connect(self._filter_fonts)
         c_layout.addWidget(self._search_input)
 
         self._font_list = QListWidget()
         self._font_list.setFixedHeight(140)
-        self._font_list.setStyleSheet(
-            "QListWidget { background: transparent; border: none; color: #eee; } "
-            "QListWidget::item { padding: 4px 6px; border-radius: 3px; } "
-            "QListWidget::item:selected { background: #0284c7; color: #fff; } "
-            "QListWidget::item:hover { background: #2f2f3c; }"
-        )
+        self._font_list.setProperty("role", "picker")
 
         seen: set[str] = set()
         all_families: list[str] = []

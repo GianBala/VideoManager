@@ -1,12 +1,25 @@
 """Exceções do domínio da aplicação.
 
 A mensagem de qualquer subclasse de :class:`VideoManagerError` é considerada
-apresentável ao usuário: escrita em pt-BR, sem jargão de stack trace. A camada
-de UI mostra ``str(exc)`` diretamente, então mensagens vagas como "erro
-inesperado" não servem — diga o que falhou e, quando possível, o que fazer.
+apresentável ao usuário: vem de um catálogo de textos, sem jargão de stack
+trace. A camada de UI mostra a mensagem diretamente, então mensagens vagas como
+"erro inesperado" não servem — diga o que falhou e, quando possível, o que fazer.
 """
 
 from __future__ import annotations
+
+from videomanager.domain.i18n import Text
+
+
+def error_message(exc: BaseException) -> str | Text:
+    """A mensagem de ``exc`` como foi escrita.
+
+    Um ``Text`` continua ``Text``: a mensagem de erro fica na fila e precisa
+    acompanhar a troca de idioma, o que ``str(exc)`` congelaria.
+    """
+    if len(exc.args) == 1 and isinstance(exc.args[0], Text):
+        return exc.args[0]
+    return str(exc)
 
 
 class VideoManagerError(Exception):

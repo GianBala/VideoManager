@@ -169,13 +169,6 @@ class _Strip:
     thumbs: dict[float, QImage] = field(default_factory=dict)
     wave: QImage | None = None
 
-    def matches(self, in_point: float, out_point: float) -> bool:
-        """Se a tira ainda corresponde ao trecho de origem do bloco."""
-        return (
-            abs(self.in_point - in_point) < 1e-6
-            and abs(self.out_point - out_point) < 1e-6
-        )
-
     @property
     def span(self) -> float:
         """Largura, em segundos de origem, da célula de cada miniatura."""
@@ -404,11 +397,6 @@ class Timeline(QWidget):
             nova.thumbs = nova._inherit(antiga.thumbs)
         self._strips[clip_id] = nova
 
-    def strip_count(self, clip_id: int) -> int:
-        """Quantas miniaturas o bloco tem pedidas — zero se ainda não tem tira."""
-        strip = self._strips.get(clip_id)
-        return strip.count if strip else 0
-
     def strip_range(self, clip_id: int) -> tuple[float, float] | None:
         strip = self._strips.get(clip_id)
         return (strip.in_point, strip.out_point) if strip else None
@@ -435,9 +423,6 @@ class Timeline(QWidget):
         strip = self._strips.setdefault(clip_id, _Strip(in_point, out_point, 0, {}))
         strip.in_point, strip.out_point, strip.wave = in_point, out_point, image
         self.update()
-
-    def has_strip(self, clip_id: int) -> bool:
-        return clip_id in self._strips
 
     # ------------------------------------------------------------------
     # Janela visível
@@ -643,13 +628,13 @@ class Timeline(QWidget):
         painter.drawText(
             rect.adjusted(10, 0, right_margin, 0),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            track.name,
+            track.title,
         )
 
         # Botão de visibilidade (olho): para vídeo e adicionais
         if track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL):
             box = self._eye_rect(index)
-            painter.setBrush(self._color("surface_alt") if track.visible else QColor("#1a1b24"))
+            painter.setBrush(self._color("surface_alt") if track.visible else self._color("bg"))
             painter.setPen(QPen(self._color("border"), 1))
             painter.drawRoundedRect(box, 4, 4)
             self._paint_eye_icon(painter, box, track.visible)
@@ -685,7 +670,7 @@ class Timeline(QWidget):
             painter.setBrush(self._color("text_dim"))
             painter.drawEllipse(QPointF(cx, cy), 2.2, 2.2)
         else:
-            painter.setPen(QPen(QColor("#64748b"), 1.2))
+            painter.setPen(QPen(self._color("text_dim"), 1.2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
             painter.setPen(QPen(self._color("error"), 1.6))
@@ -917,30 +902,14 @@ class Timeline(QWidget):
             badges.append(clip.gain_label)
 
         if clip.overlay_type == "text":
-            text = f"🔤 {clip.text_content or 'Texto'}"
+            text = f"🔤 {clip.text_content or strings.EDIT_CLIP_TEXT}"
         elif clip.overlay_type == "filter":
-            fname = clip.filter_name
-            f_labels = {
-                "pb": "P&B",
-                "sepia": "Sépia",
-                "vinheta": "Vinheta",
-                "inverter": "Inversão",
-                "contraste": "Contraste",
-            }
-            text = f"🎨 {f_labels.get(fname, fname or 'Filtro')}"
+            name = strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
+            text = f"🎨 {name}"
         elif clip.overlay_type == "transition":
-            tname = clip.transition_name
-            t_labels = {
-                "fade": "Fade",
-                "fadeblack": "Fade para Preto",
-                "fadewhite": "Fade para Branco",
-                "dissolve": "Dissolve",
-                "wipeleft": "Wipe para Esquerda",
-                "wiperight": "Wipe para Direita",
-                "slideleft": "Slide para Esquerda",
-                "slideright": "Slide para Direita",
-            }
-            text = f"⏳ {t_labels.get(tname, tname or 'Transição')}"
+            name = strings.EDIT_TRANSITIONS.get(clip.transition_name,
+                                                ("", clip.transition_name or strings.EDIT_CLIP_TRANSITION))[1]
+            text = f"⏳ {name}"
         elif clip.overlay_type == "image" or clip.is_image:
             text = f"🖼️ {clip.media.name}"
         else:
@@ -1024,12 +993,28 @@ class Timeline(QWidget):
 
         # A transição se sobrepõe aos clipes que une. Testá-la primeiro faz o
         # clique escolher o marcador desenhado por cima, não o vídeo de baixo.
+        # Depois vem o bloco sob o ponteiro, dono das alças junto às próprias
+        # bordas: entre dois blocos encostados, medir só a distância entregava
+        # a faixa inteira à ponta final do primeiro, e a alça inicial do
+        # segundo nunca era alcançável.
+        #
+        # Só os blocos perto do ponteiro entram na conta: isto roda a cada
+        # movimento do mouse, e medir todos custava o dobro da varredura antiga
+        # numa trilha longa (1,4 contra 0,75 ms com 300 blocos). A margem cobre
+        # a alça e a largura mínima de 3 px; o marcador tem largura mínima
+        # maior que a duração e entra sempre.
+        margin = (_HANDLE_GRAB + 3) * self._seconds_per_pixel()
+        moment = self._time_of(x)
+        near = [clip for clip in self._project.tracks[index].clips
+                if clip.is_transition or clip.start - margin <= moment <= clip.end + margin]
+        rects = {clip.clip_id: self._clip_rect(index, clip) for clip in near}
         ordered = sorted(
-            self._project.tracks[index].clips,
-            key=lambda item: not item.is_transition,
+            near,
+            key=lambda item: (not item.is_transition,
+                              not rects[item.clip_id].left() <= x <= rects[item.clip_id].right()),
         )
         for clip in ordered:
-            rect = self._clip_rect(index, clip)
+            rect = rects[clip.clip_id]
             d_left = abs(x - rect.left())
             d_right = abs(x - rect.right())
             if d_left <= _HANDLE_GRAB and d_right <= _HANDLE_GRAB:
@@ -1261,15 +1246,24 @@ class Timeline(QWidget):
         targets = [self._position, 0.0]
         for track in self._project.tracks:
             for clip in track.clips:
-                if moving is None or clip.clip_id != moving.clip_id:
-                    targets += [clip.start, clip.end]
+                if moving is not None and clip.clip_id == moving.clip_id:
+                    # Nem as pontas nem os quadros-chave do próprio bloco: os
+                    # quadros-chave andam com ele, e como alvo prendiam o bloco
+                    # onde ele já estava a cada movimento — o arrasto de um
+                    # bloco animado andava aos saltos de 8 px.
+                    continue
+                targets += [clip.start, clip.end]
                 for kf in clip.visible_keyframes:
                     targets.append(clip.start + kf.time_offset)
         return targets
 
     def _snap(self, moment: float, moving: Clip) -> float:
         tolerance = _SNAP_PIXELS * self._seconds_per_pixel()
-        best = min(self._snap_targets(moving), key=lambda value: abs(value - moment))
+        # Na alça, os quadros-chave do próprio bloco ficam parados no tempo da
+        # edição (``Project.resized`` os mantém onde estavam) e voltam a ser
+        # alvo: é o que deixa aparar a ponta exatamente onde a animação acaba.
+        own = [moving.start + kf.time_offset for kf in moving.visible_keyframes]
+        best = min(self._snap_targets(moving) + own, key=lambda value: abs(value - moment))
         return best if abs(best - moment) <= tolerance else moment
 
     def _snap_start(self, start: float, moving: Clip) -> float:

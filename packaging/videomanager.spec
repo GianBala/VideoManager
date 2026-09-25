@@ -142,9 +142,11 @@ _PODAR = {
 }
 _PODAR_PASTAS = ("plugins/egldeviceintegrations", "plugins/generic")
 
-# Traduções do Qt: 124 idiomas, 7,1 MB, para uma interface que só existe em
-# pt-BR. Ficam as de português e as de inglês, que é o recurso do Qt quando o
-# idioma do sistema não é nenhum dos dois.
+# Traduções do Qt: 124 idiomas, 7,1 MB, para uma interface em português e em
+# inglês. A de português é instalada pela troca de idioma para os textos do
+# próprio Qt (OK, Cancelar, o menu dos campos), e _pt é a que o Qt procura
+# quando falta a _pt_BR; o inglês é o texto original do Qt. O teste de fumaça
+# confere que a tradução carrega no pacote.
 _IDIOMAS = ("_pt", "_pt_BR", "_en")
 
 

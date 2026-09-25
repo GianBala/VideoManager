@@ -12,6 +12,7 @@ foi essa memória que já derrubou esta máquina uma vez.
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -120,6 +121,20 @@ class TestLimitesDosTrechos:
         assert segment_bounds(7.5, 1) == ((0.0, 7.5),)
 
 
+class TestDuracaoDosTrechos:
+    def test_os_trechos_cobrem_a_saida_e_nao_a_edicao_inteira(self, tmp_path: Path) -> None:
+        # Um áudio mudo depois do fim do vídeo conta na duração da edição, mas
+        # não sai no arquivo. Dividindo por ela, o paralelo gravava segundos
+        # de tela preta que o caminho serial não grava.
+        mudo = Clip(media=LENTO, start=0.0, duration=90.0, muted=True, audio_only=True)
+        edicao = replace(projeto(duration=60.0), tracks=(
+            *projeto(duration=60.0).tracks, Track(kind=TrackKind.AUDIO, clips=(mudo,), name="A")))
+        composicao = Composition(project=edicao, container="mp4", interpolate=True)
+        limites = ParallelExport(composicao, tmp_path / "saida.mp4", TOOLS, 4)._bounds
+        assert sum(span for _, span in limites) == pytest.approx(composicao.output_duration)
+        assert composicao.output_duration == pytest.approx(60.0)
+
+
 class TestComandoDoTrecho:
     def comando(self, at: float = 0.0, span: float = 10.0) -> list[str]:
         return segment_video_args(
@@ -143,6 +158,19 @@ class TestComandoDoTrecho:
 
     def test_o_trecho_interpola(self) -> None:
         assert "minterpolate" in " ".join(self.comando())
+
+    @pytest.mark.parametrize("container", ["mp4", "mov"])
+    def test_hevc_do_trecho_leva_a_etiqueta_da_apple(self, container: str, monkeypatch) -> None:
+        # A emenda e a junção copiam a etiqueta do trecho. Em MOV ela faltava,
+        # e o arquivo final saía "hev1", que o QuickTime não abre — o caminho
+        # serial sempre a gravou.
+        from types import SimpleNamespace
+        from videomanager.infrastructure.ffmpeg import hardware
+        monkeypatch.setattr(hardware, "resolve", lambda *a, **k: SimpleNamespace(
+            name="libx265", quality=[], device=[], filter_suffix=""))
+        args = segment_video_args(projeto(), 0.0, 10.0, Path(f"/tmp/t.{container}"), TOOLS,
+                                  container=container, family="hevc")
+        assert args[args.index("-tag:v") + 1] == "hvc1"
 
     def test_o_trecho_relata_progresso(self) -> None:
         # São vários processos ao mesmo tempo; sem o progresso de cada um, a
