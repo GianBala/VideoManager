@@ -115,6 +115,7 @@ from videomanager.domain.timing import keyframe_at_or_before
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import icons
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import bind, on_language_change, release, retext_items, switching
 from videomanager.presentation.qt.editor_project import EditorProject
 from videomanager.presentation.qt.export_dialog import CANVAS_PRESETS, ExportDialog, canvas_options
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
@@ -127,6 +128,7 @@ from videomanager.presentation.qt.panels.timeline import image_from_frame
 from videomanager.presentation.qt.panels.timeline import pixmap_from_frame
 
 from videomanager.presentation.qt.panels.edit_widgets import _index_of as _index_of
+from videomanager.presentation.qt.panels.edit_widgets import _filter_label, _transition_label
 from videomanager.presentation.qt.panels.edit_widgets import _VolumePopup as _VolumePopup
 from videomanager.presentation.qt.panels.edit_widgets import _SpeedPopup as _SpeedPopup
 from videomanager.presentation.qt.panels.edit_widgets import _TransportBar
@@ -284,8 +286,38 @@ class _TopSplitter(QSplitter):
     def __init__(self, orientation: Qt.Orientation) -> None:
         super().__init__(orientation)
         self._wanted: list[int] | None = None
+        # Colunas de antes da troca de idioma, e se a próxima mudança de
+        # largura ainda é efeito dela (ver ``keep_columns``).
+        self._anchor: list[int] | None = None
+        self._keep_columns = False
         # Arrastar é escolha do usuário: passa a ser a largura desejada.
-        self.splitterMoved.connect(lambda *_: setattr(self, "_wanted", self.sizes()[:2]))
+        self.splitterMoved.connect(self._on_moved)
+
+    def _on_moved(self, *_: int) -> None:
+        self._wanted = self.sizes()[:2]
+        self._anchor = None
+
+    def hold_columns(self) -> None:
+        """Guarda as colunas de antes de uma troca de idioma.
+
+        Só a primeira de uma série: ida e volta precisam devolver o arranjo de
+        antes da ida. Com a aba escondida, o layout só se refaz quando ela
+        aparece de novo, já fora da troca — a mudança de largura que vier então
+        ainda é dela, e não da janela.
+        """
+        if self._anchor is None:
+            self._anchor = self.sizes()[:2]
+        if not self.isVisible():
+            self._keep_columns = True
+
+    def restore_columns(self) -> None:
+        """Devolve as colunas guardadas; a prévia fica com o resto.
+
+        O QSplitter respeita os mínimos: se a prévia pede mais que o que sobra,
+        uma coluna cede agora, e volta quando o mínimo baixar de novo.
+        """
+        if self._anchor is not None and self.count() == 3:
+            QSplitter.setSizes(self, [*self._anchor, max(0, sum(self.sizes()) - sum(self._anchor))])
 
     def _natural(self) -> list[int]:
         if self._wanted is None:
@@ -298,14 +330,30 @@ class _TopSplitter(QSplitter):
         current = self.sizes()
         self._wanted = [new if new != old else want
                         for new, old, want in zip(sizes[:2], current[:2], self._natural())]
+        self._anchor = None
         super().setSizes(sizes)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
+        before = self.sizes()
         super().resizeEvent(event)
         # Só a largura da janela reparte as colunas. Mover o divisor vertical
         # também chega aqui, e desfazia a largura que o usuário arrastou.
         if event.size().width() == event.oldSize().width():
             return
+        # A troca de idioma também não: os textos mudam a largura mínima da
+        # aba, e refazer a divisão ali trocava o arranjo das colunas (a de
+        # Adicionais caía de 307 para 260 px) sem ninguém mexer na janela. As
+        # colunas voltam à largura de antes da troca e a prévia absorve a
+        # diferença; quando a prévia pede mais que o que sobra, o QSplitter
+        # aperta uma coluna, e a volta ao idioma anterior a devolve — coisa que
+        # o reparte do próprio QSplitter não garante.
+        if (switching() or self._keep_columns) and len(before) == 3:
+            self._keep_columns = False
+            if self._anchor is None:
+                self._anchor = before[:2]
+            self.restore_columns()
+            return
+        self._anchor = None
         total = sum(self.sizes())
         columns = [max(self.widget(i).minimumWidth(), width) for i, width in enumerate(self._natural())]
         short = _PLAYER_WIDTH - (total - sum(columns))
@@ -641,7 +689,7 @@ class EditPanel(QWidget):
         self._loading_timer.setSingleShot(True)
         self._loading_timer.setInterval(_LOADING_HINT_MS)
         self._loading_timer.timeout.connect(
-            lambda: self._loading_label.setText(strings.EDIT_LOADING_FRAME)
+            lambda: bind(self._loading_label, "setText", lambda: strings.EDIT_LOADING_FRAME)
         )
 
         self._live_timer = QTimer(self)
@@ -652,6 +700,8 @@ class EditPanel(QWidget):
         self._build_ui()
         self._install_shortcuts()
         self._refresh_all()
+        on_language_change(self._retranslate)
+        on_language_change(self._settle_columns, after_layout=True)
 
         app = QApplication.instance()
         if app is not None:
@@ -709,23 +759,23 @@ class EditPanel(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
 
-        self._new_btn = QPushButton(strings.EDIT_NEW_BUTTON)
-        self._new_btn.setToolTip(f"{strings.ACTION_NEW_PROJECT} (Ctrl+N)")
+        self._new_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_NEW_BUTTON)
+        bind(self._new_btn, "setToolTip", lambda: f"{strings.ACTION_NEW_PROJECT} (Ctrl+N)")
         self._new_btn.clicked.connect(self.new_project)
         row.addWidget(self._new_btn)
 
-        self._open_btn = QPushButton(strings.EDIT_OPEN_BUTTON)
-        self._open_btn.setToolTip(f"{strings.ACTION_OPEN_PROJECT} (Ctrl+O)")
+        self._open_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_OPEN_BUTTON)
+        bind(self._open_btn, "setToolTip", lambda: f"{strings.ACTION_OPEN_PROJECT} (Ctrl+O)")
         self._open_btn.clicked.connect(lambda: self.open_project())
         row.addWidget(self._open_btn)
 
-        self._save_btn = QPushButton(strings.EDIT_SAVE_BUTTON)
-        self._save_btn.setToolTip(f"{strings.ACTION_SAVE_PROJECT} (Ctrl+S)")
+        self._save_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_SAVE_BUTTON)
+        bind(self._save_btn, "setToolTip", lambda: f"{strings.ACTION_SAVE_PROJECT} (Ctrl+S)")
         self._save_btn.clicked.connect(self.save_project)
         row.addWidget(self._save_btn)
 
-        self._save_as_btn = QPushButton(strings.EDIT_SAVE_AS_BUTTON)
-        self._save_as_btn.setToolTip(f"{strings.ACTION_SAVE_PROJECT_AS} (Ctrl+Shift+S)")
+        self._save_as_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_SAVE_AS_BUTTON)
+        bind(self._save_as_btn, "setToolTip", lambda: f"{strings.ACTION_SAVE_PROJECT_AS} (Ctrl+Shift+S)")
         self._save_as_btn.clicked.connect(self.save_project_as)
         row.addWidget(self._save_as_btn)
 
@@ -738,12 +788,12 @@ class EditPanel(QWidget):
 
         row.addStretch(1)
 
-        self._slideshow_button = QPushButton(strings.EDIT_SLIDESHOW)
-        self._slideshow_button.setToolTip(strings.EDIT_SLIDESHOW_TIP)
+        self._slideshow_button = bind(QPushButton(), "setText", lambda: strings.EDIT_SLIDESHOW)
+        bind(self._slideshow_button, "setToolTip", lambda: strings.EDIT_SLIDESHOW_TIP)
         self._slideshow_button.clicked.connect(self._apply_slideshow_canvas)
         row.addWidget(self._slideshow_button)
 
-        aspect_label = QLabel(strings.EDIT_CANVAS_ASPECT)
+        aspect_label = bind(QLabel(), "setText", lambda: strings.EDIT_CANVAS_ASPECT)
         aspect_label.setProperty("role", "dim")
         row.addWidget(aspect_label)
 
@@ -752,35 +802,35 @@ class EditPanel(QWidget):
         # tela. O item longo continua inteiro ao abrir a lista.
         self._aspect_box = QComboBox()
         self._aspect_box.setMinimumWidth(110)
-        self._aspect_box.setToolTip(strings.EDIT_CANVAS_ASPECT_TIP)
+        bind(self._aspect_box, "setToolTip", lambda: strings.EDIT_CANVAS_ASPECT_TIP)
         self._aspect_box.currentIndexChanged.connect(self._on_aspect_choice)
         row.addWidget(self._aspect_box)
 
-        canvas_label = QLabel(strings.EDIT_CANVAS)
+        canvas_label = bind(QLabel(), "setText", lambda: strings.EDIT_CANVAS)
         canvas_label.setProperty("role", "dim")
         row.addWidget(canvas_label)
 
         self._canvas_box = QComboBox()
         self._canvas_box.setMinimumWidth(150)
-        self._canvas_box.setToolTip(strings.EDIT_CANVAS_TIP)
+        bind(self._canvas_box, "setToolTip", lambda: strings.EDIT_CANVAS_TIP)
         self._canvas_box.currentIndexChanged.connect(self._on_canvas_choice)
         row.addWidget(self._canvas_box)
 
         row.addSpacing(6)
 
-        self._collapse = QPushButton(strings.EDIT_COLLAPSE)
-        self._collapse.setToolTip(strings.EDIT_COLLAPSE_TIP)
+        self._collapse = bind(QPushButton(), "setText", lambda: strings.EDIT_COLLAPSE)
+        bind(self._collapse, "setToolTip", lambda: strings.EDIT_COLLAPSE_TIP)
         self._collapse.clicked.connect(self._toggle_collapsed)
         row.addWidget(self._collapse)
 
-        self._fullscreen_button = QPushButton(strings.EDIT_FULLSCREEN)
-        self._fullscreen_button.setToolTip(strings.EDIT_FULLSCREEN_TIP)
+        self._fullscreen_button = bind(QPushButton(), "setText", lambda: strings.EDIT_FULLSCREEN)
+        bind(self._fullscreen_button, "setToolTip", lambda: strings.EDIT_FULLSCREEN_TIP)
         self._fullscreen_button.clicked.connect(self._toggle_fullscreen)
         row.addWidget(self._fullscreen_button)
 
-        self._export_button = QPushButton(strings.EDIT_EXPORT_BUTTON)
+        self._export_button = bind(QPushButton(), "setText", lambda: strings.EDIT_EXPORT_BUTTON)
         self._export_button.setProperty("role", "primary")
-        self._export_button.setToolTip(strings.EDIT_EXPORT_BUTTON_TIP)
+        bind(self._export_button, "setToolTip", lambda: strings.EDIT_EXPORT_BUTTON_TIP)
         self._export_button.clicked.connect(self._open_export_dialog)
         row.addWidget(self._export_button)
 
@@ -789,10 +839,11 @@ class EditPanel(QWidget):
     def _update_project_label(self) -> None:
         if not hasattr(self, "_project_label"):
             return
-        name = self._project_path.name if self._project_path else strings.EDIT_UNTITLED
+        name = self._project_path.name if self._project_path else None
         dirty = " *" if self.has_unsaved_changes else ""
-        self._project_label.setText(strings.EDIT_PROJECT_STATUS.format(name=name, dirty=dirty))
-        self._project_label.setToolTip(strings.EDIT_PROJECT_V2_TIP)
+        bind(self._project_label, "setText", lambda: strings.EDIT_PROJECT_STATUS.format(
+            name=name or strings.EDIT_UNTITLED, dirty=dirty))
+        bind(self._project_label, "setToolTip", lambda: strings.EDIT_PROJECT_V2_TIP)
 
     def _build_media_box(self) -> QWidget:
         box = QWidget()
@@ -806,7 +857,7 @@ class EditPanel(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(6)
 
-        title = QLabel(strings.EDIT_MEDIA_POOL_TITLE)
+        title = bind(QLabel(), "setText", lambda: strings.EDIT_MEDIA_POOL_TITLE)
         title_font = title.font()
         title_font.setBold(True)
         title.setFont(title_font)
@@ -817,14 +868,14 @@ class EditPanel(QWidget):
         header.addWidget(self._pool_count_label)
         header.addStretch(1)
 
-        self._import = QPushButton("+ Importar")
-        self._import.setToolTip(strings.EDIT_IMPORT_TIP)
+        self._import = bind(QPushButton(), "setText", lambda: strings.EDIT_IMPORT_BUTTON)
+        bind(self._import, "setToolTip", lambda: strings.EDIT_IMPORT_TIP)
         self._import.clicked.connect(self._choose_files)
         header.addWidget(self._import)
         layout.addLayout(header)
 
         self._media_list = _MediaListWidget()
-        self._media_list.setToolTip(strings.EDIT_POOL_TIP)
+        bind(self._media_list, "setToolTip", lambda: strings.EDIT_POOL_TIP)
         self._media_list.itemDoubleClicked.connect(lambda _: self._insert_selected_media())
         self._media_list.itemSelectionChanged.connect(self._on_media_selection_changed)
         self._media_list.delete_requested.connect(self._delete_selected_media)
@@ -837,15 +888,15 @@ class EditPanel(QWidget):
         bottom_row.setContentsMargins(0, 0, 0, 0)
         bottom_row.setSpacing(6)
 
-        self._clear_unused_btn = QPushButton("🧹 Limpar não usados")
-        self._clear_unused_btn.setToolTip(strings.EDIT_CLEAR_UNUSED_TIP)
+        self._clear_unused_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_CLEAR_UNUSED_BUTTON)
+        bind(self._clear_unused_btn, "setToolTip", lambda: strings.EDIT_CLEAR_UNUSED_TIP)
         self._clear_unused_btn.clicked.connect(self._clear_unused_media)
         bottom_row.addWidget(self._clear_unused_btn)
 
         bottom_row.addStretch(1)
 
-        self._insert = QPushButton(strings.EDIT_INSERT)
-        self._insert.setToolTip(strings.EDIT_INSERT_TIP)
+        self._insert = bind(QPushButton(), "setText", lambda: strings.EDIT_INSERT)
+        bind(self._insert, "setToolTip", lambda: strings.EDIT_INSERT_TIP)
         self._insert.clicked.connect(self._insert_selected_media)
         self._insert.setEnabled(False)
         bottom_row.addWidget(self._insert)
@@ -864,7 +915,7 @@ class EditPanel(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(6)
-        title = QLabel(strings.EDIT_EXTRAS_TITLE)
+        title = bind(QLabel(), "setText", lambda: strings.EDIT_EXTRAS_TITLE)
         title_font = title.font()
         title_font.setBold(True)
         title.setFont(title_font)
@@ -902,8 +953,10 @@ class EditPanel(QWidget):
         layout.setSpacing(6)
 
         self._text_input = QLineEdit()
-        self._text_input.setPlaceholderText(strings.EDIT_TEXT_PLACEHOLDER)
-        self._text_input.setText("Título")
+        bind(self._text_input, "setPlaceholderText", lambda: strings.EDIT_TEXT_PLACEHOLDER)
+        # Enquanto ninguém digitar, o conteúdo inicial acompanha o idioma; a
+        # primeira tecla o torna do usuário, e a troca não mexe mais nele.
+        bind(self._text_input, "setText", lambda: strings.EDIT_TEXT_DEFAULT)
         self._text_input.textChanged.connect(lambda _: self._on_text_input_changed())
         layout.addWidget(self._text_input)
 
@@ -913,13 +966,13 @@ class EditPanel(QWidget):
 
         row_size = QHBoxLayout()
         row_size.setSpacing(6)
-        lbl_size = QLabel(strings.EDIT_FONT_SIZE)
+        lbl_size = bind(QLabel(), "setText", lambda: strings.EDIT_FONT_SIZE)
         row_size.addWidget(lbl_size)
 
         btn_dec = QPushButton("-")
         btn_dec.setProperty("role", "spin-tool")
         btn_dec.setFixedSize(30, 28)
-        btn_dec.setToolTip("Diminuir tamanho da fonte (1 pt)")
+        bind(btn_dec, "setToolTip", lambda: strings.EDIT_FONT_SMALLER)
         btn_dec.clicked.connect(lambda: self._font_size_spin.setValue(max(8, self._font_size_spin.value() - 1)))
         row_size.addWidget(btn_dec)
 
@@ -936,7 +989,7 @@ class EditPanel(QWidget):
         btn_inc = QPushButton("+")
         btn_inc.setProperty("role", "spin-tool")
         btn_inc.setFixedSize(30, 28)
-        btn_inc.setToolTip("Aumentar tamanho da fonte (1 pt)")
+        bind(btn_inc, "setToolTip", lambda: strings.EDIT_FONT_LARGER)
         btn_inc.clicked.connect(lambda: self._font_size_spin.setValue(min(200, self._font_size_spin.value() + 1)))
         row_size.addWidget(btn_inc)
         layout.addLayout(row_size)
@@ -947,14 +1000,14 @@ class EditPanel(QWidget):
             btn_sz = QPushButton(f"{sz}")
             btn_sz.setFixedHeight(24)
             btn_sz.setProperty("role", "chip")
-            btn_sz.setToolTip(f"Definir tamanho para {sz} pt")
+            bind(btn_sz, "setToolTip", lambda s=sz: strings.EDIT_FONT_SIZE_PRESET.format(size=s))
             btn_sz.clicked.connect(lambda _, s=sz: self._font_size_spin.setValue(s))
             size_presets.addWidget(btn_sz)
         layout.addLayout(size_presets)
 
         row_style = QHBoxLayout()
         row_style.setSpacing(4)
-        self._bold_btn = QPushButton(strings.EDIT_FONT_BOLD)
+        self._bold_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_FONT_BOLD)
         self._bold_btn.setCheckable(True)
         b_font = self._bold_btn.font()
         b_font.setBold(True)
@@ -963,7 +1016,7 @@ class EditPanel(QWidget):
         self._bold_btn.toggled.connect(lambda _: self._on_text_style_changed())
         row_style.addWidget(self._bold_btn)
 
-        self._italic_btn = QPushButton(strings.EDIT_FONT_ITALIC)
+        self._italic_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_FONT_ITALIC)
         self._italic_btn.setCheckable(True)
         i_font = self._italic_btn.font()
         i_font.setItalic(True)
@@ -979,7 +1032,7 @@ class EditPanel(QWidget):
         self._color_indicator.setStyleSheet(
             f"background: {self._text_color}; border: 1px solid #666; border-radius: 4px;"
         )
-        self._color_indicator.setToolTip("Escolher cor personalizada")
+        bind(self._color_indicator, "setToolTip", lambda: strings.EDIT_TEXT_COLOR_TIP)
         self._color_indicator.clicked.connect(self._choose_text_color)
         row_style.addWidget(self._color_indicator)
         layout.addLayout(row_style)
@@ -1001,8 +1054,8 @@ class EditPanel(QWidget):
         row_stroke = QHBoxLayout()
         row_stroke.setSpacing(6)
 
-        self._stroke_checkbox = QCheckBox("Contorno:")
-        self._stroke_checkbox.setToolTip("Ativar ou desativar contorno no texto")
+        self._stroke_checkbox = bind(QCheckBox(), "setText", lambda: strings.EDIT_STROKE)
+        bind(self._stroke_checkbox, "setToolTip", lambda: strings.EDIT_STROKE_TIP)
         self._stroke_checkbox.toggled.connect(self._on_stroke_toggled)
         row_stroke.addWidget(self._stroke_checkbox)
 
@@ -1013,7 +1066,7 @@ class EditPanel(QWidget):
         self._stroke_spin.setSuffix(" px")
         self._stroke_spin.setFixedHeight(28)
         self._stroke_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self._stroke_spin.setToolTip("Grossura do contorno em pixels")
+        bind(self._stroke_spin, "setToolTip", lambda: strings.EDIT_STROKE_WIDTH_TIP)
         self._stroke_spin.setEnabled(False)
         self._stroke_spin.valueChanged.connect(lambda _: self._on_text_style_changed())
         row_stroke.addWidget(self._stroke_spin, 1)
@@ -1024,7 +1077,7 @@ class EditPanel(QWidget):
         self._stroke_color_indicator.setStyleSheet(
             f"background: {self._stroke_color}; border: 1px solid #666; border-radius: 4px;"
         )
-        self._stroke_color_indicator.setToolTip("Escolher cor do contorno")
+        bind(self._stroke_color_indicator, "setToolTip", lambda: strings.EDIT_STROKE_COLOR_TIP)
         self._stroke_color_indicator.setEnabled(False)
         self._stroke_color_indicator.clicked.connect(self._choose_stroke_color)
         row_stroke.addWidget(self._stroke_color_indicator)
@@ -1043,12 +1096,12 @@ class EditPanel(QWidget):
 
         layout.addStretch(1)
 
-        self._insert_text_btn = QPushButton(strings.EDIT_INSERT_TEXT)
+        self._insert_text_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_INSERT_TEXT)
         self._insert_text_btn.setProperty("role", "primary")
         self._insert_text_btn.clicked.connect(self._handle_insert_or_update_text)
         layout.addWidget(self._insert_text_btn)
 
-        self._insert_new_text_btn = QPushButton(strings.EDIT_INSERT_NEW_TEXT)
+        self._insert_new_text_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_INSERT_NEW_TEXT)
         self._insert_new_text_btn.clicked.connect(self._insert_text_clip)
         self._insert_new_text_btn.setVisible(False)
         layout.addWidget(self._insert_new_text_btn)
@@ -1056,7 +1109,7 @@ class EditPanel(QWidget):
         return tab
 
     def _choose_text_color(self) -> None:
-        col = QColorDialog.getColor(QColor(self._text_color), self, "Cor do Texto")
+        col = QColorDialog.getColor(QColor(self._text_color), self, strings.EDIT_TEXT_COLOR_TITLE)
         if col.isValid():
             self._set_text_color(col.name())
 
@@ -1068,7 +1121,7 @@ class EditPanel(QWidget):
         self._on_text_style_changed()
 
     def _choose_stroke_color(self) -> None:
-        col = QColorDialog.getColor(QColor(self._stroke_color), self, "Cor do Contorno")
+        col = QColorDialog.getColor(QColor(self._stroke_color), self, strings.EDIT_STROKE_COLOR_TITLE)
         if col.isValid():
             self._set_stroke_color(col.name())
 
@@ -1093,15 +1146,16 @@ class EditPanel(QWidget):
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(6)
 
-        layout.addWidget(QLabel(strings.EDIT_CHOOSE_FILTER))
+        layout.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_CHOOSE_FILTER))
 
-        self._filter_specs = tuple((fid, f"{icon} {name}") for fid, (icon, name) in strings.EDIT_FILTERS.items())
+        # Só os identificadores: o rótulo vem do catálogo, a cada troca de idioma.
+        self._filter_specs = tuple(strings.EDIT_FILTERS)
 
         self._filter_group = QButtonGroup(self)
         self._filter_group.setExclusive(True)
         self._filter_buttons: list[QPushButton] = []
-        for fid, flabel in self._filter_specs:
-            btn = QPushButton(flabel)
+        for fid in self._filter_specs:
+            btn = bind(QPushButton(), "setText", lambda f=fid: _filter_label(f))
             btn.setCheckable(True)
             btn.setChecked(fid == self._selected_filter_name)
             btn.setProperty("role", "option")
@@ -1111,7 +1165,7 @@ class EditPanel(QWidget):
             self._filter_buttons.append(btn)
 
         dur_row = QHBoxLayout()
-        dur_row.addWidget(QLabel(strings.EDIT_EXTRA_DURATION))
+        dur_row.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_EXTRA_DURATION))
         self._filter_dur = QDoubleSpinBox()
         self._filter_dur.setRange(0.5, 3600.0)
         self._filter_dur.setValue(IMAGE_DURATION)
@@ -1123,12 +1177,12 @@ class EditPanel(QWidget):
 
         layout.addStretch(1)
 
-        self._apply_filter_btn = QPushButton(strings.EDIT_APPLY_FILTER)
+        self._apply_filter_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_APPLY_FILTER)
         self._apply_filter_btn.setProperty("role", "primary")
         self._apply_filter_btn.clicked.connect(self._handle_apply_or_update_filter)
         layout.addWidget(self._apply_filter_btn)
 
-        self._insert_new_filter_btn = QPushButton(strings.EDIT_INSERT_NEW_FILTER)
+        self._insert_new_filter_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_INSERT_NEW_FILTER)
         self._insert_new_filter_btn.clicked.connect(lambda: self._insert_filter_clip(self._selected_filter_name))
         self._insert_new_filter_btn.setVisible(False)
         layout.addWidget(self._insert_new_filter_btn)
@@ -1137,7 +1191,7 @@ class EditPanel(QWidget):
 
     def _select_filter(self, filter_name: str) -> None:
         self._selected_filter_name = filter_name
-        for i, (fid, _) in enumerate(self._filter_specs):
+        for i, fid in enumerate(self._filter_specs):
             if i < len(self._filter_buttons):
                 self._filter_buttons[i].setChecked(fid == filter_name)
         clip = self._timeline.selected_clip
@@ -1285,7 +1339,7 @@ class EditPanel(QWidget):
 
     def _insert_filter_clip(self, filter_name: str | None = None) -> None:
         fname = filter_name or self._selected_filter_name
-        label = next((lbl for fid, lbl in self._filter_specs if fid == fname), fname)
+        label = _filter_label(fname) or fname
         duration = self._filter_dur.value()
 
         ref = MediaRef(
@@ -1308,16 +1362,16 @@ class EditPanel(QWidget):
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(6)
 
-        layout.addWidget(QLabel(strings.EDIT_CHOOSE_TRANSITION))
+        layout.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_CHOOSE_TRANSITION))
 
-        self._trans_specs = tuple((tid, f"{icon} {name}") for tid, (icon, name) in strings.EDIT_TRANSITIONS.items())
+        self._trans_specs = tuple(strings.EDIT_TRANSITIONS)
         self._selected_trans_name = "fade"
 
         self._trans_group = QButtonGroup(self)
         self._trans_group.setExclusive(True)
         self._trans_buttons: list[QPushButton] = []
-        for tid, tlabel in self._trans_specs:
-            btn = QPushButton(tlabel)
+        for tid in self._trans_specs:
+            btn = bind(QPushButton(), "setText", lambda t=tid: _transition_label(t))
             btn.setCheckable(True)
             btn.setChecked(tid == self._selected_trans_name)
             btn.setProperty("role", "option")
@@ -1327,7 +1381,7 @@ class EditPanel(QWidget):
             self._trans_buttons.append(btn)
 
         dur_row = QHBoxLayout()
-        dur_row.addWidget(QLabel(strings.EDIT_EXTRA_DURATION))
+        dur_row.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_EXTRA_DURATION))
         self._trans_dur = QDoubleSpinBox()
         self._trans_dur.setRange(MIN_TRANSITION_DURATION, 5.0)
         self._trans_dur.setValue(1.0)
@@ -1337,30 +1391,26 @@ class EditPanel(QWidget):
         dur_row.addWidget(self._trans_dur)
         layout.addLayout(dur_row)
 
-        self._trans_affect_additionals = QCheckBox(
-            strings.EDIT_TRANSITION_AFFECT_ADDITIONALS
-        )
-        self._trans_affect_additionals.setToolTip(
-            strings.EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP
-        )
+        self._trans_affect_additionals = bind(QCheckBox(), "setText", lambda: strings.EDIT_TRANSITION_AFFECT_ADDITIONALS)
+        bind(self._trans_affect_additionals, "setToolTip", lambda: strings.EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP)
         self._trans_affect_additionals.toggled.connect(
             self._on_transition_affect_additionals_changed
         )
         layout.addWidget(self._trans_affect_additionals)
 
-        hint = QLabel(strings.EDIT_TRANSITION_TRACK_HINT)
+        hint = bind(QLabel(), "setText", lambda: strings.EDIT_TRANSITION_TRACK_HINT)
         hint.setWordWrap(True)
         hint.setProperty("role", "note")
         layout.addWidget(hint)
 
         layout.addStretch(1)
 
-        self._apply_trans_btn = QPushButton(strings.EDIT_INSERT_TRANSITION)
+        self._apply_trans_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_INSERT_TRANSITION)
         self._apply_trans_btn.setProperty("role", "primary")
         self._apply_trans_btn.clicked.connect(self._handle_apply_or_update_transition)
         layout.addWidget(self._apply_trans_btn)
 
-        self._insert_new_trans_btn = QPushButton(strings.EDIT_INSERT_NEW_TRANSITION)
+        self._insert_new_trans_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_INSERT_NEW_TRANSITION)
         self._insert_new_trans_btn.clicked.connect(lambda: self._insert_transition_clip(self._selected_trans_name))
         self._insert_new_trans_btn.setVisible(False)
         layout.addWidget(self._insert_new_trans_btn)
@@ -1369,7 +1419,7 @@ class EditPanel(QWidget):
 
     def _select_transition(self, trans_name: str) -> None:
         self._selected_trans_name = trans_name
-        for i, (tid, _) in enumerate(self._trans_specs):
+        for i, tid in enumerate(self._trans_specs):
             if i < len(self._trans_buttons):
                 self._trans_buttons[i].setChecked(tid == trans_name)
         clip = self._timeline.selected_clip
@@ -1470,7 +1520,7 @@ class EditPanel(QWidget):
 
     def _insert_transition_clip(self, trans_name: str | None = None) -> None:
         tname = trans_name or getattr(self, "_selected_trans_name", "fade")
-        label = next((lbl for tid, lbl in getattr(self, "_trans_specs", ()) if tid == tname), tname)
+        label = _transition_label(tname) or tname
         duration = self._trans_dur.value() if hasattr(self, "_trans_dur") else 1.0
 
         edit = self._find_nearest_video_cut(self._position)
@@ -1550,6 +1600,10 @@ class EditPanel(QWidget):
 
         if clip is not None and clip.overlay_type == "text":
             self._extras_tabs.setCurrentIndex(0)
+            # O campo agora mostra o texto do bloco, que é dado. Ainda registrado
+            # como texto inicial, um bloco com conteúdo igual a ele ("Título")
+            # seria reescrito pela troca de idioma — o campo edita o bloco ao vivo.
+            release(self._text_input, "setText")
             if self._text_input.text() != clip.text_content:
                 self._text_input.setText(clip.text_content)
             self._font_selector.set_family(clip.font_family or "Sans Serif")
@@ -1569,33 +1623,27 @@ class EditPanel(QWidget):
                 f"background: {self._stroke_color}; border: 1px solid #666; border-radius: 4px;"
             )
             self._stroke_color_indicator.setEnabled(has_stroke)
-            self._insert_text_btn.setText(strings.EDIT_UPDATE_TEXT)
             self._insert_new_text_btn.setVisible(True)
-            self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)
             self._insert_new_filter_btn.setVisible(False)
             if hasattr(self, "_apply_trans_btn"):
-                self._apply_trans_btn.setText(strings.EDIT_INSERT_TRANSITION)
                 self._insert_new_trans_btn.setVisible(False)
         elif clip is not None and clip.overlay_type == "filter":
             self._extras_tabs.setCurrentIndex(1)
             fname = clip.filter_name or "pb"
             self._selected_filter_name = fname
-            for i, (fid, _) in enumerate(self._filter_specs):
+            for i, fid in enumerate(self._filter_specs):
                 if i < len(self._filter_buttons):
                     self._filter_buttons[i].setChecked(fid == fname)
             self._filter_dur.setValue(clip.duration)
-            self._apply_filter_btn.setText(strings.EDIT_UPDATE_FILTER)
             self._insert_new_filter_btn.setVisible(True)
-            self._insert_text_btn.setText(strings.EDIT_INSERT_TEXT)
             self._insert_new_text_btn.setVisible(False)
             if hasattr(self, "_apply_trans_btn"):
-                self._apply_trans_btn.setText(strings.EDIT_INSERT_TRANSITION)
                 self._insert_new_trans_btn.setVisible(False)
         elif clip is not None and clip.overlay_type == "transition":
             self._extras_tabs.setCurrentIndex(2)
             tname = clip.transition_name or "fade"
             self._selected_trans_name = tname
-            for i, (tid, _) in enumerate(getattr(self, "_trans_specs", ())):
+            for i, tid in enumerate(getattr(self, "_trans_specs", ())):
                 if i < len(self._trans_buttons):
                     self._trans_buttons[i].setChecked(tid == tname)
             self._trans_dur.setValue(clip.duration)
@@ -1603,20 +1651,25 @@ class EditPanel(QWidget):
                 clip.transition_affects_additionals
             )
             if hasattr(self, "_apply_trans_btn"):
-                self._apply_trans_btn.setText(strings.EDIT_UPDATE_TRANSITION)
                 self._insert_new_trans_btn.setVisible(True)
-            self._insert_text_btn.setText(strings.EDIT_INSERT_TEXT)
             self._insert_new_text_btn.setVisible(False)
-            self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)
             self._insert_new_filter_btn.setVisible(False)
         else:
-            self._insert_text_btn.setText(strings.EDIT_INSERT_TEXT)
             self._insert_new_text_btn.setVisible(False)
-            self._apply_filter_btn.setText(strings.EDIT_APPLY_FILTER)
             self._insert_new_filter_btn.setVisible(False)
             if hasattr(self, "_apply_trans_btn"):
-                self._apply_trans_btn.setText(strings.EDIT_INSERT_TRANSITION)
                 self._insert_new_trans_btn.setVisible(False)
+        # O botão principal de cada aba diz "atualizar" quando o bloco escolhido
+        # é daquela espécie. Por bind: a troca de idioma refaz o texto certo
+        # sem voltar a este método, que também mexe na aba e nos campos.
+        kind = clip.overlay_type if clip is not None else None
+        bind(self._insert_text_btn, "setText",
+             lambda: strings.EDIT_UPDATE_TEXT if kind == "text" else strings.EDIT_INSERT_TEXT)
+        bind(self._apply_filter_btn, "setText",
+             lambda: strings.EDIT_UPDATE_FILTER if kind == "filter" else strings.EDIT_APPLY_FILTER)
+        if hasattr(self, "_apply_trans_btn"):
+            bind(self._apply_trans_btn, "setText",
+                 lambda: strings.EDIT_UPDATE_TRANSITION if kind == "transition" else strings.EDIT_INSERT_TRANSITION)
 
     def _build_player(self) -> QWidget:
         box = QWidget()
@@ -1680,17 +1733,20 @@ class EditPanel(QWidget):
         row.setSpacing(6)
         self._buttons: list[QPushButton] = []
         specs = (
-            ("|◀◀", strings.EDIT_TO_START, lambda: self._seek_to(0.0)),
-            ("◀◀", strings.EDIT_BACK, lambda: self._nudge(-1.0)),
-            ("◀|", f"{strings.EDIT_PREV_FRAME}  (,)", lambda: self._step_frame(-1)),
-            ("▶", f"{strings.EDIT_PLAY}  (Espaço)", self._toggle_play),
-            ("|▶", f"{strings.EDIT_NEXT_FRAME}  (.)", lambda: self._step_frame(+1)),
-            ("▶▶", strings.EDIT_FORWARD, lambda: self._nudge(+1.0)),
-            ("▶▶|", strings.EDIT_TO_END, lambda: self._seek_to(self._duration)),
+            ("|◀◀", lambda: strings.EDIT_TO_START, lambda: self._seek_to(0.0)),
+            ("◀◀", lambda: strings.EDIT_BACK, lambda: self._nudge(-1.0)),
+            ("◀|", lambda: strings.EDIT_SHORTCUT.format(label=strings.EDIT_PREV_FRAME, key=","),
+             lambda: self._step_frame(-1)),
+            ("▶", lambda: strings.EDIT_SHORTCUT.format(label=strings.EDIT_PLAY, key=strings.EDIT_KEY_SPACE),
+             self._toggle_play),
+            ("|▶", lambda: strings.EDIT_SHORTCUT.format(label=strings.EDIT_NEXT_FRAME, key="."),
+             lambda: self._step_frame(+1)),
+            ("▶▶", lambda: strings.EDIT_FORWARD, lambda: self._nudge(+1.0)),
+            ("▶▶|", lambda: strings.EDIT_TO_END, lambda: self._seek_to(self._duration)),
         )
         for text, tip, slot in specs:
             button = QPushButton(text)
-            button.setToolTip(tip)
+            bind(button, "setToolTip", tip)
             button.setProperty("role", "transport")
             button.setFixedWidth(38)
             button.setFixedHeight(32)
@@ -1708,14 +1764,14 @@ class EditPanel(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
 
-        self._prev_key = QPushButton(strings.EDIT_PREV_KEY_SHORT)
-        self._prev_key.setToolTip(strings.EDIT_PREV_KEY)
+        self._prev_key = bind(QPushButton(), "setText", lambda: strings.EDIT_PREV_KEY_SHORT)
+        bind(self._prev_key, "setToolTip", lambda: strings.EDIT_PREV_KEY)
         self._prev_key.setProperty("role", "transport")
         self._prev_key.setFixedHeight(32)
         self._prev_key.clicked.connect(lambda: self._jump_keyframe(-1))
 
-        self._next_key = QPushButton(strings.EDIT_NEXT_KEY_SHORT)
-        self._next_key.setToolTip(strings.EDIT_NEXT_KEY)
+        self._next_key = bind(QPushButton(), "setText", lambda: strings.EDIT_NEXT_KEY_SHORT)
+        bind(self._next_key, "setToolTip", lambda: strings.EDIT_NEXT_KEY)
         self._next_key.setProperty("role", "transport")
         self._next_key.setFixedHeight(32)
         self._next_key.clicked.connect(lambda: self._jump_keyframe(+1))
@@ -1725,15 +1781,15 @@ class EditPanel(QWidget):
         self._buttons += [self._prev_key, self._next_key]
 
         row.addSpacing(6)
-        self._loop = QCheckBox(strings.EDIT_LOOP)
-        self._loop.setToolTip(strings.EDIT_LOOP_TIP)
+        self._loop = bind(QCheckBox(), "setText", lambda: strings.EDIT_LOOP)
+        bind(self._loop, "setToolTip", lambda: strings.EDIT_LOOP_TIP)
         self._loop.setChecked(False)
         self._loop.toggled.connect(self._on_loop_toggled)
         row.addWidget(self._loop)
 
         row.addSpacing(6)
-        self._snap_btn = QPushButton(strings.EDIT_SNAP)
-        self._snap_btn.setToolTip(strings.EDIT_SNAP_TIP)
+        self._snap_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_SNAP)
+        bind(self._snap_btn, "setToolTip", lambda: strings.EDIT_SNAP_TIP)
         self._snap_btn.setCheckable(True)
         self._snap_btn.setChecked(self._settings.preview_snap)
         self._snap_btn.setProperty("role", "transport")
@@ -1745,7 +1801,8 @@ class EditPanel(QWidget):
 
         row.addSpacing(6)
         row.addWidget(self._build_volume())
-        return _TransportBar(readouts, controls, extras)
+        self._transport_bar = _TransportBar(readouts, controls, extras)
+        return self._transport_bar
 
     def _on_snap_toggled(self, checked: bool) -> None:
         self._preview.set_snap_enabled(checked)
@@ -1774,7 +1831,7 @@ class EditPanel(QWidget):
         self._volume.setMinimumWidth(60)
         self._volume.setMaximumWidth(90)
         self._volume.setFixedHeight(32)
-        self._volume.setToolTip(strings.EDIT_VOLUME)
+        bind(self._volume, "setToolTip", lambda: strings.EDIT_VOLUME)
         self._volume.valueChanged.connect(self._on_volume)
         row.addWidget(self._volume)
         self._refresh_volume_label()
@@ -1803,7 +1860,7 @@ class EditPanel(QWidget):
         area_row.setSpacing(0)
 
         self._timeline = Timeline(self._colors)
-        self._timeline.setToolTip(strings.EDIT_TIMELINE_HINT)
+        bind(self._timeline, "setToolTip", lambda: strings.EDIT_TIMELINE_HINT)
         self._timeline.scrubbed.connect(self._on_scrub)
         self._timeline.scrub_finished.connect(self._on_scrub_finished)
         # Tocar e pausar anda a agulha sem passar por ``_on_scrub``; sem isto
@@ -1870,9 +1927,9 @@ class EditPanel(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
 
-        self._undo = self._tool(row, "↶", "Ctrl+Z", self._undo_edit, strings.EDIT_UNDO, 40)
+        self._undo = self._tool(row, "↶", "Ctrl+Z", self._undo_edit, lambda: strings.EDIT_UNDO, 40)
         self._redo = self._tool(
-            row, "↷", "Ctrl+Shift+Z", self._redo_edit, strings.EDIT_REDO, 40
+            row, "↷", "Ctrl+Shift+Z", self._redo_edit, lambda: strings.EDIT_REDO, 40
         )
 
         row.addSpacing(_TOOL_GROUP_GAP)
@@ -1880,45 +1937,43 @@ class EditPanel(QWidget):
         # bloco" por extenso ao lado deles teria o dobro da largura de tudo que
         # está ali. O que diz o nome é a dica, como nos outros.
         self._split_button = self._tool(
-            row, "", "S", self._split_here, strings.EDIT_SPLIT, 40
+            row, "", "S", self._split_here, lambda: strings.EDIT_SPLIT, 40
         )
         self._split_button.setIcon(icons.scissors(self._colors["text"]))
         self._trim_left_button = self._tool(
             row, "", "Q", lambda: self._trim_to_cursor("inicio"),
-            strings.EDIT_TRIM_LEFT, 40,
+            lambda: strings.EDIT_TRIM_LEFT, 40,
         )
         self._trim_left_button.setIcon(icons.trim_left(self._colors["text"]))
         # Dica maior que a dos outros três: tesoura e lixeira se explicam
         # sozinhas, "apagar à esquerda" não diz de onde nem até onde.
-        self._trim_left_button.setToolTip(
-            f"{strings.EDIT_TRIM_LEFT}  (Q)\n{strings.EDIT_TRIM_LEFT_TIP}"
-        )
+        bind(self._trim_left_button, "setToolTip",
+             lambda: f"{strings.EDIT_TRIM_LEFT}  (Q)\n{strings.EDIT_TRIM_LEFT_TIP}")
         self._trim_right_button = self._tool(
             row, "", "W", lambda: self._trim_to_cursor("fim"),
-            strings.EDIT_TRIM_RIGHT, 40,
+            lambda: strings.EDIT_TRIM_RIGHT, 40,
         )
         self._trim_right_button.setIcon(icons.trim_right(self._colors["text"]))
-        self._trim_right_button.setToolTip(
-            f"{strings.EDIT_TRIM_RIGHT}  (W)\n{strings.EDIT_TRIM_RIGHT_TIP}"
-        )
+        bind(self._trim_right_button, "setToolTip",
+             lambda: f"{strings.EDIT_TRIM_RIGHT}  (W)\n{strings.EDIT_TRIM_RIGHT_TIP}")
         self._delete_button = self._tool(
-            row, "", "Del", self._delete_selected, strings.EDIT_DELETE, 40
+            row, "", "Del", self._delete_selected, lambda: strings.EDIT_DELETE, 40
         )
         self._delete_button.setIcon(icons.trash(self._colors["text"]))
 
         row.addSpacing(_TOOL_GROUP_GAP)
-        self._add_video_button = QPushButton(strings.EDIT_ADD_VIDEO_TRACK)
-        self._add_video_button.setToolTip(strings.EDIT_ADD_VIDEO_TRACK_FULL)
+        self._add_video_button = bind(QPushButton(), "setText", lambda: strings.EDIT_ADD_VIDEO_TRACK)
+        bind(self._add_video_button, "setToolTip", lambda: strings.EDIT_ADD_VIDEO_TRACK_FULL)
         self._add_video_button.clicked.connect(lambda: self._add_track(TrackKind.VIDEO))
         row.addWidget(self._add_video_button)
 
-        self._add_audio_button = QPushButton(strings.EDIT_ADD_AUDIO_TRACK)
-        self._add_audio_button.setToolTip(strings.EDIT_ADD_AUDIO_TRACK_FULL)
+        self._add_audio_button = bind(QPushButton(), "setText", lambda: strings.EDIT_ADD_AUDIO_TRACK)
+        bind(self._add_audio_button, "setToolTip", lambda: strings.EDIT_ADD_AUDIO_TRACK_FULL)
         self._add_audio_button.clicked.connect(lambda: self._add_track(TrackKind.AUDIO))
         row.addWidget(self._add_audio_button)
 
-        self._add_additional_button = QPushButton(strings.EDIT_ADD_ADDITIONAL_TRACK)
-        self._add_additional_button.setToolTip(strings.EDIT_ADD_ADDITIONAL_TRACK_FULL)
+        self._add_additional_button = bind(QPushButton(), "setText", lambda: strings.EDIT_ADD_ADDITIONAL_TRACK)
+        bind(self._add_additional_button, "setToolTip", lambda: strings.EDIT_ADD_ADDITIONAL_TRACK_FULL)
         self._add_additional_button.clicked.connect(lambda: self._add_track(TrackKind.ADDITIONAL))
         row.addWidget(self._add_additional_button)
 
@@ -1931,21 +1986,21 @@ class EditPanel(QWidget):
         # ajustam pelas alças, pelos botões de apagar e pela tesoura, todos
         # no cursor — e o nome fica aqui, sem custar altura nenhuma.
         row.addSpacing(10)
-        self._clip_label = QLabel(strings.EDIT_CLIP_NONE)
+        self._clip_label = bind(QLabel(), "setText", lambda: strings.EDIT_CLIP_NONE)
         self._clip_label.setProperty("role", "dim")
         self._clip_label.setMinimumWidth(40)
         row.addWidget(self._clip_label)
         row.addStretch(1)
 
         # Ajustes do bloco: botões suspensos compactos para volume e velocidade
-        self._volume_btn = QPushButton("🔊 0,0 dB")
-        self._volume_btn.setToolTip(strings.EDIT_GAIN_TIP)
+        self._volume_btn = bind(QPushButton(), "setText", lambda: f"🔊 {decimal(0.0)} dB")
+        bind(self._volume_btn, "setToolTip", lambda: strings.EDIT_GAIN_TIP)
         self._volume_btn.clicked.connect(self._show_volume_popup)
         row.addWidget(self._volume_btn)
 
         row.addSpacing(4)
-        self._speed_btn = QPushButton("⚡ 1,0x")
-        self._speed_btn.setToolTip(strings.EDIT_SPEED_TIP)
+        self._speed_btn = bind(QPushButton(), "setText", lambda: f"⚡ {decimal(1.0)}x")
+        bind(self._speed_btn, "setToolTip", lambda: strings.EDIT_SPEED_TIP)
         self._speed_btn.clicked.connect(self._show_speed_popup)
         row.addWidget(self._speed_btn)
         # Folga larga: o volume é do bloco escolhido, o zoom é da vista. Encostar
@@ -1953,16 +2008,16 @@ class EditPanel(QWidget):
         row.addSpacing(_VOLUME_ZOOM_GAP)
 
         for text, tip, slot in (
-            ("−", strings.EDIT_ZOOM_OUT, lambda: self._zoom(1 / _ZOOM_FACTOR)),
-            ("+", strings.EDIT_ZOOM_IN, lambda: self._zoom(_ZOOM_FACTOR)),
+            ("−", lambda: strings.EDIT_ZOOM_OUT, lambda: self._zoom(1 / _ZOOM_FACTOR)),
+            ("+", lambda: strings.EDIT_ZOOM_IN, lambda: self._zoom(_ZOOM_FACTOR)),
         ):
             button = QPushButton(text)
-            button.setToolTip(tip)
+            bind(button, "setToolTip", tip)
             button.setFixedWidth(40)
             button.clicked.connect(slot)
             row.addWidget(button)
-        fit = QPushButton(strings.EDIT_ZOOM_FIT)
-        fit.setToolTip(strings.EDIT_ZOOM_FIT_TIP)
+        fit = bind(QPushButton(), "setText", lambda: strings.EDIT_ZOOM_FIT)
+        bind(fit, "setToolTip", lambda: strings.EDIT_ZOOM_FIT_TIP)
         # Por lambda: a barra é montada antes da linha do tempo existir.
         fit.clicked.connect(lambda: self._timeline.fit())
         row.addWidget(fit)
@@ -1974,11 +2029,11 @@ class EditPanel(QWidget):
         text: str,
         shortcut: str,
         slot: Callable[[], None],
-        tip: str = "",
+        tip: Callable[[], str],
         width: int = 0,
     ) -> QPushButton:
         button = QPushButton(text)
-        button.setToolTip(f"{tip or text}  ({shortcut})" if shortcut else (tip or text))
+        bind(button, "setToolTip", lambda: f"{tip()}  ({shortcut})" if shortcut else tip())
         if width:
             button.setFixedWidth(width)
         button.clicked.connect(slot)
@@ -2258,31 +2313,34 @@ class EditPanel(QWidget):
         except Exception:
             pass
 
+    @staticmethod
+    def _media_tooltip(reference: MediaRef) -> str:
+        duration_str = format_span(reference.natural_duration)
+        if reference.has_video and reference.width and reference.height:
+            specs = f"{duration_str} · {reference.width}×{reference.height}"
+            if reference.fps:
+                specs += f" · {format_rate(reference.fps)} fps"
+        elif reference.kind is MediaKind.AUDIO:
+            ch = reference.channels or 2
+            ch_str = (strings.EDIT_CHANNELS_STEREO if ch == 2
+                      else strings.EDIT_CHANNELS_MONO if ch == 1
+                      else strings.EDIT_CHANNELS.format(count=ch))
+            specs = f"{duration_str} · {ch_str}"
+        else:
+            specs = duration_str
+        kind = strings.EDIT_MEDIA_KINDS.get(reference.kind.name, reference.kind.name)
+        return f"{reference.name}\n{reference.path}\n{kind} · {specs}"
+
     def _refresh_pool(self) -> None:
         self._syncing = True
         try:
             current_row = self._media_list.currentRow()
             self._media_list.clear()
             for reference in self._pool:
-                duration_str = format_span(reference.natural_duration)
-                if reference.has_video and reference.width and reference.height:
-                    specs = f"{duration_str} · {reference.width}×{reference.height}"
-                    if reference.fps:
-                        specs += f" · {format_rate(reference.fps)} fps"
-                elif reference.kind is MediaKind.AUDIO:
-                    ch = reference.channels or 2
-                    ch_str = "estéreo" if ch == 2 else ("mono" if ch == 1 else f"{ch} canais")
-                    specs = f"{duration_str} · {ch_str}"
-                else:
-                    specs = duration_str
-
                 item = QListWidgetItem(reference.name)
                 item.setIcon(self._create_thumbnail_for(reference))
                 item.setData(Qt.ItemDataRole.UserRole, reference)
-                item.setToolTip(
-                    f"{reference.name}\n{reference.path}\n"
-                    f"{reference.kind.value.capitalize()} · {specs}"
-                )
+                item.setToolTip(self._media_tooltip(reference))
                 self._media_list.addItem(item)
 
             if self._pool:
@@ -2290,9 +2348,8 @@ class EditPanel(QWidget):
                 self._media_list.setCurrentRow(new_row)
 
             count = len(self._pool)
-            self._pool_count_label.setText(
-                strings.EDIT_MEDIA_COUNT.format(count=count) if count else ""
-            )
+            bind(self._pool_count_label, "setText",
+                 lambda: strings.EDIT_MEDIA_COUNT.format(count=count) if count else "")
             self._insert.setEnabled(bool(self._pool) and self._media_list.currentRow() >= 0)
         finally:
             self._syncing = False
@@ -3087,18 +3144,20 @@ class EditPanel(QWidget):
         clip = self._timeline.selected_clip
         self._syncing = True
         try:
+            # Por bind: os números levam o separador decimal do idioma.
             if clip is not None:
-                self._volume_btn.setText(f"🔊 {decimal(clip.gain_db, sign=True)} dB")
-                self._speed_btn.setText(f"⚡ {decimal(clip.speed)}x")
+                gain, speed = clip.gain_db, clip.speed
+                bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(gain, sign=True)} dB")
+                bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(speed)}x")
             else:
-                self._volume_btn.setText(f"🔊 {decimal(0.0)} dB")
-                self._speed_btn.setText(f"⚡ {decimal(1.0)}x")
+                bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(0.0)} dB")
+                bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(1.0)}x")
             self._sync_extras_controls(clip)
         finally:
             self._syncing = False
 
         if clip is None:
-            self._clip_label.setText(strings.EDIT_CLIP_NONE)
+            bind(self._clip_label, "setText", lambda: strings.EDIT_CLIP_NONE)
             self._preview.set_active_clip(None, self._project.width, self._project.height)
             self._update_preview_overlay_clips()
             return
@@ -3110,14 +3169,18 @@ class EditPanel(QWidget):
             track_visible = self._project.tracks[t_idx].visible
 
         self._preview.set_active_clip(clip, self._project.width, self._project.height, visible=track_visible)
-        info = strings.EDIT_CLIP_INFO.format(
-            name=clip.media.name if clip.media else (clip.text_content or clip.overlay_type), duration=format_span(clip.duration)
-        )
-        if clip.detached:
-            info = f"{info} · {strings.EDIT_CLIP_DETACHED}"
-        if abs(clip.speed - 1.0) >= 0.01:
-            info = f"{info} · {clip.speed:.1f}x"
-        self._clip_label.setText(info)
+        def info(clip=clip) -> str:
+            text = strings.EDIT_CLIP_INFO.format(
+                name=clip.media.name if clip.media else (clip.text_content or clip.overlay_type),
+                duration=format_span(clip.duration),
+            )
+            if clip.detached:
+                text = f"{text} · {strings.EDIT_CLIP_DETACHED}"
+            if abs(clip.speed - 1.0) >= 0.01:
+                text = f"{text} · {clip.speed:.1f}x"
+            return text
+
+        bind(self._clip_label, "setText", info)
         self._update_preview_overlay_clips()
 
     def _update_preview_overlay_clips(self) -> None:
@@ -3261,6 +3324,22 @@ class EditPanel(QWidget):
         finally:
             self._syncing = False
 
+        self._label_auto_items()
+
+    def _retext_canvas_controls(self) -> None:
+        """Texto novo nas listas de proporção e tela, sem reconstruí-las.
+
+        ``_refresh_canvas_controls`` só refaz uma lista quando os dados mudam,
+        e numa troca de idioma eles não mudam — o texto ficaria no idioma
+        anterior. Reescrever item a item mantém a escolha e não emite sinal.
+        """
+        aspects = {data: label for label, data in self._aspect_options()}
+        retext_items(self._aspect_box, aspects.get)
+        sizes = {data: label for label, data in canvas_options(self._pool, self._aspect_choice, self._canvas_choice)}
+        retext_items(self._canvas_box, sizes.get)
+        self._label_auto_items()
+
+    def _label_auto_items(self) -> None:
         # O que a escolha automática produziu fica à vista mesmo sem abrir a
         # lista: sem isso, "Automática" não diz em que tela a edição está.
         proj_aspect = format_aspect_ratio(self._project.width, self._project.height)
@@ -3428,8 +3507,8 @@ class EditPanel(QWidget):
             return
         self._frame_busy = True
         if hasattr(self, "_loading_label") and not self._preview.has_frame:
-            self._loading_label.setText(strings.EDIT_LOADING_FRAME)
-            self._preview.setText(strings.EDIT_LOADING_FRAME)
+            bind(self._loading_label, "setText", lambda: strings.EDIT_LOADING_FRAME)
+            bind(self._preview, "setText", lambda: strings.EDIT_LOADING_FRAME)
         self._rendered = self._wanted
         revision = self._frame_revision
         self._frame_token = next(self._tokens)
@@ -3479,7 +3558,8 @@ class EditPanel(QWidget):
         if token == self._play_token and self._playing:
             self._stop_playback()
         self._loading_timer.stop()
-        self._loading_label.setText(str(message))
+        # A mensagem da falha é texto guardado: segue a troca de idioma.
+        bind(self._loading_label, "setText", lambda: str(message))
 
     def _on_frame(self, token: int, frame: object) -> None:
         if isinstance(frame, PreviewFrameInbox):
@@ -3540,7 +3620,7 @@ class EditPanel(QWidget):
         if current:
             self._end_loading_hint()
         elif gesture:
-            self._loading_label.setText(strings.EDIT_LOADING_FRAME)
+            bind(self._loading_label, "setText", lambda: strings.EDIT_LOADING_FRAME)
         else:
             self._defer_loading_hint()
         self._shown_frame = frame.seconds
@@ -3595,9 +3675,8 @@ class EditPanel(QWidget):
             self._split_view.setSizes([top, max(0, total - top)])
         else:
             self._split_view.setSizes([total // 2, total - total // 2])
-        self._collapse.setText(
-            strings.EDIT_EXPAND if self._collapsed else strings.EDIT_COLLAPSE
-        )
+        collapsed = self._collapsed
+        bind(self._collapse, "setText", lambda: strings.EDIT_EXPAND if collapsed else strings.EDIT_COLLAPSE)
         self._preview.update()
         self._resize_timer.start()
         self.changed.emit()
@@ -4001,6 +4080,13 @@ class EditPanel(QWidget):
             self._seek_to(target)
 
     def _update_time_labels(self) -> None:
+        self._render_time_labels()
+        self._update_preview_overlay_clips()
+        if hasattr(self, "_properties_widget"):
+            self._properties_widget.set_playhead_position(self._position)
+        self._sync_fullscreen()
+
+    def _render_time_labels(self) -> None:
         curr = format_timecode(self._position, milliseconds=False)
         visible_dur = self._project.export_duration if hasattr(self, "_project") else self._duration
         tot = format_timecode(visible_dur, milliseconds=False)
@@ -4013,10 +4099,6 @@ class EditPanel(QWidget):
         self._frame_label.setText(
             strings.EDIT_FRAME_NUMBER.format(index=frame_index(self._position, self._fps))
         )
-        self._update_preview_overlay_clips()
-        if hasattr(self, "_properties_widget"):
-            self._properties_widget.set_playhead_position(self._position)
-        self._sync_fullscreen()
 
     def _lock_readouts(self) -> None:
         """Fixa a largura dos números pelo maior valor deste projeto.
@@ -4584,7 +4666,7 @@ class EditPanel(QWidget):
             self._play_button.setToolTip(strings.EDIT_NO_PLAYBACK)
             return
         label = strings.EDIT_PAUSE if self._playing else strings.EDIT_PLAY
-        self._play_button.setToolTip(f"{label}  (Espaço)")
+        self._play_button.setToolTip(strings.EDIT_SHORTCUT.format(label=label, key=strings.EDIT_KEY_SPACE))
 
     # ------------------------------------------------------------------
     # Tela cheia
@@ -4782,6 +4864,57 @@ class EditPanel(QWidget):
         self._volume.setValue(settings.preview_volume)
         self._mute.setChecked(settings.preview_muted)
 
+    def _render_count_label(self) -> None:
+        loaded = not self._project.is_empty
+        self._count_label.setText(
+            strings.EDIT_TRACK_COUNT.format(
+                tracks=len(self._project.tracks),
+                clips=len(self._project.clips),
+                duration=format_span(self._duration),
+            )
+            if loaded
+            else ""
+        )
+        # Até 40 px ele encolhe em tela estreita; acima do próprio texto, não:
+        # vazio, sem projeto, empurrava o nome do bloco 16 px para o lado. A
+        # medida é a do texto, e não o sizeHint, que já vem inflado pelo mínimo
+        # em vigor — voltando ao vazio depois de um projeto, os 40 px ficavam.
+        texto = self._count_label.fontMetrics().horizontalAdvance(self._count_label.text())
+        self._count_label.setMinimumWidth(min(40, texto))
+
+    def _retranslate(self) -> None:
+        """Texto que depende de estado, e as medidas que dependem de texto.
+
+        Só isso: nada aqui pede quadro, abre worker, muda seleção ou troca de
+        aba — a troca de idioma não pode ter efeito sobre a edição. O texto que
+        não depende de estado volta sozinho, pelos ``bind`` da montagem.
+        """
+        for index, text in enumerate((strings.EDIT_TAB_TEXT, strings.EDIT_TAB_FILTERS,
+                                      strings.EDIT_TAB_TRANSITIONS)):
+            self._extras_tabs.setTabText(index, text)
+        properties = self._extras_tabs.indexOf(self._properties_widget)
+        if properties >= 0:
+            self._extras_tabs.setTabText(properties, strings.EDIT_TAB_PROPERTIES)
+        for row in range(self._media_list.count()):
+            item = self._media_list.item(row)
+            reference = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(reference, MediaRef):
+                item.setToolTip(self._media_tooltip(reference))
+        self._retext_canvas_controls()
+        self._render_count_label()
+        # O contador de quadros muda de largura com a palavra ("quadro"/"frame").
+        self._lock_readouts()
+        self._render_time_labels()
+        self._refresh_volume_label()
+        self._refresh_play_button()
+        # Antes de qualquer layout da troca: as colunas guardadas são as de antes.
+        self._top_splitter.hold_columns()
+
+    def _settle_columns(self) -> None:
+        """Depois de os layouts assentarem com os textos novos (ver ``_retranslate``)."""
+        self._transport_bar.rewrap()
+        self._top_splitter.restore_columns()
+
     def _refresh_all(self) -> None:
         self._timeline.set_project(self._project)
         self._refresh_controls()
@@ -4801,16 +4934,12 @@ class EditPanel(QWidget):
         # menu do botão direito, que só o oferece quando ele tem o que calar.
         adjustable = clip is not None and clip.can_adjust_sound
         self._volume_btn.setEnabled(adjustable)
-        self._volume_btn.setToolTip(
-            strings.EDIT_GAIN_DETACHED
-            if clip is not None and clip.detached
-            else strings.EDIT_GAIN_TIP
-        )
+        detached = clip is not None and clip.detached
+        bind(self._volume_btn, "setToolTip", lambda: strings.EDIT_GAIN_DETACHED if detached else strings.EDIT_GAIN_TIP)
         # Foto, texto, filtro e transição não têm relógio de mídia: velocidade
         # só esticaria a duração (e o selo "2,0x" no bloco), e a composição a
         # ignora.
         self._speed_btn.setEnabled(clip is not None and not clip.is_additional)
-        self._speed_btn.setToolTip(strings.EDIT_SPEED_TIP)
 
         self._refresh_clip_actions()
 
@@ -4822,21 +4951,7 @@ class EditPanel(QWidget):
         self._fullscreen_button.setEnabled(self._has_video)
         self._collapse.setEnabled(True)
 
-        self._count_label.setText(
-            strings.EDIT_TRACK_COUNT.format(
-                tracks=len(self._project.tracks),
-                clips=len(self._project.clips),
-                duration=format_span(self._duration),
-            )
-            if loaded
-            else ""
-        )
-        # Até 40 px ele encolhe em tela estreita; acima do próprio texto, não:
-        # vazio, sem projeto, empurrava o nome do bloco 16 px para o lado. A
-        # medida é a do texto, e não o sizeHint, que já vem inflado pelo mínimo
-        # em vigor — voltando ao vazio depois de um projeto, os 40 px ficavam.
-        texto = self._count_label.fontMetrics().horizontalAdvance(self._count_label.text())
-        self._count_label.setMinimumWidth(min(40, texto))
+        self._render_count_label()
         self._slideshow_button.setEnabled(slideshow_canvas(self._project) is not None)
         self._refresh_canvas_controls()
         self._lock_readouts()

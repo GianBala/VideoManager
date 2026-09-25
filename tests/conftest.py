@@ -97,6 +97,30 @@ def idioma_padrao():
     i18n.set_language(i18n.PORTUGUESE)
 
 
+def _pseudo(valor):
+    if isinstance(valor, str):
+        return f"⟦{valor}⟧"
+    if isinstance(valor, tuple):
+        return tuple(_pseudo(v) for v in valor)
+    if isinstance(valor, dict):
+        return {chave: _pseudo(v) for chave, v in valor.items()}
+    return valor
+
+
+@pytest.fixture
+def pseudo(monkeypatch, desktop_app):
+    """Inglês trocado por um pseudoidioma: cada texto do catálogo da interface entre ⟦ ⟧.
+
+    O que se confere com ele é o mecanismo da troca, que não pode depender de
+    uma tradução existir — e texto sem as marcas depois da troca é texto que
+    escapou do catálogo.
+    """
+    from videomanager.domain import i18n
+    from videomanager.presentation.qt import i18n as idioma
+    tabela = {nome: _pseudo(valor) for nome, valor in idioma._TABLES[i18n.PORTUGUESE].items()}
+    monkeypatch.setitem(idioma._TABLES, i18n.ENGLISH, tabela)
+
+
 @pytest.fixture
 def isolated_audio(monkeypatch):
     from videomanager.infrastructure.qt.audio import AudioPreview

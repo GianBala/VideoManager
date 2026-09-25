@@ -61,6 +61,7 @@ CARD_EMPTY = "Nenhuma mídia analisada.\nCole um endereço acima e clique em Ana
 CARD_LIVE = "TRANSMISSÃO AO VIVO"
 CARD_NO_THUMB = "sem\nminiatura"
 CARD_SUBTITLES = "{count} legenda(s) disponível(is)"
+CARD_DRM = "{count} formato(s) bloqueado(s) por DRM"
 
 # --- modo --------------------------------------------------------------------
 MODE_LABEL = "O que baixar"
@@ -77,6 +78,7 @@ LABEL_AUDIO_TRACK = "Trilha de áudio"
 LABEL_ESTIMATED_SIZE = "Tamanho estimado"
 ANY_FPS = "Qualquer"
 ANY_CODEC = "Qualquer"
+QUALITY_BEST_AVAILABLE = "Melhor disponível"
 CONTAINER_AUTO_LABEL = "Automático (o melhor sem recodificar)"
 
 TIP_CONTAINER = (
@@ -87,6 +89,18 @@ TIP_CONTAINER = (
 TIP_RESOLUTION = (
     "Só aparecem as resoluções que esta mídia realmente oferece.\n"
     "Quando a plataforma não informa a resolução, a opção é exibida pelo bitrate."
+)
+QUALITY_WARN_EXTRACTED = (
+    "Esta mídia não separa as trilhas: será preciso baixar o vídeo inteiro e "
+    "extrair o áudio dele."
+)
+QUALITY_WARN_NO_FAMILY = "Esta mídia não tem {family}: será baixado {actual}."
+QUALITY_WARN_NO_FAMILY_AT = (
+    "Esta mídia não tem {family} em {resolution}: será baixado {actual}. Com "
+    "{family}, a maior resolução disponível é {reach}p."
+)
+QUALITY_WARN_FAMILY_LIMIT = (
+    "{family} nesta mídia vai até {reach}p. Há {top}p, mas só em outros codecs."
 )
 TIP_CODEC = (
     "Só aparecem os codecs que existem na resolução escolhida. Acima de 1080p é "
@@ -141,10 +155,13 @@ QUEUE_SHOW_LOG = "Ver detalhes técnicos"
 QUEUE_CLEAR_FINISHED = "Limpar encerrados"
 QUEUE_CANCEL_ALL = "Cancelar todos"
 QUEUE_LOG_TITLE = "Detalhes técnicos — {title}"
+QUEUE_LOG_CLOSE = "Fechar"
 
 # --- status bar --------------------------------------------------------------
 STATUS_COUNTS = "{active} em andamento · {pending} na fila · {done} concluídos"
 STATUS_FFMPEG = "ffmpeg: {source}"
+# De onde veio o ffmpeg em uso, pelo identificador que o localizador devolve.
+FFMPEG_SOURCES = {"empacotado": "empacotado", "gerenciado": "gerenciado", "sistema": "sistema"}
 STATUS_ENQUEUED = "{count} tarefa(s) adicionada(s) à fila — acompanhe na aba Download"
 # Na barra de status, e não num diálogo: não poder gravar as preferências não
 # interrompe nada do que está em andamento.
@@ -159,6 +176,7 @@ PLAYLIST_ADD = "Adicionar {count} à fila"
 PLAYLIST_MODE_LABEL = "Baixar como"
 PLAYLIST_MODE_VIDEO = "Vídeo"
 PLAYLIST_MODE_AUDIO = "Somente áudio"
+PLAYLIST_LIMIT_UP_TO = "até {height}p"
 PLAYLIST_NOTE = (
     "Os itens usam a configuração de qualidade atual. Cada vídeo pode oferecer "
     "formatos diferentes, então a escolha é feita por limite de resolução e não "
@@ -182,6 +200,19 @@ CONVERT_ESTIMATED_SIZE = "Tamanho estimado: {size}"
 CONVERT_RESIZE = "Redimensionar para"
 CONVERT_KEEP = "Manter original"
 CONVERT_NO_FILES = "Escolha ao menos um arquivo."
+CONVERT_COPY_CODEC = "Copiar (sem recodificar)"
+CONVERT_PICK_TIP = "{label} (Ctrl+O)"
+CONVERT_REMOVE_TIP = "{label} (Del)"
+CONVERT_FILE_FILTER = (
+    "Mídia (*.mp4 *.mkv *.webm *.avi *.mov *.flv *.wmv *.m4v *.ts "
+    "*.mp3 *.m4a *.aac *.opus *.ogg *.flac *.wav *.wma);;Todos (*)"
+)
+CONVERT_PLAN_MIXED = "{plan} (e outros formatos distintos entre os {count} arquivos)"
+CONVERT_FALLBACK = (
+    "A pasta de origem não permite escrita. Os arquivos serão salvos na pasta "
+    "de downloads:\n{folder}"
+)
+CONVERT_SKIPPED = "Ignorados:"
 
 # --- editor de vídeo ---------------------------------------------------------
 EDIT_IMPORT = "Importar mídia…"
@@ -202,6 +233,13 @@ EDIT_MEDIA_IN_USE_MSG = (
     "Remova seus blocos das faixas primeiro."
 )
 EDIT_MEDIA_COUNT = "{count} mídia(s)"
+EDIT_IMPORT_BUTTON = "+ Importar"
+EDIT_CLEAR_UNUSED_BUTTON = "🧹 Limpar não usados"
+# Espécie da mídia na dica do acervo, pelo nome do tipo.
+EDIT_MEDIA_KINDS = {"VIDEO": "Vídeo", "IMAGE": "Imagem", "AUDIO": "Áudio"}
+EDIT_CHANNELS_STEREO = "estéreo"
+EDIT_CHANNELS_MONO = "mono"
+EDIT_CHANNELS = "{count} canais"
 EDIT_EXPORT_BUTTON = "Exportar"
 EDIT_EXPORT_BUTTON_TIP = "Configurar e exportar o vídeo para a fila (Ctrl+E)"
 EXPORT_DIALOG_TITLE = "Exportar Vídeo"
@@ -241,6 +279,41 @@ EXPORT_QUALITY_ECONOMY = "Econômica (CRF 28 - arquivo leve)"
 EXPORT_AUDIO_FORMAT = "Formato de áudio"
 EXPORT_AUDIO_FORMAT_TIP = "Formato e codec do arquivo de som gerado"
 EXPORT_ESTIMATED_SIZE = "Tamanho estimado"
+EXPORT_SUMMARY = "Duração total: <b>{duration}</b> · {tracks} trilha(s) · {clips} bloco(s)"
+EXPORT_FILENAME = "Nome do arquivo:"
+EXPORT_FILENAME_PLACEHOLDER = "Nome do arquivo (sem extensão)"
+# Nome sugerido para o arquivo exportado: é dado, e sai no idioma do momento.
+EXPORT_DEFAULT_SUFFIX = "_editado"
+EXPORT_DEFAULT_STEM = "video_editado"
+# Opções das listas, pelo dado que cada uma guarda.
+EXPORT_CONTAINERS = {
+    "mp4": "MP4 (.mp4)",
+    "mkv": "MKV (.mkv)",
+    "webm": "WebM (.webm)",
+    "mov": "QuickTime (.mov)",
+    "gif": "GIF animado (.gif)",
+}
+EXPORT_VIDEO_CODECS = {
+    "h264": "H.264 / AVC (padrão universal)",
+    "hevc": "HEVC / H.265 (alta eficiência)",
+    "av1": "AV1 (alta compressão)",
+    "vp9": "VP9 (web)",
+}
+EXPORT_AUDIO_FORMATS = {
+    "mp3": "MP3 (.mp3 - 192 kbps)",
+    "m4a": "AAC / M4A (.m4a - 192 kbps)",
+    "flac": "FLAC (.flac - sem perdas)",
+    "wav": "WAV (.wav - PCM sem perdas)",
+    "opus": "Opus (.opus - 128 kbps)",
+    "ogg": "OGG Vorbis (.ogg)",
+}
+EXPORT_ASPECTS = {
+    "16:9": "16:9 (Widescreen)",
+    "4:3": "4:3 (Tradicional)",
+    "9:16": "9:16 (Vertical / Shorts / Reels)",
+    "1:1": "1:1 (Quadrado)",
+    "21:9": "21:9 (Ultrawide)",
+}
 EDIT_INSERT = "Inserir no cursor"
 EDIT_INSERT_TIP = (
     "Coloca a mídia escolhida na linha do tempo, a partir de onde o "
@@ -280,6 +353,9 @@ EDIT_NEXT_KEY = "Próximo keyframe — o ponto de corte rápido logo à frente"
 EDIT_PREV_KEY_SHORT = "◁ keyframe"
 EDIT_NEXT_KEY_SHORT = "keyframe ▷"
 EDIT_POSITION = "{current}  /  {total}"
+# Nome da tecla nas dicas ("Reproduzir  (Espaço)").
+EDIT_KEY_SPACE = "Espaço"
+EDIT_SHORTCUT = "{label}  ({key})"
 EDIT_FRAME_NUMBER = "quadro {index}"
 EDIT_FULLSCREEN = "Tela cheia"
 EDIT_FULLSCREEN_TIP = "Ver a prévia em tela cheia (F) — a barra some sozinha"
@@ -337,6 +413,18 @@ EDIT_TRANSITION_TRACK_HINT = (
     "sem seleção, será usado o corte mais próximo do cursor."
 )
 EDIT_TEXT_PLACEHOLDER = "Digite o texto aqui…"
+# Conteúdo inicial de um texto novo: vira dado do bloco ao ser inserido.
+EDIT_TEXT_DEFAULT = "Título"
+EDIT_FONT_SMALLER = "Diminuir tamanho da fonte (1 pt)"
+EDIT_FONT_LARGER = "Aumentar tamanho da fonte (1 pt)"
+EDIT_FONT_SIZE_PRESET = "Definir tamanho para {size} pt"
+EDIT_TEXT_COLOR_TIP = "Escolher cor personalizada"
+EDIT_TEXT_COLOR_TITLE = "Cor do Texto"
+EDIT_STROKE = "Contorno:"
+EDIT_STROKE_TIP = "Ativar ou desativar contorno no texto"
+EDIT_STROKE_WIDTH_TIP = "Grossura do contorno em pixels"
+EDIT_STROKE_COLOR_TIP = "Escolher cor do contorno"
+EDIT_STROKE_COLOR_TITLE = "Cor do Contorno"
 EDIT_FONT_SIZE = "Tamanho:"
 EDIT_FONT_BOLD = "B"
 EDIT_FONT_ITALIC = "I"
@@ -514,6 +602,9 @@ EDIT_SUFFIX_EDIT = " (edição)"
 EDIT_SAVE_PROJECT = "Salvar projeto"
 EDIT_OPEN_PROJECT = "Abrir projeto"
 EDIT_PROJECT_FILTER = "Projeto Video Manager (*.vmp *.json);;Todos os arquivos (*)"
+# Nome sugerido ao salvar pela primeira vez: é o nome do arquivo, e sai no
+# idioma em que o projeto é salvo.
+EDIT_DEFAULT_PROJECT_NAME = "projeto.vmp"
 EDIT_LOADING_FRAME = "Carregando quadro…"
 PROJECT_MODIFIED_TITLE = "Alterações não salvas"
 PROJECT_MODIFIED_BODY = (
@@ -540,6 +631,7 @@ SETTINGS_COOKIES_TIP = (
 SETTINGS_COOKIES_FILE = "Arquivo de cookies (.txt)"
 SETTINGS_COOKIES_FILE_BROWSE = "Escolher…"
 SETTINGS_COOKIES_FILE_PLACEHOLDER = "Opcional: caminho para cookies.txt"
+SETTINGS_COOKIES_FILTER = "Cookies (*.txt);;Todos os arquivos (*)"
 SETTINGS_COOKIES_FILE_TIP = (
     "Arquivo de cookies exportado no formato Netscape (cookies.txt). "
     "Tem prioridade sobre a leitura do navegador e contorna restrições "
@@ -575,6 +667,7 @@ DIALOG_ERROR_TITLE = "Não foi possível continuar"
 DIALOG_WARNING_TITLE = "Atenção"
 DIALOG_INFO_TITLE = "Informação"
 DIALOG_FFMPEG_TITLE = "ffmpeg necessário"
+DIALOG_FFMPEG_UNAVAILABLE = "FFmpeg não disponível."
 DIALOG_FFMPEG_BODY = (
     "O ffmpeg é necessário para juntar vídeo com áudio e para converter "
     "arquivos, e não foi encontrado neste computador.\n\n"
@@ -636,14 +729,56 @@ EDIT_KEYFRAME_REMOVE = "Remover quadro-chave deste instante"
 EDIT_KEYFRAME_TOGGLE = "Alternar quadro-chave no cursor"
 EDIT_KEYFRAME_EASING = "Interpolação:"
 EDIT_OPACITY = "Opacidade:"
-EDIT_PRESET_SLIDE_UP = "Deslizar de Baixo (Slide Up)"
-EDIT_PRESET_SLIDE_DOWN = "Deslizar de Cima (Slide Down)"
-EDIT_PRESET_SLIDE_LEFT = "Deslizar da Direita (Slide Left)"
-EDIT_PRESET_SLIDE_RIGHT = "Deslizar da Esquerda (Slide Right)"
-EDIT_PRESET_FADE_IN = "Surgir com Fade (Fade In)"
-EDIT_PRESET_ZOOM_IN = "Surgir com Zoom (Pop In)"
-EDIT_PRESET_SPIN_IN = "Girar e Entrar (Spin In)"
-EDIT_PRESET_CLEAR = "Remover Animações"
+# Efeitos rápidos de animação, pelo identificador; o vazio é o item de convite.
+EDIT_ANIMATION_PRESETS = {
+    "": "— Selecionar preset —",
+    "slide_up": "Deslizar de Baixo (Slide Up)",
+    "slide_down": "Deslizar de Cima (Slide Down)",
+    "slide_left": "Deslizar da Direita (Slide Left)",
+    "slide_right": "Deslizar da Esquerda (Slide Right)",
+    "fade_in": "Surgir com Fade (Fade In)",
+    "zoom_in": "Surgir com Zoom (Pop In)",
+    "spin_in": "Girar e Entrar (Spin In)",
+    "clear": "Remover Animações",
+}
+EDIT_EASINGS = {
+    "linear": "Linear (Constante)",
+    "ease_in": "Suave ao Entrar (Ease In)",
+    "ease_out": "Suave ao Sair (Ease Out)",
+    "ease_in_out": "Suave Completo (Ease In-Out)",
+    "hold": "Degrau (Hold)",
+}
+
+# aba Propriedades
+PROP_TITLE = "Propriedades"
+PROP_TITLE_CLIP = "Propriedades: {name}"
+PROP_CLOSE_TIP = "Fechar aba de propriedades"
+PROP_CLIP_ID = "ID #{id} · {kind}"
+# Espécie do bloco, pelo tipo de sobreposição gravado no projeto.
+PROP_KINDS = {"none": "Mídia", "image": "Imagem", "text": "Texto", "filter": "Filtro", "transition": "Transição"}
+PROP_TRANSFORM = "Transformação"
+PROP_POS_X = "Posição X:"
+PROP_POS_Y = "Posição Y:"
+PROP_WIDTH = "Largura:"
+PROP_HEIGHT = "Altura:"
+PROP_LOCK_RATIO = "Travar proporção"
+PROP_SCALE = "Escala:"
+PROP_ROTATION = "Rotação:"
+PROP_KEYFRAMES_NONE = "Sem quadros-chave"
+PROP_KEYFRAMES_COUNT = "{count} quadro(s)-chave"
+PROP_QUICK_EFFECT = "Efeito Rápido:"
+PROP_CHROMA = "Fundo Verde (Chroma Key)"
+PROP_CHROMA_ENABLE = "Ativar remoção de fundo verde"
+PROP_CHROMA_COLOR = "Cor a remover:"
+PROP_CHROMA_COLOR_TIP = "Clique para escolher a cor a ser removida"
+PROP_CHROMA_PICK_TITLE = "Escolher cor para remover"
+PROP_CHROMA_PRESETS = {"#00FF00": "Verde Padrão", "#00B140": "Verde Studio", "#0000FF": "Azul"}
+PROP_CHROMA_PRESET_TIP = "{name} ({color})"
+PROP_CHROMA_TOLERANCE = "Tolerância:"
+PROP_CHROMA_SMOOTHING = "Suavização:"
+PROP_TRANSITION = "Transição de Vídeo"
+PROP_TRANSITION_EFFECT = "Efeito:"
+EDIT_FONT_SEARCH = "🔍 Buscar fonte..."
 
 JOB_STATUS_LABELS = {
     "pending": "Na fila", "running": "Baixando", "processing": "Processando",

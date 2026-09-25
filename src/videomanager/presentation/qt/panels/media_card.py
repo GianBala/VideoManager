@@ -18,6 +18,7 @@ from videomanager.application.formatting import format_duration
 from videomanager.domain.formats import MediaInfo
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import bind
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
 # 16:9, do tamanho de um selo: o card divide a altura da janela com os controles
@@ -62,7 +63,7 @@ class MediaCard(QFrame):
         info = QVBoxLayout()
         info.setSpacing(3)
 
-        self._title = QLabel(strings.CARD_EMPTY)
+        self._title = QLabel()
         self._title.setProperty("role", "title")
         self._title.setWordWrap(True)
         self._title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -87,12 +88,12 @@ class MediaCard(QFrame):
 
     def clear(self) -> None:
         self._pending_thumb_url = ""
-        self._title.setText(strings.CARD_EMPTY)
+        bind(self._title, "setText", lambda: strings.CARD_EMPTY)
         self._title.setProperty("role", "dim")
         self._meta.clear()
         self._extra.clear()
         self._thumb.setPixmap(QPixmap())
-        self._thumb.setText(strings.CARD_NO_THUMB)
+        bind(self._thumb, "setText", lambda: strings.CARD_NO_THUMB)
 
     def set_media(self, media: MediaInfo) -> None:
         self._title.setText(media.title)
@@ -110,21 +111,25 @@ class MediaCard(QFrame):
             for piece in (media.uploader, format_duration(media.duration), media.extractor)
             if piece and piece != DASH
         ]
-        if media.is_live:
-            pieces.insert(0, strings.CARD_LIVE)
-        self._meta.setText(" · ".join(pieces))
+        live = media.is_live
+        subtitles, blocked = len(media.subtitles), len(media.matrix.drm_blocked)
 
-        extras: list[str] = []
-        if media.subtitles:
-            extras.append(strings.CARD_SUBTITLES.format(count=len(media.subtitles)))
-        if media.matrix.drm_blocked:
-            extras.append(
-                f"{len(media.matrix.drm_blocked)} formato(s) bloqueado(s) por DRM"
-            )
-        self._extra.setText(" · ".join(extras))
+        def meta() -> str:
+            return " · ".join([strings.CARD_LIVE, *pieces] if live else pieces)
+
+        def extras() -> str:
+            parts = []
+            if subtitles:
+                parts.append(strings.CARD_SUBTITLES.format(count=subtitles))
+            if blocked:
+                parts.append(strings.CARD_DRM.format(count=blocked))
+            return " · ".join(parts)
+
+        bind(self._meta, "setText", meta)
+        bind(self._extra, "setText", extras)
 
         self._thumb.setPixmap(QPixmap())
-        self._thumb.setText(strings.CARD_NO_THUMB)
+        bind(self._thumb, "setText", lambda: strings.CARD_NO_THUMB)
         self._pending_thumb_url = media.thumbnail_url
         if media.thumbnail_url:
             worker = self._runtime.thumbnail_worker(media.thumbnail_url)
