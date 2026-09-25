@@ -23,8 +23,7 @@ from videomanager.presentation.qt import strings
 
 # Limites oferecidos para playlists. A escolha é por limite, e não por formato
 # fixo, porque cada item pode oferecer resoluções diferentes.
-_HEIGHT_LIMITS = ((None, "Melhor disponível"), (2160, "até 2160p"), (1440, "até 1440p"),
-                  (1080, "até 1080p"), (720, "até 720p"), (480, "até 480p"), (360, "até 360p"))
+_HEIGHT_LIMITS = (None, 2160, 1440, 1080, 720, 480, 360)
 # Equilíbrio entre qualidade e tamanho para um lote inteiro.
 _DEFAULT_LIMIT = 1080
 
@@ -82,7 +81,8 @@ class PlaylistDialog(QDialog):
         self._limit_label = QLabel(strings.LABEL_RESOLUTION)
         toggles.addWidget(self._limit_label)
         self._limit = QComboBox()
-        for value, label in _HEIGHT_LIMITS:
+        for value in _HEIGHT_LIMITS:
+            label = strings.QUALITY_BEST_AVAILABLE if value is None else strings.PLAYLIST_LIMIT_UP_TO.format(height=value)
             self._limit.addItem(label, value)
         self._limit.setCurrentIndex(max(0, self._limit.findData(_DEFAULT_LIMIT)))
         toggles.addWidget(self._limit)

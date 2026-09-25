@@ -1,7 +1,7 @@
 """Troca de idioma com a janela aberta: o mecanismo de presentation/qt/i18n.py.
 
-O inglês daqui é um pseudoidioma (cada texto do catálogo entre ⟦ ⟧): o que se
-confere é o mecanismo, que não pode depender de uma tradução existir.
+O inglês daqui é o pseudoidioma do ``conftest`` (cada texto do catálogo entre
+⟦ ⟧): o que se confere é o mecanismo, que não pode depender de uma tradução.
 """
 
 from __future__ import annotations
@@ -13,22 +13,6 @@ from PySide6.QtWidgets import QLabel, QWidget
 from videomanager.domain import i18n
 from videomanager.presentation.qt import i18n as idioma
 from videomanager.presentation.qt import strings
-
-
-def _pseudo(valor):
-    if isinstance(valor, str):
-        return f"⟦{valor}⟧"
-    if isinstance(valor, tuple):
-        return tuple(_pseudo(v) for v in valor)
-    if isinstance(valor, dict):
-        return {chave: _pseudo(v) for chave, v in valor.items()}
-    return valor
-
-
-@pytest.fixture
-def pseudo(monkeypatch, desktop_app):
-    tabela = {nome: _pseudo(valor) for nome, valor in idioma._TABLES[i18n.PORTUGUESE].items()}
-    monkeypatch.setitem(idioma._TABLES, i18n.ENGLISH, tabela)
 
 
 class _Dono(QWidget):
@@ -179,3 +163,25 @@ def test_descricao_e_aviso_da_exportacao_seguem_a_troca(pseudo, tmp_path):
     # A descrição rápida vem do catálogo da interface; a composta, do da aplicação.
     assert str(rapida.description).startswith("⟦")
     assert str(composta.description).endswith("30.00 s long")
+
+
+def test_quem_mede_o_layout_roda_depois_de_todos_os_textos(pseudo):
+    """Medido no meio da troca, o layout tinha parte dos textos trocados, e um
+    QSplitter apertado por um mínimo provisório não devolvia a coluna."""
+    ordem = []
+
+    class Dono(QWidget):
+        def texto(self):
+            ordem.append("texto")
+
+        def medida(self):
+            ordem.append(("medida", idioma.switching(), not self.updatesEnabled()))
+
+    dono = Dono()
+    dono.show()
+    idioma.on_language_change(dono.medida, after_layout=True)
+    idioma.on_language_change(dono.texto)
+    idioma.apply_language(i18n.ENGLISH)
+    assert ordem == ["texto", ("medida", True, True)]
+    assert not idioma.switching()
+    dono.close()

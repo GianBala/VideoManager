@@ -26,6 +26,7 @@ from videomanager.application import encoding as hwaccel
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.i18n import align_label_column
 from videomanager.presentation.qt.theme import FIELD_WIDTH
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
@@ -133,9 +134,7 @@ class SettingsDialog(QDialog):
         self._describe_encoder()
 
     def _align_label_column(self) -> None:
-        width = max((label.sizeHint().width() for label in self._labels), default=0)
-        for label in self._labels:
-            label.setMinimumWidth(width)
+        align_label_column(self._labels)
 
     def _build_general(self) -> QWidget:
         page, form = self._make_page()
@@ -277,7 +276,7 @@ class SettingsDialog(QDialog):
             self,
             strings.SETTINGS_COOKIES_FILE,
             self._cookies_file.text() or str(Path.home()),
-            "Cookies (*.txt);;Todos os arquivos (*)",
+            strings.SETTINGS_COOKIES_FILTER,
         )
         if chosen:
             self._cookies_file.setText(chosen)

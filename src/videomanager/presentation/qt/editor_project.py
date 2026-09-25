@@ -84,7 +84,7 @@ class EditorProject(QObject):
         path = p.project_path
         if choose_path or path is None:
             chosen, _ = QFileDialog.getSaveFileName(
-                p, strings.EDIT_SAVE_PROJECT, str(path or Path.home() / "projeto.vmp"),
+                p, strings.EDIT_SAVE_PROJECT, str(path or Path.home() / strings.EDIT_DEFAULT_PROJECT_NAME),
                 strings.EDIT_PROJECT_FILTER,
             )
             if not chosen:
