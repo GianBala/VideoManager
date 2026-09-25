@@ -230,7 +230,7 @@ EDIT_POOL_TIP = "Media already imported into this edit · drag one onto the time
 EDIT_MEDIA_POOL_TITLE = "Project media"
 EDIT_MEDIA_EMPTY = "Drag media here\nor click “+ Import”"
 EDIT_MEDIA_REMOVE = "Delete  (Del)"
-EDIT_CLEAR_UNUSED = "Remove Unused"
+EDIT_CLEAR_UNUSED = "Clear Unused"
 EDIT_CLEAR_UNUSED_TIP = "Removes from the library the media that isn't on any track"
 EDIT_MEDIA_IN_USE_TITLE = "Media in Use"
 EDIT_MEDIA_IN_USE_MSG = (
@@ -239,7 +239,7 @@ EDIT_MEDIA_IN_USE_MSG = (
 )
 EDIT_MEDIA_COUNT = "{count} item(s)"
 EDIT_IMPORT_BUTTON = "+ Import"
-EDIT_CLEAR_UNUSED_BUTTON = "🧹 Remove Unused"
+EDIT_CLEAR_UNUSED_BUTTON = "🧹 Clear Unused"
 EDIT_MEDIA_KINDS = {"VIDEO": "Video", "IMAGE": "Image", "AUDIO": "Audio"}
 EDIT_CHANNELS_STEREO = "stereo"
 EDIT_CHANNELS_MONO = "mono"
@@ -316,7 +316,7 @@ EXPORT_ASPECTS = {
     "1:1": "1:1 (Square)",
     "21:9": "21:9 (Ultrawide)",
 }
-EDIT_INSERT = "Insert at Playhead"
+EDIT_INSERT = "Add to Timeline"
 EDIT_INSERT_TIP = (
     "Places the chosen media on the timeline, starting where the playhead is. "
     "If no compatible track has free space, a new track is created."
