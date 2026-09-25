@@ -736,6 +736,15 @@ def test_properties_widget_title_truncation_and_close(qapp: QApplication) -> Non
     assert len(closed) == 1
 
 
+def test_aba_propriedades_nasce_como_fica_depois_de_uma_troca(qapp: QApplication) -> None:
+    """Sem bloco, o cabeçalho refeito na troca de idioma era outro que o do nascimento."""
+    w = _ClipPropertiesWidget()
+    antes = (w._title_lbl.text(), w._title_lbl.toolTip(), w._lbl_clip_type.text())
+    w._retranslate()
+    assert (w._title_lbl.text(), w._title_lbl.toolTip(), w._lbl_clip_type.text()) == antes
+    w.deleteLater()
+
+
 def test_bloco_sem_arquivo_aparece_pelo_conteudo_e_nao_pelo_identificador(pseudo) -> None:
     """O caminho de texto, filtro e transição é identificador, gravado na inserção."""
     from videomanager.domain import i18n
