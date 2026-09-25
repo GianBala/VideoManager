@@ -131,9 +131,11 @@ def panel(monkeypatch):
     instance.shutdown()
 
 
-def test_aba_propriedades_nunca_aberta_morre_com_o_painel():
-    """Solta até a primeira abertura, ela era uma janela de topo que
-    sobrevivia ao painel — uma a cada janela aberta e fechada."""
+def test_aba_propriedades_nunca_aberta_nao_pesa_na_abertura_e_morre_com_o_painel():
+    """Montada dentro da janela desde a criação, a aba custava 105 ms a mais na
+    abertura (cada widget inserido já herdava estilo e fonte da árvore);
+    solta e sem laço com o painel, sobrevivia a ele — uma a cada janela
+    aberta e fechada."""
     import shiboken6
     from PySide6.QtCore import QCoreApplication, QEvent
     panel = EditPanel(Settings(), ensure_tools=lambda: None, editor=build_editor_service(),
@@ -141,9 +143,11 @@ def test_aba_propriedades_nunca_aberta_morre_com_o_painel():
     propriedades = panel._properties_widget
     panel.show()
     QCoreApplication.processEvents()
-    assert not propriedades.isWindow() and not propriedades.isVisible()
+    assert propriedades.parentWidget() is None and not propriedades.isVisible()
     panel.shutdown()
     panel.deleteLater()
+    # O painel sai na primeira entrega; a aba, pelo destroyed dele, na seguinte.
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert not shiboken6.isValid(propriedades)
 
