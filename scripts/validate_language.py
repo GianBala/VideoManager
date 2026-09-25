@@ -11,8 +11,8 @@ Propriedades, a tela cheia) monta duas janelas no mesmo processo:
 
 A troca de volta leva as duas ao português ao vivo. Compara-se o texto de cada
 widget (texto, dica, placeholder, título, abas, itens de lista, células e
-cabeçalhos de tabela, campos numéricos como aparecem, menus e ações) e a
-geometria de cada widget visível:
+cabeçalhos de tabela, campos numéricos como aparecem, menus e ações, e o texto
+pintado à mão, como o da linha do tempo) e a geometria de cada widget visível:
 
 - inglês ao vivo (A) contra inglês do zero (B): diferença é texto que a troca
   esqueceu ou medida que ela não refez;
@@ -26,7 +26,12 @@ Três modos, porque texto de outra largura muda o layout por razões legítimas:
   catálogo. Geometria só na ida e volta da mesma janela;
 - ``identidade``: o "inglês" é o próprio português. Nenhum texto muda de
   largura, então qualquer diferença de geometria é da mecânica da troca;
-- ``ingles``: a tradução de verdade.
+- ``ingles``: a tradução de verdade. Lista todo texto visível com cara de
+  português (acento, ou palavra que o inglês não tem): o que a tradução
+  esqueceu, ou o que outra camada compôs sem catálogo.
+
+Diálogos e menus de contexto, que se montam ao abrir e já nascem no idioma do
+momento, passam no fim pela busca de texto do modo.
 
 Mede ainda, por cena, o tempo da troca, as pinturas durante ela (têm de ser
 zero) e os efeitos colaterais: desfazer, alteração não salva, pedido de quadro,
@@ -37,6 +42,7 @@ houver qualquer diferença ou efeito.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import re
@@ -67,9 +73,15 @@ _DADO = re.compile(
 # Listas cujo conteúdo é dado do sistema, e não texto do aplicativo.
 _LISTAS_DE_DADO = ("_FontSelectorWidget",)
 # O que as próprias cenas trazem: título e autor da mídia analisada, nome das
-# tarefas, conteúdo do texto, faixas de áudio (bitrate · codec · tamanho).
+# tarefas, das trilhas e dos itens da playlist, conteúdo do texto, faixas de
+# áudio (bitrate · codec · tamanho). E nomes próprios, que nenhuma língua
+# traduz: navegadores de onde ler cookies, placas de vídeo, códigos de idioma.
 _DADOS_DA_CENA = re.compile(
-    r"^(Big Buck Bunny.*|Blender( · .*)?|Vídeo [AB]|Olá|\d+ kbps · \w+ · [\d.,]+ \w?B)$"
+    r"^(Big Buck Bunny.*|Blender( · .*)?|Vídeo [AB]|Olá|Trilha da câmera|\d+\. Item \d+.*"
+    r"|\d+ kbps · \w+ · [\d.,]+ \w?B"
+    r"|Brave|Chrome|Chromium|Edge|Firefox|Opera|Safari|Vivaldi|Whale"
+    r"|NVIDIA \(NVENC\)|Intel \(Quick Sync\)|AMD \(AMF\)|VAAPI \(Linux\)"
+    r"|[a-z]{2}(-[A-Z]{2})?(, [a-z]{2}(-[A-Z]{2})?)*)$"
 )
 
 
@@ -308,14 +320,19 @@ def _acoes(prefixo: str, acoes, saida: dict) -> None:
 
 def _textos_do_widget(w) -> list[tuple[str, object]]:
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QComboBox, QDoubleSpinBox, QGroupBox, QLabel,
-                                   QLineEdit, QListWidget, QMenu, QPlainTextEdit, QSpinBox, QStatusBar, QTableView,
-                                   QTabWidget, QTextEdit)
+    from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QComboBox, QDialogButtonBox, QDoubleSpinBox,
+                                   QGroupBox, QLabel, QLineEdit, QListWidget, QMenu, QPlainTextEdit, QSpinBox,
+                                   QStatusBar, QTableView, QTabWidget, QTextEdit)
     saida: list[tuple[str, object]] = []
     if isinstance(w, QLabel):
         saida.append(("texto", w.text()))
     if isinstance(w, QAbstractButton):
-        saida.append(("texto", w.text()))
+        # OK e Cancelar de uma caixa de botões padrão são texto do próprio Qt,
+        # traduzido por ele: entram na comparação com outro nome.
+        caixa = w.parentWidget()
+        padrao = (isinstance(caixa, QDialogButtonBox)
+                  and caixa.standardButton(w) != QDialogButtonBox.StandardButton.NoButton)
+        saida.append(("texto_qt" if padrao else "texto", w.text()))
     if isinstance(w, QGroupBox):
         saida.append(("titulo", w.title()))
     if isinstance(w, QLineEdit) and not isinstance(w.parentWidget(), QAbstractSpinBox):
@@ -355,6 +372,40 @@ def _textos_do_widget(w) -> list[tuple[str, object]]:
     return [(prop, valor) for prop, valor in saida if valor not in ("", [], None)]
 
 
+def _pintados(raiz) -> dict[str, list[str]]:
+    """Texto desenhado à mão, que não mora em widget nenhum.
+
+    A linha do tempo pinta nomes de trilha, rótulos e marcas dos blocos; a fila
+    e as listas vazias pintam o convite. Só se enxerga pelo ``drawText`` que o
+    ``paintEvent`` escrito em Python chama.
+    """
+    from PySide6.QtGui import QPainter
+    from PySide6.QtWidgets import QWidget
+
+    def pinta_a_mao(w) -> bool:
+        return any("paintEvent" in vars(c) for c in type(w).__mro__ if c.__module__.startswith("videomanager"))
+
+    original = QPainter.drawText
+    vistos: list[str] = []
+
+    def gravar(painter, *args):
+        vistos.extend(a for a in args if isinstance(a, str))
+        return original(painter, *args)
+
+    saida = {}
+    QPainter.drawText = gravar
+    try:
+        for w in [raiz, *raiz.findChildren(QWidget)]:
+            if w.isVisible() and pinta_a_mao(w):
+                vistos.clear()
+                w.grab()
+                if vistos:
+                    saida[_caminho(w, raiz)] = list(vistos)
+    finally:
+        QPainter.drawText = original
+    return saida
+
+
 def _retrato(janela, extras=()) -> dict:
     from PySide6.QtCore import QPoint
     from PySide6.QtWidgets import QMenu, QMenuBar, QWidget
@@ -377,6 +428,8 @@ def _retrato(janela, extras=()) -> dict:
             if w.isVisible():
                 p = w.mapTo(raiz, QPoint(0, 0))
                 geometria[caminho] = [p.x(), p.y(), w.width(), w.height()]
+        for caminho, pintado in _pintados(raiz).items():
+            textos[f"{nome}/{caminho}.pintado"] = pintado
     return {"textos": textos, "geometria": geometria}
 
 
@@ -390,8 +443,7 @@ def _diferencas(a: dict, b: dict, secoes=("textos", "geometria")) -> list[str]:
     return saida
 
 
-def _sem_marca(retrato: dict) -> list[str]:
-    """Texto com letras e sem as marcas num retrato em pseudoidioma."""
+def _suspeitos(retrato: dict, suspeito, ignorar: tuple[str, ...]) -> list[str]:
     achados = []
 
     def varrer(chave, valor):
@@ -399,21 +451,74 @@ def _sem_marca(retrato: dict) -> list[str]:
             for item in valor:
                 varrer(chave, item)
         elif isinstance(valor, str):
-            # Ícone ou símbolo na ponta ("🔊 0,0 dB") não faz de um número uma frase.
+            # Ícone ou símbolo na ponta ("🔊 0,0 dB", "🔤 Olá") não faz de um
+            # número uma frase, nem de um dado um texto.
             bruto = valor.replace("&", "").strip()
-            if _DADO.match(bruto):
-                return
             limpo = re.sub(rf"^[^\w{ABRE}]+|[^\w{FECHA})]+$", "", bruto)
-            if (ABRE in limpo or not re.search(r"[^\W\d_]{2,}", limpo) or _DADO.match(limpo)
-                    or _DADOS_DA_CENA.match(bruto)):
+            if any(_DADO.match(x) or _DADOS_DA_CENA.match(x) for x in (bruto, limpo)):
                 return
-            achados.append(f"{chave}: {limpo[:110]!r}")
+            if suspeito(limpo):
+                achados.append(f"{chave}: {limpo[:110]!r}")
 
     for chave, valor in retrato["textos"].items():
-        if chave.endswith((".atual", ".janela", ".atalho")) or any(lista in chave for lista in _LISTAS_DE_DADO):
+        if chave.endswith(ignorar) or any(lista in chave for lista in _LISTAS_DE_DADO):
             continue
         varrer(chave, valor)
     return sorted(set(achados))
+
+
+def _sem_marca(retrato: dict) -> list[str]:
+    """Texto com letras e sem as marcas num retrato em pseudoidioma."""
+    return _suspeitos(
+        retrato,
+        lambda limpo: ABRE not in limpo and re.search(r"[^\W\d_]{2,}", limpo),
+        (".atual", ".janela", ".atalho", ".texto_qt"),
+    )
+
+
+def _textos(valor):
+    if isinstance(valor, str):
+        yield valor
+    elif isinstance(valor, (tuple, dict)):
+        for item in (valor.values() if isinstance(valor, dict) else valor):
+            yield from _textos(item)
+
+
+@functools.cache
+def _portugues() -> re.Pattern:
+    """Acento, palavra curta do português, ou palavra que só o português dos catálogos usa.
+
+    O vocabulário sai dos catálogos, e não de uma lista escrita à mão: uma
+    lista não reconhecia "Desfazer" nem o plural de "trilha". Fotografado na
+    primeira chamada, com as tabelas de verdade.
+    """
+    from videomanager.domain import i18n
+    from videomanager.presentation.qt import i18n as idioma
+
+    def palavras(textos):
+        return {p.lower() for texto in textos for p in re.findall(r"[^\W\d_]{4,}", re.sub(r"\{[^}]*\}", "", texto))}
+
+    so_pt = (palavras([*_textos(idioma._TABLES[i18n.PORTUGUESE]), *(pt for pt, _ in i18n._catalog.values())])
+             - palavras([*_textos(idioma._TABLES[i18n.ENGLISH]), *(en for _, en in i18n._catalog.values())]))
+    return re.compile(rf"[ãõçáéíóúâêôà]|\b(de|com|sem|uma?|os|ao|{'|'.join(sorted(so_pt))})\b", re.IGNORECASE)
+
+
+# Dado das cenas no meio de um texto maior: nome de arquivo ("clipe.mp4" numa
+# dica), conteúdo digitado ("Olá · 3.00 s"), nome de tarefa e de trilha não se
+# traduzem.
+_DADO_EMBUTIDO = re.compile(
+    r"\S*\.(mp4|mkv|webm|mov|m4a|mp3|png|jpg|vmp|json|wav|flac|ogg|opus|gif|avi)\b|\bOlá\b|\bVídeo [AB]\b"
+    r"|\bTrilha da câmera\b",
+    re.IGNORECASE,
+)
+
+
+def _em_portugues(retrato: dict) -> list[str]:
+    """Texto com cara de português num retrato em inglês, títulos e teclas inclusive."""
+    return _suspeitos(retrato, lambda limpo: _portugues().search(_DADO_EMBUTIDO.sub("", limpo)), (".atual",))
+
+
+_DETECTORES = {"pseudo": _sem_marca, "ingles": _em_portugues}
 
 
 # ---------------------------------------------------------------------------
@@ -491,14 +596,57 @@ def rodar_cena(app, nome: str, r: dict, modo: str) -> dict:
     # colunas depende da história de cada janela, e não é defeito divergir. A
     # ida e volta na mesma janela, essa sim, tem de devolver tudo.
     entre_janelas = ("textos", "geometria") if modo == "identidade" else ("textos",)
+    detector = _DETECTORES.get(modo)
     return {
         "ida": ida, "volta": volta, "efeitos": efeitos,
         "ingles_vivo_x_zero": _diferencas(en_vivo, en_zero, entre_janelas),
         "portugues_volta_x_inicio": _diferencas(pt_volta_a, pt_inicio),
         "portugues_de_b_x_inicio": _diferencas(pt_volta_b, pt_inicio, entre_janelas),
-        "sem_traducao": (_sem_marca(en_vivo) + [f"(do zero) {x}" for x in _sem_marca(en_zero)]
-                         if modo == "pseudo" else []),
+        "sem_traducao": detector(en_vivo) + [f"(do zero) {x}" for x in detector(en_zero)] if detector else [],
     }
+
+
+def _sob_demanda(app, r) -> dict:
+    """Retrato do que só se monta ao abrir: diálogos e menus de contexto.
+
+    Nascem no idioma do momento e são modais — a troca de idioma nunca os
+    pega abertos —, então não há troca a conferir, só o texto: fora do
+    catálogo (pseudoidioma) ou com cara de português (inglês).
+    """
+    from PySide6.QtWidgets import QMenu
+
+    from videomanager.domain.formats import PlaylistEntry, PlaylistInfo
+    from videomanager.presentation.qt.export_dialog import ExportDialog
+    from videomanager.presentation.qt.playlist_dialog import PlaylistDialog
+    from videomanager.presentation.qt.settings_dialog import SettingsDialog
+
+    janela = _janela(app)
+    _editor(app, janela, r, 901)
+    editor = janela._edit
+    lista = editor._media_list
+    itens = tuple(PlaylistEntry(f"https://exemplo/{i}", f"Item {i}", i) for i in range(1, 4))
+    raizes = {
+        "configuracoes": SettingsDialog(janela._settings, janela, runtime=janela._runtime),
+        "exportacao": ExportDialog(project=editor._project, settings=editor._settings, pool=editor._pool,
+                                   probed=editor._probed, parent=editor, processing=editor._processing,
+                                   runtime=editor._runtime),
+        "playlist": PlaylistDialog(PlaylistInfo("https://exemplo/lista", "Playlist X", itens), parent=janela),
+        "menu_do_bloco": editor.build_menu("clip", 2, 901),
+        "menu_do_texto": editor.build_menu("clip", 0, 904),
+        "menu_da_trilha": editor.build_menu("track", 3, -1),
+        "menu_do_acervo": editor.build_media_menu(lista.visualItemRect(lista.item(0)).center()),
+    }
+    for raiz in raizes.values():
+        if not isinstance(raiz, QMenu):
+            raiz.show()
+    _processar(app, 200)
+    textos = {}
+    for nome, raiz in raizes.items():
+        textos.update({f"{nome}:{chave}": valor for chave, valor in _retrato(raiz)["textos"].items()})
+        raiz.close()
+        raiz.deleteLater()
+    _fechar(app, janela)
+    return {"textos": textos}
 
 
 def main() -> int:
@@ -506,7 +654,7 @@ def main() -> int:
     parser.add_argument("--modo", choices=("pseudo", "identidade", "ingles"), default="pseudo",
                         help="pseudo: textos marcados, confere texto e o que ficou sem catálogo; "
                              "identidade: inglês igual ao português, confere a geometria da própria troca; "
-                             "ingles: a tradução de verdade")
+                             "ingles: a tradução de verdade, e o que ficou com cara de português")
     parser.add_argument("--cena", action="append", choices=sorted(CENAS), help="só estas cenas")
     parser.add_argument("--limite", type=int, default=12, help="diferenças mostradas por grupo")
     parser.add_argument("--json", type=Path, help="grava o resultado completo")
@@ -547,7 +695,20 @@ def main() -> int:
             print(f"   sem tradução: {len(sem)}")
             for linha in sem[:args.limite]:
                 print(f"      {linha}")
-    tempos = [c["ida"]["troca_ms"] for c in resultado.values()] + [c["volta"]["troca_ms"] for c in resultado.values()]
+    detector = _DETECTORES.get(args.modo)
+    if detector is not None and not args.cena:
+        from videomanager.domain import i18n
+        from videomanager.presentation.qt.i18n import apply_language
+        apply_language(i18n.ENGLISH)
+        sob_demanda = detector(_sob_demanda(app, recursos))
+        apply_language(i18n.PORTUGUESE)
+        problemas += len(sob_demanda)
+        resultado["sob_demanda"] = sob_demanda
+        print(f"== diálogos e menus: {len(sob_demanda)} texto(s) sem tradução")
+        for linha in sob_demanda[:args.limite]:
+            print(f"      {linha}")
+    tempos = [c["ida"]["troca_ms"] for n, c in resultado.items() if n in CENAS]
+    tempos += [c["volta"]["troca_ms"] for n, c in resultado.items() if n in CENAS]
     print(f"\ntroca: mediana {statistics.median(tempos):.1f} ms, máximo {max(tempos):.1f} ms")
     print(f"{problemas} problema(s).")
     if args.json:

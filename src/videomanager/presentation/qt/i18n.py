@@ -19,7 +19,7 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel
 
 from videomanager.domain import i18n
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import strings, strings_en
 
 T = TypeVar("T")
 
@@ -28,8 +28,10 @@ def _table(module) -> dict[str, object]:
     return {name: value for name, value in vars(module).items() if name.isupper()}
 
 
-# Fotografado no import, antes de qualquer troca: é o que strings.py traz.
-_TABLES: dict[str, dict[str, object]] = {i18n.PORTUGUESE: _table(strings)}
+# O português é fotografado no import, antes de qualquer troca: é o que
+# strings.py traz, e a troca de volta precisa dele depois de o módulo ter
+# recebido os valores do inglês.
+_TABLES: dict[str, dict[str, object]] = {i18n.PORTUGUESE: _table(strings), i18n.ENGLISH: _table(strings_en)}
 _current = i18n.PORTUGUESE
 _switching = False
 

@@ -1,10 +1,15 @@
 """Troca de idioma com a janela aberta: o mecanismo de presentation/qt/i18n.py.
 
-O inglês daqui é o pseudoidioma do ``conftest`` (cada texto do catálogo entre
-⟦ ⟧): o que se confere é o mecanismo, que não pode depender de uma tradução.
+O inglês dos testes do mecanismo é o pseudoidioma do ``conftest`` (cada texto
+do catálogo entre ⟦ ⟧), porque o mecanismo não pode depender de uma tradução.
+A tradução de verdade se confere no fim, pela forma: os mesmos nomes,
+parâmetros e estruturas do português.
 """
 
 from __future__ import annotations
+
+import re
+import string
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -185,3 +190,77 @@ def test_quem_mede_o_layout_roda_depois_de_todos_os_textos(pseudo):
     assert ordem == ["texto", ("medida", True, True)]
     assert not idioma.switching()
     dono.close()
+
+
+# --- a tradução de verdade ---------------------------------------------------
+
+def _campos(texto):
+    return sorted((nome, formato, conversao) for _, nome, formato, conversao in string.Formatter().parse(texto)
+                  if nome is not None)
+
+
+def _mesma_forma(pt, en, onde):
+    assert type(pt) is type(en), onde
+    if isinstance(pt, dict):
+        assert list(pt) == list(en), onde
+        for chave in pt:
+            _mesma_forma(pt[chave], en[chave], f"{onde}[{chave!r}]")
+    elif isinstance(pt, tuple):
+        assert len(pt) == len(en), onde
+        for i, (a, b) in enumerate(zip(pt, en)):
+            _mesma_forma(a, b, f"{onde}[{i}]")
+    else:
+        # Um parâmetro a menos no inglês levantaria KeyError só nesse idioma.
+        assert _campos(pt) == _campos(en), onde
+        # A marcação só vale onde as duas línguas a têm, e "&" é tecla de
+        # atalho em botão, aba e rótulo de formulário: some da tela.
+        assert re.findall(r"<[^>]*>", pt) == re.findall(r"<[^>]*>", en), onde
+        assert pt.count("&") == en.count("&"), onde
+        # O espaço da ponta faz parte do texto montado (" (corte)").
+        assert (pt[:1] == " ", pt[-1:] == " ") == (en[:1] == " ", en[-1:] == " "), onde
+        # Ícone e símbolo ("♪", "{width} × {height}") não se traduzem.
+        if not re.search(r"[^\W\d_]", re.sub(r"\{[^}]*\}", "", pt)):
+            assert en == pt, onde
+
+
+def test_ingles_tem_os_nomes_parametros_e_estruturas_do_portugues():
+    pt, en = idioma._TABLES[i18n.PORTUGUESE], idioma._TABLES[i18n.ENGLISH]
+    assert set(pt) ^ set(en) == set()
+    # Na mesma ordem, para os dois arquivos se lerem lado a lado.
+    assert list(pt) == list(en)
+    for nome in pt:
+        _mesma_forma(pt[nome], en[nome], nome)
+
+
+def _textos(valor):
+    if isinstance(valor, str):
+        yield valor
+    elif isinstance(valor, (tuple, dict)):
+        for item in (valor.values() if isinstance(valor, dict) else valor):
+            yield from _textos(item)
+
+
+# Acento do português, ou palavra que o inglês não tem.
+_PORTUGUES = re.compile(r"[ãõçáéíóúâêôà]|\b(de|para|com|sem|uma?|os|ao|trilha|bloco|quadro|arquivo)\b",
+                        re.IGNORECASE)
+# Iguais nas duas línguas de propósito: nome de formato, sigla, palavra que o
+# português tomou do inglês. Fora daqui, texto igual é texto que ficou sem
+# tradução — o detector acima não reconhece "Copiar".
+_IGUAIS = {
+    "TAB_DOWNLOAD", "TAB_CONVERT", "LABEL_CONTAINER", "LABEL_AUDIO_QUALITY", "PROFILE_MP4_1080",
+    "PROFILE_MP3_320", "STATUS_FFMPEG", "CONVERT_PICK_TIP", "CONVERT_REMOVE_TIP", "EDIT_CHANNELS_MONO",
+    "EXPORT_CONTAINERS", "EXPORT_VIDEO_CODECS", "EXPORT_AUDIO_FORMATS", "EXPORT_ASPECTS", "EDIT_PREV_KEY_SHORT",
+    "EDIT_NEXT_KEY_SHORT", "EDIT_LOOP", "EDIT_FONT_BOLD", "EDIT_FONT_ITALIC", "EDIT_TRANSITIONS",
+    "EDIT_CANVAS_FPS", "PROP_CLIP_ID", "EDIT_SLIDESHOW",
+}
+
+
+def test_ingles_sem_resto_de_portugues():
+    pt, en = idioma._TABLES[i18n.PORTUGUESE], idioma._TABLES[i18n.ENGLISH]
+    restos = []
+    for nome in en:
+        for original, traduzido in zip(_textos(pt[nome]), _textos(en[nome])):
+            igual = traduzido == original and re.search(r"[^\W\d_]", re.sub(r"\{[^}]*\}", "", original))
+            if _PORTUGUES.search(traduzido) or (igual and nome not in _IGUAIS):
+                restos.append(f"{nome}: {traduzido!r}")
+    assert restos == []
