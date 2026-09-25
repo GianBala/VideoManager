@@ -109,12 +109,16 @@ def _ensure_linux_desktop_integration() -> None:
             "[Desktop Entry]\n"
             "Type=Application\n"
             "Name=Video Manager\n"
-            "Comment=Baixe, edite e converta vídeo e áudio\n"
+            # O ambiente escolhe pelo idioma do sistema, não pelo do aplicativo:
+            # o inglês é o de quem não tem tradução, e o português vem marcado.
+            "Comment=Download, edit and convert video and audio\n"
+            "Comment[pt_BR]=Baixe, edite e converta vídeo e áudio\n"
             f"Exec={exec_cmd}\n"
             "Icon=videomanager\n"
             "Terminal=false\n"
             "Categories=AudioVideo;Video;\n"
-            "Keywords=vídeo;áudio;download;converter;editor;ffmpeg;\n"
+            "Keywords=video;audio;download;convert;editor;ffmpeg;\n"
+            "Keywords[pt_BR]=vídeo;áudio;download;converter;editor;ffmpeg;\n"
             "StartupWMClass=VideoManager\n"
         )
 
