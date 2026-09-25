@@ -409,3 +409,30 @@ def test_atalhos_de_projeto_funcionam_com_o_foco_no_editor(qapp: QApplication, m
         assert chamadas == ["salvar", "novo", "exportar"]
     finally:
         window.close()
+
+
+def test_titulo_da_janela_nao_repete_o_nome_do_aplicativo(tmp_path):
+    """O Qt acrescenta o nome de exibição a todo título que não termina com
+    ele: com "Video Manager" como nome, a janela aparecia como "Video Manager
+    2.1 - Video Manager". Roda a abertura de verdade, que é quem define o nome."""
+    import ast
+    import subprocess
+    import sys
+
+    import videomanager
+    script = (
+        "from pathlib import Path\n"
+        "from videomanager.infrastructure.storage import settings\n"
+        f"settings.config_dir = lambda: Path({str(tmp_path)!r})\n"
+        "from videomanager.app import build_app\n"
+        "app, janela = build_app([], audio_enabled=False)\n"
+        "print(repr((janela.windowTitle(), app.applicationDisplayName())))\n"
+    )
+    raiz = Path(__file__).resolve().parents[1]
+    ambiente = {**os.environ, "QT_QPA_PLATFORM": "offscreen", "PYTHONPATH": str(raiz / "src"),
+                "XDG_DATA_HOME": str(tmp_path / "dados")}
+    saida = subprocess.run([sys.executable, "-c", script], env=ambiente, capture_output=True, text=True,
+                           timeout=120, cwd=raiz)
+    titulo, nome = ast.literal_eval(saida.stdout.strip().splitlines()[-1])
+    assert titulo == f"Video Manager {videomanager.__version__}"
+    assert titulo.endswith(nome)

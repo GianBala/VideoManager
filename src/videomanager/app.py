@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QApplication
 
-from videomanager import APP_DISPLAY_NAME
+from videomanager import APP_TITLE
 from videomanager import APP_NAME
 from videomanager import __version__
 from videomanager.domain import i18n
@@ -139,7 +139,10 @@ def build_app(argv: list[str] | None = None, *, audio_enabled: bool = True) -> t
     """
     app = QApplication(argv if argv is not None else sys.argv)
     app.setApplicationName(APP_NAME)
-    app.setApplicationDisplayName(APP_DISPLAY_NAME)
+    # Com a versão: o Qt acrescenta o nome de exibição ao título de toda janela
+    # que não termina com ele, e a janela principal, que se chama exatamente
+    # assim, aparecia como "Video Manager 2.1 - Video Manager".
+    app.setApplicationDisplayName(APP_TITLE)
     app.setApplicationVersion(__version__)
     app.setDesktopFileName("videomanager.desktop")
 
