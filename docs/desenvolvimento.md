@@ -132,8 +132,14 @@ versionar: o resultado depende das fontes da máquina.
 
 ## Convenções
 
-Comentários, docstrings e mensagens seguem pt-BR. Novos textos de controles
-ficam em `presentation/qt/strings.py`; tema e paleta em `theme.py`.
+Comentários, docstrings e mensagens seguem pt-BR. A interface existe em
+português e inglês: novos textos de controles ficam em
+`presentation/qt/strings.py` e, com o mesmo nome, em `strings_en.py`; os das
+outras camadas, nos catálogos `texts.py` de cada uma, em pares
+`CHAVE: (pt, en)`. Texto posto num widget passa por `bind` (ver
+`presentation/qt/i18n.py`) para acompanhar a troca de idioma com a janela
+aberta; identificadores gravados no projeto nunca se traduzem. Tema e
+paleta ficam em `theme.py`.
 Comentários explicam decisões. Preserve IDs, compatibilidade .vmp, avisos de
 download, comportamento temporal e propriedade das saídas.
 

@@ -77,6 +77,7 @@ usam o programa de verdade, porque o defeito só existe na execução.
 | `tests/test_middle_thumbnails.py` | Miniatura e capa mostram o quadro do meio. |
 | `tests/test_gif_export.py`, `tests/test_export_dialog.py` | Exportação GIF real conferida com ffprobe (loop, sem som, imagem parada) e a janela de exportação (corte rápido, qualidade, GIF em "Automática", volta do GIF ao codec anterior). A troca de paleta acima de 512 MB fica em `tests/test_composer.py`. |
 | `tests/test_conversion_checkup.py` | Um teste por achado do checkup da conversão (ver [processamento](processamento.md#regras-da-conversão-local)). |
+| `tests/domain/test_i18n.py`, `tests/application/test_texts.py`, `tests/test_language.py`, `tests/test_language_window.py` | Idioma: catálogos com os mesmos parâmetros nos dois idiomas, texto guardado que se traduz ao exibir, separador decimal, nomes-padrão de trilha; o inglês com os nomes, parâmetros e estruturas do português e sem resto de português; a janela trocada ao vivo igual à que nasce no idioma, sem editar o projeto nem refazer a divisão das colunas; a opção nas Configurações, a abertura direto em inglês e os textos e números do próprio Qt. |
 | `tests/test_binaries.py`, `tests/test_probe_lifecycle.py`, `tests/test_workers.py` | Ambiente dos binários e versão do ffmpeg, análise cancelada sem instalar resultado, cancelamento dos workers e diagnóstico de falha da prévia (cancelar não é erro). |
 
 Testes de interação Qt usam eventos reais (`QTest`, `sendEvent`), não chamadas
@@ -89,6 +90,15 @@ Os testes que precisam dele solicitam `desktop_app` e, quando pertinente,
 `isolated_audio`. A primeira cria QApplication/fontes; a segunda evita
 consultar dispositivo de áudio. `wait_until` processa eventos enquanto
 aguarda uma condição com prazo, em vez de presumir resultado síncrono.
+
+Três fixtures do `conftest.py` rodam em todo teste: `sem_sondagem_de_placa`
+desliga a sondagem da placa de vídeo, `idioma_padrao` devolve o idioma ao
+português e `janelas_do_teste_apagadas` apaga as janelas sem pai que o teste
+criou — sem ela, na altura dos testes de idioma havia 35 mil widgets de testes
+anteriores vivos, e cada troca entregava eventos a todos. Sem PySide6 (job
+`internal`) as três não fazem nada. O fixture `pseudo` troca o inglês por um
+pseudoidioma (cada texto entre ⟦ ⟧), para conferir o mecanismo da troca sem
+depender da tradução.
 
 ## Provar que o núcleo independe do desktop
 
@@ -154,8 +164,9 @@ buffers, repita com entradas representativas do caso real e registre variação.
 
 ### Ensaios opt-in do editor
 
-Os quatro scripts abaixo ficam fora da suíte: precisam de Qt e ffmpeg reais (o
-primeiro, também de uma placa de som) e imprimem números, não veredictos.
+Os scripts abaixo ficam fora da suíte: precisam de Qt e ffmpeg reais (o
+primeiro, também de uma placa de som) e imprimem números — o de idioma também
+um veredito, pelo código de saída.
 Meça **antes e depois** de mexer em fluidez ou gestos, no mesmo ambiente — um
 worktree do commit anterior serve de referência.
 
@@ -164,6 +175,7 @@ PYTHONPATH=src .venv/bin/python scripts/validate_audio.py
 PYTHONPATH=src .venv/bin/python scripts/validate_scrub.py --seconds 30 --size 1920x1080
 QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_preview_gestures.py
 QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_editor_responsiveness.py
+QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_language.py --modo ingles
 ```
 
 | Script | O que mede |
@@ -172,6 +184,7 @@ QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_edito
 | `validate_scrub.py` | Custo por movimento da agulha com o cache de quadros (assinatura + JPEG + `QPixmap`) e sem ele (um ffmpeg por quadro), mais o ritmo de preenchimento. |
 | `validate_preview_gestures.py` | Eventos de mouse reais na prévia: se as bordas dos pixels do objeto acompanham cada movimento. `--canonical-only` desliga as camadas para comparar no mesmo código. |
 | `validate_editor_responsiveness.py` | 30 gestos a 60 Hz: latência dos quadros parciais e finais, workers vivos, processos e encerramento. |
+| `validate_language.py` | A troca de idioma em quinze cenas: a janela trocada ao vivo contra uma que nasce no idioma, a ida e volta, pinturas durante a troca, efeitos colaterais e o tempo. `--modo pseudo` acha texto fora do catálogo, `identidade` confere a geometria da troca, `ingles` acha texto com cara de português; `--cortes` lista o texto que corta em inglês e não em português. A troca durante a reprodução se mede com `validate_playback.py --trocar-idioma`. |
 
 Nenhum deles substitui arrastar a agulha e reproduzir no aplicativo; servem
 para comparar máquinas e versões.
