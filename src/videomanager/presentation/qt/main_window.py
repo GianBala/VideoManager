@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from videomanager import APP_DISPLAY_NAME
+from videomanager import APP_TITLE
 from videomanager import __version__
 from videomanager.application import encoding as hwaccel
 from videomanager.application.capabilities import FFmpegTools
@@ -143,7 +143,7 @@ class MainWindow(QMainWindow):
         # que há lá dentro, ou impediria o download por falta de permissão.
         self._temp_dir = self._runtime.download_cache
 
-        self.setWindowTitle(f"{APP_DISPLAY_NAME} {__version__}")
+        self.setWindowTitle(APP_TITLE)
         # Altura escolhida para caber a aba inteira sem rolagem — barra de abas,
         # cabeçalho e controles — com a fila mostrando quatro linhas. Quem manda
         # na conta é a aba de edição, a mais alta das três: cada pixel a mais
