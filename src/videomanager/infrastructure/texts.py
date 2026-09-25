@@ -265,11 +265,13 @@ register({
 
     # --- yt-dlp ---------------------------------------------------------------------
     "MEDIA_UNTITLED": ("Sem título", "Untitled"),
+    # O motor se atualiza pelo menu Ferramentas; o texto apontava Configurações,
+    # onde não há como fazer isso.
     "PROBE_UNSUPPORTED": (
-        "Nenhum extrator reconhece esta URL. Confira o endereço; se o site for novo, atualizar a "
-        "engine em Configurações pode resolver.",
+        "Nenhum extrator reconhece esta URL. Confira o endereço; se o site for novo, atualizar o "
+        "motor de download, no menu Ferramentas, pode resolver.",
         "No extractor recognizes this URL. Check the address; if the site is new, updating the "
-        "engine in Settings may help.",
+        "download engine from the Tools menu may help.",
     ),
     "PROBE_DRM": (
         "Esta mídia é protegida por DRM e não pode ser baixada.",
