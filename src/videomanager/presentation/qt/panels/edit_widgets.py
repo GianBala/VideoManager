@@ -1373,7 +1373,7 @@ class _ClipPropertiesWidget(QWidget):
         self._btn_kf_next.clicked.connect(self._on_next_keyframe)
         row_kf.addWidget(self._btn_kf_next)
 
-        self._lbl_kf_status = QLabel(strings.PROP_KEYFRAMES_NONE)
+        self._lbl_kf_status = bind(QLabel(), "setText", lambda: strings.PROP_KEYFRAMES_NONE)
         self._lbl_kf_status.setProperty("role", "dim")
         row_kf.addWidget(self._lbl_kf_status, 1)
 
