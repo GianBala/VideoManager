@@ -20,6 +20,29 @@ import ctypes
 import os
 import sys
 
+from videomanager.domain.i18n import register, t
+
+# Aqui, e não no catálogo de uma camada: a mensagem sai antes de qualquer
+# camada ser importada, e este módulo só pode depender da biblioteca padrão.
+register({
+    "PREFLIGHT_MISSING_ONE": (
+        "O Video Manager não pôde abrir: falta biblioteca de sistema que a interface gráfica (Qt) exige.",
+        "Video Manager could not start: a system library required by the graphical interface (Qt) is missing.",
+    ),
+    "PREFLIGHT_MISSING_MANY": (
+        "O Video Manager não pôde abrir: falta bibliotecas de sistema que a interface gráfica (Qt) exige.",
+        "Video Manager could not start: system libraries required by the graphical interface (Qt) are missing.",
+    ),
+    "PREFLIGHT_INSTALL": (
+        "Instale com:\n\n    sudo apt install -y {packages}\n\nDepois abra o aplicativo novamente.\n\n"
+        "Em distribuições que não usam apt, procure o equivalente a {first}.\n"
+        "Para apenas testar sem interface gráfica, use QT_QPA_PLATFORM=offscreen.",
+        "Install with:\n\n    sudo apt install -y {packages}\n\nThen open the application again.\n\n"
+        "On distributions that don't use apt, look for the equivalent of {first}.\n"
+        "To just test without a graphical interface, use QT_QPA_PLATFORM=offscreen.",
+    ),
+})
+
 # Biblioteca -> pacote que a fornece no Debian/Ubuntu/Zorin. Somente as que o
 # plugin xcb do Qt 6 exige e que costumam faltar numa instalação enxuta.
 _REQUIRED: tuple[tuple[str, str], ...] = (
@@ -60,19 +83,9 @@ def missing_system_libraries() -> list[str]:
 
 
 def format_instructions(packages: list[str]) -> str:
-    """Mensagem de erro acionável, em pt-BR."""
-    joined = " ".join(packages)
-    plural = "bibliotecas" if len(packages) > 1 else "biblioteca"
-    return (
-        f"O Video Manager não pôde abrir: falta {plural} de sistema que a "
-        "interface gráfica (Qt) exige.\n\n"
-        f"Instale com:\n\n    sudo apt install -y {joined}\n\n"
-        "Depois abra o aplicativo novamente.\n\n"
-        "Em distribuições que não usam apt, procure o equivalente a "
-        f"{packages[0]}.\n"
-        "Para apenas testar sem interface gráfica, use "
-        "QT_QPA_PLATFORM=offscreen."
-    )
+    """Mensagem de erro acionável, no idioma das preferências."""
+    head = t("PREFLIGHT_MISSING_MANY" if len(packages) > 1 else "PREFLIGHT_MISSING_ONE")
+    return f"{head}\n\n" + t("PREFLIGHT_INSTALL", packages=" ".join(packages), first=packages[0])
 
 
 def check_or_explain() -> str | None:

@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, QLibraryInfo, QLocale, QTranslator
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel
 
 from videomanager.domain import i18n
@@ -34,6 +34,15 @@ def _table(module) -> dict[str, object]:
 _TABLES: dict[str, dict[str, object]] = {i18n.PORTUGUESE: _table(strings), i18n.ENGLISH: _table(strings_en)}
 _current = i18n.PORTUGUESE
 _switching = False
+
+# O que o próprio Qt escreve (OK e Cancelar, o menu de contexto dos campos, o
+# nome das teclas) e como formata números (os campos numéricos) em cada idioma.
+_QT_LOCALES = {
+    i18n.PORTUGUESE: QLocale(QLocale.Language.Portuguese, QLocale.Country.Brazil),
+    i18n.ENGLISH: QLocale(QLocale.Language.English, QLocale.Country.UnitedStates),
+}
+_qt_language: str | None = None
+_qt_translator: QTranslator | None = None
 
 # De onde cada setter lê o texto de volta, para saber se alguém o trocou depois.
 _GETTERS = {
@@ -149,6 +158,8 @@ def apply_language(code: str) -> None:
     global _current, _switching
     if code == _current:
         i18n.set_language(code)
+        # Na abertura em português não há troca, mas o Qt ainda não sabe o idioma.
+        _apply_qt(code)
         return
     table = _TABLES[code]
     # Sem isso, cada texto trocado pediria uma pintura, e a janela mostraria
@@ -159,6 +170,7 @@ def apply_language(code: str) -> None:
     _switching = True
     try:
         i18n.set_language(code)
+        _apply_qt(code)
         for name, value in table.items():
             setattr(strings, name, value)
         _current = code
@@ -172,6 +184,42 @@ def apply_language(code: str) -> None:
         _switching = False
         for window in frozen:
             window.setUpdatesEnabled(True)
+
+
+def _apply_qt(code: str) -> None:
+    """Põe o próprio Qt no idioma ``code``: tradução dele e formato dos números.
+
+    Sem a tradução, os botões padrão (OK, Cancelar, Sim) e o menu de contexto
+    dos campos saíam em inglês no meio da interface em português. Sem o
+    locale, os campos numéricos seguiam o sistema operacional: "0.50" num
+    sistema em inglês, ao lado de rótulos que já diziam "0,5x".
+    """
+    global _qt_language, _qt_translator
+    app = QCoreApplication.instance()
+    if app is None or code == _qt_language:
+        return
+    if _qt_translator is None:
+        _qt_translator = QTranslator()
+        # Sem o arquivo (um pacote que não o trouxe), os textos do Qt ficam em
+        # inglês — a interface continua funcionando.
+        _qt_translator.load(_QT_LOCALES[i18n.PORTUGUESE], "qtbase", "_",
+                            QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath))
+    if code == i18n.PORTUGUESE:
+        app.installTranslator(_qt_translator)
+    else:
+        app.removeTranslator(_qt_translator)
+    QLocale.setDefault(_QT_LOCALES[code])
+    # O locale de um widget é resolvido quando ele nasce: o padrão novo só
+    # chega aos que já existem pela janela de cada um. unsetLocale, e não
+    # setLocale: este marca o widget com locale próprio, e um solto agora (a
+    # aba Propriedades antes de ser aberta é uma janela de topo) entraria
+    # depois na janela preso ao idioma desta troca — "0.50" em português.
+    for window in QApplication.topLevelWidgets():
+        window.unsetLocale()
+    # A tradução avisa cada janela com um evento na fila; entregue aqui, os
+    # textos do Qt trocam antes da pintura, junto com os do aplicativo.
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.LanguageChange)
+    _qt_language = code
 
 
 def _reapply() -> None:

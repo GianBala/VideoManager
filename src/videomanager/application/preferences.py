@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 from typing import Any
 
+from videomanager.domain.i18n import LANGUAGES, PORTUGUESE
+
 @dataclass
 class Preferences:
     """Preferências da aplicação. Todos os campos têm padrão utilizável."""
@@ -57,6 +59,8 @@ class Preferences:
 
     # --- interface ---
     theme: str = "dark"
+    # Idioma da interface, pelo código de videomanager.domain.i18n.
+    language: str = PORTUGUESE
     window_geometry: str = ""  # QByteArray serializado em base64
     # Volume da prévia da aba de edição, de 0 a 100. Guardado porque é ajustado
     # pelo ambiente em que se edita (fone, caixa, escritório), e não pelo vídeo:
@@ -89,4 +93,8 @@ class Preferences:
                 kwargs[name] = value
             elif spec.type in ("list[str]",) and isinstance(value, list):
                 kwargs[name] = [str(item) for item in value]
+        # Um idioma que esta versão não tem (arquivo editado à mão, gravado por
+        # uma versão futura) volta ao padrão: aplicá-lo recusaria abrir.
+        if kwargs.get("language", PORTUGUESE) not in LANGUAGES:
+            del kwargs["language"]
         return cls(**kwargs)
