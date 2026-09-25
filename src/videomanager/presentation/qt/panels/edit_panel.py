@@ -128,7 +128,7 @@ from videomanager.presentation.qt.panels.timeline import image_from_frame
 from videomanager.presentation.qt.panels.timeline import pixmap_from_frame
 
 from videomanager.presentation.qt.panels.edit_widgets import _index_of as _index_of
-from videomanager.presentation.qt.panels.edit_widgets import _filter_label, _transition_label
+from videomanager.presentation.qt.panels.edit_widgets import _clip_name, _filter_label, _transition_label
 from videomanager.presentation.qt.panels.edit_widgets import _VolumePopup as _VolumePopup
 from videomanager.presentation.qt.panels.edit_widgets import _SpeedPopup as _SpeedPopup
 from videomanager.presentation.qt.panels.edit_widgets import _TransportBar
@@ -3188,7 +3188,7 @@ class EditPanel(QWidget):
         self._preview.set_active_clip(clip, self._project.width, self._project.height, visible=track_visible)
         def info(clip=clip) -> str:
             text = strings.EDIT_CLIP_INFO.format(
-                name=clip.media.name if clip.media else (clip.text_content or clip.overlay_type),
+                name=_clip_name(clip),
                 duration=format_span(clip.duration),
             )
             if clip.detached:
