@@ -87,6 +87,24 @@ def _transition_label(transition: object) -> str | None:
     return f"{entry[0]} {entry[1]}" if entry else None
 
 
+def _clip_name(clip: Clip) -> str:
+    """Nome do bloco para quem lê: o arquivo, o texto digitado, o filtro ou a transição.
+
+    O caminho de um bloco sem arquivo ("Filtro_🎬 Sépia") é identificador:
+    guarda o rótulo no idioma em que o bloco nasceu e o texto de quando ele
+    foi inserido. Mostrado como nome, editar o texto deixava o antigo na tela,
+    e a interface em inglês exibia "Transição_".
+    """
+    if clip.overlay_type == "text":
+        return clip.text_content or strings.EDIT_CLIP_TEXT
+    if clip.overlay_type == "filter":
+        return strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
+    if clip.overlay_type == "transition":
+        tname = clip.transition_name or "fade"
+        return strings.EDIT_TRANSITION_TITLE.format(name=strings.EDIT_TRANSITIONS.get(tname, ("", tname))[1])
+    return clip.media.name if clip.media else strings.PROP_KINDS.get(clip.overlay_type, clip.overlay_type)
+
+
 def _index_of(box: QComboBox, value: object) -> int:
     """Posição do item que guarda este dado, ou -1.
 
@@ -1171,11 +1189,7 @@ class _ClipPropertiesWidget(QWidget):
             self._lbl_clip_type.setText(strings.EDIT_CLIP_NONE)
             return
         kind = strings.PROP_KINDS.get(clip.overlay_type, clip.overlay_type)
-        if clip.overlay_type == "transition":
-            tname = clip.transition_name or "fade"
-            name = strings.EDIT_TRANSITION_TITLE.format(name=strings.EDIT_TRANSITIONS.get(tname, ("", tname))[1])
-        else:
-            name = clip.media.name if clip.media else (clip.text_content or kind)
+        name = _clip_name(clip)
         display_name = name if len(name) <= 32 else f"{name[:29]}..."
         self._title_lbl.setText(strings.PROP_TITLE_CLIP.format(name=display_name))
         self._title_lbl.setToolTip(strings.PROP_TITLE_CLIP.format(name=name))
