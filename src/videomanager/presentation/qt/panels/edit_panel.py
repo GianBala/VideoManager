@@ -267,6 +267,19 @@ def _file_key(path: Path) -> tuple:
     return (path, info.st_size, info.st_mtime_ns)
 
 
+def _restyle(buttons) -> None:
+    """Refaz o estilo depois de marcar outro botão de opção.
+
+    O estado marcado muda a borda e o peso da fonte (ver ``theme``), e o
+    QPushButton não refaz a dica de tamanho quando é marcado: o botão escolhido
+    ficava com a altura do desmarcado, e o anterior com a do marcado — até
+    alguma outra coisa, como trocar o texto, refazer a medida.
+    """
+    for button in buttons:
+        button.style().unpolish(button)
+        button.style().polish(button)
+
+
 class _TopSplitter(QSplitter):
     """Divisor de cima, em que a prévia é a última a perder largura.
 
@@ -1194,6 +1207,7 @@ class EditPanel(QWidget):
         for i, fid in enumerate(self._filter_specs):
             if i < len(self._filter_buttons):
                 self._filter_buttons[i].setChecked(fid == filter_name)
+        _restyle(self._filter_buttons)
         clip = self._timeline.selected_clip
         if not self._syncing and clip is not None and clip.overlay_type == "filter":
             self._remember()
@@ -1422,6 +1436,7 @@ class EditPanel(QWidget):
         for i, tid in enumerate(self._trans_specs):
             if i < len(self._trans_buttons):
                 self._trans_buttons[i].setChecked(tid == trans_name)
+        _restyle(self._trans_buttons)
         clip = self._timeline.selected_clip
         if not self._syncing and clip is not None and clip.overlay_type == "transition":
             self._remember()
@@ -1634,6 +1649,7 @@ class EditPanel(QWidget):
             for i, fid in enumerate(self._filter_specs):
                 if i < len(self._filter_buttons):
                     self._filter_buttons[i].setChecked(fid == fname)
+            _restyle(self._filter_buttons)
             self._filter_dur.setValue(clip.duration)
             self._insert_new_filter_btn.setVisible(True)
             self._insert_new_text_btn.setVisible(False)
@@ -1646,6 +1662,7 @@ class EditPanel(QWidget):
             for i, tid in enumerate(getattr(self, "_trans_specs", ())):
                 if i < len(self._trans_buttons):
                     self._trans_buttons[i].setChecked(tid == tname)
+            _restyle(self._trans_buttons)
             self._trans_dur.setValue(clip.duration)
             self._trans_affect_additionals.setChecked(
                 clip.transition_affects_additionals

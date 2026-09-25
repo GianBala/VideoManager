@@ -2333,3 +2333,27 @@ def test_filter_clip_preserved_in_paused_frame_preview(
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
 pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+def test_opcao_escolhida_nas_abas_de_adicionais_tem_a_medida_de_marcada(qapp: QApplication,
+                                                                       dummy_tools: FFmpegTools) -> None:
+    """O estado marcado muda borda e peso da fonte, e o QPushButton não refaz a
+    dica de tamanho ao ser marcado: a opção escolhida ficava com a altura da
+    desmarcada, e a anterior com a da marcada."""
+    from videomanager.presentation.qt.theme import stylesheet
+    anterior = qapp.styleSheet()
+    qapp.setStyleSheet(stylesheet("dark"))
+    panel = EditPanel(settings=Settings(), ensure_tools=lambda: dummy_tools, editor=build_editor_service(),
+                      processing=build_processing_service(), runtime=build_desktop_runtime())
+    try:
+        panel.show()
+        qapp.processEvents()
+        panel._select_filter("sepia")
+        alturas = dict(zip(panel._filter_specs, (b.sizeHint().height() for b in panel._filter_buttons)))
+        assert alturas["sepia"] > alturas["pb"]
+        panel._select_transition("wipeleft")
+        alturas = dict(zip(panel._trans_specs, (b.sizeHint().height() for b in panel._trans_buttons)))
+        assert alturas["wipeleft"] > alturas["fade"]
+    finally:
+        panel.shutdown()
+        qapp.setStyleSheet(anterior)
