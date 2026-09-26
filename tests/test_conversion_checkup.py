@@ -475,17 +475,18 @@ def _medir(tools: FFmpegTools, path: Path) -> dict:
     return {"tamanho": int(data["format"]["size"]), "duracao": float(data["format"]["duration"]), **streams}
 
 
-def _comprimir(tools: FFmpegTools, origem: Path, nivel, pasta: Path) -> tuple[Path, object]:
+def _comprimir(tools: FFmpegTools, origem: Path, nivel, pasta: Path, codec: str = "h264",
+               max_bytes: int | None = None) -> tuple[Path, object]:
     from videomanager.bootstrap import build_processing_service
     from videomanager.domain.compression import compression_target
     from videomanager.infrastructure.ffmpeg.converter import Converter, probe_file
 
     media = probe_file(origem, tools)
-    alvo = compression_target(media, nivel, "h264", "software")
+    alvo = compression_target(media, nivel, codec, "software")
     job, _ = build_processing_service().convert(media, alvo, same_folder=False, fallback=pasta, compress=True)
     request = job.request
     return Converter(media, alvo, request.destination, tools, lease=request.lease,
-                     max_bytes=request.max_bytes).run(), alvo
+                     max_bytes=max_bytes or request.max_bytes).run(), alvo
 
 
 @pytest.mark.ffmpeg
@@ -566,8 +567,10 @@ def test_aba_comprime_video_e_audio_da_mesma_lista(desktop_app, tmp_path) -> Non
         panel._start_conversion()
         alvos = {job.request.destination.name: job.request.target for job in enfileiradas}
         assert alvos == {
+            # Sem bitrate da trilha: 150 MB em 60 s são 20000 kbps, menos 256 do
+            # áudio, e o teto da Equilibrada é 70% disso.
             "video (comprimido).mp4": VideoTarget(container="mp4", video_codec="hevc", audio_codec="aac",
-                                                  audio_bitrate="128", quality="balanced"),
+                                                  audio_bitrate="128", quality="balanced", max_kbps=13820),
             "musica (comprimido).m4a": AudioTarget(codec="m4a", bitrate="128", reencode=True),
         }
 
@@ -641,15 +644,65 @@ def test_amostra_cancelada_para_e_nao_deixa_temporario(ffmpeg_tools, tmp_path, m
 
 
 @pytest.mark.ffmpeg
-def test_compressao_que_aumenta_o_arquivo_nao_e_gravada(ffmpeg_tools, tmp_path) -> None:
+def test_compressao_que_nao_encolhe_nao_e_gravada(ffmpeg_tools, tmp_path) -> None:
+    """A recusa é a rede de quem não tem teto (a placa, e o AV1, que o trata
+    como alvo): um limite que nenhuma saída cumpre a faz aparecer."""
     from videomanager.domain.compression import LEVELS
 
-    # CRF 45: o original já está mais comprimido do que o nível Leve aceita.
-    origem = _fonte_sintetica(ffmpeg_tools, tmp_path, 3, "45")
+    origem = _fonte_sintetica(ffmpeg_tools, tmp_path, 3, "20")
     saidas = tmp_path / "saidas"
     with pytest.raises(ConversionError, match="não ficou menor que o original"):
-        _comprimir(ffmpeg_tools, origem, LEVELS[0], saidas)
+        _comprimir(ffmpeg_tools, origem, LEVELS[0], saidas, max_bytes=1000)
     assert list(saidas.iterdir()) == []
+
+
+def _ja_comprimida(tools: FFmpegTools, pasta: Path, segundos: int) -> Path:
+    """Como um vídeo baixado da internet: encoder lento, bitrate baixo, e o CRF
+    do nível Leve o triplicaria (medido: 298% no x264, 271% no x265)."""
+    origem = pasta / "baixado.mp4"
+    _run(tools, "-f", "lavfi", "-i", f"testsrc2=s=640x360:r=30:d={segundos}", "-f", "lavfi",
+         "-i", f"sine=duration={segundos}", "-ac", "2", "-c:v", "libx264", "-crf", "30", "-preset", "veryslow",
+         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", str(origem))
+    return origem
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("codec", ["h264", "hevc"])
+def test_teto_garante_o_tamanho_de_material_ja_comprimido(ffmpeg_tools, tmp_path, codec) -> None:
+    from dataclasses import replace
+
+    from videomanager.domain.compression import LEVELS, compression_ceiling
+    from videomanager.infrastructure.ffmpeg.converter import Converter, probe_file
+
+    origem = _ja_comprimida(ffmpeg_tools, tmp_path, 20)
+    media = probe_file(origem, ffmpeg_tools)
+    saida, alvo = _comprimir(ffmpeg_tools, origem, LEVELS[0], tmp_path / "com", codec)
+    assert saida.stat().st_size <= compression_ceiling(media, alvo) < origem.stat().st_size
+    # Sem o teto, o mesmo nível cresceria: é o que o teto evita, e não o acaso.
+    livre = tmp_path / f"livre.{alvo.extension}"
+    Converter(media, replace(alvo, max_kbps=None), livre, ffmpeg_tools).run()
+    assert livre.stat().st_size > origem.stat().st_size
+
+
+@pytest.mark.ffmpeg
+def test_teto_do_av1_reduz_o_crescimento_sem_garantir(ffmpeg_tools, tmp_path) -> None:
+    from dataclasses import replace
+
+    from videomanager.domain.compression import LEVELS, compression_ceiling
+    from videomanager.infrastructure.ffmpeg.converter import Converter, probe_file
+
+    if "libsvtav1" not in subprocess.run([ffmpeg_tools.ffmpeg_str, "-hide_banner", "-encoders"],
+                                         capture_output=True, text=True, timeout=30).stdout:
+        pytest.skip("ffmpeg sem SVT-AV1")
+    origem = _ja_comprimida(ffmpeg_tools, tmp_path, 6)
+    media = probe_file(origem, ffmpeg_tools)
+    from videomanager.domain.compression import compression_target
+    alvo = compression_target(media, LEVELS[0], "av1", "software")
+    assert compression_ceiling(media, alvo) is None  # a tabela não promete
+    com, livre = tmp_path / "com.mp4", tmp_path / "livre.mp4"
+    Converter(media, alvo, com, ffmpeg_tools).run()
+    Converter(media, replace(alvo, max_kbps=None), livre, ffmpeg_tools).run()
+    assert com.stat().st_size < livre.stat().st_size / 2
 
 
 class _AmostrasFalsas:
@@ -679,11 +732,12 @@ class _AmostrasFalsas:
         return FunctionWorker(medir, control.cancel)
 
 
-def test_tabela_espera_a_amostra_e_descarta_a_medida_velha(desktop_app, wait_until, tmp_path) -> None:
+@pytest.mark.parametrize("placa", ["software", "nvenc"])
+def test_tabela_espera_a_amostra_e_descarta_a_medida_velha(desktop_app, wait_until, tmp_path, placa) -> None:
     import re
     from types import SimpleNamespace
 
-    from videomanager.application.formatting import format_size
+    from videomanager.application.formatting import DASH, format_size
     from videomanager.application.preferences import Preferences
     from videomanager.bootstrap import build_desktop_runtime, build_processing_service
     from videomanager.domain.compression import LEVELS, compression_target
@@ -699,7 +753,8 @@ def test_tabela_espera_a_amostra_e_descarta_a_medida_velha(desktop_app, wait_unt
                         (LocalStream(0, "audio", "flac", bitrate=900.0),))
     # 1 MB por minuto: já mais comprimido do que qualquer nível entrega.
     baixado = LocalMedia(tmp_path / "baixado.mp4", 60.0, "mov,mp4", 1_000_000, (VIDEO,))
-    panel = ConvertPanel(Preferences(), lambda: TOOLS, processing=build_processing_service(), runtime=runtime)
+    panel = ConvertPanel(Preferences(hardware_encoder=placa), lambda: TOOLS, processing=build_processing_service(),
+                         runtime=runtime)
     try:
         panel._tools = TOOLS
         panel._on_inspected(panel._inspection_token, SimpleNamespace(
@@ -714,6 +769,12 @@ def test_tabela_espera_a_amostra_e_descarta_a_medida_velha(desktop_app, wait_unt
                                        ("baixado.mp4", "h264", "balanced", None)]
         assert len(runtime.pedidos) == 11 and not any(p[0] == "musica.flac" for p in runtime.pedidos)
         assert all(rotulo.text() == strings.CONVERT_MEASURING for rotulo in panel._level_sizes)
+        # O teto não espera a amostra; na placa não há teto, e o lote fica sem garantia.
+        garantias = [rotulo.text() for rotulo in panel._level_ceilings]
+        if placa == "software":
+            assert all(texto.startswith(strings.CONVERT_CEILING.format(size="")) for texto in garantias), garantias
+        else:
+            assert garantias == [DASH] * 4
         assert strings.CONVERT_MEASURING in panel._plan.text()
 
         # Trocar o codec cancela o que estava sendo medido para o anterior.
@@ -731,12 +792,14 @@ def test_tabela_espera_a_amostra_e_descarta_a_medida_velha(desktop_app, wait_unt
         esperado = sum(estimate_convert_size(m, alvo, {"high": 4000.0, "balanced": 2000.0}.get(alvo.quality))
                        if isinstance(alvo, VideoTarget) else estimate_convert_size(m, alvo)
                        for m in (video, pequeno, musica, baixado)
-                       for alvo in [compression_target(m, LEVELS[1], "hevc", "software")])
+                       for alvo in [compression_target(m, LEVELS[1], "hevc", placa)])
         assert panel._level_sizes[1].text().startswith(format_size(esperado, estimated=True))
         reducoes = [int(re.search(r"\(([+-]\d+)%\)", rotulo.text()).group(1)) for rotulo in panel._level_sizes]
         assert reducoes == sorted(reducoes, reverse=True), reducoes
-        # O lote encolhe no total, mas o arquivo que cresce é avisado.
-        assert strings.CONVERT_COMPRESS_NO_GAIN.format(count=1) in panel._plan.text()
+        # O lote encolhe no total. Com teto, o arquivo baixado encolhe também;
+        # na placa, sem teto, ele cresceria, e é avisado.
+        aviso = strings.CONVERT_COMPRESS_NO_GAIN.format(count=1)
+        assert (aviso in panel._plan.text()) is (placa == "nvenc")
         assert "menor)" in panel._plan.text()
     finally:
         panel.shutdown()
@@ -763,3 +826,48 @@ def test_amostra_4k_so_roda_com_memoria_para_ela(monkeypatch, disponivel, mede) 
             sample.sample_video_kbps(uhd, VideoTarget(container="mp4", video_codec="h264", quality="balanced"),
                                      TOOLS, sample.ProcessControl())
         assert rodou == []
+
+
+class TestTetoNoComando:
+    @pytest.mark.parametrize(("codec", "esperado"), [
+        ("h264", ["-maxrate", "7000k", "-bufsize", "7000k"]),
+        ("hevc", ["-maxrate", "7000k", "-bufsize", "7000k"]),
+        ("av1", ["-svtav1-params", "mbr=7000"]),
+    ])
+    def test_teto_por_encoder(self, codec, esperado) -> None:
+        args = build_video_args(_media(VIDEO, AUDIO), VideoTarget(container="mp4", video_codec=codec,
+                                                                  quality="balanced", max_kbps=7000),
+                                Path("/s/x"), TOOLS)
+        inicio = args.index(esperado[0])
+        assert args[inicio:inicio + len(esperado)] == esperado
+
+    def test_sem_teto_nada_muda(self) -> None:
+        args = build_video_args(_media(VIDEO, AUDIO), VideoTarget(container="mp4", video_codec="h264",
+                                                                  quality="balanced"), Path("/s/x"), TOOLS)
+        assert "-maxrate" not in args and "-svtav1-params" not in args
+
+    def test_placa_nao_recebe_teto(self, monkeypatch) -> None:
+        from dataclasses import replace
+
+        from videomanager.infrastructure.ffmpeg import hardware
+        placa = replace(hardware.software_encoder("h264"), name="h264_nvenc", quality=("-rc", "constqp"))
+        monkeypatch.setattr(hardware, "resolve", lambda *a, **k: placa)
+        args = build_video_args(_media(VIDEO, AUDIO), VideoTarget(container="mp4", video_codec="h264",
+                                                                  hardware="nvenc", quality="balanced",
+                                                                  max_kbps=7000), Path("/s/x"), TOOLS)
+        assert "-maxrate" not in args
+
+
+def test_audio_abaixo_do_teto_sai_da_fila_com_o_motivo(tmp_path) -> None:
+    from videomanager.bootstrap import build_processing_service
+    from videomanager.domain.compression import LEVELS, compression_target
+
+    origem = tmp_path / "musica.mp3"
+    origem.write_bytes(b"x")
+    mp3 = LocalMedia(origem, 60.0, "mp3", 720_000, (LocalStream(0, "audio", "mp3", bitrate=96.0),))
+    alvo = compression_target(mp3, LEVELS[1], "h264", "software")
+    with pytest.raises(ConversionError, match="96 kbps"):
+        build_processing_service().convert(mp3, alvo, same_folder=True, fallback=tmp_path, compress=True)
+    assert list(tmp_path.iterdir()) == [origem]  # nada reservado
+    # Fora da compressão, a mesma cópia continua sendo um pedido legítimo.
+    build_processing_service().convert(mp3, alvo, same_folder=True, fallback=tmp_path)

@@ -311,6 +311,25 @@ def _mkv_extra_streams(media: LocalMedia) -> tuple[str, ...]:
     return tuple(extras)
 
 
+def _bitrate_cap(encoder: str, target: VideoTarget) -> list[str]:
+    """Teto de bitrate sobre o CRF, onde o encoder o respeita.
+
+    O x264 e o x265 limitam pelo VBV, com buffer de 1 s: com 2 s, o que ele
+    gasta além do teto no começo dobrava (medido: 0,75 s de teto a mais contra
+    0,45). O SVT-AV1 ignora o ``-maxrate`` nesse modo (19% acima) e trata o
+    ``mbr`` como alvo, não como teto: ainda reduz o crescimento, sem garantir.
+    Na placa a quantização é fixa e não há teto — quem segura ali é a recusa no
+    fim.
+    """
+    if not target.max_kbps:
+        return []
+    if encoder == "libsvtav1":
+        return ["-svtav1-params", f"mbr={target.max_kbps}"]
+    if encoder in ("libx264", "libx265"):
+        return ["-maxrate", f"{target.max_kbps}k", "-bufsize", f"{target.max_kbps}k"]
+    return []
+
+
 def build_video_args(
     media: LocalMedia, target: VideoTarget, destination: Path, tools: FFmpegTools
 ) -> list[str]:
@@ -341,7 +360,7 @@ def build_video_args(
             device_args = list(hw_enc.device)
             if hw_enc.filter_suffix:
                 filters.append(hw_enc.filter_suffix)
-            video_encoder_args = ["-c:v", hw_enc.name, *hw_enc.quality]
+            video_encoder_args = ["-c:v", hw_enc.name, *hw_enc.quality, *_bitrate_cap(hw_enc.name, target)]
         else:
             encoder = _VIDEO_ENCODERS.get(codec)
             if encoder is None:
@@ -350,7 +369,8 @@ def build_video_args(
                 # A tabela de cada encoder, a mesma da exportação: o mesmo CRF
                 # rende arquivos muito diferentes no x264 e no AV1, e o VP9 só
                 # trata o CRF como qualidade constante com o ``-b:v 0`` dela.
-                video_encoder_args = ["-c:v", encoder, *hwaccel.encoder_quality(encoder, target.quality)]
+                video_encoder_args = ["-c:v", encoder, *hwaccel.encoder_quality(encoder, target.quality),
+                                      *_bitrate_cap(encoder, target)]
             else:
                 video_encoder_args = ["-c:v", encoder, "-crf", str(target.crf)]
                 if encoder in ("libx264", "libx265"):

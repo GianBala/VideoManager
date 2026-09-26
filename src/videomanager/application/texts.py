@@ -17,6 +17,8 @@ register({
     "QUALITY_HIGH": ("alta qualidade", "high quality"),
     "QUALITY_ECONOMY": ("qualidade econômica", "economy quality"),
     "OUTPUT_COMPRESSED_SUFFIX": (" (comprimido)", " (compressed)"),
+    "ERROR_ALREADY_COMPRESSED": ("já está em {kbps} kbps, abaixo do teto do nível: não há o que comprimir",
+                                 "already at {kbps} kbps, below the level's ceiling: nothing to compress"),
     "ENCODER_SOFTWARE": ("Software (melhor compressão)", "Software (best compression)"),
     "ENCODER_AUTO": ("Automático (usa a placa)", "Automatic (uses the GPU)"),
 

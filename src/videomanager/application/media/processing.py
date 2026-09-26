@@ -23,6 +23,7 @@ from videomanager.application.ports.rendering import TextRasterizer
 from videomanager.application.ports.processing import MediaCatalog
 from videomanager.application.ports.processing import OutputStore
 from videomanager.domain.compatibility import container_accepts_video
+from videomanager.domain.compatibility import copies_audio
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,10 @@ class ProcessingService:
                                          container=target.container))
         if isinstance(target, AudioTarget) and not media.has_audio:
             raise ConversionError(Text('ERROR_NO_AUDIO_TRACK'))
+        if compress and isinstance(target, AudioTarget) and copies_audio(media, target):
+            # Abaixo do teto do nível o áudio seria copiado, do mesmo tamanho: sai
+            # da fila aqui, com o motivo, em vez de falhar depois.
+            raise ConversionError(Text('ERROR_ALREADY_COMPRESSED', kbps=target.bitrate))
         directory = media.path.parent if same_folder else fallback
         fallback_used = not self.catalog.writable(directory)
         if fallback_used:

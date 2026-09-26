@@ -263,6 +263,8 @@ def estimate_convert_size(
                 v_rate = min(v_rate, orig_total_rate * 1.1)
         if video_kbps is not None:
             v_rate = video_kbps
+        if target.guaranteed_kbps:
+            v_rate = min(v_rate, target.guaranteed_kbps)
 
         if duration > 0:
             return int(((v_rate + a_rate) * 1000 / 8) * duration * 1.015)
