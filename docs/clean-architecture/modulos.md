@@ -21,7 +21,7 @@ de textos da camada. A tabela cobre os módulos de produção, incluindo as entr
 | --- | --- |
 | [domain/compatibility.py](../../src/videomanager/domain/compatibility.py) | Compatibilidade de codecs/containers, decisões de cópia, escala e recodificação; tamanho exibido com rotação (720p é o lado curto) e codec que o container aceita. |
 | [domain/composition.py](../../src/videomanager/domain/composition.py) | Pedido semântico de composição/exportação, sem argumentos ffmpeg. |
-| [domain/compression.py](../../src/videomanager/domain/compression.py) | Níveis de compressão e o alvo de vídeo ou áudio de cada arquivo; nunca amplia nem recodifica áudio abaixo do teto. |
+| [domain/compression.py](../../src/videomanager/domain/compression.py) | Níveis de compressão, o alvo de vídeo ou áudio de cada arquivo (CRF com teto de bitrate por nível) e o tamanho garantido; nunca amplia nem recodifica áudio abaixo do teto. |
 | [domain/constants.py](../../src/videomanager/domain/constants.py) | Duração mínima de segmento e de transição (0,2 s) e codecs de imagens compartilhados. |
 | [domain/estimator.py](../../src/videomanager/domain/estimator.py) | Estimativas de tamanho/bitrate a partir de formatos e escolhas, inclusive o GIF (por pixel, sem áudio). |
 | [domain/export_policy.py](../../src/videomanager/domain/export_policy.py) | Elegibilidade de corte simples (velocidade, opacidade, animação, lacunas e sobreposições o descartam) e de interpolação, e adaptação para TrimTarget. |

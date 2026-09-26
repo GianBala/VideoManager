@@ -129,6 +129,21 @@ class VideoTarget:
     # ``None`` mantém o ``crf`` acima, que é o da conversão comum.
     quality: str | None = None
     hardware: str = "software"
+    # Teto do bitrate de vídeo (kbps) sobre o nível de qualidade: o encoder
+    # mira o nível e não passa disto (ver ``domain/compression.py``).
+    max_kbps: int | None = None
+
+    @property
+    def guaranteed_kbps(self) -> int | None:
+        """O teto que o encoder cumpre: o VBV do x264 e do x265.
+
+        O SVT-AV1 trata o dele como alvo — medido num conteúdo difícil, até 38%
+        acima, e passando mais quanto mais longo o arquivo —, e a placa, com
+        quantização fixa, não tem teto. Só este número pode virar promessa.
+        """
+        if self.max_kbps and self.hardware == "software" and self.video_codec in ("h264", "hevc"):
+            return self.max_kbps
+        return None
 
     @property
     def extension(self) -> str:

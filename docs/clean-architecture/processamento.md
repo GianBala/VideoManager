@@ -70,7 +70,20 @@ Estas regras saíram de um checkup da conversão e têm teste em
   x264. A medida roda na vaga da inspeção (um ffmpeg por vez da aba), é
   cancelada ao mudar arquivos, codec, modo ou encoder, e só começa se couber em
   70% da memória disponível (~600 bytes por pixel da origem: 4,3 GB num 4K);
-  senão, ou com memória desconhecida, a conta por pixels fica no lugar. `ConversionRequest.max_bytes`
+  senão, ou com memória desconhecida, a conta por pixels fica no lugar.
+  O vídeo é **CRF com teto**: `VideoTarget.max_kbps` é uma fração do bitrate de
+  vídeo da origem (85/70/50/35% por nível), enviada como VBV ao x264 e ao x265
+  (`-maxrate`/`-bufsize` de 1 s) e como `mbr` ao SVT-AV1. Medido contra o CRF
+  sozinho em vídeos reais: onde o CRF crescia (+10% a +37%), o teto segurou, com
+  SSIM de 0,003 a 0,010 menor; onde o conteúdo comprime bem, saída idêntica. Duas
+  passagens para um tamanho-alvo foram descartadas: acertam o tamanho (±1,3%),
+  mas numa tela parada gravam 5× o necessário. Só o VBV é garantia
+  (`VideoTarget.guaranteed_kbps`): o excesso dele é fixo — até 0,45 s de teto,
+  com buffer de 1 s, em 6, 20 e 60 s —, e `compression_ceiling` soma 1 s. O
+  SVT-AV1 passou até 38% do `mbr` num conteúdo difícil, e a placa usa
+  quantização fixa, sem teto: nesses, a estimativa não é cortada no teto, a
+  tabela não promete, e quem segura é `ConversionRequest.max_bytes`. O áudio
+  abaixo do teto do nível é recusado ao enfileirar (`ERROR_ALREADY_COMPRESSED`). `ConversionRequest.max_bytes`
   faz o `Converter` recusar, antes de publicar, a compressão que não encolheu.
 - **Capa.** O remux que embute a capa mantém metadados e capítulos
   (`-map_metadata 0 -map_chapters 0`).
