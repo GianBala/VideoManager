@@ -192,6 +192,7 @@ def estimate_convert_size(
     from videomanager.domain.media import AudioTarget
     from videomanager.domain.media import VideoTarget
     from videomanager.domain.compatibility import can_copy_audio
+    from videomanager.domain.compatibility import display_size
 
     duration = media.duration or 0.0
 
@@ -224,12 +225,17 @@ def estimate_convert_size(
         orig_h = (media.video.height if media.video else None) or 1080
         orig_fps = (media.video.fps if media.video else None) or 30.0
 
-        if target.height and orig_h:
-            target_h = target.height
-            target_w = int(orig_w * (target_h / orig_h))
-        else:
-            target_w = orig_w
-            target_h = orig_h
+        # A resolução pedida é o lado curto da imagem exibida, como em
+        # ``build_video_args``. Pela altura guardada, um retrato 1080×1920 em
+        # "720p" entrava na conta como 405×720, e a estimativa saía ~2,4× abaixo.
+        target_w, target_h = display_size(media) or (orig_w, orig_h)
+        short = min(target_w, target_h)
+        if target.height:
+            scale = target.height / short
+            if target_w < target_h:
+                target_w, target_h = target.height, int(target_h * scale)
+            else:
+                target_w, target_h = int(target_w * scale), target.height
 
         v_rate = estimate_video_bitrate(target_w, target_h, orig_fps, target.video_codec)
         a_rate = (media.audio.bitrate if (media.audio and media.audio.bitrate) else 160.0)
@@ -237,7 +243,7 @@ def estimate_convert_size(
         # Se o original já possui taxa menor, não superestima
         if media.size and duration > 0:
             orig_total_rate = (media.size * 8) / (duration * 1000)
-            if target_h <= orig_h and orig_total_rate > 0:
+            if (target.height or short) <= short and orig_total_rate > 0:
                 v_rate = min(v_rate, orig_total_rate * 1.1)
 
         if duration > 0:
