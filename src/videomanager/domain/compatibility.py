@@ -1,4 +1,5 @@
 """Regras de compatibilidade de streams e containers."""
+from videomanager.domain.media import AudioTarget
 from videomanager.domain.media import LocalMedia
 from videomanager.domain.media import VideoTarget
 
@@ -47,6 +48,15 @@ def can_copy_audio(media: LocalMedia, codec: str) -> bool:
     if stream is None or codec == "copy":
         return codec == "copy" and stream is not None
     return stream.codec.lower() in _EQUIVALENT_SOURCE_CODECS.get(codec, set())
+
+
+def copies_audio(media: LocalMedia, target: AudioTarget) -> bool:
+    """Se a conversão para áudio vai copiar em vez de recodificar.
+
+    Comando, descrição e estimativa perguntam aqui: decidindo cada um por conta
+    própria, a compressão anunciaria um bitrate e gravaria uma cópia.
+    """
+    return not target.reencode and can_copy_audio(media, target.codec)
 
 
 def display_size(media: LocalMedia) -> tuple[int, int] | None:

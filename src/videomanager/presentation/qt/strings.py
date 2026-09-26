@@ -213,6 +213,24 @@ CONVERT_FALLBACK = (
     "de downloads:\n{folder}"
 )
 CONVERT_SKIPPED = "Ignorados:"
+CONVERT_TO_COMPRESS = "Comprimir"
+CONVERT_LEVEL_HEADER = "Nível"
+CONVERT_QUALITY_HEADER = "Qualidade"
+CONVERT_SIZE_HEADER = "Tamanho estimado"
+CONVERT_MEASURING = "medindo…"
+CONVERT_LEVELS = {"light": "Leve", "balanced": "Equilibrada", "strong": "Forte", "max": "Máxima"}
+CONVERT_LEVEL_QUALITY = {
+    "light": "quase idêntica ao original",
+    "balanced": "ótima · recomendada",
+    "strong": "boa · perda visível de perto",
+    "max": "aceitável · até {height}p",
+}
+CONVERT_COMPRESS_SIZE = "Tamanho: {before} → {after} ({percent}% menor)"
+CONVERT_COMPRESS_SIZE_LARGER = "Tamanho: {before} → {after}"
+CONVERT_COMPRESS_NO_GAIN = (
+    "{count} arquivo(s) já bem comprimido(s) não deve(m) ficar menor(es) que o "
+    "original, e o que não ficar menor não é gravado."
+)
 
 # --- editor de vídeo ---------------------------------------------------------
 EDIT_IMPORT = "Importar mídia…"

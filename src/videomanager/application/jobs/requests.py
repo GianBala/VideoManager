@@ -21,6 +21,8 @@ class ConversionRequest:
     destination: Path
     text_assets: tuple[tuple[int, Path], ...] = ()
     lease: OutputLease | None = None
+    # A compressão só publica o que ficou menor que isto (o tamanho da origem).
+    max_bytes: int | None = None
 
 
 @dataclass(frozen=True)

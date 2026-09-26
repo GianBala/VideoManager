@@ -5,7 +5,7 @@ Três decisões sustentam este módulo.
 **Cópia direta quando dá.** Se o áudio de origem já está no codec pedido e só o
 container muda, usamos ``-c copy``: é instantâneo e sem perda nenhuma.
 Recodificar nesse caso desperdiçaria minutos e degradaria o som sem motivo. A
-detecção está em :func:`can_copy_audio`.
+detecção está em :func:`copies_audio`.
 
 **Progresso por ``-progress pipe:1``.** O ffmpeg escreve pares ``chave=valor`` em
 stdout, em formato estável e independente de idioma. A alternativa comum —
@@ -37,6 +37,7 @@ from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
 from videomanager.application.events import Progress
 from videomanager.application.errors import ConversionError
+from videomanager.application.formatting import format_size
 from videomanager.domain.i18n import Text
 from videomanager.infrastructure.system.process import ProcessControl, terminate_and_wait, terminate_async
 from videomanager.domain.composition import Composition
@@ -52,7 +53,7 @@ from videomanager.domain.media import LocalMedia
 from videomanager.domain.media import AudioTarget
 from videomanager.domain.media import VideoTarget
 
-from videomanager.domain.compatibility import can_copy_audio
+from videomanager.domain.compatibility import copies_audio
 from videomanager.domain.compatibility import needs_scaling
 from videomanager.domain.compatibility import is_portrait
 from videomanager.domain.compatibility import resolved_video_codec
@@ -265,7 +266,7 @@ def build_audio_args(
         "-map", "0:a:0",
     ]
 
-    if can_copy_audio(media, target.codec):
+    if copies_audio(media, target):
         args += ["-c:a", "copy"]
     else:
         encoder = _AUDIO_ENCODERS.get(target.codec)
@@ -335,7 +336,8 @@ def build_video_args(
     else:
         # Se hardware foi solicitado e a família possui acelerador
         if target.hardware != hwaccel.SOFTWARE and codec in ("h264", "hevc"):
-            hw_enc = hwaccel.resolve(codec, target.hardware, tools)
+            hw_enc = hwaccel.resolve(codec, target.hardware, tools,
+                                     quality=target.quality or hwaccel.DEFAULT_QUALITY)
             device_args = list(hw_enc.device)
             if hw_enc.filter_suffix:
                 filters.append(hw_enc.filter_suffix)
@@ -344,12 +346,18 @@ def build_video_args(
             encoder = _VIDEO_ENCODERS.get(codec)
             if encoder is None:
                 raise ConversionError(Text("CONVERT_VIDEO_CODEC_UNSUPPORTED", codec=codec))
-            video_encoder_args = ["-c:v", encoder, "-crf", str(target.crf)]
-            if encoder in ("libx264", "libx265"):
-                # yuv420p garante reprodução em reprodutores legados e navegadores
-                video_encoder_args += ["-pix_fmt", "yuv420p"]
-            if encoder == "libx264":
-                video_encoder_args += ["-preset", "medium"]
+            if target.quality:
+                # A tabela de cada encoder, a mesma da exportação: o mesmo CRF
+                # rende arquivos muito diferentes no x264 e no AV1, e o VP9 só
+                # trata o CRF como qualidade constante com o ``-b:v 0`` dela.
+                video_encoder_args = ["-c:v", encoder, *hwaccel.encoder_quality(encoder, target.quality)]
+            else:
+                video_encoder_args = ["-c:v", encoder, "-crf", str(target.crf)]
+                if encoder in ("libx264", "libx265"):
+                    # yuv420p garante reprodução em reprodutores legados e navegadores
+                    video_encoder_args += ["-pix_fmt", "yuv420p"]
+                if encoder == "libx264":
+                    video_encoder_args += ["-preset", "medium"]
 
     args = [
         tools.ffmpeg_str,
@@ -486,8 +494,10 @@ class Converter:
         on_progress: Callable[[Progress], None] | None = None,
         text_assets: dict[int, Path] | None = None,
         lease: OutputLease | None = None,
+        max_bytes: int | None = None,
     ) -> None:
         self._text_assets = text_assets
+        self._max_bytes = max_bytes
         self._media = media
         self._target = target
         self._destination = destination
@@ -685,6 +695,10 @@ class Converter:
         audio_only = isinstance(self._target, Composition) and self._target.audio_only
         if is_video and not audio_only:
             embed_thumbnail(render_target, self._tools, control=self._postprocess)
+        size = render_target.stat().st_size
+        if self._max_bytes is not None and size >= self._max_bytes:
+            raise ConversionError(Text("CONVERT_NOT_SMALLER", before=Text.of(format_size, self._max_bytes),
+                                       after=Text.of(format_size, size)))
         with self._lock:
             self._postprocess.check()
             self._outputs.commit(render_target, self._destination, lease=self._lease)

@@ -21,6 +21,7 @@ de textos da camada. A tabela cobre os módulos de produção, incluindo as entr
 | --- | --- |
 | [domain/compatibility.py](../../src/videomanager/domain/compatibility.py) | Compatibilidade de codecs/containers, decisões de cópia, escala e recodificação; tamanho exibido com rotação (720p é o lado curto) e codec que o container aceita. |
 | [domain/composition.py](../../src/videomanager/domain/composition.py) | Pedido semântico de composição/exportação, sem argumentos ffmpeg. |
+| [domain/compression.py](../../src/videomanager/domain/compression.py) | Níveis de compressão e o alvo de vídeo ou áudio de cada arquivo; nunca amplia nem recodifica áudio abaixo do teto. |
 | [domain/constants.py](../../src/videomanager/domain/constants.py) | Duração mínima de segmento e de transição (0,2 s) e codecs de imagens compartilhados. |
 | [domain/estimator.py](../../src/videomanager/domain/estimator.py) | Estimativas de tamanho/bitrate a partir de formatos e escolhas, inclusive o GIF (por pixel, sem áudio). |
 | [domain/export_policy.py](../../src/videomanager/domain/export_policy.py) | Elegibilidade de corte simples (velocidade, opacidade, animação, lacunas e sobreposições o descartam) e de interpolação, e adaptação para TrimTarget. |
@@ -84,6 +85,7 @@ de textos da camada. A tabela cobre os módulos de produção, incluindo as entr
 | [infrastructure/ffmpeg/lastframe.py](../../src/videomanager/infrastructure/ffmpeg/lastframe.py) | Instante em que o último quadro de um arquivo começa, lido do próprio arquivo por ffprobe e guardado por caminho, tamanho e data. |
 | [infrastructure/ffmpeg/parallel.py](../../src/videomanager/infrastructure/ffmpeg/parallel.py) | Planeja concorrência da interpolação, renderiza trechos, concatena, mistura áudio e publica; o erro de um trecho aponta a linha que explica a falha. |
 | [infrastructure/ffmpeg/preview.py](../../src/videomanager/infrastructure/ffmpeg/preview.py) | Decodifica quadros, filmstrips (miniaturas que preservam a proporção), ondas e reprodução por FramePump, com leitura adiantada limitada; separa os JPEGs do cache da agulha. |
+| [infrastructure/ffmpeg/sample.py](../../src/videomanager/infrastructure/ffmpeg/sample.py) | Mede o bitrate de vídeo comprimido em três trechos de 8 s, com o mesmo comando da conversão e cancelamento. |
 | [infrastructure/ffmpeg/thumbnail.py](../../src/videomanager/infrastructure/ffmpeg/thumbnail.py) | Gera/incorpora a capa opcional antes da publicação, com controle de processo; a capa preserva metadados e capítulos. |
 | [infrastructure/ffmpeg/trimmer.py](../../src/videomanager/infrastructure/ffmpeg/trimmer.py) | Consulta keyframes e traduz recorte rápido/exato e junção em comandos. |
 | [infrastructure/qt/audio.py](../../src/videomanager/infrastructure/qt/audio.py) | PCM, QAudioSink, filas limitadas, relógio de áudio, descarte de gerações antigas e emenda do loop (`queue_next`) sem parar a placa. |
@@ -92,7 +94,7 @@ de textos da camada. A tabela cobre os módulos de produção, incluindo as entr
 | [infrastructure/qt/workers/convert_worker.py](../../src/videomanager/infrastructure/qt/workers/convert_worker.py) | Executa ConversionRequest com Converter, traduzindo término, falha e cancelamento em sinais. |
 | [infrastructure/qt/workers/download_worker.py](../../src/videomanager/infrastructure/qt/workers/download_worker.py) | Constrói opções do pedido e executa Downloader, emitindo eventos da tarefa. |
 | [infrastructure/qt/workers/engine_worker.py](../../src/videomanager/infrastructure/qt/workers/engine_worker.py) | Provisionamento do ffmpeg e atualização do mecanismo yt-dlp fora da UI. |
-| [infrastructure/qt/workers/function_worker.py](../../src/videomanager/infrastructure/qt/workers/function_worker.py) | Executa uma callable com finished/failed/done; usado na escrita de snapshot. |
+| [infrastructure/qt/workers/function_worker.py](../../src/videomanager/infrastructure/qt/workers/function_worker.py) | Executa uma callable com finished/failed/done e cancelamento opcional; usado na escrita de snapshot e na amostra da compressão. |
 | [infrastructure/qt/workers/hwaccel_worker.py](../../src/videomanager/infrastructure/qt/workers/hwaccel_worker.py) | Executa sondagem de hardware em segundo plano. |
 | [infrastructure/qt/workers/media_worker.py](../../src/videomanager/infrastructure/qt/workers/media_worker.py) | Adapta ReadMedia, repositório JSON e probe cancelável a QRunnable. |
 | [infrastructure/qt/workers/preview_worker.py](../../src/videomanager/infrastructure/qt/workers/preview_worker.py) | Workers de quadro, camadas de interação, reprodução, cache da agulha, filmstrip, waveform e keyframes, com cancelamento/tokens; falha e cancelamento são sinais próprios, e o stderr do ffmpeg é drenado por thread com teto. |
@@ -130,7 +132,7 @@ de textos da camada. A tabela cobre os módulos de produção, incluindo as entr
 | [presentation/qt/i18n.py](../../src/videomanager/presentation/qt/i18n.py) | Troca de idioma com a janela aberta: tabelas de `strings`, textos presos em widgets (`bind`, `release`), refrescos (`on_language_change`, antes ou depois do layout), itens de lista pelo dado (`retext_items`), coluna de rótulos (`align_label_column`) e a tradução e o locale do próprio Qt. |
 | [presentation/qt/icons.py](../../src/videomanager/presentation/qt/icons.py) | Cria ícones usados nos controles. |
 | [presentation/qt/main_window.py](../../src/videomanager/presentation/qt/main_window.py) | Três abas, menus, destino, análise, playlists, configuração e coordenação da fila. |
-| [presentation/qt/panels/convert_panel.py](../../src/videomanager/presentation/qt/panels/convert_panel.py) | Lista de arquivos locais, escolha de alvo e submissão via ProcessingService. |
+| [presentation/qt/panels/convert_panel.py](../../src/videomanager/presentation/qt/panels/convert_panel.py) | Lista de arquivos locais, escolha de alvo (áudio, vídeo ou nível de compressão com tamanho medido) e submissão via ProcessingService. |
 | [presentation/qt/panels/edit_panel.py](../../src/videomanager/presentation/qt/panels/edit_panel.py) | Widgets e controller de edição: seleção, comandos do domínio, sessão, gestos (agrupados em transações), prévia com camadas e cache da agulha, reprodução, loop, tela/proporção e propriedades. |
 | [presentation/qt/panels/edit_widgets.py](../../src/videomanager/presentation/qt/panels/edit_widgets.py) | Componentes visuais do editor: superfície da prévia com alças, acervo arrastável, popups de volume e velocidade e a aba Propriedades (transformação, animação por quadros-chave e chroma key). |
 | [presentation/qt/panels/media_card.py](../../src/videomanager/presentation/qt/panels/media_card.py) | Apresenta título, duração, origem e miniatura da mídia analisada. |
