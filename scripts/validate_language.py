@@ -269,9 +269,14 @@ def _convert(app, janela, r, video: bool = False, comprimir: bool = False) -> No
     if video:
         painel._to_video.setChecked(True)
     if comprimir:
+        # As janelas usam as mesmas amostras: o x264 com teto (VBV) e várias
+        # threads não repete o tamanho (medido: ~1% entre execuções), e a
+        # diferença no último dígito passaria por texto que a troca esqueceu.
+        painel._samples.update(r.setdefault("amostras", {}))
         painel._to_compress.setChecked(True)
         # Com a medida pela metade, as duas janelas mostrariam estados diferentes.
         _esperar(app, lambda: not painel._sampling, 60)
+        r["amostras"].update(painel._samples)
     _processar(app, 120)
 
 
