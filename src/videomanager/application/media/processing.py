@@ -12,6 +12,7 @@ from videomanager.domain.timing import CutMode
 from videomanager.domain.timing import TrimTarget
 from videomanager.domain.timing import keyframe_at_or_before
 from videomanager.domain.i18n import Text
+from videomanager.domain.i18n import t
 from videomanager.application.errors import ConversionError
 from videomanager.application.errors import VideoManagerError
 from videomanager.application.jobs.models import Job
@@ -96,7 +97,7 @@ class ProcessingService:
                    request=ConversionRequest(local, target, lease.path, tuple(assets.items()), lease))
 
     def convert(self, media: LocalMedia, target: AudioTarget | VideoTarget, *,
-                same_folder: bool, fallback: Path) -> tuple[Job, bool]:
+                same_folder: bool, fallback: Path, compress: bool = False) -> tuple[Job, bool]:
         if isinstance(target, VideoTarget) and (not media.has_video or media.video_is_cover):
             # Uma capa embutida (MP3, M4A, FLAC) aparece como trilha de vídeo,
             # mas convertê-la gerava um "vídeo" de um quadro só.
@@ -110,6 +111,10 @@ class ProcessingService:
         fallback_used = not self.catalog.writable(directory)
         if fallback_used:
             directory = fallback
-        lease = self.outputs.reserve(media.path, target, directory)
-        return Job(str(media.path), media.path.name, '', kind=JobKind.CONVERT,
-                   request=ConversionRequest(media, target, lease.path, lease=lease)), fallback_used
+        lease = self.outputs.reserve(media.path, target, directory, t('OUTPUT_COMPRESSED_SUFFIX') if compress else '')
+        # Recodificar um arquivo já bem comprimido pode aumentá-lo (medido: +24%
+        # no nível padrão numa abertura de anime baixada): a compressão que não
+        # encolhe não é publicada.
+        request = ConversionRequest(media, target, lease.path, lease=lease,
+                                    max_bytes=media.size if compress else None)
+        return Job(str(media.path), media.path.name, '', kind=JobKind.CONVERT, request=request), fallback_used

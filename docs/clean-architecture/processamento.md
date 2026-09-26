@@ -58,6 +58,20 @@ Estas regras saíram de um checkup da conversão e têm teste em
 - **WAV.** Só copia PCM que o muxer grava como está (`pcm_s16le`, `pcm_u8`;
   big-endian é recusado), e uma origem de 24 bits, 32 bits ou ponto flutuante
   sai em `pcm_s24le` — "sem perda" continua valendo.
+- **Compressão.** `domain/compression.py` transforma nível e codec num
+  `VideoTarget` (com `quality`, que escolhe o número na tabela de cada encoder,
+  a mesma da exportação) ou num `AudioTarget` (com `reencode`, sem o qual o
+  mesmo codec seria copiado intacto); descrição, estimativa e execução seguem os
+  caminhos da conversão. O tamanho de vídeo da tabela vem de
+  `infrastructure/ffmpeg/sample.py`: três trechos de 8 s codificados com o
+  mesmo `build_video_args`. A conta por pixels errou de −66% a +1500% em vídeos
+  reais; trechos de 2 s erravam até +195%, porque o keyframe que abre cada
+  trecho pesa demais num conteúdo parado, e 8 s é o intervalo de keyframes do
+  x264. A medida roda na vaga da inspeção (um ffmpeg por vez da aba), é
+  cancelada ao mudar arquivos, codec, modo ou encoder, e só começa se couber em
+  70% da memória disponível (~600 bytes por pixel da origem: 4,3 GB num 4K);
+  senão, ou com memória desconhecida, a conta por pixels fica no lugar. `ConversionRequest.max_bytes`
+  faz o `Converter` recusar, antes de publicar, a compressão que não encolheu.
 - **Capa.** O remux que embute a capa mantém metadados e capítulos
   (`-map_metadata 0 -map_chapters 0`).
 - **Processo.** O stderr do ffmpeg é lido em UTF-8 com `errors="replace"`: em

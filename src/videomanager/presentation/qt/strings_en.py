@@ -218,6 +218,24 @@ CONVERT_FALLBACK = (
     "folder:\n{folder}"
 )
 CONVERT_SKIPPED = "Skipped:"
+CONVERT_TO_COMPRESS = "Compress"
+CONVERT_LEVEL_HEADER = "Level"
+CONVERT_QUALITY_HEADER = "Quality"
+CONVERT_SIZE_HEADER = "Estimated size"
+CONVERT_MEASURING = "measuring…"
+CONVERT_LEVELS = {"light": "Light", "balanced": "Balanced", "strong": "Strong", "max": "Maximum"}
+CONVERT_LEVEL_QUALITY = {
+    "light": "nearly identical to the original",
+    "balanced": "great · recommended",
+    "strong": "good · visible loss up close",
+    "max": "acceptable · up to {height}p",
+}
+CONVERT_COMPRESS_SIZE = "Size: {before} → {after} ({percent}% smaller)"
+CONVERT_COMPRESS_SIZE_LARGER = "Size: {before} → {after}"
+CONVERT_COMPRESS_NO_GAIN = (
+    "{count} file(s) already well compressed should not come out smaller than "
+    "the original, and a result that is not smaller is not saved."
+)
 
 # --- editor de vídeo ---------------------------------------------------------
 EDIT_IMPORT = "Import Media…"

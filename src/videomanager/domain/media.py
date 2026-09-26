@@ -95,6 +95,9 @@ class AudioTarget:
 
     codec: str = "mp3"
     bitrate: str = "192"
+    # A compressão pede o mesmo codec com bitrate menor: sem isto a cópia
+    # direta (``copies_audio``) devolvia o arquivo intacto, do mesmo tamanho.
+    reencode: bool = False
 
     @property
     def extension(self) -> str:
@@ -120,6 +123,11 @@ class VideoTarget:
     height: int | None = None
     fps: float | None = None
     crf: int = 20
+    # Nível do encoder ("high", "balanced", "economy"), usado pela compressão.
+    # Com ele, o número de qualidade sai da tabela de cada encoder — software e
+    # placa —, porque o mesmo CRF não quer dizer a mesma coisa no x264 e no AV1.
+    # ``None`` mantém o ``crf`` acima, que é o da conversão comum.
+    quality: str | None = None
     hardware: str = "software"
 
     @property

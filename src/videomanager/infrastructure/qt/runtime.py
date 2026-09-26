@@ -12,6 +12,8 @@ from platformdirs import user_cache_dir
 from videomanager import APP_NAME
 from videomanager.application.media.preview import prepare_preview
 from videomanager.infrastructure.ffmpeg import hardware, composer
+from videomanager.infrastructure.ffmpeg.sample import sample_video_kbps
+from videomanager.infrastructure.system.process import ProcessControl
 from videomanager.infrastructure.system import binaries
 from videomanager.infrastructure.system import memory
 from videomanager.infrastructure.storage.settings import Settings
@@ -39,6 +41,11 @@ class DesktopRuntime:
 
     def function_worker(self, operation):
         return FunctionWorker(operation)
+
+    def sample_worker(self, media, target, tools):
+        """Mede o bitrate de vídeo de ``target`` em trechos de ``media``; cancelável."""
+        control = ProcessControl()
+        return FunctionWorker(partial(sample_video_kbps, media, target, tools, control), control.cancel)
 
     def probe_worker(self, *args, **kwargs):
         return ProbeWorker(*args, **kwargs)

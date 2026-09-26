@@ -164,6 +164,73 @@ class TestWav:
         assert args[_index(args, "-c:a") + 1] == "pcm_s16le"
 
 
+# --- Compressão ---------------------------------------------------------------
+
+class TestCompressao:
+    @pytest.mark.parametrize(("codec", "encoder"), [
+        ("h264", "libx264"), ("hevc", "libx265"), ("vp9", "libvpx-vp9"), ("av1", "libsvtav1")])
+    @pytest.mark.parametrize("nivel", ["high", "balanced", "economy"])
+    def test_nivel_usa_a_tabela_do_encoder(self, codec, encoder, nivel) -> None:
+        from videomanager.infrastructure.ffmpeg.hardware import encoder_quality
+        container = "webm" if codec == "vp9" else "mp4"
+        args = build_video_args(_media(VIDEO, AUDIO), VideoTarget(container=container, video_codec=codec,
+                                                                  quality=nivel), Path("/s/x"), TOOLS)
+        inicio = _index(args, "-c:v")
+        esperado = ["-c:v", encoder, *encoder_quality(encoder, nivel)]
+        assert args[inicio:inicio + len(esperado)] == esperado
+        assert args.count("-crf") == 1 and args.count("-pix_fmt") <= 1
+
+    def test_sem_nivel_o_comando_e_o_da_conversao_comum(self) -> None:
+        args = build_video_args(_media(VIDEO, AUDIO), VideoTarget(container="mp4", video_codec="h264"),
+                                Path("/s/x"), TOOLS)
+        inicio = _index(args, "-c:v")
+        assert args[inicio:inicio + 8] == ["-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p",
+                                           "-preset", "medium"]
+
+    @pytest.mark.parametrize(("nivel", "esperado"), [(None, "balanced"), ("economy", "economy")])
+    def test_nivel_chega_a_placa(self, monkeypatch, nivel, esperado) -> None:
+        from videomanager.infrastructure.ffmpeg import hardware
+        pedidos = []
+
+        def resolve(family, preference, tools, quality=hardware.DEFAULT_QUALITY):
+            pedidos.append(quality)
+            return hardware.software_encoder(family)
+
+        monkeypatch.setattr(hardware, "resolve", resolve)
+        build_video_args(_media(VIDEO, AUDIO), VideoTarget(container="mp4", video_codec="h264",
+                                                           hardware="nvenc", quality=nivel), Path("/s/x"), TOOLS)
+        assert pedidos == [esperado]
+
+    def test_nivel_aparece_no_plano(self) -> None:
+        texto = describe_target(_media(VIDEO, AUDIO), VideoTarget(container="mp4", video_codec="h264",
+                                                                  quality="economy"))
+        assert "qualidade econômica" in texto
+
+    def test_audio_recomprimido_no_mesmo_codec_nao_e_copiado(self) -> None:
+        mp3 = _media(LocalStream(0, "audio", "mp3", bitrate=320.0), name="a.mp3", format_name="mp3")
+        alvo = AudioTarget(codec="mp3", bitrate="128", reencode=True)
+        args = build_audio_args(mp3, alvo, Path("/s/x.mp3"), TOOLS)
+        assert args[_index(args, "-c:a") + 1] == "libmp3lame"
+        assert args[_index(args, "-b:a") + 1] == "128k"
+        assert "cópia" not in describe_target(mp3, alvo)
+        assert estimate_convert_size(mp3, alvo) == int(128 * 1000 / 8 * 60.0)
+
+    def test_mesmo_codec_sem_recomprimir_continua_copiado(self) -> None:
+        mp3 = _media(LocalStream(0, "audio", "mp3", bitrate=320.0), name="a.mp3", format_name="mp3")
+        args = build_audio_args(mp3, AudioTarget(codec="mp3", bitrate="128"), Path("/s/x.mp3"), TOOLS)
+        assert args[_index(args, "-c:a") + 1] == "copy"
+
+    def test_saida_comprimida_leva_sufixo_e_teto(self, tmp_path) -> None:
+        from videomanager.bootstrap import build_processing_service
+        origem = tmp_path / "video.mp4"
+        origem.write_bytes(b"x")
+        media = LocalMedia(origem, 60.0, "mov,mp4", 1, (VIDEO, AUDIO))
+        job, _ = build_processing_service().convert(media, VideoTarget(container="mp4", video_codec="h264"),
+                                                    same_folder=True, fallback=tmp_path, compress=True)
+        assert job.request.destination == tmp_path / "video (comprimido).mp4"
+        assert job.request.max_bytes == 1
+
+
 # --- C12: estimativa sem dimensões ------------------------------------------
 
 def test_estimativa_sem_largura_nao_quebra() -> None:
@@ -391,3 +458,308 @@ def test_mensagem_do_trecho_aponta_a_causa_e_nao_a_estatistica() -> None:
     resposta = _last_line(sem_marca)
     assert "CPB properties" in resposta and "video:0KiB" in resposta
     assert str(_last_line(deque())) == "sem detalhes do ffmpeg"
+
+
+# --- Compressão de verdade ----------------------------------------------------
+
+def _medir(tools: FFmpegTools, path: Path) -> dict:
+    import json
+
+    from videomanager.infrastructure.system.binaries import subprocess_kwargs
+    kwargs = subprocess_kwargs()
+    kwargs["stdout"] = subprocess.PIPE
+    probe = subprocess.run([tools.ffprobe_str, "-v", "error", "-of", "json", "-show_format", "-show_streams",
+                            str(path)], timeout=30, text=True, **kwargs)
+    data = json.loads(probe.stdout)
+    streams = {stream["codec_type"]: stream for stream in reversed(data["streams"])}
+    return {"tamanho": int(data["format"]["size"]), "duracao": float(data["format"]["duration"]), **streams}
+
+
+def _comprimir(tools: FFmpegTools, origem: Path, nivel, pasta: Path) -> tuple[Path, object]:
+    from videomanager.bootstrap import build_processing_service
+    from videomanager.domain.compression import compression_target
+    from videomanager.infrastructure.ffmpeg.converter import Converter, probe_file
+
+    media = probe_file(origem, tools)
+    alvo = compression_target(media, nivel, "h264", "software")
+    job, _ = build_processing_service().convert(media, alvo, same_folder=False, fallback=pasta, compress=True)
+    request = job.request
+    return Converter(media, alvo, request.destination, tools, lease=request.lease,
+                     max_bytes=request.max_bytes).run(), alvo
+
+
+@pytest.mark.ffmpeg
+def test_cada_nivel_de_compressao_entrega_arquivo_menor_e_inteiro(ffmpeg_tools, tmp_path) -> None:
+    """Medido na saída: menor a cada nível, menor que a origem, sem perder
+    duração nem trilha, e com o teto de resolução e de áudio de cada nível."""
+    from videomanager.domain.compression import LEVELS
+
+    origem = tmp_path / "origem.mp4"
+    # Bitrate alto de propósito, como o de uma câmera: é o que a compressão encolhe.
+    _run(ffmpeg_tools, "-f", "lavfi", "-i", "testsrc2=s=1920x1080:r=30:d=2", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=2", "-ac", "2", "-c:v", "libx264", "-crf", "10",
+         "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "320k", str(origem))
+    antes = _medir(ffmpeg_tools, origem)
+    medidas = [_medir(ffmpeg_tools, _comprimir(ffmpeg_tools, origem, nivel, tmp_path)[0]) for nivel in LEVELS]
+
+    tamanhos = [medida["tamanho"] for medida in medidas]
+    assert tamanhos == sorted(tamanhos, reverse=True) and len(set(tamanhos)) == 4, tamanhos
+    assert tamanhos[0] < antes["tamanho"]
+    # Na mesma resolução, só o nível do encoder separa os três primeiros: o
+    # áudio sozinho já faria os tamanhos caírem.
+    video = [int(medida["video"]["bit_rate"]) for medida in medidas[:3]]
+    assert video[0] > video[1] * 1.2 and video[1] > video[2] * 1.2, video
+    for nivel, medida in zip(LEVELS, medidas):
+        assert medida["duracao"] == pytest.approx(antes["duracao"], abs=0.1)
+        assert medida["video"]["codec_name"] == "h264" and medida["audio"]["codec_name"] == "aac"
+        assert medida["video"]["height"] == (nivel.max_height or 1080)
+        assert int(medida["audio"]["bit_rate"]) / 1000 == pytest.approx(nivel.audio_kbps, rel=0.2)
+
+
+@pytest.mark.ffmpeg
+def test_mp3_comprimido_e_recodificado_e_nao_copiado(ffmpeg_tools, tmp_path) -> None:
+    from videomanager.domain.compression import LEVELS
+
+    origem = tmp_path / "musica.mp3"
+    _run(ffmpeg_tools, "-f", "lavfi", "-i", "sine=frequency=330:duration=4", "-ac", "2",
+         "-c:a", "libmp3lame", "-b:a", "320k", str(origem))
+    saida, alvo = _comprimir(ffmpeg_tools, origem, LEVELS[1], tmp_path)
+    medida = _medir(ffmpeg_tools, saida)
+    assert (saida.suffix, alvo.bitrate) == (".mp3", "128")
+    assert int(medida["audio"]["bit_rate"]) / 1000 == pytest.approx(128, rel=0.05)
+    assert medida["tamanho"] < origem.stat().st_size / 2
+
+
+def test_aba_comprime_video_e_audio_da_mesma_lista(desktop_app, tmp_path) -> None:
+    import re
+    from types import SimpleNamespace
+
+    from videomanager.application.preferences import Preferences
+    from videomanager.bootstrap import build_desktop_runtime, build_processing_service
+    from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
+
+    video = tmp_path / "video.mov"
+    musica = tmp_path / "musica.flac"
+    for path in (video, musica):
+        path.write_bytes(b"x")
+    midias = [
+        LocalMedia(video, 60.0, "mov,mp4", 150_000_000,
+                   (VIDEO, LocalStream(1, "audio", "aac", bitrate=256.0))),
+        LocalMedia(musica, 180.0, "flac", 20_000_000, (LocalStream(0, "audio", "flac", bitrate=900.0),)),
+    ]
+    panel = ConvertPanel(Preferences(), lambda: TOOLS, processing=build_processing_service(),
+                         runtime=build_desktop_runtime(audio_enabled=False))
+    try:
+        panel._on_inspected(panel._inspection_token,
+                            SimpleNamespace(probed={m.path: m for m in midias}, rejected=[]))
+        assert not panel._level_table.isVisibleTo(panel)
+        panel._to_compress.setChecked(True)
+        assert panel._level_table.isVisibleTo(panel) and panel._compress_codec.isVisibleTo(panel)
+        assert not panel._container.isVisibleTo(panel) and not panel._audio_codec.isVisibleTo(panel)
+        reducoes = [int(re.search(r"\(([+-]\d+)%\)", rotulo.text()).group(1)) for rotulo in panel._level_sizes]
+        assert reducoes == sorted(reducoes, reverse=True) and reducoes[-1] < 0, reducoes
+        assert "menor" in panel._plan.text()
+
+        panel._compress_codec.setCurrentIndex(panel._compress_codec.findData("hevc"))
+        enfileiradas = []
+        panel.jobs_ready.connect(enfileiradas.extend)
+        panel._start_conversion()
+        alvos = {job.request.destination.name: job.request.target for job in enfileiradas}
+        assert alvos == {
+            "video (comprimido).mp4": VideoTarget(container="mp4", video_codec="hevc", audio_codec="aac",
+                                                  audio_bitrate="128", quality="balanced"),
+            "musica (comprimido).m4a": AudioTarget(codec="m4a", bitrate="128", reencode=True),
+        }
+
+        panel._to_video.setChecked(True)
+        assert not panel._level_table.isVisibleTo(panel) and panel._container.isVisibleTo(panel)
+    finally:
+        panel.shutdown()
+        panel.deleteLater()
+
+
+# --- Amostra do tamanho comprimido -------------------------------------------
+
+def test_amostra_espalha_trechos_de_8s_ou_usa_o_arquivo_inteiro() -> None:
+    from videomanager.infrastructure.ffmpeg.sample import sample_windows
+    assert sample_windows(0) == []
+    assert sample_windows(20.0) == [(0.0, 20.0)]
+    trechos = sample_windows(120.0)
+    assert [inicio + duracao / 2 for inicio, duracao in trechos] == [30.0, 60.0, 90.0]
+    assert {duracao for _, duracao in trechos} == {8.0}
+
+
+def _fonte_sintetica(tools: FFmpegTools, pasta: Path, segundos: int, crf: str) -> Path:
+    origem = pasta / f"origem-{crf}.mp4"
+    _run(tools, "-f", "lavfi", "-i", f"testsrc2=s=640x360:r=30:d={segundos}", "-f", "lavfi",
+         "-i", f"sine=duration={segundos}", "-ac", "2", "-c:v", "libx264", "-crf", crf, "-preset", "ultrafast",
+         "-pix_fmt", "yuv420p", "-c:a", "aac", str(origem))
+    return origem
+
+
+@pytest.mark.ffmpeg
+def test_amostra_mede_o_bitrate_da_codificacao_completa(ffmpeg_tools, tmp_path) -> None:
+    from dataclasses import replace
+
+    from videomanager.domain.compression import LEVELS, compression_target
+    from videomanager.infrastructure.ffmpeg.converter import probe_file
+    from videomanager.infrastructure.ffmpeg.sample import sample_video_kbps
+    from videomanager.infrastructure.system.process import ProcessControl
+
+    media = probe_file(_fonte_sintetica(ffmpeg_tools, tmp_path, 40, "10"), ffmpeg_tools)
+    alvo = compression_target(media, LEVELS[1], "h264", "software")
+    medido = sample_video_kbps(media, alvo, ffmpeg_tools, ProcessControl())
+    so_video = replace(media, streams=tuple(s for s in media.streams if s.kind == "video"))
+    completo = tmp_path / "completo.mp4"
+    ProcessControl().run(build_video_args(so_video, alvo, completo, ffmpeg_tools), timeout=120)
+    real = completo.stat().st_size * 8 / 1000 / media.duration
+    assert medido == pytest.approx(real, rel=0.15)
+
+
+@pytest.mark.ffmpeg
+def test_amostra_cancelada_para_e_nao_deixa_temporario(ffmpeg_tools, tmp_path, monkeypatch) -> None:
+    import tempfile
+    import time
+
+    from videomanager.application.errors import JobCancelled
+    from videomanager.domain.compression import LEVELS, compression_target
+    from videomanager.infrastructure.ffmpeg.converter import probe_file
+    from videomanager.infrastructure.ffmpeg.sample import sample_video_kbps
+    from videomanager.infrastructure.system.process import ProcessControl
+
+    media = probe_file(_fonte_sintetica(ffmpeg_tools, tmp_path, 60, "10"), ffmpeg_tools)
+    temporarios = tmp_path / "tmp"
+    temporarios.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temporarios))
+    control = ProcessControl()
+    threading.Timer(0.3, control.cancel).start()
+    inicio = time.monotonic()
+    with pytest.raises(JobCancelled):
+        sample_video_kbps(media, compression_target(media, LEVELS[0], "hevc", "software"), ffmpeg_tools, control)
+    assert time.monotonic() - inicio < 5
+    assert list(temporarios.iterdir()) == []
+
+
+@pytest.mark.ffmpeg
+def test_compressao_que_aumenta_o_arquivo_nao_e_gravada(ffmpeg_tools, tmp_path) -> None:
+    from videomanager.domain.compression import LEVELS
+
+    # CRF 45: o original já está mais comprimido do que o nível Leve aceita.
+    origem = _fonte_sintetica(ffmpeg_tools, tmp_path, 3, "45")
+    saidas = tmp_path / "saidas"
+    with pytest.raises(ConversionError, match="não ficou menor que o original"):
+        _comprimir(ffmpeg_tools, origem, LEVELS[0], saidas)
+    assert list(saidas.iterdir()) == []
+
+
+class _AmostrasFalsas:
+    """O runtime de verdade, com a medida trocada por uma que só termina quando liberada."""
+
+    def __init__(self, runtime) -> None:
+        self._runtime = runtime
+        self.pedidos: list[tuple] = []
+        self.liberar = threading.Event()
+
+    def __getattr__(self, nome):
+        return getattr(self._runtime, nome)
+
+    def sample_worker(self, media, target, tools):
+        from videomanager.infrastructure.qt.workers.function_worker import FunctionWorker
+        from videomanager.infrastructure.system.process import ProcessControl
+
+        control = ProcessControl()
+        self.pedidos.append((media.path.name, target.video_codec, target.quality, target.height))
+
+        def medir():
+            while not self.liberar.wait(0.005):
+                control.check()
+            control.check()
+            return {"high": 4000.0, "balanced": 2000.0, "economy": 1000.0}[target.quality] / (2 if target.height else 1)
+
+        return FunctionWorker(medir, control.cancel)
+
+
+def test_tabela_espera_a_amostra_e_descarta_a_medida_velha(desktop_app, wait_until, tmp_path) -> None:
+    import re
+    from types import SimpleNamespace
+
+    from videomanager.application.formatting import format_size
+    from videomanager.application.preferences import Preferences
+    from videomanager.bootstrap import build_desktop_runtime, build_processing_service
+    from videomanager.domain.compression import LEVELS, compression_target
+    from videomanager.presentation.qt import strings
+    from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
+
+    runtime = _AmostrasFalsas(build_desktop_runtime(audio_enabled=False))
+    video = LocalMedia(tmp_path / "video.mp4", 60.0, "mov,mp4", 150_000_000,
+                       (VIDEO, LocalStream(1, "audio", "aac", bitrate=256.0)))
+    pequeno = LocalMedia(tmp_path / "pequeno.mp4", 60.0, "mov,mp4", 40_000_000,
+                         (LocalStream(0, "video", "h264", height=720, width=1280, fps=30.0),))
+    musica = LocalMedia(tmp_path / "musica.flac", 180.0, "flac", 20_000_000,
+                        (LocalStream(0, "audio", "flac", bitrate=900.0),))
+    # 1 MB por minuto: já mais comprimido do que qualquer nível entrega.
+    baixado = LocalMedia(tmp_path / "baixado.mp4", 60.0, "mov,mp4", 1_000_000, (VIDEO,))
+    panel = ConvertPanel(Preferences(), lambda: TOOLS, processing=build_processing_service(), runtime=runtime)
+    try:
+        panel._tools = TOOLS
+        panel._on_inspected(panel._inspection_token, SimpleNamespace(
+            probed={m.path: m for m in (video, pequeno, musica, baixado)}, rejected=[]))
+        assert runtime.pedidos == []  # fora da compressão não se mede nada
+        panel._to_compress.setChecked(True)
+
+        # O nível escolhido primeiro; o 720p grava a mesma imagem em Forte e
+        # Máxima, e é medido uma vez; o áudio não é medido.
+        assert runtime.pedidos[:3] == [("video.mp4", "h264", "balanced", None),
+                                       ("pequeno.mp4", "h264", "balanced", None),
+                                       ("baixado.mp4", "h264", "balanced", None)]
+        assert len(runtime.pedidos) == 11 and not any(p[0] == "musica.flac" for p in runtime.pedidos)
+        assert all(rotulo.text() == strings.CONVERT_MEASURING for rotulo in panel._level_sizes)
+        assert strings.CONVERT_MEASURING in panel._plan.text()
+
+        # Trocar o codec cancela o que estava sendo medido para o anterior.
+        antigo = panel._sampling_token
+        panel._compress_codec.setCurrentIndex(panel._compress_codec.findData("hevc"))
+        assert panel._sampling_token != antigo and runtime.pedidos[11][1] == "hevc"
+        runtime.liberar.set()
+        wait_until(lambda: not panel._sampling and panel._sampling_runner.active == 0, timeout=10)
+        assert {chave[2] for chave in panel._samples} == {"hevc"}
+
+        # Uma resposta de antes da troca não entra.
+        panel._on_sampled(antigo, ("velha",), 1.0)
+        assert ("velha",) not in panel._samples
+
+        esperado = sum(estimate_convert_size(m, alvo, {"high": 4000.0, "balanced": 2000.0}.get(alvo.quality))
+                       if isinstance(alvo, VideoTarget) else estimate_convert_size(m, alvo)
+                       for m in (video, pequeno, musica, baixado)
+                       for alvo in [compression_target(m, LEVELS[1], "hevc", "software")])
+        assert panel._level_sizes[1].text().startswith(format_size(esperado, estimated=True))
+        reducoes = [int(re.search(r"\(([+-]\d+)%\)", rotulo.text()).group(1)) for rotulo in panel._level_sizes]
+        assert reducoes == sorted(reducoes, reverse=True), reducoes
+        # O lote encolhe no total, mas o arquivo que cresce é avisado.
+        assert strings.CONVERT_COMPRESS_NO_GAIN.format(count=1) in panel._plan.text()
+        assert "menor)" in panel._plan.text()
+    finally:
+        panel.shutdown()
+        panel.deleteLater()
+    assert panel._sampling_runner.active == 0
+
+
+@pytest.mark.parametrize(("disponivel", "mede"), [
+    (None, False),                  # não saber é não medir
+    (2_700_000_000, False),         # uma conversão 4K rodando ao lado
+    (7_500_000_000, True),          # a máquina ociosa
+])
+def test_amostra_4k_so_roda_com_memoria_para_ela(monkeypatch, disponivel, mede) -> None:
+    from videomanager.application.errors import ConversionError as Falha
+    from videomanager.infrastructure.ffmpeg import sample
+
+    monkeypatch.setattr(sample, "available_bytes", lambda: disponivel)
+    uhd = _media(LocalStream(0, "video", "h264", width=3840, height=2160, fps=30.0), AUDIO)
+    assert sample.fits_in_memory(uhd) is mede
+    if not mede:
+        rodou = []
+        monkeypatch.setattr(sample.ProcessControl, "run", lambda *a, **k: rodou.append(a))
+        with pytest.raises(Falha):
+            sample.sample_video_kbps(uhd, VideoTarget(container="mp4", video_codec="h264", quality="balanced"),
+                                     TOOLS, sample.ProcessControl())
+        assert rodou == []

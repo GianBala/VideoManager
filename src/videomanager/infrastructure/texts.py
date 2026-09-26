@@ -219,6 +219,12 @@ register({
     ),
     # Nome do arquivo, e por isso dado: sai no idioma do momento em que é criado.
     "OUTPUT_CONVERTED_SUFFIX": (" (convertido)", " (converted)"),
+    "CONVERT_NOT_SMALLER": ("o resultado não ficou menor que o original ({before} → {after}) e não foi "
+                            "gravado; tente um nível mais forte",
+                            "the result was not smaller than the original ({before} → {after}) and was not "
+                            "saved; try a stronger level"),
+    "CONVERT_SAMPLE_FAILED": ("não foi possível medir a compressão numa amostra do vídeo",
+                              "could not measure the compression on a sample of the video"),
     "OUTPUT_DIR_FAILED": (
         "Não foi possível usar a pasta de destino {directory}: {error}",
         "Couldn't use the destination folder {directory}: {error}",

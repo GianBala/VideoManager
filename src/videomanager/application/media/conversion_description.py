@@ -4,7 +4,7 @@ from videomanager.domain.media import AudioTarget
 from videomanager.domain.media import LocalMedia
 from videomanager.domain.composition import Composition
 from videomanager.domain.timing import TrimTarget
-from videomanager.domain.compatibility import can_copy_audio
+from videomanager.domain.compatibility import copies_audio
 from videomanager.domain.compatibility import resolved_video_codec
 from videomanager.domain.compatibility import resolved_audio_codec
 from videomanager.domain.i18n import t
@@ -28,7 +28,7 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
     if isinstance(target, TrimTarget):
         return describe_trim(media, target)
     if isinstance(target, AudioTarget):
-        if can_copy_audio(media, target.codec):
+        if copies_audio(media, target):
             return t("DESC_AUDIO_COPY", codec=target.codec.upper())
         if target.is_lossless:
             return t("DESC_AUDIO_LOSSLESS", codec=target.codec.upper())
@@ -42,6 +42,8 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
         parts.append(t("DESC_REENCODE", codec=codec.upper()))
         if target.hardware != hwaccel.SOFTWARE and codec in ("h264", "hevc"):
             parts.append(t("DESC_GPU"))
+        if target.quality:
+            parts.append(hwaccel.quality_label(target.quality))
     audio_codec = resolved_audio_codec(media, target)
     if media.has_audio and audio_codec != "copy":
         # Só se diz quando há custo: "áudio copiado" seria ruído em toda linha.
