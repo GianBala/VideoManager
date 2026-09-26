@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from videomanager.domain.compression import LEVELS
+from videomanager.domain.compression import compression_ceiling
 from videomanager.domain.compression import compression_target
 from videomanager.domain.estimator import estimate_convert_size
 from videomanager.domain.media import AudioTarget
@@ -116,3 +117,47 @@ def test_estimativa_do_video_usa_o_audio_do_nivel():
     so_video = [estimate_convert_size(_video(audio=None), alvo) for alvo in alvos]
     assert forte - so_video[0] == pytest.approx(96 * 1000 / 8 * 60 * 1.015, rel=0.01)
     assert maxima - so_video[1] == pytest.approx(64 * 1000 / 8 * 60 * 1.015, rel=0.01)
+
+
+def test_teto_do_video_e_uma_fracao_do_bitrate_de_origem():
+    midia = LocalMedia(Path("/origem/video.mp4"), 60.0, "mov,mp4", 150_000_000,
+                       (LocalStream(0, "video", "h264", width=1920, height=1080, fps=30.0, bitrate=10_000.0),))
+    assert [compression_target(midia, nivel, "h264", "software").max_kbps for nivel in LEVELS] == [
+        8500, 7000, 5000, 3500]
+
+
+def test_sem_bitrate_da_trilha_o_teto_sai_do_arquivo_menos_o_audio():
+    # 150 MB em 60 s são 20000 kbps; menos os 256 do áudio.
+    assert compression_target(_video(kbps=256.0), EQUILIBRADA, "h264", "software").max_kbps == int(19744 * 0.70)
+    sem_tamanho = LocalMedia(Path("/origem/a.mp4"), None, "mov,mp4", None, _video().streams)
+    assert compression_target(sem_tamanho, EQUILIBRADA, "h264", "software").max_kbps is None
+
+
+@pytest.mark.parametrize(("codec", "placa", "tem_teto", "garante"), [
+    ("h264", "software", True, True), ("hevc", "software", True, True),
+    # O SVT-AV1 (sempre software) recebe o teto, mas o trata como alvo.
+    ("av1", "software", True, False), ("av1", "nvenc", True, False),
+    # Quantização fixa na placa não aceita teto.
+    ("h264", "nvenc", False, False), ("hevc", "auto", False, False),
+])
+def test_teto_so_onde_o_encoder_o_cumpre(codec, placa, tem_teto, garante):
+    alvo = compression_target(_video(), EQUILIBRADA, codec, placa)
+    assert (alvo.max_kbps is not None) is tem_teto
+    assert (alvo.guaranteed_kbps is not None) is garante
+    assert (compression_ceiling(_video(), alvo) is not None) is garante
+
+
+def test_estimativa_do_av1_nao_e_cortada_no_teto():
+    # O SVT-AV1 passou até 38% do teto: cortar a medida nele prometeria menos.
+    midia = _video()
+    alvo = compression_target(midia, EQUILIBRADA, "av1", "software")
+    assert estimate_convert_size(midia, alvo, alvo.max_kbps * 1.3) > estimate_convert_size(midia, alvo, alvo.max_kbps)
+
+
+def test_estimativa_nunca_passa_da_garantia():
+    for midia in (_video(), _video(1080, 1920), _video(kbps=64.0)):
+        for nivel in LEVELS:
+            alvo = compression_target(midia, nivel, "h264", "software")
+            # Mesmo com a amostra medindo acima do teto, a conta fica nele.
+            for medido in (None, 100.0, 1_000_000.0):
+                assert estimate_convert_size(midia, alvo, medido) <= compression_ceiling(midia, alvo)

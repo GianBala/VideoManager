@@ -44,6 +44,7 @@ from videomanager.domain.media import LocalMedia
 from videomanager.domain.i18n import Text
 from videomanager.domain.compatibility import container_accepts_video
 from videomanager.domain.compression import LEVELS
+from videomanager.domain.compression import compression_ceiling
 from videomanager.domain.compression import VIDEO_CODECS as COMPRESS_CODECS
 from videomanager.domain.compression import compression_target
 from videomanager.domain.media import VideoTarget
@@ -337,14 +338,15 @@ class ConvertPanel(QWidget):
         grid.setHorizontalSpacing(18)
         grid.setVerticalSpacing(4)
         headers = (lambda: strings.CONVERT_LEVEL_HEADER, lambda: strings.CONVERT_QUALITY_HEADER,
-                   lambda: strings.CONVERT_SIZE_HEADER)
+                   lambda: strings.CONVERT_SIZE_HEADER, lambda: strings.CONVERT_CEILING_HEADER)
         for column, text in enumerate(headers):
             header = bind(QLabel(), "setText", text)
             header.setProperty("role", "dim")
-            grid.addWidget(header, 0, column, Qt.AlignmentFlag.AlignRight if column == 2 else Qt.AlignmentFlag.AlignLeft)
+            grid.addWidget(header, 0, column, Qt.AlignmentFlag.AlignRight if column >= 2 else Qt.AlignmentFlag.AlignLeft)
         # Grupo próprio: os rádios de modo são irmãos no mesmo grupo de tela.
         self._levels = QButtonGroup(self)
         self._level_sizes: list[QLabel] = []
+        self._level_ceilings: list[QLabel] = []
         for row, level in enumerate(LEVELS, start=1):
             button = bind(QRadioButton(), "setText", lambda key=level.key: strings.CONVERT_LEVELS[key])
             self._levels.addButton(button, row - 1)
@@ -355,9 +357,12 @@ class ConvertPanel(QWidget):
             size = QLabel(DASH)
             grid.addWidget(size, row, 2, Qt.AlignmentFlag.AlignRight)
             self._level_sizes.append(size)
+            ceiling = QLabel(DASH)
+            grid.addWidget(ceiling, row, 3, Qt.AlignmentFlag.AlignRight)
+            self._level_ceilings.append(ceiling)
         self._levels.button(1).setChecked(True)  # Equilibrada
         self._levels.idToggled.connect(self._on_level_toggled)
-        grid.setColumnStretch(3, 1)
+        grid.setColumnStretch(4, 1)
         return self._level_table
 
     def _on_level_toggled(self, _index: int, checked: bool) -> None:
@@ -642,8 +647,14 @@ class ConvertPanel(QWidget):
     def _update_level_sizes(self) -> None:
         """Tamanho de cada nível para os arquivos da lista, e quanto encolhe."""
         before = sum(m.size for m in self._media) if all(m.size for m in self._media) else None
-        for level, label in zip(LEVELS, self._level_sizes):
-            sizes = [self._estimate(m, self._compression_target(m, level)) for m in self._media]
+        for level, label, ceiling in zip(LEVELS, self._level_sizes, self._level_ceilings):
+            targets = [self._compression_target(m, level) for m in self._media]
+            # O teto não depende da amostra: aparece na hora. Um arquivo sem teto
+            # (na placa, ou sem bitrate de origem) deixa o lote sem garantia.
+            limits = [compression_ceiling(m, t) for m, t in zip(self._media, targets)]
+            ceiling.setText(strings.CONVERT_CEILING.format(size=format_size(sum(limits)))
+                            if limits and None not in limits else DASH)
+            sizes = [self._estimate(m, t) for m, t in zip(self._media, targets)]
             if None in sizes:
                 label.setText(strings.CONVERT_MEASURING)
                 continue

@@ -223,6 +223,8 @@ CONVERT_LEVEL_HEADER = "Level"
 CONVERT_QUALITY_HEADER = "Quality"
 CONVERT_SIZE_HEADER = "Estimated size"
 CONVERT_MEASURING = "measuring…"
+CONVERT_CEILING_HEADER = "Guaranteed"
+CONVERT_CEILING = "up to {size}"
 CONVERT_LEVELS = {"light": "Light", "balanced": "Balanced", "strong": "Strong", "max": "Maximum"}
 CONVERT_LEVEL_QUALITY = {
     "light": "nearly identical to the original",

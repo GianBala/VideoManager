@@ -47,15 +47,25 @@ O WAV sai em 16 bits, ou em 24 bits quando a origem tem mais resolução que iss
 ### Comprimir
 
 Deixa os arquivos menores sem trocar de formato à toa. Uma tabela mostra os
-quatro níveis lado a lado, cada um com a qualidade esperada e o **tamanho** que
-os arquivos da lista vão ter, com a redução em relação ao original:
+quatro níveis lado a lado, cada um com a qualidade esperada, o **tamanho
+estimado** dos arquivos da lista (com a redução em relação ao original) e o
+**tamanho garantido** — o máximo que a saída pode ter:
 
-| Nível | Qualidade | Vídeo | Áudio |
-| --- | --- | --- | --- |
-| Leve | quase idêntica ao original | CRF 18 (x264) | até 192 kbps |
-| Equilibrada (padrão) | ótima | CRF 23 | até 128 kbps |
-| Forte | boa, perda visível de perto | CRF 28 | até 96 kbps |
-| Máxima | aceitável | CRF 28 e no máximo 720p | até 64 kbps |
+| Nível | Qualidade | Vídeo | Teto do vídeo | Áudio |
+| --- | --- | --- | --- | --- |
+| Leve | quase idêntica ao original | CRF 18 (x264) | 85% do original | até 192 kbps |
+| Equilibrada (padrão) | ótima | CRF 23 | 70% | até 128 kbps |
+| Forte | boa, perda visível de perto | CRF 28 | 50% | até 96 kbps |
+| Máxima | aceitável | CRF 28 e no máximo 720p | 35% | até 64 kbps |
+
+O vídeo mira a qualidade do nível, mas não passa do teto, que é uma fração do
+bitrate do vídeo original. Onde o conteúdo comprime bem (uma gravação de tela
+quase parada), o arquivo sai do tamanho que a qualidade pede, muito abaixo do
+teto; num vídeo baixado da internet, que já vem bem comprimido, o teto é o que
+impede o arquivo de crescer, ao custo de um pouco de qualidade. O teto é
+cumprido pelo x264 e pelo x265, e só nesses casos a coluna **Garantido** traz
+um número. O AV1 também recebe o teto, mas o encoder o trata como alvo — reduz o
+crescimento sem garantir —, e a placa de vídeo não aceita teto.
 
 - **Codec de vídeo** — H.264 (toca em qualquer lugar), HEVC ou AV1 (menores,
   mais lentos para codificar). A placa de vídeo configurada é usada em H.264 e
@@ -68,11 +78,12 @@ os arquivos da lista vão ter, com a redução em relação ao original:
 - **Nada é ampliado nem recodificado para ficar igual.** O teto de 720p só vale
   para o que é maior que isso; um áudio que já está abaixo do teto do nível é
   copiado.
-- **Resultado que não encolhe não é gravado.** Um vídeo baixado da internet
-  costuma já estar bem comprimido, e recodificá-lo pode aumentá-lo. A tabela
-  mostra isso antes (redução com sinal de `+`), o plano conta os arquivos que
-  não devem encolher, e a tarefa que não terminar menor que o original falha com
-  o aviso, sem deixar arquivo na pasta.
+- **Resultado que não encolhe não é gravado.** É a rede de segurança de quem
+  não tem teto garantido (placa de vídeo e AV1): a tabela mostra antes (redução
+  com sinal de `+`), o plano conta os arquivos que não devem encolher, e a tarefa
+  que não terminar menor que o original falha com o aviso, sem deixar arquivo na
+  pasta. Um áudio que já está abaixo do teto do nível nem entra na fila: é
+  ignorado com o motivo.
 - **A medida só roda com memória para ela.** Uma amostra 4K pede tanto quanto a
   conversão 4K (até 4,3 GB); com a fila convertendo outro arquivo grande ao lado,
   a tabela usa uma conta aproximada no lugar.
