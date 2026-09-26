@@ -189,6 +189,18 @@ class TestConvertSizeEstimation:
 
         assert size_hevc < size_h264
 
+    def test_retrato_reduz_o_lado_curto_como_a_conversao(self, tmp_path: Path) -> None:
+        # "720p" é o lado curto (ver ``needs_scaling``): o retrato sai 720×1280,
+        # a mesma área da paisagem 1280×720, e não 405×720.
+        def midia(largura: int, altura: int) -> LocalMedia:
+            return LocalMedia(
+                path=tmp_path / "video.mp4", duration=60.0, format_name="mov,mp4", size=None,
+                streams=(LocalStream(index=0, kind="video", codec="h264", width=largura, height=altura),),
+            )
+
+        alvo = VideoTarget(container="mp4", video_codec="h264", height=720)
+        assert estimate_convert_size(midia(1080, 1920), alvo) == estimate_convert_size(midia(1920, 1080), alvo)
+
     def test_convert_to_audio(self, tmp_path: Path) -> None:
         media = LocalMedia(
             path=tmp_path / "video.mp4",
