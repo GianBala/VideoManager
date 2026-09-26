@@ -35,6 +35,7 @@ class ConvertWorker(QRunnable):
             on_progress=self._emit_progress,
             text_assets=dict(job.request.text_assets),
             lease=job.request.lease,
+            max_bytes=job.request.max_bytes,
         )
 
     def cancel(self) -> None:

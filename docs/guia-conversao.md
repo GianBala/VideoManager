@@ -18,7 +18,7 @@ Grupo **Arquivos a converter**:
 
 ## Escolhendo o destino da conversão
 
-Grupo **Converter para**, com dois rádios que trocam o formulário abaixo:
+Grupo **Converter para**, com três rádios que trocam o formulário abaixo:
 
 ### Converter para áudio
 
@@ -43,6 +43,44 @@ O WAV sai em 16 bits, ou em 24 bits quando a origem tem mais resolução que iss
   A resolução é o **lado curto** da imagem como ela aparece: num vídeo retrato
   (inclusive gravado de lado, com rotação nos metadados), 720p reduz a largura
   para 720.
+
+### Comprimir
+
+Deixa os arquivos menores sem trocar de formato à toa. Uma tabela mostra os
+quatro níveis lado a lado, cada um com a qualidade esperada e o **tamanho** que
+os arquivos da lista vão ter, com a redução em relação ao original:
+
+| Nível | Qualidade | Vídeo | Áudio |
+| --- | --- | --- | --- |
+| Leve | quase idêntica ao original | CRF 18 (x264) | até 192 kbps |
+| Equilibrada (padrão) | ótima | CRF 23 | até 128 kbps |
+| Forte | boa, perda visível de perto | CRF 28 | até 96 kbps |
+| Máxima | aceitável | CRF 28 e no máximo 720p | até 64 kbps |
+
+- **Codec de vídeo** — H.264 (toca em qualquer lugar), HEVC ou AV1 (menores,
+  mais lentos para codificar). A placa de vídeo configurada é usada em H.264 e
+  HEVC, com o número de qualidade de cada nível.
+- **O tamanho é medido, não adivinhado.** Ao entrar no modo, a aba codifica
+  três trechos de 8 s de cada vídeo em cada nível, em segundo plano, e mostra
+  "medindo…" até o número chegar. Quanto um vídeo encolhe depende do conteúdo:
+  uma gravação de tela quase parada encolhe para poucos por cento, uma cena com
+  movimento bem menos.
+- **Nada é ampliado nem recodificado para ficar igual.** O teto de 720p só vale
+  para o que é maior que isso; um áudio que já está abaixo do teto do nível é
+  copiado.
+- **Resultado que não encolhe não é gravado.** Um vídeo baixado da internet
+  costuma já estar bem comprimido, e recodificá-lo pode aumentá-lo. A tabela
+  mostra isso antes (redução com sinal de `+`), o plano conta os arquivos que
+  não devem encolher, e a tarefa que não terminar menor que o original falha com
+  o aviso, sem deixar arquivo na pasta.
+- **A medida só roda com memória para ela.** Uma amostra 4K pede tanto quanto a
+  conversão 4K (até 4,3 GB); com a fila convertendo outro arquivo grande ao lado,
+  a tabela usa uma conta aproximada no lugar.
+- Vídeo e áudio podem estar na mesma lista: cada arquivo é comprimido no seu
+  tipo. O áudio fica no formato em que chegou (MP3, AAC, Opus, Vorbis); os sem
+  perda (FLAC, WAV) e os demais vão para AAC (`.m4a`). O vídeo sai em `.mp4`,
+  ou em `.mkv` quando a origem é MKV, para manter todas as faixas e legendas.
+- A saída leva " (comprimido)" no nome.
 
 ### Faixas extras
 

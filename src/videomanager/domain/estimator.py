@@ -187,17 +187,24 @@ def estimate_download_size(
 def estimate_convert_size(
     media: LocalMedia,
     target: VideoTarget | AudioTarget,
+    video_kbps: float | None = None,
 ) -> int:
-    """Estima tamanho de arquivo resultante da conversão local em bytes."""
+    """Estima tamanho de arquivo resultante da conversão local em bytes.
+
+    ``video_kbps`` é o bitrate de vídeo medido numa amostra (ver
+    ``infrastructure/ffmpeg/sample.py``): quando existe, substitui a conta por
+    pixels, que não enxerga o conteúdo.
+    """
     from videomanager.domain.media import AudioTarget
     from videomanager.domain.media import VideoTarget
-    from videomanager.domain.compatibility import can_copy_audio
+    from videomanager.domain.compatibility import copies_audio
     from videomanager.domain.compatibility import display_size
+    from videomanager.domain.compatibility import resolved_audio_codec
 
     duration = media.duration or 0.0
 
     if isinstance(target, AudioTarget):
-        if media.size and not media.has_video and can_copy_audio(media, target.codec):
+        if media.size and not media.has_video and copies_audio(media, target):
             return media.size
         if duration > 0:
             a_rate = estimate_audio_bitrate(target.codec, target.bitrate)
@@ -237,14 +244,25 @@ def estimate_convert_size(
             else:
                 target_w, target_h = int(target_w * scale), target.height
 
-        v_rate = estimate_video_bitrate(target_w, target_h, orig_fps, target.video_codec)
-        a_rate = (media.audio.bitrate if (media.audio and media.audio.bitrate) else 160.0)
+        v_rate = estimate_video_bitrate(target_w, target_h, orig_fps, target.video_codec,
+                                        quality=target.quality or "balanced")
+        # O áudio recodificado sai no bitrate pedido, não no de origem: numa
+        # compressão, 320 kbps viram 64, e a conta pela origem anunciava o
+        # arquivo maior do que ele sai.
+        if not media.has_audio:
+            a_rate = 0.0
+        elif resolved_audio_codec(media, target) != "copy":
+            a_rate = float(target.audio_bitrate)
+        else:
+            a_rate = media.audio.bitrate or 160.0
 
         # Se o original já possui taxa menor, não superestima
         if media.size and duration > 0:
             orig_total_rate = (media.size * 8) / (duration * 1000)
             if (target.height or short) <= short and orig_total_rate > 0:
                 v_rate = min(v_rate, orig_total_rate * 1.1)
+        if video_kbps is not None:
+            v_rate = video_kbps
 
         if duration > 0:
             return int(((v_rate + a_rate) * 1000 / 8) * duration * 1.015)

@@ -12,15 +12,18 @@ está baixando.
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPainter, QPalette
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -40,10 +43,14 @@ from videomanager.domain.media import AudioTarget
 from videomanager.domain.media import LocalMedia
 from videomanager.domain.i18n import Text
 from videomanager.domain.compatibility import container_accepts_video
+from videomanager.domain.compression import LEVELS
+from videomanager.domain.compression import VIDEO_CODECS as COMPRESS_CODECS
+from videomanager.domain.compression import compression_target
 from videomanager.domain.media import VideoTarget
 from videomanager.application.media.conversion_description import describe_target
 from videomanager.domain.estimator import estimate_convert_size
 from videomanager.application.errors import VideoManagerError
+from videomanager.application.formatting import DASH
 from videomanager.application.formatting import format_duration
 from videomanager.application.formatting import format_size
 from videomanager.application.jobs.models import Job
@@ -145,6 +152,15 @@ class ConvertPanel(QWidget):
         self._inspection_pool = QThreadPool(self)
         self._inspection_pool.setMaxThreadCount(1)
         self._inspection_runner = WorkerRunner(self._inspection_pool)
+        # A medida dos níveis divide a vaga da inspeção: um ffmpeg por vez da
+        # aba, e adicionar arquivos cancela a medida em vez de esperar por ela.
+        self._sampling_runner = WorkerRunner(self._inspection_pool)
+        self._sampling_token = 0
+        self._sampling: set[tuple] = set()
+        # Bitrate de vídeo medido por (arquivo, alvo); ``None`` quando a medida
+        # falhou e a conta por pixels é o que resta.
+        self._samples: dict[tuple, float | None] = {}
+        self._tools: FFmpegTools | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -177,6 +193,7 @@ class ConvertPanel(QWidget):
     def _retranslate(self) -> None:
         retext_items(self._video_codec, _codec_label)
         retext_items(self._resize, _resize_label)
+        retext_items(self._compress_codec, strings.EXPORT_VIDEO_CODECS.get)
         self._align_label_column()
         # O plano, o tamanho estimado e a descrição de cada arquivo levam texto
         # e números do idioma.
@@ -234,10 +251,15 @@ class ConvertPanel(QWidget):
         self._to_audio.setChecked(True)
         self._to_audio.toggled.connect(self._on_mode_changed)
         self._to_video = bind(QRadioButton(), "setText", lambda: strings.CONVERT_TO_VIDEO)
+        self._to_compress = bind(QRadioButton(), "setText", lambda: strings.CONVERT_TO_COMPRESS)
+        # O rádio de áudio não avisa a troca entre vídeo e compressão.
+        self._to_compress.toggled.connect(self._on_mode_changed)
         modes.addWidget(self._to_audio)
         modes.addWidget(self._to_video)
+        modes.addWidget(self._to_compress)
         modes.addStretch(1)
         outer.addLayout(modes)
+        outer.addWidget(self._build_level_table())
 
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
@@ -285,8 +307,14 @@ class ConvertPanel(QWidget):
         self._resize.currentIndexChanged.connect(self._update_plan)
         self._add_row(form, lambda: strings.CONVERT_RESIZE, self._resize)
 
+        self._compress_codec = QComboBox()
+        for value in COMPRESS_CODECS:
+            self._compress_codec.addItem(strings.EXPORT_VIDEO_CODECS[value], value)
+        self._compress_codec.currentIndexChanged.connect(self._on_compress_codec_changed)
+        self._add_row(form, lambda: strings.LABEL_CODEC, self._compress_codec)
+
         for combo in (self._audio_codec, self._audio_bitrate, self._container,
-                      self._video_codec, self._resize):
+                      self._video_codec, self._resize, self._compress_codec):
             combo.setFixedWidth(FIELD_WIDTH)
 
         outer.addLayout(form)
@@ -294,6 +322,52 @@ class ConvertPanel(QWidget):
         self._form = form
         self._on_mode_changed()
         return group
+
+    def _build_level_table(self) -> QWidget:
+        """Os níveis lado a lado com o que cada um custa e rende.
+
+        Uma lista de nomes obrigaria a escolher um nível para descobrir o
+        tamanho dele; aqui a troca entre qualidade e tamanho está à vista antes
+        de escolher, para os arquivos que estão na lista.
+        """
+        self._level_table = QWidget()
+        self._level_table.setProperty("role", "plain")
+        grid = QGridLayout(self._level_table)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(4)
+        headers = (lambda: strings.CONVERT_LEVEL_HEADER, lambda: strings.CONVERT_QUALITY_HEADER,
+                   lambda: strings.CONVERT_SIZE_HEADER)
+        for column, text in enumerate(headers):
+            header = bind(QLabel(), "setText", text)
+            header.setProperty("role", "dim")
+            grid.addWidget(header, 0, column, Qt.AlignmentFlag.AlignRight if column == 2 else Qt.AlignmentFlag.AlignLeft)
+        # Grupo próprio: os rádios de modo são irmãos no mesmo grupo de tela.
+        self._levels = QButtonGroup(self)
+        self._level_sizes: list[QLabel] = []
+        for row, level in enumerate(LEVELS, start=1):
+            button = bind(QRadioButton(), "setText", lambda key=level.key: strings.CONVERT_LEVELS[key])
+            self._levels.addButton(button, row - 1)
+            grid.addWidget(button, row, 0)
+            quality = bind(QLabel(), "setText",
+                           lambda level=level: strings.CONVERT_LEVEL_QUALITY[level.key].format(height=level.max_height))
+            grid.addWidget(quality, row, 1)
+            size = QLabel(DASH)
+            grid.addWidget(size, row, 2, Qt.AlignmentFlag.AlignRight)
+            self._level_sizes.append(size)
+        self._levels.button(1).setChecked(True)  # Equilibrada
+        self._levels.idToggled.connect(self._on_level_toggled)
+        grid.setColumnStretch(3, 1)
+        return self._level_table
+
+    def _on_level_toggled(self, _index: int, checked: bool) -> None:
+        if checked:
+            self._update_plan()
+
+    def _on_compress_codec_changed(self) -> None:
+        # O que estava na fila mede o codec anterior: sairia antes do pedido agora.
+        self._cancel_sampling()
+        self._update_plan()
 
     def _on_container_changed(self) -> None:
         self._sync_codec_choices()
@@ -332,10 +406,15 @@ class ConvertPanel(QWidget):
 
     def _on_mode_changed(self) -> None:
         audio = self._to_audio.isChecked()
+        compress = self._to_compress.isChecked()
         for widget in (self._audio_codec, self._audio_bitrate):
             self._set_row_visible(widget, audio)
         for widget in (self._container, self._video_codec, self._resize):
-            self._set_row_visible(widget, not audio)
+            self._set_row_visible(widget, not audio and not compress)
+        self._set_row_visible(self._compress_codec, compress)
+        self._level_table.setVisible(compress)
+        if not compress:
+            self._cancel_sampling()
         self._update_plan()
 
     def _set_row_visible(self, widget: QWidget, visible: bool) -> None:
@@ -374,6 +453,7 @@ class ConvertPanel(QWidget):
         tools = self._ensure_tools()
         if tools is None:
             return
+        self._tools = tools
 
         known = {media.path for media in self._media}
         pending = [path for path in dict.fromkeys(self._inspection_paths + paths) if path not in known]
@@ -424,15 +504,19 @@ class ConvertPanel(QWidget):
         self._inspection_runner.cancel_all()
         self._inspection_worker = None
         self._inspection_paths = []
+        self._cancel_sampling()
+
+    def _cancel_sampling(self) -> None:
+        self._sampling_token += 1
+        self._sampling_runner.cancel_all()
+        self._sampling.clear()
 
     def shutdown(self) -> None:
         self._cancel_inspection()
         self._inspection_pool.waitForDone(2000)
 
     @staticmethod
-    def _describe(
-        media: LocalMedia, target: VideoTarget | AudioTarget | None = None
-    ) -> str:
+    def _describe(media: LocalMedia, after: str | None = None) -> str:
         pieces = [media.path.name]
         if media.video:
             pieces.append(f"{media.video.codec} {media.video.width}x{media.video.height}")
@@ -440,19 +524,21 @@ class ConvertPanel(QWidget):
             pieces.append(f"{media.audio.codec}")
         pieces.append(format_duration(media.duration))
         size_txt = format_size(media.size)
-        if target is not None:
-            est = estimate_convert_size(media, target)
-            size_txt = f"{size_txt} → {format_size(est, estimated=True)}"
+        if after is not None:
+            size_txt = f"{size_txt} → {after}"
         pieces.append(size_txt)
         return "   ·   ".join(pieces)
 
-    def _refresh_list_items(self, target: VideoTarget | AudioTarget) -> None:
-        for idx, media in enumerate(self._media):
+    def _refresh_list_items(self, targets: list[VideoTarget | AudioTarget]) -> None:
+        for idx, (media, target) in enumerate(zip(self._media, targets)):
             item = self._list.item(idx)
             if item:
-                item.setText(self._describe(media, target))
+                estimated = self._estimate(media, target)
+                after = strings.CONVERT_MEASURING if estimated is None else format_size(estimated, estimated=True)
+                item.setText(self._describe(media, after))
 
     def _remove_selected(self) -> None:
+        self._cancel_sampling()
         for item in self._list.selectedItems():
             row = self._list.row(item)
             self._list.takeItem(row)
@@ -468,6 +554,8 @@ class ConvertPanel(QWidget):
         a pasta de downloads só valia na conversão depois de reiniciar.
         """
         self._settings = settings
+        # A placa escolhida muda o encoder, e com ele o que se mede.
+        self._cancel_sampling()
         self._update_plan()
 
     def clear_files(self) -> None:
@@ -484,7 +572,11 @@ class ConvertPanel(QWidget):
     # Alvo
     # ------------------------------------------------------------------
 
-    def _build_target(self) -> AudioTarget | VideoTarget:
+    def _build_target(self, media: LocalMedia) -> AudioTarget | VideoTarget:
+        """O alvo deste arquivo. Na compressão ele depende do arquivo: vídeo
+        vira vídeo e áudio vira áudio, na mesma lista."""
+        if self._to_compress.isChecked():
+            return self._compression_target(media, LEVELS[self._levels.checkedId()])
         if self._to_audio.isChecked():
             codec = self._audio_codec.currentData() or "mp3"
             return AudioTarget(
@@ -499,7 +591,72 @@ class ConvertPanel(QWidget):
             hardware=self._settings.hardware_encoder,
         )
 
+    def _compression_target(self, media: LocalMedia, level) -> AudioTarget | VideoTarget:
+        return compression_target(media, level, self._compress_codec.currentData() or "h264",
+                                  self._settings.hardware_encoder)
+
+    @staticmethod
+    def _sample_key(media: LocalMedia, target: VideoTarget) -> tuple:
+        # Tudo que muda o vídeo codificado, e nada do áudio: Forte e Máxima de
+        # um vídeo até 720p gravam a mesma imagem e são medidos uma vez só.
+        return (media.path, target.container, target.video_codec, target.quality, target.height, target.hardware)
+
+    def _estimate(self, media: LocalMedia, target: AudioTarget | VideoTarget) -> int | None:
+        """Tamanho esperado da saída; ``None`` enquanto a amostra não chega."""
+        if not (self._to_compress.isChecked() and isinstance(target, VideoTarget)) or self._tools is None:
+            return estimate_convert_size(media, target)
+        key = self._sample_key(media, target)
+        if key not in self._samples:
+            return None
+        return estimate_convert_size(media, target, self._samples[key])
+
+    def _request_samples(self) -> None:
+        """Enfileira a medida do que falta, começando pelo nível escolhido."""
+        if self._tools is None:
+            return
+        chosen = self._levels.checkedId()
+        for level in (LEVELS[chosen], *LEVELS[:chosen], *LEVELS[chosen + 1:]):
+            for media in self._media:
+                target = self._compression_target(media, level)
+                if not isinstance(target, VideoTarget):
+                    continue
+                key = self._sample_key(media, target)
+                if key in self._samples or key in self._sampling:
+                    continue
+                self._sampling.add(key)
+                token = self._sampling_token
+                worker = self._runtime.sample_worker(media, target, self._tools)
+                worker.signals.finished.connect(partial(self._on_sampled, token, key),
+                                                Qt.ConnectionType.QueuedConnection)
+                worker.signals.failed.connect(lambda _error, token=token, key=key: self._on_sampled(token, key, None),
+                                              Qt.ConnectionType.QueuedConnection)
+                self._sampling_runner.start(worker, worker.signals.done)
+
+    def _on_sampled(self, token: int, key: tuple, kbps: float | None) -> None:
+        if token != self._sampling_token:
+            return
+        self._sampling.discard(key)
+        self._samples[key] = kbps
+        self._update_plan()
+
+    def _update_level_sizes(self) -> None:
+        """Tamanho de cada nível para os arquivos da lista, e quanto encolhe."""
+        before = sum(m.size for m in self._media) if all(m.size for m in self._media) else None
+        for level, label in zip(LEVELS, self._level_sizes):
+            sizes = [self._estimate(m, self._compression_target(m, level)) for m in self._media]
+            if None in sizes:
+                label.setText(strings.CONVERT_MEASURING)
+                continue
+            after = sum(sizes)
+            text = format_size(after, estimated=True) if after else DASH
+            if after and before:
+                change = round((after - before) * 100 / before)
+                text += f"  ({change:+d}%)"
+            label.setText(text)
+
     def _update_plan(self) -> None:
+        if self._to_compress.isChecked():
+            self._update_level_sizes()
         if self._to_audio.isChecked():
             codec = self._audio_codec.currentData() or "mp3"
             self._audio_bitrate.setEnabled(codec not in LOSSLESS_AUDIO)
@@ -518,13 +675,28 @@ class ConvertPanel(QWidget):
             self.changed.emit()
             return
 
-        target = self._build_target()
-        self._refresh_list_items(target)
-        plans = [describe_target(m, target) for m in self._media]
+        targets = [self._build_target(m) for m in self._media]
+        self._refresh_list_items(targets)
+        plans = [describe_target(m, t) for m, t in zip(self._media, targets)]
         unique_plans = list(dict.fromkeys(plans))
-        total_estimated = sum(estimate_convert_size(m, target) for m in self._media)
-        formatted_size = format_size(total_estimated, estimated=True)
+        estimates = [self._estimate(m, t) for m, t in zip(self._media, targets)]
+        total_estimated = None if None in estimates else sum(estimates)
+        formatted_size = (strings.CONVERT_MEASURING if total_estimated is None
+                          else format_size(total_estimated, estimated=True))
         size_info = strings.CONVERT_ESTIMATED_SIZE.format(size=formatted_size)
+        before = sum(m.size for m in self._media) if all(m.size for m in self._media) else None
+        if self._to_compress.isChecked() and before and total_estimated:
+            template = (strings.CONVERT_COMPRESS_SIZE if total_estimated < before
+                        else strings.CONVERT_COMPRESS_SIZE_LARGER)
+            size_info = template.format(before=format_size(before), after=formatted_size,
+                                        percent=round((before - total_estimated) * 100 / before))
+        if self._to_compress.isChecked() and total_estimated:
+            # Por arquivo, e não pelo total: é cada tarefa que deixa de gravar o
+            # que sai maior, e um lote que encolhe no total pode ter um arquivo
+            # baixado da internet que cresce (medido: +24% no nível padrão).
+            larger = sum(1 for m, size in zip(self._media, estimates) if m.size and size >= m.size)
+            if larger:
+                size_info += "\n• " + strings.CONVERT_COMPRESS_NO_GAIN.format(count=larger)
 
         if len(unique_plans) == 1:
             plan_str = strings.CONVERT_PLAN.format(plan=unique_plans[0])
@@ -535,6 +707,8 @@ class ConvertPanel(QWidget):
         self._plan.setText(f"{plan_str}\n• {size_info}")
         self._plan.setVisible(True)
         self.changed.emit()
+        if self._to_compress.isChecked():
+            self._request_samples()
 
     # ------------------------------------------------------------------
 
@@ -550,17 +724,19 @@ class ConvertPanel(QWidget):
         if tools is None:
             return
 
-        target = self._build_target()
         fallback_dir = self._runtime.download_directory(self._settings)
         use_same_folder = self._same_folder.isChecked()
+        compress = self._to_compress.isChecked()
 
         jobs: list[Job] = []
         skipped: list[str] = []
         fallback_used = False
 
         for media in self._media:
+            target = self._build_target(media)
             try:
-                job, used_fallback = self._processing.convert(media, target, same_folder=use_same_folder, fallback=fallback_dir)
+                job, used_fallback = self._processing.convert(media, target, same_folder=use_same_folder,
+                                                              fallback=fallback_dir, compress=compress)
                 # Refeita na exibição: a tarefa fica na fila depois da troca de idioma.
                 job.description = Text.of(describe_target, media, target)
                 jobs.append(job)

@@ -11,10 +11,16 @@ class FunctionSignals(QObject):
 
 
 class FunctionWorker(QRunnable):
-    def __init__(self, operation: Callable[[], object]):
+    def __init__(self, operation: Callable[[], object], cancel: Callable[[], None] | None = None):
         super().__init__()
         self.operation = operation
         self.signals = FunctionSignals()
+        self._cancel = cancel
+
+    def cancel(self) -> None:
+        # ``WorkerRunner.cancel_all`` chama isto em todo worker vivo.
+        if self._cancel is not None:
+            self._cancel()
 
     @Slot()
     def run(self):

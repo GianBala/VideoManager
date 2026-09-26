@@ -16,6 +16,7 @@ register({
     "QUALITY_BALANCED": ("qualidade equilibrada", "balanced quality"),
     "QUALITY_HIGH": ("alta qualidade", "high quality"),
     "QUALITY_ECONOMY": ("qualidade econômica", "economy quality"),
+    "OUTPUT_COMPRESSED_SUFFIX": (" (comprimido)", " (compressed)"),
     "ENCODER_SOFTWARE": ("Software (melhor compressão)", "Software (best compression)"),
     "ENCODER_AUTO": ("Automático (usa a placa)", "Automatic (uses the GPU)"),
 
