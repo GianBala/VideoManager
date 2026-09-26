@@ -281,6 +281,18 @@ def secao_interface(midia_dir: Path) -> dict:
         saida[f"editor com projeto {largura}x{altura}"] = cheio
         editor.install_project(new_project(), None, [], {})
         _processar(app)
+        conversao = janela._convert
+        if hasattr(conversao, "_to_compress"):  # a árvore anterior não tem o modo
+            janela._tabs.setCurrentIndex(1)
+            conversao._to_compress.setChecked(True)
+            _processar(app)
+            medidas = _geometria(janela, janela)
+            medidas.update({f"_convert.{k}": v for k, v in _geometria(janela, conversao).items()})
+            saida[f"convert comprimir {largura}x{altura}"] = medidas
+            # De volta ao modo padrão: a medida seguinte tem de sair igual à da
+            # árvore anterior, e é isso que mostra se o modo deixou rastro.
+            conversao._to_audio.setChecked(True)
+            _processar(app)
     editor.shutdown()
     return saida
 

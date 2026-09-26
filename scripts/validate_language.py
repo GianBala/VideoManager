@@ -71,7 +71,7 @@ _DADO = re.compile(
     rf"""^(
         [\W\d_]*                                   # só símbolos e números
       | .*\.(mp4|mkv|webm|mov|m4a|mp3|png|jpg|vmp|json|wav|flac|ogg|opus|gif|avi)\b.*   # arquivo
-      | [\d.,:\s×x%/+\-−]*{_UNIDADE}?([\s·/]+[\d.,:\s×x%/+\-−]+{_UNIDADE}?)*   # medida
+      | [\d.,:\s×x%/+\-−~]*{_UNIDADE}?([\s·/(]+[\d.,:\s×x%/+\-−~)]+{_UNIDADE}?)*   # medida, "~2 MB  (-41%)"
       | (H\.264|HEVC|H\.265|AV1|VP9|VP8|AAC|ALAC|MP3|FLAC|WAV|Opus|Vorbis|MKV|MP4|WEBM|GIF|MOV|PNG)(\W.*)?
       | https?://\S+
       | (/|~/|[A-Za-z]:\\)\S.*                     # caminho
@@ -261,13 +261,17 @@ def _editor(app, janela, r, selecionar: int | None = 901) -> None:
         _processar(app, 150)
 
 
-def _convert(app, janela, r, video: bool = False) -> None:
+def _convert(app, janela, r, video: bool = False, comprimir: bool = False) -> None:
     _aba(janela, 1)
     painel = janela._convert
     painel.add_files(list(r["arquivos"]))
     _esperar(app, lambda: len(painel._media) == len(r["arquivos"]), 30)
     if video:
         painel._to_video.setChecked(True)
+    if comprimir:
+        painel._to_compress.setChecked(True)
+        # Com a medida pela metade, as duas janelas mostrariam estados diferentes.
+        _esperar(app, lambda: not painel._sampling, 60)
     _processar(app, 120)
 
 
@@ -279,6 +283,7 @@ CENAS = {
     "convert_vazio": lambda app, j, r: _aba(j, 1),
     "convert_audio": lambda app, j, r: _convert(app, j, r),
     "convert_video": lambda app, j, r: _convert(app, j, r, video=True),
+    "convert_comprimir": lambda app, j, r: _convert(app, j, r, comprimir=True),
     "editor_vazio": lambda app, j, r: _aba(j, 2),
     "editor_video": lambda app, j, r: _editor(app, j, r, 901),
     "editor_audio": lambda app, j, r: _editor(app, j, r, 907),
