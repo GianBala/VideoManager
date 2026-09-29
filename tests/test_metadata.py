@@ -97,7 +97,8 @@ class TestComando:
         assert "-0:2" in _pares(args, "-map")
         # Já há um anexo (a fonte): a capa é o segundo.
         assert _pares(args, "-metadata:s:t:1") == ["mimetype=image/jpeg", "filename=cover.jpg"]
-        assert args[args.index("-attach") + 1] == "/t/cover.jpg"
+        # Pelo Path, e não por texto: no Windows ele vira "\t\cover.jpg".
+        assert args[args.index("-attach") + 1] == str(Path("/t/cover.jpg"))
 
     def test_mp4_sai_com_indice_no_comeco(self) -> None:
         assert "+faststart" in metadata_args(_meta(), unchanged_edit(_meta()), Path("/s/x.mp4"), TOOLS)
