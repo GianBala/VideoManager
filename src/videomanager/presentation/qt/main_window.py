@@ -60,6 +60,7 @@ from videomanager.presentation.qt.ffmpeg_setup import ensure_ffmpeg
 from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
 from videomanager.presentation.qt.panels.media_card import MediaCard
+from videomanager.presentation.qt.panels.metadata_panel import MetadataPanel
 from videomanager.presentation.qt.panels.profiles_panel import Profile
 from videomanager.presentation.qt.panels.profiles_panel import ProfilesPanel
 from videomanager.presentation.qt.panels.quality_panel import QualityPanel
@@ -74,6 +75,9 @@ from videomanager.presentation.qt.ports import DesktopRuntimePort
 _TAB_DOWNLOAD = 0
 _TAB_CONVERT = 1
 _TAB_EDIT = 2
+# No fim, e não ao lado da Convert: scripts de validação e testes situam o
+# editor no índice 2, e a aba nova não desloca nenhum deles.
+_TAB_METADATA = 3
 # Sem margem lateral: o conteúdo da aba fica na mesma coluna da fila, que está
 # fora das abas. Em cima, só o respiro que separa da barra de abas.
 _TAB_MARGINS = (0, 10, 0, 0)
@@ -192,6 +196,8 @@ class MainWindow(QMainWindow):
         self._edit.jobs_ready.connect(self._submit_jobs)
         self._edit.changed.connect(self._balance_panes)
         self._tabs.addTab(self._wrap_tab(self._edit, horizontal=True), strings.TAB_EDIT)
+        self._metadata = MetadataPanel(self._settings, self._tools_for_convert, runtime=self._runtime)
+        self._tabs.addTab(self._wrap_tab(self._metadata), strings.TAB_METADATA)
 
         self._vertical = QSplitter(Qt.Orientation.Vertical)
         self._vertical.addWidget(self._tabs)
@@ -245,7 +251,8 @@ class MainWindow(QMainWindow):
         return tab
 
     def _retranslate(self) -> None:
-        for index, text in enumerate((strings.TAB_DOWNLOAD, strings.TAB_CONVERT, strings.TAB_EDIT)):
+        for index, text in enumerate((strings.TAB_DOWNLOAD, strings.TAB_CONVERT, strings.TAB_EDIT,
+                                      strings.TAB_METADATA)):
             self._tabs.setTabText(index, text)
         self._update_status()
 
@@ -264,7 +271,9 @@ class MainWindow(QMainWindow):
         andamento, na fila e concluído, e a fila volta inteira em qualquer outra
         aba, com as tarefas que entraram enquanto ela estava escondida.
         """
-        self._queue_panel.setVisible(index != _TAB_EDIT)
+        # Na aba Metadados também: salvar lá não passa pela fila, e o espaço
+        # vale mais como formulário.
+        self._queue_panel.setVisible(index not in (_TAB_EDIT, _TAB_METADATA))
         self._balance_panes()
         self._update_menu_scope(index)
 
@@ -525,6 +534,12 @@ class MainWindow(QMainWindow):
         self._export_action = bind(QAction(self), "setText", lambda: strings.ACTION_EXPORT_VIDEO)
         self._export_action.triggered.connect(self._edit._open_export_dialog)
 
+        # Ações da aba Metadados
+        self._meta_open_action = bind(QAction(self), "setText", lambda: strings.ACTION_META_OPEN)
+        self._meta_open_action.triggered.connect(self._metadata.choose_file)
+        self._meta_save_action = bind(QAction(self), "setText", lambda: strings.ACTION_META_SAVE)
+        self._meta_save_action.triggered.connect(self._metadata.save)
+
     def _on_file_menu_about_to_show(self) -> None:
         if self._tabs.currentIndex() == _TAB_CONVERT:
             self._convert_remove_action.setEnabled(bool(self._convert._list.selectedItems()))
@@ -539,6 +554,11 @@ class MainWindow(QMainWindow):
 
         # Configurações gerais sempre presentes em Ferramentas
         self._tools_menu.addAction(self._settings_action)
+        # O mesmo atalho vale uma coisa em cada aba (Ctrl+O abre arquivos na
+        # Convert, projeto no editor e arquivo nos Metadados): só os da aba atual
+        # ficam ligados, senão o Qt acusa atalho ambíguo e nenhum dispara.
+        for action in (self._meta_open_action, self._meta_save_action):
+            action.setShortcut(QKeySequence())
 
         if index == _TAB_DOWNLOAD:
             # Desativa atalhos de outras abas
@@ -595,6 +615,18 @@ class MainWindow(QMainWindow):
             self._file_menu.addSeparator()
             self._file_menu.addAction(self._import_media_action)
             self._file_menu.addAction(self._export_action)
+            self._file_menu.addSeparator()
+            self._file_menu.addAction(self._quit_action)
+
+        elif index == _TAB_METADATA:
+            for action in (self._convert_add_action, self._new_proj_action, self._open_proj_action,
+                           self._save_proj_action, self._save_as_proj_action, self._import_media_action,
+                           self._export_action):
+                action.setShortcut(QKeySequence())
+            self._meta_open_action.setShortcut(QKeySequence("Ctrl+O"))
+            self._meta_save_action.setShortcut(QKeySequence("Ctrl+S"))
+            self._file_menu.addAction(self._meta_open_action)
+            self._file_menu.addAction(self._meta_save_action)
             self._file_menu.addSeparator()
             self._file_menu.addAction(self._quit_action)
 
@@ -830,6 +862,7 @@ class MainWindow(QMainWindow):
         self._queue.apply_settings(self._settings)
         self._convert.apply_settings(self._settings)
         self._edit.apply_settings(self._settings)
+        self._metadata.apply_settings(self._settings)
         self._dest.setText(self._settings.download_dir)
         if self._settings.theme != previous_theme:
             app = QApplication.instance()
@@ -939,6 +972,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_edit") and not self._edit._project_actions.confirm_replace():
             event.ignore()
             return
+        if hasattr(self, "_metadata") and not self._metadata.confirm_discard():
+            event.ignore()
+            return
 
         unfinished = sum(1 for job in self._queue.jobs if not job.status.is_final)
         if unfinished:
@@ -964,6 +1000,7 @@ class MainWindow(QMainWindow):
         # não conhece: sem este aviso, eles ficam rodando depois da janela.
         self._edit.shutdown()
         self._convert.shutdown()
+        self._metadata.shutdown()
         self._queue.shutdown()
         self._save_settings()
         event.accept()

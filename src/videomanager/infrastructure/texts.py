@@ -223,6 +223,16 @@ register({
                             "gravado; tente um nível mais forte",
                             "the result was not smaller than the original ({before} → {after}) and was not "
                             "saved; try a stronger level"),
+    "OUTPUT_METADATA_SUFFIX": (" (metadados)", " (metadata)"),
+    "META_FFMPEG_FAILED": ("o ffmpeg não conseguiu gravar a cópia: {detail}",
+                           "ffmpeg could not write the copy: {detail}"),
+    "META_COPY_DIFFERS": ("a cópia não saiu com as mesmas trilhas e a mesma duração do original, e não foi gravada",
+                          "the copy did not come out with the original's tracks and duration, and was not saved"),
+    "META_COVER_UNREADABLE": ("não foi possível ler a capa do arquivo para mantê-la na cópia",
+                              "could not read the file's cover to keep it in the copy"),
+    "META_NOT_SAVED_TRACK_TITLE": ("título da trilha {number}", "title of track {number}"),
+    "META_NOT_SAVED_TRACK_LANGUAGE": ("idioma da trilha {number}", "language of track {number}"),
+    "META_NOT_SAVED_COVER": ("capa", "cover"),
     "CONVERT_SAMPLE_FAILED": ("não foi possível medir a compressão numa amostra do vídeo",
                               "could not measure the compression on a sample of the video"),
     "OUTPUT_DIR_FAILED": (

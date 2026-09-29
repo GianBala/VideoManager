@@ -234,6 +234,64 @@ CONVERT_COMPRESS_NO_GAIN = (
     "original, e o que não ficar menor não é gravado."
 )
 
+# --- metadados ---------------------------------------------------------------
+TAB_METADATA = "Metadados"
+ACTION_META_OPEN = "Abrir arquivo…"
+ACTION_META_SAVE = "Salvar cópia"
+META_FILE_GROUP = "Arquivo"
+META_OPEN = "Abrir arquivo…"
+META_OPEN_TIP = "{label} (Ctrl+O)"
+META_DROP_HINT = "Arraste um arquivo de vídeo ou áudio para cá, ou clique em “Abrir arquivo…”"
+META_FILE_INFO = "{name}   ·   {format}   ·   {duration}"
+META_LOADING = "Lendo {name}…"
+META_FILE_FILTER = (
+    "Mídia (*.mp4 *.m4v *.mov *.mkv *.mka *.webm *.avi *.mp3 *.m4a *.flac *.opus *.ogg *.wav);;Todos (*)"
+)
+META_TAGS_GROUP = "Tags"
+META_FIELDS = {
+    "title": "Título",
+    "artist": "Artista",
+    "album": "Álbum",
+    "album_artist": "Artista do álbum",
+    "date": "Data",
+    "genre": "Gênero",
+    "track": "Nº da faixa",
+    "disc": "Nº do disco",
+    "composer": "Compositor",
+    "comment": "Comentário",
+    "description": "Descrição",
+    "copyright": "Direitos autorais",
+}
+META_OTHER_FIELDS = "Outros campos"
+META_FIELD_HEADER = "Campo"
+META_VALUE_HEADER = "Valor"
+META_ADD_FIELD = "Adicionar campo"
+META_REMOVE_FIELD = "Remover campo"
+META_TRACKS_GROUP = "Trilhas"
+META_TRACK_HEADERS = ("Nº", "Tipo", "Codec", "Título", "Idioma")
+META_TRACK_KINDS = {"video": "Vídeo", "audio": "Áudio", "subtitle": "Legenda", "data": "Dados"}
+META_TRACKS_ON_FILE = "No Ogg e no Opus, os campos da trilha são os do arquivo: edite-os em Tags."
+META_LANGUAGE_TIP = "Código de três letras (ISO 639-2), como por, eng ou spa"
+META_COVER_GROUP = "Capa"
+META_COVER_NONE = "Sem capa"
+META_COVER_UNSUPPORTED = "Este formato não guarda capa."
+META_COVER_REMOVED = "A cópia sai sem capa."
+META_COVER_CHANGE = "Trocar…"
+META_COVER_REMOVE = "Remover"
+META_COVER_FILTER = "Imagens (*.jpg *.jpeg *.png)"
+META_DISCARD = "Descartar alterações"
+META_SAVE = "Salvar cópia"
+META_SAVE_TIP = "{label} (Ctrl+S): o original não é alterado"
+META_SAVING = "Salvando a cópia…"
+META_CANCEL = "Cancelar"
+META_CANCELLED = "Gravação cancelada: nenhuma cópia foi criada."
+META_SAVED = "Cópia salva: {name}"
+META_SAVED_FALLBACK = "Sem permissão na pasta do original: cópia salva na pasta de downloads como {name}"
+META_NOT_SAVED = "Este formato não guardou: {fields}"
+META_REVEAL = "Mostrar na pasta"
+META_MODIFIED_TITLE = "Metadados não salvos"
+META_MODIFIED_BODY = "As alterações em “{name}” ainda não foram salvas numa cópia. Descartá-las?"
+
 # --- editor de vídeo ---------------------------------------------------------
 EDIT_IMPORT = "Importar mídia…"
 EDIT_IMPORT_TIP = (

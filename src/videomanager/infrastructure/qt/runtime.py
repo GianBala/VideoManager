@@ -12,6 +12,7 @@ from platformdirs import user_cache_dir
 from videomanager import APP_NAME
 from videomanager.application.media.preview import prepare_preview
 from videomanager.infrastructure.ffmpeg import hardware, composer
+from videomanager.infrastructure.ffmpeg.metadata import cover_bytes, read_metadata, save_metadata
 from videomanager.infrastructure.ffmpeg.sample import sample_video_kbps
 from videomanager.infrastructure.system.process import ProcessControl
 from videomanager.infrastructure.system import binaries
@@ -41,6 +42,20 @@ class DesktopRuntime:
 
     def function_worker(self, operation):
         return FunctionWorker(operation)
+
+    def metadata_reader(self, path, tools):
+        """Lê os metadados e a capa de ``path``; devolve ``(FileMetadata, bytes | None)``."""
+        control = ProcessControl()
+
+        def read():
+            meta = read_metadata(path, tools, control)
+            return meta, cover_bytes(meta, tools, control)
+        return FunctionWorker(read, control.cancel)
+
+    def metadata_writer(self, meta, edit, tools, fallback):
+        """Grava a cópia com ``edit`` e devolve o ``SavedCopy``; cancelável."""
+        control = ProcessControl()
+        return FunctionWorker(partial(save_metadata, meta, edit, tools, control, fallback), control.cancel)
 
     def sample_worker(self, media, target, tools):
         """Mede o bitrate de vídeo de ``target`` em trechos de ``media``; cancelável."""

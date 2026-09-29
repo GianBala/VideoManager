@@ -1,9 +1,9 @@
 # Janela principal
 
 A janela abre com o título "Video Manager {versão}", em 1180×1000 px. Ela tem
-três partes fixas: a barra de menu, três abas (**Download**, **Convert** e
-**Editar**) e, embaixo delas, a **fila de tarefas** — comum às três abas, para
-que trocar de aba nunca esconda o que está em andamento.
+três partes fixas: a barra de menu, quatro abas (**Download**, **Convert**,
+**Editar** e **Metadados**) e, embaixo delas, a **fila de tarefas** — comum às
+abas, para que trocar de aba nunca esconda o que está em andamento.
 
 ## Barra de menu
 
@@ -23,6 +23,8 @@ projeto na aba Editar).
     (`Ctrl+O`), **Salvar projeto** (`Ctrl+S`), **Salvar projeto como…**
     (`Ctrl+Shift+S`), **Importar mídia…** (`Ctrl+I`) e **Exportar vídeo…**
     (`Ctrl+E`) — ver o [guia do editor](guia-edicao.md#projetos).
+  - Na aba **Metadados**: **Abrir arquivo…** (`Ctrl+O`) e **Salvar cópia**
+    (`Ctrl+S`) — ver o [guia da aba](guia-metadados.md).
   - **Sair** fecha o aplicativo (atalho padrão de encerrar do sistema
     operacional).
 - **&Ferramentas**
@@ -36,18 +38,19 @@ projeto na aba Editar).
 - **A&juda**
   - **Sobre** — mostra a versão do aplicativo e a versão do yt-dlp em uso.
 
-## As três abas
+## As quatro abas
 
 | Aba | Para que serve |
 |---|---|
 | [Download](guia-download.md) | Baixar vídeo/áudio de uma URL (yt-dlp) |
 | [Convert](guia-conversao.md) | Converter arquivos que já estão no disco |
 | [Editar](guia-edicao.md) | Cortar e montar uma edição multipista |
+| [Metadados](guia-metadados.md) | Editar tags, trilhas e capa, gravando numa cópia |
 
 O divisor entre as abas e a fila é ajustado automaticamente conforme o
 tamanho da janela — até o usuário arrastá-lo manualmente, quando a escolha
-passa a ser dele e para de mudar sozinha. **Na aba Editar a fila fica
-oculta**: ali o espaço vale mais como área de prévia e edição, e a barra de
+passa a ser dele e para de mudar sozinha. **Nas abas Editar e Metadados a fila
+fica oculta**: ali o espaço vale mais como área de trabalho, e a barra de
 status continua contando as tarefas em andamento mesmo sem a fila visível.
 
 ## A fila de tarefas
