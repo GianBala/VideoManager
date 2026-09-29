@@ -239,6 +239,64 @@ CONVERT_COMPRESS_NO_GAIN = (
     "the original, and a result that is not smaller is not saved."
 )
 
+# --- metadados ---------------------------------------------------------------
+TAB_METADATA = "Metadata"
+ACTION_META_OPEN = "Open File…"
+ACTION_META_SAVE = "Save Copy"
+META_FILE_GROUP = "File"
+META_OPEN = "Open File…"
+META_OPEN_TIP = "{label} (Ctrl+O)"
+META_DROP_HINT = "Drag a video or audio file here, or click “Open File…”"
+META_FILE_INFO = "{name}   ·   {format}   ·   {duration}"
+META_LOADING = "Reading {name}…"
+META_FILE_FILTER = (
+    "Media (*.mp4 *.m4v *.mov *.mkv *.mka *.webm *.avi *.mp3 *.m4a *.flac *.opus *.ogg *.wav);;All files (*)"
+)
+META_TAGS_GROUP = "Tags"
+META_FIELDS = {
+    "title": "Title",
+    "artist": "Artist",
+    "album": "Album",
+    "album_artist": "Album artist",
+    "date": "Date",
+    "genre": "Genre",
+    "track": "Track no.",
+    "disc": "Disc no.",
+    "composer": "Composer",
+    "comment": "Comment",
+    "description": "Description",
+    "copyright": "Copyright",
+}
+META_OTHER_FIELDS = "Other fields"
+META_FIELD_HEADER = "Field"
+META_VALUE_HEADER = "Value"
+META_ADD_FIELD = "Add Field"
+META_REMOVE_FIELD = "Remove Field"
+META_TRACKS_GROUP = "Tracks"
+META_TRACK_HEADERS = ("No.", "Type", "Codec", "Title", "Language")
+META_TRACK_KINDS = {"video": "Video", "audio": "Audio", "subtitle": "Subtitle", "data": "Data"}
+META_TRACKS_ON_FILE = "In Ogg and Opus, the track fields are the file's: edit them under Tags."
+META_LANGUAGE_TIP = "Three-letter code (ISO 639-2), such as eng, por or spa"
+META_COVER_GROUP = "Cover"
+META_COVER_NONE = "No cover"
+META_COVER_UNSUPPORTED = "This format does not store a cover."
+META_COVER_REMOVED = "The copy will have no cover."
+META_COVER_CHANGE = "Change…"
+META_COVER_REMOVE = "Remove"
+META_COVER_FILTER = "Images (*.jpg *.jpeg *.png)"
+META_DISCARD = "Discard Changes"
+META_SAVE = "Save Copy"
+META_SAVE_TIP = "{label} (Ctrl+S): the original is not changed"
+META_SAVING = "Saving the copy…"
+META_CANCEL = "Cancel"
+META_CANCELLED = "Saving cancelled: no copy was created."
+META_SAVED = "Copy saved: {name}"
+META_SAVED_FALLBACK = "No permission in the original's folder: copy saved to the downloads folder as {name}"
+META_NOT_SAVED = "This format did not store: {fields}"
+META_REVEAL = "Show in Folder"
+META_MODIFIED_TITLE = "Unsaved metadata"
+META_MODIFIED_BODY = "The changes to “{name}” have not been saved to a copy yet. Discard them?"
+
 # --- editor de vídeo ---------------------------------------------------------
 EDIT_IMPORT = "Import Media…"
 EDIT_IMPORT_TIP = (
