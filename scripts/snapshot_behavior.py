@@ -281,6 +281,12 @@ def secao_interface(midia_dir: Path) -> dict:
         saida[f"editor com projeto {largura}x{altura}"] = cheio
         editor.install_project(new_project(), None, [], {})
         _processar(app)
+        if hasattr(janela, "_metadata"):  # a árvore anterior não tem a aba
+            janela._tabs.setCurrentIndex(3)
+            _processar(app)
+            medidas = _geometria(janela, janela)
+            medidas.update({f"_metadata.{k}": v for k, v in _geometria(janela, janela._metadata).items()})
+            saida[f"metadados {largura}x{altura}"] = medidas
         conversao = janela._convert
         if hasattr(conversao, "_to_compress"):  # a árvore anterior não tem o modo
             janela._tabs.setCurrentIndex(1)
