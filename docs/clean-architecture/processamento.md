@@ -98,6 +98,36 @@ Estas regras saíram de um checkup da conversão e têm teste em
 - **Estimativa.** Dimensões ausentes no ffprobe (streams quebrados, HLS) usam o
   padrão em vez de levantar `TypeError`.
 
+## Editar metadados numa cópia
+
+A aba Metadados grava `nome (metadados).ext` por remux: `-map 0 -c copy`, os
+metadados da origem copiados (`-map_metadata 0 -map_chapters 0`) e só as
+diferenças aplicadas por `-metadata` — valor vazio apaga, e a chave vai na caixa
+da origem, porque o MKV guarda `ARTIST` onde o MP4 guarda `artist` e o ffmpeg as
+compara sem caixa. Não passa pela fila: é um `FunctionWorker` numa pool de uma
+vaga do próprio painel, cancelável, e a reserva do nome é a mesma
+`FileOutputStore` da conversão (temporário no mesmo volume, publicação atômica,
+reserva devolvida em falha ou cancelamento).
+
+As regras de formato saíram de medir a mesma edição em onze formatos, e ficam em
+`domain/metadata.py`:
+
+- **Capa** entra como imagem marcada (`attached_pic`) em MP4, M4A, MP3 e FLAC,
+  e como anexo (`-attach`) em MKV/MKA. Ogg, Opus, WebM e WAV recusam a imagem;
+  MOV e AVI a aceitam como uma trilha de vídeo de um quadro, que não é capa.
+- **No MKV a capa mantida sai e volta anexada.** O ffmpeg expõe o anexo JPEG/PNG
+  como trilha de imagem, e num remux simples ela voltava como trilha de vídeo de
+  um quadro. Os MKV baixados do YouTube trazem a capa em WebP, que fica como
+  anexo comum e sobrevive ao `-map 0`.
+- **Ogg e Opus** guardam as tags do arquivo na trilha de áudio
+  (`-metadata:s:a:0`); gravadas no arquivo, nenhuma ficava.
+- **Título de trilha** no MP4/MOV é `handler_name`.
+
+`verify_copy` lê a cópia antes de publicá-la: outras trilhas ou outra duração
+recusam a gravação (`META_COPY_DIFFERS`); o que se pediu e não ficou volta em
+`SavedCopy.not_saved` para a aba mostrar. Os testes medem a cópia: tags lidas
+de volta, md5 dos pacotes de cada trilha igual ao da origem e original intacto.
+
 ## Exportar uma edição
 
 `export` começa com `project.for_export()`, removendo da visão de exportação

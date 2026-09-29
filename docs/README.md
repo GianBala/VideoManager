@@ -10,14 +10,16 @@ repositório para uma visão geral rápida; esta pasta traz o manual completo.
 - [**Instalação e primeira execução**](instalacao.md) — pacotes prontos
   (AppImage, Windows), rodar a partir do código, o que acontece com o
   `ffmpeg` na primeira execução.
-- [**Janela principal**](interface-geral.md) — menus, as três abas, a fila de
-  tarefas comum a elas.
+- [**Janela principal**](interface-geral.md) — menus, as quatro abas, a fila
+  de tarefas comum a elas.
 - [**Aba Download**](guia-download.md) — baixar de uma URL: qualidade,
   perfis rápidos, playlists e canais.
 - [**Aba Convert**](guia-conversao.md) — converter arquivos que já estão no
   disco.
 - [**Aba Editar**](guia-edicao.md) — o editor multipista: importar, cortar,
   montar trilhas, atalhos de teclado, exportar.
+- [**Aba Metadados**](guia-metadados.md) — editar tags, trilhas e capa de um
+  arquivo, gravando numa cópia.
 - [**Configurações**](configuracoes.md) — toda preferência ajustável, o que
   cada uma faz.
 
