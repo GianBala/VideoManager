@@ -89,6 +89,9 @@ _DADOS_DA_CENA = re.compile(
     r"^(Big Buck Bunny.*|Blender( · .*)?|Vídeo [AB]|Olá|Trilha da câmera|\d+\. Item \d+.*"
     r"|Português \(Brasil\)|English"
     r"|\d+ kbps · \w+ · [\d.,]+ \w?B"
+    # O que a aba Metadados mostra do próprio arquivo: codec, idioma da trilha
+    # e o nome que o muxer do MP4 dá a cada trilha.
+    r"|h264|aac|und|VideoHandler|SoundHandler"
     r"|Brave|Chrome|Chromium|Edge|Firefox|Opera|Safari|Vivaldi|Whale"
     r"|NVIDIA \(NVENC\)|Intel \(Quick Sync\)|AMD \(AMF\)|VAAPI \(Linux\)"
     r"|[a-z]{2}(-[A-Z]{2})?(, [a-z]{2}(-[A-Z]{2})?)*)$"
@@ -261,6 +264,14 @@ def _editor(app, janela, r, selecionar: int | None = 901) -> None:
         _processar(app, 150)
 
 
+def _metadados(app, janela, r) -> None:
+    _aba(janela, 3)
+    painel = janela._metadata
+    painel.open_file(r["arquivos"][0])
+    _esperar(app, lambda: painel._meta is not None, 30)
+    _processar(app, 60)
+
+
 def _convert(app, janela, r, video: bool = False, comprimir: bool = False) -> None:
     _aba(janela, 1)
     painel = janela._convert
@@ -289,6 +300,8 @@ CENAS = {
     "convert_audio": lambda app, j, r: _convert(app, j, r),
     "convert_video": lambda app, j, r: _convert(app, j, r, video=True),
     "convert_comprimir": lambda app, j, r: _convert(app, j, r, comprimir=True),
+    "metadados_vazio": lambda app, j, r: _aba(j, 3),
+    "metadados_arquivo": _metadados,
     "editor_vazio": lambda app, j, r: _aba(j, 2),
     "editor_video": lambda app, j, r: _editor(app, j, r, 901),
     "editor_audio": lambda app, j, r: _editor(app, j, r, 907),
