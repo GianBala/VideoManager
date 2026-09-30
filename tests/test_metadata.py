@@ -465,3 +465,40 @@ def test_troca_de_idioma_refaz_o_que_as_celulas_da_tabela_mostram(desktop_app) -
     finally:
         painel.shutdown()
         painel.deleteLater()
+
+def _mp3_vbr_sem_xing(tools: FFmpegTools, pasta: Path) -> Path:
+    """Silêncio e depois ruído, sem o cabeçalho Xing: sem ele, o ffprobe estima
+    a duração pelo bitrate do começo, que é o do silêncio."""
+    origem = pasta / "vbr.mp3"
+    _run(tools, "-f", "lavfi", "-i", "anoisesrc=d=12:a=0.5", "-af", "volume='if(lt(t,6),0,1)':eval=frame",
+         "-c:a", "libmp3lame", "-q:a", "4", "-write_xing", "0", str(origem))
+    return origem
+
+
+@pytest.mark.ffmpeg
+def test_mp3_vbr_sem_cabecalho_xing_e_salvo(ffmpeg_tools, tmp_path) -> None:
+    """A cópia ganha o cabeçalho e passa a dizer a duração real: a diferença de
+    duração não é diferença de conteúdo (medido num rip real: 18,80 s estimados
+    contra 20,04 s), e a cópia correta era recusada."""
+    from videomanager.infrastructure.ffmpeg.metadata import read_metadata
+
+    origem = _mp3_vbr_sem_xing(ffmpeg_tools, tmp_path)
+    meta = read_metadata(origem, ffmpeg_tools)
+    salvo = _salvar(ffmpeg_tools, meta, replace(unchanged_edit(meta), tags=(("title", "X"),)), tmp_path)
+    copia = read_metadata(salvo.path, ffmpeg_tools)
+    assert abs(copia.duration - meta.duration) > 1  # o cenário é o de verdade
+    assert _md5_das_trilhas(ffmpeg_tools, salvo.path, copia) == _md5_das_trilhas(ffmpeg_tools, origem, meta)
+
+
+@pytest.mark.ffmpeg
+def test_duracao_diferente_com_outros_pacotes_continua_recusada(ffmpeg_tools, tmp_path, monkeypatch) -> None:
+    from videomanager.infrastructure.ffmpeg import metadata as modulo
+
+    origem = _mp3_vbr_sem_xing(ffmpeg_tools, tmp_path)
+    meta = modulo.read_metadata(origem, ffmpeg_tools)
+    contagens = iter([[100], [99]])
+    monkeypatch.setattr(modulo, "_packet_counts", lambda *a, **k: next(contagens))
+    with pytest.raises(ConversionError, match="mesmas trilhas"):
+        _salvar(ffmpeg_tools, meta, unchanged_edit(meta), tmp_path)
+    assert [p.name for p in tmp_path.iterdir()] == [origem.name]
+
