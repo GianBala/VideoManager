@@ -195,8 +195,7 @@ def verify_copy(meta: FileMetadata, edit: MetadataEdit, copy: FileMetadata) -> t
         cover = info.cover.index if info.cover else None
         return [stream for index, stream in enumerate(info.streams) if index != cover]
 
-    if body(copy) != body(meta) or (meta.duration and copy.duration
-                                    and abs(meta.duration - copy.duration) > 0.2):
+    if body(copy) != body(meta):
         raise ConversionError(Text("META_COPY_DIFFERS"))
     missing: list[str | Text] = []
     written = {key.lower(): value for key, value in copy.tags}
@@ -222,6 +221,30 @@ def verify_copy(meta: FileMetadata, edit: MetadataEdit, copy: FileMetadata) -> t
     if wants_cover != (copy.cover is not None):
         missing.append(Text("META_NOT_SAVED_COVER"))
     return tuple(missing)
+
+
+def _packet_counts(path: Path, info: FileMetadata, tools: FFmpegTools, control: ProcessControl) -> list[str]:
+    """Pacotes de cada trilha, fora a capa: só demultiplexa, não decodifica."""
+    result = _run(control, [tools.ffprobe_str, "-v", "error", "-count_packets", "-show_entries",
+                            "stream=index,nb_read_packets", "-of", "csv=p=0", str(path)], _SAVE_TIMEOUT)
+    cover = str(info.cover.index) if info.cover else None
+    lines = (line.split(",") for line in (result.stdout or b"").decode().splitlines() if "," in line)
+    return [count for index, count in lines if index != cover]
+
+
+def _same_content(meta: FileMetadata, copy: FileMetadata, render: Path, tools: FFmpegTools,
+                  control: ProcessControl) -> bool:
+    """A mesma duração, ou, quando ela discorda, os mesmos pacotes.
+
+    Duração não prova nada sozinha: sem o cabeçalho Xing, a do MP3 VBR é
+    estimada pelo bitrate do começo (medido num rip real: 18,80 s contra
+    20,04 s), e a cópia ganha o cabeçalho e diz a real — a cópia correta era
+    recusada. Contar pacotes lê o arquivo inteiro, então só entra quando a
+    duração discorda.
+    """
+    if not (meta.duration and copy.duration) or abs(meta.duration - copy.duration) <= 0.2:
+        return True
+    return _packet_counts(meta.path, meta, tools, control) == _packet_counts(render, copy, tools, control)
 
 
 def _language(code: str) -> str:
@@ -262,6 +285,8 @@ def save_metadata(meta: FileMetadata, edit: MetadataEdit, tools: FFmpegTools, co
                 raise ConversionError(Text("META_FFMPEG_FAILED", detail=lines[-1] if lines else "?"))
         copy = read_metadata(render, tools, control)
         not_saved = verify_copy(meta, edit, copy)
+        if not _same_content(meta, copy, render, tools, control):
+            raise ConversionError(Text("META_COPY_DIFFERS"))
         control.check()
         store.commit(render, destination, lease=lease)
     except BaseException:
