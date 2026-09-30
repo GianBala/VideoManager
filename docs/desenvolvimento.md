@@ -148,5 +148,25 @@ Não adicionar Co-Authored-By a commits, PRs, tags ou changelogs.
 Documentos históricos locais podem conter caminhos anteriores à migração;
 a referência atual é este guia e o código.
 
+## Versões
+
+O número segue o que a versão traz, e sobe no commit que traz a novidade,
+sem esperar acumular: a 2.0 chegou atrasada, e a data dela não serve de
+régua.
+
+- **Primeiro número** (3.0 → 4.0): uma ferramenta ou área nova do aplicativo —
+  uma aba ou um fluxo que não existia (a aba Metadados levou à 3.0) — ou algo
+  que quebra compatibilidade: um `.vmp` que a versão anterior não abre,
+  preferências que ela leria errado, uma funcionalidade removida.
+- **Segundo número** (3.0 → 3.1): modo ou opção nova numa ferramenta que já
+  existe (o modo Comprimir da aba Convert, a interface em inglês) e
+  correções que valem uma entrega.
+- O número mora em `pyproject.toml` e em `src/videomanager/__init__.py`, e
+  `test_video_track_button_positions_and_version` o confere.
+- O identificador do aplicativo no Windows (`VideoManager.2.0`, em `app.py`)
+  **não acompanha** o número: trocado, o Windows trata a versão nova como
+  outro aplicativo, e o ícone fixado na barra de tarefas deixa de agrupar as
+  janelas.
+
 Para distribuir, consulte [empacotamento](empacotamento.md). Linux e Windows
 precisam de validação nos respectivos sistemas.
