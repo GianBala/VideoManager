@@ -96,6 +96,7 @@ class MetadataPanel(QWidget):
         self._cover: bytes | None = None
         self._new_cover: Path | None = None
         self._remove_cover = False
+        self._cover_pixmap: QPixmap | None = None
         self._baseline: MetadataEdit | None = None
         self._loading: Path | None = None
         self._saving = None
@@ -322,6 +323,7 @@ class MetadataPanel(QWidget):
     def _install(self, meta: FileMetadata, cover: bytes | None) -> None:
         self._meta, self._cover = meta, cover
         self._new_cover, self._remove_cover = None, False
+        self._update_cover_pixmap()
         self._saved, self._cancelled = None, False
         tags = dict((key.lower(), (key, value)) for key, value in editable_tags(meta))
         for key, field in self._fields.items():
@@ -388,10 +390,12 @@ class MetadataPanel(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, strings.META_COVER_CHANGE, start, strings.META_COVER_FILTER)
         if path:
             self._new_cover, self._remove_cover = Path(path), False
+            self._update_cover_pixmap()
             self._refresh()
 
     def _clear_cover(self) -> None:
         self._new_cover, self._remove_cover = None, True
+        self._update_cover_pixmap()
         self._refresh()
 
     def _discard_changes(self) -> None:
@@ -496,20 +500,29 @@ class MetadataPanel(QWidget):
         self._refresh_cover()
         self._refresh_result()
 
+    def _update_cover_pixmap(self) -> None:
+        """Decodifica e reduz a capa uma vez por troca de capa.
+
+        Feito no ``_refresh``, que roda a cada tecla, custava 59 ms por tecla
+        com uma capa de 3000×3000 (medido) — e, com capa nova, lia o arquivo
+        do disco a cada vez.
+        """
+        pixmap = QPixmap()
+        if self._new_cover is not None:
+            pixmap.load(str(self._new_cover))
+        elif self._cover and not self._remove_cover:
+            pixmap.loadFromData(self._cover)
+        self._cover_pixmap = None if pixmap.isNull() else pixmap.scaled(
+            _COVER_SIZE, _COVER_SIZE, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
     def _refresh_cover(self) -> None:
         meta = self._meta
         accepts = bool(meta and meta.accepts_cover)
         self._change_cover.setEnabled(accepts)
         self._drop_cover.setEnabled(accepts and (bool(self._cover) or self._new_cover is not None)
                                     and not self._remove_cover)
-        pixmap = QPixmap()
-        if self._new_cover is not None:
-            pixmap.load(str(self._new_cover))
-        elif self._cover and not self._remove_cover:
-            pixmap.loadFromData(self._cover)
-        if not pixmap.isNull():
-            self._cover_view.setPixmap(pixmap.scaled(_COVER_SIZE, _COVER_SIZE, Qt.AspectRatioMode.KeepAspectRatio,
-                                                     Qt.TransformationMode.SmoothTransformation))
+        if self._cover_pixmap is not None:
+            self._cover_view.setPixmap(self._cover_pixmap)
             return
         self._cover_view.setPixmap(QPixmap())
         if meta is not None and not accepts:

@@ -502,3 +502,47 @@ def test_duracao_diferente_com_outros_pacotes_continua_recusada(ffmpeg_tools, tm
         _salvar(ffmpeg_tools, meta, unchanged_edit(meta), tmp_path)
     assert [p.name for p in tmp_path.iterdir()] == [origem.name]
 
+
+def test_digitar_nao_decodifica_a_capa_de_novo(desktop_app, monkeypatch) -> None:
+    """Decodificar e reduzir a capa a cada tecla custava 59 ms por tecla com uma
+    capa de 3000×3000 (medido): a imagem só se refaz quando a capa muda."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+    from PySide6.QtGui import QPixmap
+    from PySide6.QtTest import QTest
+    from videomanager.application.preferences import Preferences
+    from videomanager.bootstrap import build_desktop_runtime
+    from videomanager.presentation.qt.panels import metadata_panel as modulo
+
+    decodificacoes = []
+
+    class Contada(QPixmap):
+        def loadFromData(self, *args, **kwargs):  # noqa: N802
+            decodificacoes.append("bytes")
+            return super().loadFromData(*args, **kwargs)
+
+        def load(self, *args, **kwargs):
+            decodificacoes.append("arquivo")
+            return super().load(*args, **kwargs)
+
+    monkeypatch.setattr(modulo, "QPixmap", Contada)
+    painel = modulo.MetadataPanel(Preferences(), lambda: TOOLS, runtime=build_desktop_runtime(audio_enabled=False))
+    try:
+        capa = QPixmap(8, 8)
+        capa.fill()
+        dados = QByteArray()
+        buffer = QBuffer(dados)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        capa.save(buffer, "PNG")
+        meta = _meta("a.mp3", tags=(("title", "T"),), cover=CoverInfo(1, "picture", "image/png"),
+                     streams=(("audio", "mp3"), ("video", "png")), formato="mp3")
+        painel._install(meta, bytes(dados))
+        antes = len(decodificacoes)
+        QTest.keyClicks(painel._fields["title"], "novo titulo")  # o QTest só mapeia ASCII
+        assert len(decodificacoes) == antes, decodificacoes
+        assert not painel._cover_view.pixmap().isNull()
+        painel._clear_cover()
+        assert painel._cover_view.pixmap().isNull()
+    finally:
+        painel.shutdown()
+        painel.deleteLater()
+
