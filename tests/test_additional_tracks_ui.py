@@ -1193,7 +1193,7 @@ def test_video_track_button_positions_and_version(qapp: QApplication) -> None:
     from videomanager.domain.project import Track
     from videomanager.domain.project import TrackKind
 
-    assert videomanager.__version__ == "2.1"
+    assert videomanager.__version__ == "3.0"
 
     tl = Timeline(DARK)
     proj = Project(
