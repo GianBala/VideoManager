@@ -393,9 +393,9 @@ def test_fechar_com_metadados_nao_salvos_pergunta(desktop_app, monkeypatch) -> N
     janela = MainWindow(Settings(), editor=build_editor_service(), processing=build_processing_service(),
                         downloads=build_download_service(), runtime=build_desktop_runtime(audio_enabled=False))
     try:
-        meta = _meta()
-        janela._metadata._install(meta, None)
-        janela._metadata._fields["title"].setText("Mudou")
+        painel = janela._metadata_panel()
+        painel._install(_meta(), None)
+        painel._fields["title"].setText("Mudou")
         monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Cancel)
         evento = QCloseEvent()
         janela.closeEvent(evento)
@@ -465,6 +465,7 @@ def test_troca_de_idioma_refaz_o_que_as_celulas_da_tabela_mostram(desktop_app) -
     finally:
         painel.shutdown()
         painel.deleteLater()
+
 
 def _mp3_vbr_sem_xing(tools: FFmpegTools, pasta: Path) -> Path:
     """Silêncio e depois ruído, sem o cabeçalho Xing: sem ele, o ffprobe estima
@@ -546,3 +547,51 @@ def test_digitar_nao_decodifica_a_capa_de_novo(desktop_app, monkeypatch) -> None
         painel.shutdown()
         painel.deleteLater()
 
+
+def _janela(monkeypatch):
+    from videomanager.bootstrap import (build_desktop_runtime, build_download_service, build_editor_service,
+                                        build_processing_service)
+    from videomanager.infrastructure.storage.settings import Settings
+    from videomanager.presentation.qt.main_window import MainWindow
+
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.ensure_ffmpeg", lambda parent, **kw: None)
+    return MainWindow(Settings(), editor=build_editor_service(), processing=build_processing_service(),
+                      downloads=build_download_service(), runtime=build_desktop_runtime(audio_enabled=False))
+
+
+def test_painel_de_metadados_nasce_na_primeira_visita(desktop_app, monkeypatch) -> None:
+    """Montado com a janela, ele somava ~55 ms à abertura e ~6 ms a toda troca de
+    idioma (medido), para quem nunca abre a aba."""
+    from videomanager.presentation.qt.main_window import _TAB_EDIT, _TAB_METADATA
+    from videomanager.presentation.qt.panels.metadata_panel import MetadataPanel
+
+    janela = _janela(monkeypatch)
+    try:
+        assert janela.findChildren(MetadataPanel) == []
+        janela._tabs.setCurrentIndex(_TAB_EDIT)
+        assert janela.findChildren(MetadataPanel) == []
+        janela._tabs.setCurrentIndex(_TAB_METADATA)
+        paineis = janela.findChildren(MetadataPanel)
+        assert len(paineis) == 1 and paineis[0].isVisibleTo(janela._tabs.widget(_TAB_METADATA))
+        janela._tabs.setCurrentIndex(_TAB_EDIT)
+        janela._tabs.setCurrentIndex(_TAB_METADATA)
+        assert janela.findChildren(MetadataPanel) == paineis  # uma vez só
+    finally:
+        janela._edit.shutdown()
+        janela._convert.shutdown()
+        if janela._metadata is not None:
+            janela._metadata.shutdown()
+        janela.deleteLater()
+
+
+def test_fechar_sem_visitar_a_aba_nao_cria_o_painel(desktop_app, monkeypatch) -> None:
+    from PySide6.QtGui import QCloseEvent
+    from videomanager.presentation.qt.panels.metadata_panel import MetadataPanel
+
+    janela = _janela(monkeypatch)
+    try:
+        evento = QCloseEvent()
+        janela.closeEvent(evento)
+        assert evento.isAccepted() and janela.findChildren(MetadataPanel) == []
+    finally:
+        janela.deleteLater()
