@@ -196,8 +196,14 @@ class MainWindow(QMainWindow):
         self._edit.jobs_ready.connect(self._submit_jobs)
         self._edit.changed.connect(self._balance_panes)
         self._tabs.addTab(self._wrap_tab(self._edit, horizontal=True), strings.TAB_EDIT)
-        self._metadata = MetadataPanel(self._settings, self._tools_for_convert, runtime=self._runtime)
-        self._tabs.addTab(self._wrap_tab(self._metadata), strings.TAB_METADATA)
+        # A aba nasce vazia e o painel entra na primeira visita: montado com a
+        # janela, ele somava ~55 ms à abertura e ~6 ms a toda troca de idioma
+        # (medido), para quem nunca abre a aba.
+        self._metadata: MetadataPanel | None = None
+        self._metadata_page = QWidget()
+        self._metadata_page.setLayout(QVBoxLayout())
+        self._metadata_page.layout().setContentsMargins(0, 0, 0, 0)
+        self._tabs.addTab(self._metadata_page, strings.TAB_METADATA)
 
         self._vertical = QSplitter(Qt.Orientation.Vertical)
         self._vertical.addWidget(self._tabs)
@@ -259,6 +265,13 @@ class MainWindow(QMainWindow):
     def _on_split_moved(self, *_: int) -> None:
         self._split_by_user = not self._balancing
 
+    def _metadata_panel(self) -> MetadataPanel:
+        """O painel da aba Metadados, criado na primeira vez que alguém o pede."""
+        if self._metadata is None:
+            self._metadata = MetadataPanel(self._settings, self._tools_for_convert, runtime=self._runtime)
+            self._metadata_page.layout().addWidget(self._wrap_tab(self._metadata))
+        return self._metadata
+
     def _on_tab_changed(self, index: int) -> None:
         """A fila sai de cena no editor, e a janela inteira vira área de trabalho.
 
@@ -273,6 +286,8 @@ class MainWindow(QMainWindow):
         """
         # Na aba Metadados também: salvar lá não passa pela fila, e o espaço
         # vale mais como formulário.
+        if index == _TAB_METADATA:
+            self._metadata_panel()
         self._queue_panel.setVisible(index not in (_TAB_EDIT, _TAB_METADATA))
         self._balance_panes()
         self._update_menu_scope(index)
@@ -536,9 +551,9 @@ class MainWindow(QMainWindow):
 
         # Ações da aba Metadados
         self._meta_open_action = bind(QAction(self), "setText", lambda: strings.ACTION_META_OPEN)
-        self._meta_open_action.triggered.connect(self._metadata.choose_file)
+        self._meta_open_action.triggered.connect(lambda: self._metadata_panel().choose_file())
         self._meta_save_action = bind(QAction(self), "setText", lambda: strings.ACTION_META_SAVE)
-        self._meta_save_action.triggered.connect(self._metadata.save)
+        self._meta_save_action.triggered.connect(lambda: self._metadata_panel().save())
 
     def _on_file_menu_about_to_show(self) -> None:
         if self._tabs.currentIndex() == _TAB_CONVERT:
@@ -862,7 +877,8 @@ class MainWindow(QMainWindow):
         self._queue.apply_settings(self._settings)
         self._convert.apply_settings(self._settings)
         self._edit.apply_settings(self._settings)
-        self._metadata.apply_settings(self._settings)
+        if self._metadata is not None:
+            self._metadata.apply_settings(self._settings)
         self._dest.setText(self._settings.download_dir)
         if self._settings.theme != previous_theme:
             app = QApplication.instance()
@@ -972,7 +988,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_edit") and not self._edit._project_actions.confirm_replace():
             event.ignore()
             return
-        if hasattr(self, "_metadata") and not self._metadata.confirm_discard():
+        if getattr(self, "_metadata", None) is not None and not self._metadata.confirm_discard():
             event.ignore()
             return
 
@@ -1000,7 +1016,8 @@ class MainWindow(QMainWindow):
         # não conhece: sem este aviso, eles ficam rodando depois da janela.
         self._edit.shutdown()
         self._convert.shutdown()
-        self._metadata.shutdown()
+        if self._metadata is not None:
+            self._metadata.shutdown()
         self._queue.shutdown()
         self._save_settings()
         event.accept()
