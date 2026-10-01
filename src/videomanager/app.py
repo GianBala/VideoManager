@@ -144,7 +144,8 @@ def build_app(argv: list[str] | None = None, *, audio_enabled: bool = True) -> t
     # assim, aparecia como "Video Manager 2.1 - Video Manager".
     app.setApplicationDisplayName(APP_TITLE)
     app.setApplicationVersion(__version__)
-    app.setDesktopFileName("videomanager.desktop")
+    # Sem o sufixo: o Qt o remove sozinho e reclama no terminal a cada abertura.
+    app.setDesktopFileName("videomanager")
 
     from videomanager.presentation.qt.fonts import ensure_application_fonts
 
