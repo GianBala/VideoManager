@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QThreadPool
+from PySide6.QtCore import QEvent, QSize, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -61,6 +62,45 @@ _TITLE, _LANGUAGE = 3, 4
 # Linhas visíveis de cada tabela antes de rolar: sem piso próprio o Qt reserva
 # 192 px, que não tem relação com o conteúdo.
 _TABLE_ROWS = 3
+# Menor largura a que o usuário leva uma coluna: a zero ela sumiria sem aviso.
+_MIN_COLUMN = 60
+
+
+class _Header(QHeaderView):
+    """Cabeçalho que sabe quando o usuário está com o botão apertado nele.
+
+    ``sectionResized`` sai igual para o arrasto do usuário e para um
+    redimensionamento nosso, e o Qt não distingue os dois.
+    """
+
+    def __init__(self, orientation: Qt.Orientation, parent: QWidget) -> None:
+        super().__init__(orientation, parent)
+        self.pressed = False
+        # O que o QTableView dá aos cabeçalhos que ele mesmo cria: clicar numa
+        # seção a seleciona. Um cabeçalho nosso nasce sem isso.
+        self.setSectionsClickable(True)
+        self.setHighlightSections(True)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        self.pressed = True
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        super().mouseReleaseEvent(event)
+        self.pressed = False
+
+
+# Altura da faixa, no pé de cada linha, onde está a alça de ampliá-la.
+_ROW_BAND = 8
+# O ajuste automático de uma linha vai até este número de linhas de texto; acima
+# disso, só pela alça: uma sinopse de 200 linhas não pode empurrar o resto da aba.
+_AUTO_ROW_LINES = 8
+# Voltas, no máximo, de um ajuste que a mudança de altura faz recomeçar (a barra
+# de rolagem aparece ou some e o texto quebra de outro jeito): a segunda já costuma
+# estabilizar, e o limite impede um vaivém de nunca terminar.
+_FIT_PASSES = 5
+# Dado, no item da primeira coluna, que marca a linha que o usuário ajustou à mão.
+_MANUAL = Qt.ItemDataRole.UserRole + 1
 
 
 class _Table(QTableWidget):
@@ -69,16 +109,267 @@ class _Table(QTableWidget):
     A dica padrão de uma área de rolagem é um palpite fixo (192 px) sem relação
     com o conteúdo: duas tabelas assim empurravam o botão de salvar para fora
     da janela padrão.
+
+    Com ``adjustable``, a divisão das colunas se arrasta e cada linha se adapta
+    ao texto: um valor de várias linhas (a sinopse de um vídeo baixado) cabia em
+    30 px, e o Qt o cortava com reticências no fim da primeira linha por mais
+    larga que fosse a coluna. A linha também tem uma alça à vista no pé, como os
+    campos de texto da aba: arrastá-la a amplia, e o clique duplo devolve o
+    ajuste automático. ``row_tip`` dá o texto da dica dessa alça, lido a cada
+    vez para acompanhar o idioma.
     """
 
-    def __init__(self, columns: int) -> None:
+    def __init__(self, columns: int, *, adjustable: bool = False, row_tip=None) -> None:
         super().__init__(0, columns)
+        self._adjustable = adjustable
+        self._row_tip = row_tip
+        self._split_free = True  # ninguém arrastou a divisão: ela segue a largura da tabela
+        self._balancing = False
+        self._passes = 0
+        # O ajuste das linhas roda depois de o layout assentar, e não de dentro
+        # do sinal que o pede: nesse instante o Qt ainda não redistribuiu a
+        # última coluna nem decidiu a altura da tabela, e a linha ficava com a
+        # medida de uma largura que logo deixava de existir.
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.timeout.connect(self._fit_now)
+        self._drag: tuple[int, int, int] | None = None  # (linha, y na tela, altura) ao apertar a alça
+        self._hover_row = -1
         self.verticalHeader().setVisible(False)
+        if adjustable:
+            self.setHorizontalHeader(_Header(Qt.Orientation.Horizontal, self))
         self.setMinimumHeight(self.horizontalHeader().sizeHint().height()
                               + self.verticalHeader().defaultSectionSize() * _TABLE_ROWS + 2 * self.frameWidth())
+        self._base_min = self.minimumHeight()  # o piso de nascença: é a esta altura que a alça da tabela volta
+        self._user_min = self._base_min  # o que o usuário escolheu pela alça da tabela
+        if adjustable:
+            header, rows = self.horizontalHeader(), self.verticalHeader()
+            # No modo Stretch o Qt desliga o arrasto: a primeira coluna passa a
+            # ser interativa, e a última pega o que sobra.
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+            header.setStretchLastSection(True)
+            header.setMinimumSectionSize(_MIN_COLUMN)
+            header.sectionResized.connect(self._section_resized)
+            rows.setMinimumSectionSize(rows.defaultSectionSize())  # nunca menor que a nascença
+            self.setWordWrap(True)
+            # Uma linha mais alta que a tabela precisa de rolagem por pixel: por
+            # item, o meio dela não se alcança.
+            self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+            self.viewport().setMouseTracking(True)  # o cursor muda sobre a alça sem botão apertado
+            self.itemChanged.connect(lambda _item: self.fit_rows())
+            self.model().rowsRemoved.connect(lambda *_: self.fit_rows())
+
+    # --- colunas --------------------------------------------------------------
+
+    def _section_resized(self, *_args) -> None:
+        if not self._balancing and self.horizontalHeader().pressed:
+            self._split_free = False
+        # A largura mudou e o texto quebra em outras linhas. Pelo arrasto do
+        # usuário ou por um rebalanceamento nosso é um pedido novo; o resto é o
+        # Qt reacomodando a última coluna no meio de um ajuste.
+        if self.horizontalHeader().pressed or self._balancing:
+            self.fit_rows()
+        else:
+            self._fit_timer.start()
+
+    def _balance_columns(self) -> None:
+        """Até o usuário arrastar a divisão, as colunas se repartem como antes: metade e metade."""
+        if self._split_free and self.columnCount() == 2:
+            self._balancing = True
+            self.horizontalHeader().resizeSection(0, (self.viewport().width() + 1) // 2)
+            self._balancing = False
+
+    # --- linhas ---------------------------------------------------------------
+
+    def _is_manual(self, row: int) -> bool:
+        item = self.item(row, 0)
+        return item is not None and bool(item.data(_MANUAL))
+
+    def _set_manual(self, row: int, manual: bool) -> None:
+        item = self.item(row, 0)
+        if item is not None:
+            blocked = self.blockSignals(True)  # gravar o dado não é edição: não avisa ninguém
+            item.setData(_MANUAL, manual)
+            self.blockSignals(blocked)
+
+    def _auto_height(self, row: int) -> int:
+        """A altura do próprio texto da linha, sem passar do teto."""
+        base = self.verticalHeader().defaultSectionSize()
+        teto = base + (_AUTO_ROW_LINES - 1) * self.fontMetrics().lineSpacing()
+        return max(base, min(self.sizeHintForRow(row), teto))
+
+    def _fit_row(self, row: int) -> bool:
+        """Dá à linha a altura do próprio texto, se o usuário não a ajustou.
+
+        Devolve se a altura mudou.
+        """
+        if not 0 <= row < self.rowCount() or self._is_manual(row):
+            return False
+        height = self._auto_height(row)
+        changed = height != self.rowHeight(row)
+        if changed:
+            self.setRowHeight(row, height)
+        return changed
+
+    def fit_rows(self) -> None:
+        """Pede o ajuste de todas as linhas, para quando a largura e o layout já assentaram."""
+        if self._adjustable:
+            self._passes = 0
+            self._fit_timer.start()
+
+    def _fit_now(self) -> None:
+        changed = False
+        for row in range(self.rowCount()):
+            changed |= self._fit_row(row)
+        self._update_floor()  # também depois de linhas apagadas ou de uma linha devolvida ao automático
+        if changed:
+            # Mudar a altura move a barra de rolagem e a altura que a tabela pede
+            # (ver sizeHint), e isso pode mudar a largura do texto: outra volta.
+            if self._passes < _FIT_PASSES:
+                self._passes += 1
+                self._fit_timer.start()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        self._passes = 0  # a tabela mudou de tamanho de verdade: o limite de voltas recomeça
+        super().resizeEvent(event)
+
+    def _grip_row(self, y: int) -> int:
+        """A linha cuja alça está na altura ``y`` da área visível, ou -1."""
+        row = self.rowAt(y)
+        if row < 0 or y < self.rowViewportPosition(row) + self.rowHeight(row) - _ROW_BAND:
+            return -1
+        return row
+
+    def _hover(self, row: int) -> None:
+        if row != self._hover_row:
+            self._hover_row = row
+            self.viewport().setCursor(Qt.CursorShape.SizeVerCursor) if row >= 0 else self.viewport().unsetCursor()
+            self.viewport().update()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        row = self._grip_row(int(event.position().y())) if self._adjustable else -1
+        if row >= 0 and event.button() == Qt.MouseButton.LeftButton:
+            self._drag = (row, int(event.globalPosition().y()), self.rowHeight(row))
+            event.accept()  # a alça não seleciona nem abre editor
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._drag is not None:
+            if not event.buttons() & Qt.MouseButton.LeftButton:  # soltou fora e o release se perdeu
+                self._drag = None
+                return
+            row, start, height = self._drag
+            self._set_manual(row, True)
+            self.setRowHeight(row, max(self.verticalHeader().defaultSectionSize(),
+                                       height + int(event.globalPosition().y()) - start))
+            self._update_floor()
+            event.accept()
+            return
+        if self._adjustable:
+            self._hover(self._grip_row(int(event.position().y())))
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._drag is not None:
+            row, self._drag = self._drag[0], None
+            # Arrastada de volta à altura que o ajuste automático daria, a linha
+            # volta a ser automática: segue o texto e a largura de novo, e o piso
+            # da tabela deixa de segurá-la.
+            if self.rowHeight(row) == self._auto_height(row):
+                self._set_manual(row, False)
+                self.fit_rows()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        row = self._grip_row(int(event.position().y())) if self._adjustable else -1
+        if row >= 0:
+            self._set_manual(row, False)
+            self.fit_rows()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hover(-1)
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        if not self._adjustable or self.rowCount() == 0:
+            return
+        painter = QPainter(self.viewport())
+        selected = {index.row() for index in self.selectedIndexes()}
+        active = {self._hover_row, self._drag[0] if self._drag else -1}
+        middle = self.viewport().width() // 2
+        first, last = max(self.rowAt(0), 0), self.rowAt(self.viewport().height() - 1)
+        for row in range(first, (self.rowCount() if last < 0 else last + 1)):
+            bottom = self.rowViewportPosition(row) + self.rowHeight(row)
+            # Sobre a linha selecionada o fundo é o destaque: o traço usa o texto dele.
+            role = (QPalette.ColorRole.HighlightedText if row in selected
+                    else QPalette.ColorRole.Highlight if row in active
+                    else QPalette.ColorRole.PlaceholderText)
+            painter.setPen(QPen(self.palette().color(role), 1))
+            for y in (bottom - 6, bottom - 4):
+                painter.drawLine(middle - 12, y, middle + 12, y)
+
+    def viewportEvent(self, event) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.ToolTip and self._adjustable and self._row_tip is not None:
+            if self._grip_row(event.pos().y()) >= 0:
+                QToolTip.showText(event.globalPos(), self._row_tip(), self.viewport())
+                return True
+        # No evento da área visível, e não no da tabela: a barra de rolagem que
+        # aparece estreita a área sem mexer na tabela.
+        result = super().viewportEvent(event)
+        if event.type() == QEvent.Type.Resize:
+            self._balance_columns()
+        return result
 
     def sizeHint(self) -> QSize:  # noqa: N802
-        return QSize(super().sizeHint().width(), self.minimumHeight())
+        """O piso, mais o que as linhas ajustadas sozinhas passam da altura de nascença (até um teto).
+
+        A linha de uma sinopse se adapta ao texto, mas numa tabela de três
+        linhas só se veria uma: a janela da tabela acompanha o que a adaptação
+        acrescenta. Com todas as linhas de uma linha de texto o acréscimo é zero
+        e a tabela pede o que sempre pediu. O que o usuário abriu à mão está no
+        piso (:meth:`_update_floor`), e não aqui.
+        """
+        auto = 0
+        if self._adjustable:
+            base = self.verticalHeader().defaultSectionSize()
+            auto = min(sum(max(0, self.rowHeight(r) - base) for r in range(self.rowCount()) if not self._is_manual(r)),
+                       (_AUTO_ROW_LINES - 1) * self.fontMetrics().lineSpacing())
+        return QSize(super().sizeHint().width(), max(self.minimumHeight(), self._base_min + auto))
+
+    def set_floor(self, height: int) -> None:
+        """A altura mínima que o usuário escolheu pela alça da tabela."""
+        self._user_min = height
+        self._update_floor()
+
+    def _update_floor(self) -> None:
+        """O piso é o maior entre a escolha do usuário e o que as linhas que ele abriu exigem.
+
+        Um piso, e não só o pedido (``sizeHint``): a área de rolagem da página dá
+        ao painel no mínimo o tamanho **mínimo** dele, e com a janela mais baixa
+        que o conteúdo o layout espreme a tabela até o piso. Aberta além disso, a
+        linha levava a alça do pé — a de fechá-la — para fora da área visível,
+        bem sobre a alça da tabela, logo abaixo, e não se fechava mais. Com o
+        piso a página rola, e a alça continua ao alcance.
+        """
+        if not self._adjustable:
+            return
+        base = self.verticalHeader().defaultSectionSize()
+        manual = [r for r in range(self.rowCount()) if self._is_manual(r)]
+        floor = max(self._user_min, self._base_min)
+        if manual:
+            # Da primeira linha até a última aberta: as de cima também têm de caber
+            # para a alça do pé da aberta aparecer. O resto do piso é a moldura.
+            shown = sum(self.rowHeight(r) for r in range(manual[-1] + 1))
+            floor = max(floor, self._base_min - _TABLE_ROWS * base + shown)
+        self.setMinimumHeight(floor)
+        self.updateGeometry()
 
 
 class _Grip(QWidget):
@@ -91,12 +382,17 @@ class _Grip(QWidget):
 
     A posição é medida na tela, e não no widget: a alça anda junto com o campo
     que cresce, e o ponteiro relativo a ela mudaria a cada passo.
+
+    ``apply`` diz como a altura chega ao alvo: o campo de texto fica com altura
+    fixa, mas a tabela só sobe o **piso** (``_Table.set_floor``) e continua
+    crescendo com a sobra da coluna, como sempre cresceu.
     """
 
-    def __init__(self, target: QPlainTextEdit, base: int) -> None:
+    def __init__(self, target: QWidget, base: int, apply=QWidget.setFixedHeight) -> None:
         super().__init__()
         self._target = target
         self._base = base
+        self._apply = apply
         self._press: tuple[int, int] | None = None  # (y na tela, altura do campo) ao apertar
         self._hover = False
         self.setProperty("role", "plain")
@@ -137,14 +433,14 @@ class _Grip(QWidget):
             self.update()
             return
         start, height = self._press
-        self._target.setFixedHeight(max(self._base, height + int(event.globalPosition().y()) - start))
+        self._apply(self._target, max(self._base, height + int(event.globalPosition().y()) - start))
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         self._press = None
         self.update()
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
-        self._target.setFixedHeight(self._base)
+        self._apply(self._target, self._base)
 
 
 class MetadataPanel(QWidget):
@@ -282,11 +578,22 @@ class MetadataPanel(QWidget):
     def _build_others_group(self) -> QGroupBox:
         self._others_group = bind(QGroupBox(), "setTitle", lambda: strings.META_OTHER_FIELDS)
         box = QVBoxLayout(self._others_group)
-        self._others = _Table(2)
-        self._others.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._others = _Table(2, adjustable=True, row_tip=lambda: strings.META_ROW_TIP)
         self._others.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._others.itemChanged.connect(self._refresh)
-        box.addWidget(self._others)
+        bind(self._others.horizontalHeader(), "setToolTip", lambda: strings.META_COLUMN_TIP)
+        # Tabela e alça num contêiner sem espaçamento: a alça fica colada, como
+        # nos campos de texto, e não a 6 px do espaçamento do grupo.
+        holder = QWidget()
+        holder.setProperty("role", "plain")
+        column = QVBoxLayout(holder)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        column.addWidget(self._others)
+        self._others_grip = bind(_Grip(self._others, self._others.minimumHeight(), _Table.set_floor),
+                                 "setToolTip", lambda: strings.META_GROW_TABLE_TIP)
+        column.addWidget(self._others_grip)
+        box.addWidget(holder)
         buttons = QHBoxLayout()
         self._add_field = bind(QPushButton(), "setText", lambda: strings.META_ADD_FIELD)
         self._add_field.clicked.connect(self._add_other)
@@ -419,6 +726,7 @@ class MetadataPanel(QWidget):
         for key, value in tags.values():
             self._append_other(key, value)
         self._others.blockSignals(blocked)
+        self._others.fit_rows()  # com os sinais bloqueados, nenhuma linha se ajustou sozinha
 
         blocked = self._tracks.blockSignals(True)
         self._tracks.setRowCount(0)

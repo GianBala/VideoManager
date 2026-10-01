@@ -560,6 +560,449 @@ def test_a_dica_da_alca_segue_o_idioma(painel_visivel) -> None:
     assert alca.toolTip() == strings.META_GROW_TIP != em_portugues
 
 
+# --- Tabela "Outros campos": colunas, linhas e altura ------------------------------
+
+def _mouse(widget, de, para) -> None:
+    """Aperta em ``de``, move até ``para`` e solta, no widget dado — eventos reais."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    QTest.mousePress(widget, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, de)
+    QTest.mouseMove(widget, para)
+    QTest.mouseRelease(widget, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, para)
+
+
+def _arrastar_divisao(tabela, dx: int) -> None:
+    """Arrasta a divisão entre as duas colunas pelo cabeçalho."""
+    from PySide6.QtCore import QPoint
+
+    cabecalho = tabela.horizontalHeader()
+    x = cabecalho.sectionViewportPosition(0) + cabecalho.sectionSize(0) - 1
+    y = cabecalho.height() // 2
+    _mouse(cabecalho.viewport(), QPoint(x, y), QPoint(x + dx, y))
+
+
+def _alca_da_linha(tabela, linha: int):
+    """Ponto da alça, no pé da linha, na área visível da tabela."""
+    from PySide6.QtCore import QPoint
+
+    return QPoint(tabela.viewport().width() // 2, tabela.rowViewportPosition(linha) + tabela.rowHeight(linha) - 3)
+
+
+def _arrastar_alca_da_linha(tabela, linha: int, dy: int) -> None:
+    ponto = _alca_da_linha(tabela, linha)
+    _mouse(tabela.viewport(), ponto, type(ponto)(ponto.x(), ponto.y() + dy))
+
+
+def _linha_do_campo(tabela, nome: str) -> int:
+    return next(r for r in range(tabela.rowCount()) if tabela.item(r, 0).text() == nome)
+
+
+def _larguras(tabela) -> tuple[int, int]:
+    cabecalho = tabela.horizontalHeader()
+    return cabecalho.sectionSize(0), cabecalho.sectionSize(1)
+
+
+def test_a_divisao_das_colunas_segue_a_largura_ate_alguem_arrastar(painel_visivel, desktop_app) -> None:
+    tabela = painel_visivel._others
+    primeira, segunda = _larguras(tabela)
+    assert abs(primeira - segunda) <= 1  # nascem metade e metade, como antes
+    painel_visivel.resize(800, 900)
+    _assentar(desktop_app)
+    primeira, segunda = _larguras(tabela)
+    assert abs(primeira - segunda) <= 1  # e continuam assim quando a janela muda
+
+    _arrastar_divisao(tabela, 50)
+    _assentar(desktop_app)
+    escolhida = _larguras(tabela)[0]
+    assert escolhida == primeira + 50 and not tabela._split_free
+    painel_visivel.resize(1000, 900)
+    _assentar(desktop_app)
+    assert _larguras(tabela)[0] == escolhida  # depois de arrastar, a escolha é do usuário
+
+
+def test_a_coluna_nunca_fica_menor_que_o_minimo(painel_visivel, desktop_app) -> None:
+    from videomanager.presentation.qt.panels.metadata_panel import _MIN_COLUMN
+
+    tabela = painel_visivel._others
+    # Até perto da borda esquerda do cabeçalho: o Qt ignora posição negativa.
+    _arrastar_divisao(tabela, -(_larguras(tabela)[0] - 5))
+    _assentar(desktop_app)
+    assert _larguras(tabela)[0] == _MIN_COLUMN
+
+
+def test_a_tabela_de_outros_campos_mantem_o_visual_de_sempre(painel_visivel) -> None:
+    tabela = painel_visivel._others
+    assert not tabela.verticalHeader().isVisible()  # sem coluna de números nem quadrado no canto
+    assert tabela.wordWrap()
+
+
+def test_a_linha_se_adapta_ao_texto_sem_reticencias(painel_visivel) -> None:
+    """Texto de várias linhas numa linha de 30 px era cortado com ``…`` no fim da
+    primeira, por mais larga que fosse a coluna."""
+    tabela = painel_visivel._others
+    padrao = tabela.verticalHeader().defaultSectionSize()
+    sinopse, purl = _linha_do_campo(tabela, "synopsis"), _linha_do_campo(tabela, "purl")
+    assert tabela.rowHeight(purl) == padrao  # uma linha de texto: nada muda
+    assert tabela.rowHeight(sinopse) > padrao  # várias linhas: a linha cresce
+    assert tabela.sizeHintForRow(sinopse) <= tabela.rowHeight(sinopse)  # e cabe o texto todo
+
+
+def test_alargar_a_coluna_reduz_a_linha_que_se_adapta(painel_visivel, desktop_app) -> None:
+    tabela = painel_visivel._others
+    painel_visivel._install(_meta(tags=(("longa", _FRASE),)), None)
+    _assentar(desktop_app)
+    estreita = tabela.rowHeight(0)
+    assert tabela.sizeHintForRow(0) <= estreita
+    _arrastar_divisao(tabela, -120)  # o valor ganha 120 px
+    _assentar(desktop_app)
+    larga = tabela.rowHeight(0)
+    assert larga < estreita and tabela.sizeHintForRow(0) <= larga  # menos linhas, e o texto continua cabendo
+    _arrastar_divisao(tabela, 120)  # e volta a ficar apertado
+    _assentar(desktop_app)
+    assert tabela.rowHeight(0) == estreita
+
+
+def test_o_ajuste_automatico_tem_teto_e_a_alca_vai_alem(painel_visivel, desktop_app) -> None:
+    from videomanager.presentation.qt.panels.metadata_panel import _AUTO_ROW_LINES
+
+    tabela = painel_visivel._others
+    painel_visivel._install(_meta(tags=(("longa", "\n".join(f"linha {n}" for n in range(60))),)), None)
+    _assentar(desktop_app)
+    padrao = tabela.verticalHeader().defaultSectionSize()
+    teto = padrao + (_AUTO_ROW_LINES - 1) * tabela.fontMetrics().lineSpacing()
+    assert tabela.rowHeight(0) == teto < tabela.sizeHintForRow(0)  # 60 linhas não empurram a aba
+    _arrastar_alca_da_linha(tabela, 0, 300)
+    _assentar(desktop_app)
+    assert tabela.rowHeight(0) == teto + 300  # a alça não tem teto
+
+
+def test_a_alca_da_linha_a_amplia_e_a_escolha_do_usuario_prevalece(painel_visivel, desktop_app) -> None:
+    tabela = painel_visivel._others
+    padrao = tabela.verticalHeader().defaultSectionSize()
+    purl, sinopse = _linha_do_campo(tabela, "purl"), _linha_do_campo(tabela, "synopsis")
+    _arrastar_alca_da_linha(tabela, purl, 70)
+    _assentar(desktop_app)
+    assert tabela.rowHeight(purl) == padrao + 70 and tabela._is_manual(purl)
+    assert not tabela._is_manual(sinopse)  # só a linha arrastada
+    escolhida = tabela.rowHeight(purl)
+    _arrastar_divisao(tabela, 40)  # mudar a largura reajusta as outras, e não a que o usuário ajustou
+    _assentar(desktop_app)
+    assert tabela.rowHeight(purl) == escolhida
+    _arrastar_alca_da_linha(tabela, purl, -500)  # o piso é a altura de nascença
+    _assentar(desktop_app)
+    assert tabela.rowHeight(purl) == padrao
+
+
+def test_clique_duplo_na_alca_devolve_o_ajuste_automatico(painel_visivel, desktop_app) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    tabela = painel_visivel._others
+    painel_visivel._install(_meta(tags=(("longa", _FRASE),)), None)
+    _assentar(desktop_app)
+    automatica = tabela.rowHeight(0)
+    _arrastar_alca_da_linha(tabela, 0, 90)
+    _assentar(desktop_app)
+    assert tabela.rowHeight(0) == automatica + 90 and tabela._is_manual(0)
+    QTest.mouseDClick(tabela.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                      _alca_da_linha(tabela, 0))
+    _assentar(desktop_app)
+    assert tabela.rowHeight(0) == automatica and not tabela._is_manual(0)
+    _arrastar_divisao(tabela, -120)  # voltou a se adaptar à largura
+    _assentar(desktop_app)
+    assert tabela.rowHeight(0) < automatica
+
+
+def test_a_alca_da_linha_nao_seleciona_nem_abre_editor(painel_visivel, desktop_app) -> None:
+    from PySide6.QtWidgets import QAbstractItemView
+
+    tabela = painel_visivel._others
+    tabela.clearSelection()
+    _arrastar_alca_da_linha(tabela, _linha_do_campo(tabela, "purl"), 20)
+    _assentar(desktop_app)
+    assert not tabela.selectedIndexes()
+    assert tabela.state() != QAbstractItemView.State.EditingState
+
+
+def test_o_cursor_muda_sobre_a_alca_da_linha_e_volta_fora_dela(painel_visivel, desktop_app) -> None:
+    """Pelo sistema de janelas, que é por onde o mouse de verdade chega: o movimento
+    sem botão apertado só existe aí."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    tabela, viewport = painel_visivel._others, painel_visivel._others.viewport()
+    janela = painel_visivel.windowHandle()
+    sobre = viewport.mapTo(painel_visivel, _alca_da_linha(tabela, 0))
+    fora = viewport.mapTo(painel_visivel, QPoint(viewport.width() // 2, tabela.rowViewportPosition(0) + 8))
+    QTest.mouseMove(janela, sobre)
+    _assentar(desktop_app)
+    assert viewport.cursor().shape() == Qt.CursorShape.SizeVerCursor
+    QTest.mouseMove(janela, fora)
+    _assentar(desktop_app)
+    assert viewport.cursor().shape() != Qt.CursorShape.SizeVerCursor
+
+
+def test_a_alca_de_cada_linha_e_desenhada(painel_visivel, desktop_app) -> None:
+    """O traço no pé da linha tem de aparecer: é o que diz onde arrastar."""
+    tabela = painel_visivel._others
+    tabela.clearSelection()
+    _assentar(desktop_app)
+    imagem = tabela.grab().toImage()
+    y = tabela.viewport().y() + tabela.rowViewportPosition(0) + tabela.rowHeight(0) - 6
+    x = tabela.viewport().x() + tabela.viewport().width() // 2
+    assert imagem.pixelColor(x, y) != imagem.pixelColor(x - 40, y)  # traço x fundo da linha
+
+
+def test_a_dica_da_alca_da_linha_aparece_sobre_ela_e_segue_o_idioma(painel_visivel, monkeypatch) -> None:
+    from PySide6.QtCore import QEvent, QPoint
+    from PySide6.QtGui import QHelpEvent
+    from PySide6.QtWidgets import QApplication
+    from videomanager.presentation.qt import i18n, strings
+    from videomanager.presentation.qt.panels import metadata_panel
+
+    mostradas: list[str] = []
+
+    class DicaFalsa:  # o QToolTip de verdade guarda o texto antigo por 300 ms depois de escondido
+        @staticmethod
+        def showText(_posicao, texto, _widget=None) -> None:  # noqa: N802
+            mostradas.append(texto)
+
+    monkeypatch.setattr(metadata_panel, "QToolTip", DicaFalsa)
+    tabela = painel_visivel._others
+    viewport = tabela.viewport()
+
+    def pedir_dica(ponto: QPoint) -> None:
+        QApplication.sendEvent(viewport, QHelpEvent(QEvent.Type.ToolTip, ponto, viewport.mapToGlobal(ponto)))
+
+    sobre = _alca_da_linha(tabela, 0)
+    fora = QPoint(viewport.width() // 2, tabela.rowViewportPosition(0) + 8)
+    pedir_dica(fora)
+    assert mostradas == []  # fora da faixa da alça não há dica
+    pedir_dica(sobre)
+    assert mostradas == [strings.META_ROW_TIP]
+    i18n.apply_language("en")
+    pedir_dica(sobre)
+    assert mostradas[-1] == strings.META_ROW_TIP != mostradas[0]
+
+
+def test_a_tabela_acompanha_o_que_a_adaptacao_das_linhas_acrescenta(painel_visivel, desktop_app) -> None:
+    """Mede o que a tabela **pede** (``sizeHint``): a sobra da coluna ela sempre recebeu, e
+    é o layout que a reparte."""
+    from videomanager.presentation.qt.panels.metadata_panel import _AUTO_ROW_LINES
+
+    tabela = painel_visivel._others
+    base = tabela._base_min
+    # Só linhas de uma linha de texto: a tabela pede o que sempre pediu.
+    painel_visivel._install(_meta(tags=(("a", "1"), ("b", "2"), ("c", "3"), ("d", "4"), ("e", "5"))), None)
+    _assentar(desktop_app)
+    assert tabela.sizeHint().height() == base
+    # Uma sinopse de várias linhas: a tabela passa a pedir mais, e a linha ajustada cabe na área visível.
+    painel_visivel._install(_meta(tags=(("synopsis", _SINOPSE),)), None)
+    _assentar(desktop_app)
+    assert tabela.sizeHint().height() > base and tabela.viewport().height() >= tabela.rowHeight(0)
+    # Sessenta linhas: o pedido tem teto, e a alça da tabela vai além dele.
+    painel_visivel._install(_meta(tags=(("longa", "\n".join(f"linha {n}" for n in range(60))),)), None)
+    _assentar(desktop_app)
+    teto = base + (_AUTO_ROW_LINES - 1) * tabela.fontMetrics().lineSpacing()
+    assert tabela.sizeHint().height() == teto
+    antes = tabela.height()
+    _arrastar(painel_visivel._others_grip, 50)
+    _assentar(desktop_app)
+    assert tabela.height() == antes + 50 and tabela.sizeHint().height() == antes + 50
+
+
+def test_linha_mais_alta_que_a_tabela_rola_por_pixel(desktop_app) -> None:
+    """Numa tabela espremida (janela baixa) uma linha ajustada ao texto passa da área
+    visível; por item, o meio dela não se alcançaria."""
+    from PySide6.QtWidgets import QAbstractItemView, QTableWidgetItem
+    from videomanager.presentation.qt.panels.metadata_panel import _Table
+
+    tabela = _Table(2, adjustable=True)
+    try:
+        for linha, valor in enumerate(("curto", "\n".join(f"linha {n}" for n in range(60)), "curto")):
+            tabela.insertRow(linha)
+            tabela.setItem(linha, 0, QTableWidgetItem(f"campo{linha}"))
+            tabela.setItem(linha, 1, QTableWidgetItem(valor))
+        tabela.setFixedSize(400, 126)  # o piso de nascença: 90 px de área visível
+        tabela.show()
+        _assentar(desktop_app)
+        assert tabela.rowHeight(1) > tabela.viewport().height()  # a premissa: a linha passa da área visível
+        assert tabela.verticalScrollMode() == QAbstractItemView.ScrollMode.ScrollPerPixel
+        barra = tabela.verticalScrollBar()
+        assert barra.maximum() > 50  # por item seria 2 (uma linha por passo)
+        topo = tabela.rowViewportPosition(1)
+        barra.setValue(barra.value() + 20)
+        assert tabela.rowViewportPosition(1) == topo - 20  # anda 20 px, e não a linha inteira
+    finally:
+        tabela.close()
+        tabela.deleteLater()
+
+
+def test_ajustar_colunas_linhas_e_tabela_nao_conta_como_alteracao(painel_visivel, desktop_app) -> None:
+    tabela = painel_visivel._others
+    antes = painel_visivel.current_edit()
+    _arrastar_divisao(tabela, 30)
+    _arrastar_alca_da_linha(tabela, 0, 40)
+    _arrastar(painel_visivel._others_grip, 50)
+    _assentar(desktop_app)
+    assert painel_visivel.current_edit() == antes and not painel_visivel.has_unsaved_changes
+
+
+def test_editar_o_valor_de_uma_linha_reajusta_a_altura_dela(painel_visivel, desktop_app) -> None:
+    tabela = painel_visivel._others
+    purl = _linha_do_campo(tabela, "purl")
+    padrao = tabela.verticalHeader().defaultSectionSize()
+    assert tabela.rowHeight(purl) == padrao
+    tabela.item(purl, 1).setText("um\ndois\ntrês\nquatro")
+    _assentar(desktop_app)
+    assert tabela.rowHeight(purl) > padrao and tabela.sizeHintForRow(purl) <= tabela.rowHeight(purl)
+    tabela.item(purl, 1).setText("curto")
+    _assentar(desktop_app)
+    assert tabela.rowHeight(purl) == padrao
+
+
+def test_clicar_numa_celula_seleciona_a_linha_e_remover_campo_a_apaga(painel_visivel, desktop_app) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    tabela = painel_visivel._others
+    antes = tabela.rowCount()
+    linha = _linha_do_campo(tabela, "purl")
+    celula = tabela.visualRect(tabela.model().index(linha, 0))
+    QTest.mouseClick(tabela.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                     celula.center() - type(celula.center())(0, 4))  # longe da faixa da alça
+    assert {i.row() for i in tabela.selectedIndexes()} == {linha}
+    painel_visivel._remove_others()
+    assert tabela.rowCount() == antes - 1 and painel_visivel.has_unsaved_changes
+    assert "purl" not in {tabela.item(r, 0).text() for r in range(tabela.rowCount())}
+
+
+def test_as_linhas_voltam_ao_ajuste_automatico_em_outro_arquivo_e_a_divisao_fica(painel_visivel, desktop_app) -> None:
+    tabela = painel_visivel._others
+    _arrastar_alca_da_linha(tabela, 0, 60)
+    _arrastar_divisao(tabela, 40)
+    _assentar(desktop_app)
+    divisao = _larguras(tabela)[0]
+    painel_visivel._install(_meta(nome="b.mp4", tags=(("synopsis", _SINOPSE), ("purl", "x"))), None)
+    _assentar(desktop_app)
+    assert not any(tabela._is_manual(r) for r in range(tabela.rowCount()))
+    assert tabela.sizeHintForRow(0) <= tabela.rowHeight(0)
+    assert _larguras(tabela)[0] == divisao
+
+
+def test_a_alca_da_tabela_a_amplia_e_o_clique_duplo_a_restaura(painel_visivel, desktop_app) -> None:
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    tabela, alca = painel_visivel._others, painel_visivel._others_grip
+    base, campos = tabela.height(), {k: f.height() for k, f in painel_visivel._fields.items()}
+    _arrastar(alca, 80)
+    _assentar(desktop_app)
+    assert tabela.height() == base + 80
+    # A alça fica colada à tabela, e os campos de texto não são afetados:
+    topo = lambda w: w.mapTo(painel_visivel, w.rect().topLeft())  # noqa: E731
+    assert topo(alca).y() == topo(tabela).y() + tabela.height() and alca.width() == tabela.width()
+    assert {k: f.height() for k, f in painel_visivel._fields.items()} == campos
+    _arrastar(alca, -500)
+    _assentar(desktop_app)
+    assert tabela.height() == base  # o piso é a altura de nascença
+    _arrastar(alca, 60)
+    QTest.mouseDClick(alca, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                      QPoint(alca.width() // 2, alca.height() // 2))
+    _assentar(desktop_app)
+    assert tabela.height() == base
+
+
+def test_a_tabela_de_trilhas_continua_como_era(painel_visivel) -> None:
+    from PySide6.QtWidgets import QHeaderView
+    from videomanager.presentation.qt.panels.metadata_panel import _TITLE, _Header
+
+    trilhas = painel_visivel._tracks
+    cabecalho = trilhas.horizontalHeader()
+    assert not trilhas._adjustable and not trilhas.verticalHeader().isVisible()
+    assert not isinstance(cabecalho, _Header)
+    assert cabecalho.sectionResizeMode(0) == QHeaderView.ResizeMode.ResizeToContents
+    assert cabecalho.sectionResizeMode(_TITLE) == QHeaderView.ResizeMode.Stretch
+
+
+def test_as_dicas_do_cabecalho_e_da_alca_da_tabela_seguem_o_idioma(painel_visivel) -> None:
+    from videomanager.presentation.qt import i18n, strings
+
+    pecas = {
+        "colunas": (painel_visivel._others.horizontalHeader(), "META_COLUMN_TIP"),
+        "alça": (painel_visivel._others_grip, "META_GROW_TABLE_TIP"),
+    }
+    antes = {nome: widget.toolTip() for nome, (widget, _) in pecas.items()}
+    assert all(antes[nome] == getattr(strings, chave) and antes[nome] for nome, (_, chave) in pecas.items())
+    i18n.apply_language("en")
+    for nome, (widget, chave) in pecas.items():
+        assert widget.toolTip() == getattr(strings, chave) != antes[nome]
+
+
+def test_a_linha_aberta_continua_com_a_alca_a_vista_e_se_fecha(painel_visivel, desktop_app) -> None:
+    """Aberta além do que a tabela mostrava, a linha levava a alça do pé para fora da área
+    visível — bem sobre a alça da tabela, logo abaixo — e não se fechava mais."""
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "purl")
+    antes, pedido = tabela.rowHeight(linha), tabela.sizeHint().height()
+    _arrastar_alca_da_linha(tabela, linha, 300)  # muito além do teto do ajuste automático
+    _assentar(desktop_app)
+    assert tabela.rowHeight(linha) == antes + 300
+    alca = _alca_da_linha(tabela, linha)
+    assert 0 <= alca.y() < tabela.viewport().height()  # a alça de fechar está à vista
+    _arrastar_alca_da_linha(tabela, linha, -300)  # fecha arrastando para cima
+    _assentar(desktop_app)
+    assert tabela.rowHeight(linha) == antes and tabela.sizeHint().height() == pedido  # e a tabela acompanha de volta
+
+
+def test_arrastar_a_linha_de_volta_ao_ajuste_automatico_a_devolve_ao_automatico(painel_visivel, desktop_app) -> None:
+    """Fechada de volta ao que o ajuste daria, a linha não fica presa como "manual": senão
+    o piso da tabela continuava segurando uma altura que ninguém mais pediu."""
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "synopsis")
+    automatica, piso = tabela.rowHeight(linha), tabela.minimumHeight()
+    _arrastar_alca_da_linha(tabela, linha, 120)
+    _assentar(desktop_app)
+    assert tabela._is_manual(linha) and tabela.minimumHeight() > piso
+    _arrastar_alca_da_linha(tabela, linha, -120)  # de volta, exatamente
+    _assentar(desktop_app)
+    assert tabela.rowHeight(linha) == automatica and not tabela._is_manual(linha)
+    assert tabela.minimumHeight() == piso
+    # E volta a acompanhar a largura da coluna:
+    _arrastar_divisao(tabela, -120)
+    _assentar(desktop_app)
+    assert tabela.rowHeight(linha) < automatica
+
+
+def test_fechar_a_linha_para_menos_que_o_automatico_a_mantem_manual(painel_visivel, desktop_app) -> None:
+    """Quem fecha a sinopse até 30 px quer vê-la fechada: ela fica como o usuário a deixou."""
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "synopsis")
+    padrao = tabela.verticalHeader().defaultSectionSize()
+    _arrastar_alca_da_linha(tabela, linha, -500)
+    _assentar(desktop_app)
+    assert tabela.rowHeight(linha) == padrao and tabela._is_manual(linha)
+    _arrastar_divisao(tabela, 40)  # a largura muda e a linha fechada continua fechada
+    _assentar(desktop_app)
+    assert tabela.rowHeight(linha) == padrao
+
+
+def test_a_linha_aberta_tambem_se_fecha_com_o_clique_duplo(painel_visivel, desktop_app) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "purl")
+    antes = tabela.rowHeight(linha)
+    _arrastar_alca_da_linha(tabela, linha, 300)
+    _assentar(desktop_app)
+    QTest.mouseDClick(tabela.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                      _alca_da_linha(tabela, linha))
+    _assentar(desktop_app)
+    assert tabela.rowHeight(linha) == antes and not tabela._is_manual(linha)
+
+
 def test_cancelar_o_worker_de_gravacao_nao_deixa_arquivo(desktop_app, tmp_path) -> None:
     """``WorkerRunner.cancel_all`` chama ``cancel`` do worker: tem de chegar ao
     processo e devolver a reserva, senão fica um arquivo vazio com o nome da cópia."""
