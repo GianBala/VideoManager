@@ -66,7 +66,7 @@ src/videomanager/
 ├── presentation/qt/          janela, controllers, painéis e widgets
 ├── bootstrap.py              criação dos serviços e adaptadores
 ├── app.py                    QApplication, recursos e montagem da janela
-├── preflight.py              diagnóstico das bibliotecas gráficas
+├── preflight.py              bibliotecas gráficas e cache de fontes, antes do Qt
 └── resources/                ícones e fontes
 ```
 

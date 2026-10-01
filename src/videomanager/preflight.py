@@ -12,14 +12,24 @@ incompreensível numa linha dizendo qual pacote instalar.
 
 O caso concreto que motivou isto: o PySide6 6.11 pede ``libxcb-cursor.so.0``, que
 o Ubuntu/Zorin não instala por padrão.
+
+Também mora aqui a defesa contra o cache de fontes envenenado
+(:func:`font_cache_isolation`), pela mesma razão: o defeito derruba o processo
+sem exceção e sem mensagem, e a única chance de evitá-lo é antes do Qt.
 """
 
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
+import re
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 
+from videomanager import APP_NAME
 from videomanager.domain.i18n import register, t
 
 # Aqui, e não no catálogo de uma camada: a mensagem sai antes de qualquer
@@ -92,3 +102,91 @@ def check_or_explain() -> str | None:
     """``None`` se estiver tudo certo; senão, a mensagem a exibir antes de sair."""
     missing = missing_system_libraries()
     return format_instructions(missing) if missing else None
+
+
+# Todo cache do fontconfig começa com FC_CACHE_MAGIC_MMAP (0xFC02FC04, em
+# little-endian) e, logo depois, a versão do formato — que também é o sufixo do
+# nome do arquivo (``<hash>-le64.cache-9``). ``le64``: só Linux little-endian
+# importa aqui.
+_FC_MAGIC = b"\x04\xfc\x02\xfc"
+_FC_CACHE_NAME = re.compile(r"\.cache-(\d+)$")
+
+_LOG = logging.getLogger(__name__)
+
+
+def _cache_home() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+
+
+def poisoned_font_caches(directory: Path) -> list[Path]:
+    """Caches cujo nome anuncia uma versão do formato e cujo conteúdo é de outra.
+
+    O fontconfig só confere que a versão gravada é **maior ou igual** à que ele
+    entende, então um ``cache-9`` que na verdade é formato 12 é aceito e lido
+    com o desenho de estruturas antigo: o processo cai com SIGSEGV em
+    ``FcCharSetHasChar``, na primeira vez que o Qt monta texto com fonte de
+    reserva. Quem fabrica isso é o fontconfig embutido num navegador Chromium
+    (medido com o Brave), que grava o formato novo e aponta ``cache-9/10/11``
+    para ele — daí olhar o cabeçalho, que pega o link e também uma cópia.
+    """
+    poisoned: list[Path] = []
+    try:
+        entries = sorted(directory.iterdir())
+    except OSError:
+        return poisoned
+    for entry in entries:
+        named = _FC_CACHE_NAME.search(entry.name)
+        if named is None:
+            continue
+        try:
+            with open(entry, "rb") as handle:  # abre o alvo do link; link quebrado cai no except
+                header = handle.read(8)
+        except OSError:
+            continue
+        if header[:4] == _FC_MAGIC and int.from_bytes(header[4:8], "little") != int(named.group(1)):
+            poisoned.append(entry)
+    return poisoned
+
+
+@contextmanager
+def font_cache_isolation() -> Iterator[bool]:
+    """Enquanto vale, o fontconfig usa um cache só do aplicativo, não o do usuário.
+
+    Só entra em ação quando :func:`poisoned_font_caches` acha algo: sem veneno
+    nada muda, nem o lugar do cache. Entra por ``XDG_CACHE_HOME`` porque é a
+    única forma de o fontconfig trocar a pasta do cache do usuário sem reescrever
+    o ``fonts.conf`` do sistema — e a variável é devolvida ao sair, para que
+    yt-dlp, platformdirs e os processos filhos continuem enxergando a verdadeira.
+
+    Devolve ``True`` quando o desvio está valendo. Quem cria o ``QApplication``
+    precisa então **forçar a leitura da lista de fontes dentro do bloco**: o Qt
+    só a carrega quando alguém pergunta, e uma leitura adiada para depois da
+    saída iria direto ao cache envenenado.
+    """
+    if not sys.platform.startswith("linux"):
+        yield False
+        return
+    try:
+        home = _cache_home()
+        poisoned = poisoned_font_caches(home / "fontconfig")
+        private = home / APP_NAME / "xdg"
+        if poisoned:
+            private.mkdir(parents=True, exist_ok=True)
+    except (OSError, RuntimeError):  # sem HOME ou sem onde gravar: segue como antes
+        poisoned = []
+    if not poisoned:
+        yield False
+        return
+
+    _LOG.warning(
+        "O cache de fontes do usuário tem %d arquivo(s) de outra versão do formato (em geral links "
+        "criados por um navegador); usando um cache próprio em %s.", len(poisoned), private)
+    previous = os.environ.get("XDG_CACHE_HOME")
+    os.environ["XDG_CACHE_HOME"] = str(private)
+    try:
+        yield True
+    finally:
+        if previous is None:
+            os.environ.pop("XDG_CACHE_HOME", None)
+        else:
+            os.environ["XDG_CACHE_HOME"] = previous
