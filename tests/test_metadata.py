@@ -419,8 +419,19 @@ def test_tabela_nao_pede_o_palpite_fixo_de_192px(desktop_app) -> None:
 # --- Alça que amplia os campos de várias linhas ----------------------------------
 
 _LINHAS = "\n".join(f"linha {n} da descrição" for n in range(30))
-# Muda de número de linhas conforme a largura da coluna: 98 px a mais a fazem quebrar menos.
-_FRASE = "uma frase comprida que quebra conforme a largura " * 6
+
+def _frase(tabela, larguras: float = 3.4) -> str:
+    """Um texto de ``larguras`` vezes a largura da coluna de valor, na fonte que a tabela tem.
+
+    Com 3,4 larguras ele ocupa 4 linhas na coluna de agora e 3 numa coluna 50% mais larga,
+    em qualquer fonte e abaixo do teto de 8 linhas. Um texto de tamanho fixo ocupava 8 na
+    DejaVu da CI — o teto —, e o teste que esperava ver a linha encolher falhava.
+    """
+    unidade = "uma frase comprida que quebra conforme a largura "
+    disponivel = tabela.horizontalHeader().sectionSize(1) - 12  # o preenchimento da célula
+    return unidade * max(1, round(larguras * disponivel / tabela.fontMetrics().horizontalAdvance(unidade)))
+
+
 _SINOPSE = ("Primeiro parágrafo da sinopse, longo o bastante para passar da largura da coluna de valor e quebrar.\n"
             "Segundo parágrafo.\nTerceiro parágrafo.")
 
@@ -650,7 +661,7 @@ def test_a_linha_se_adapta_ao_texto_sem_reticencias(painel_visivel) -> None:
 
 def test_alargar_a_coluna_reduz_a_linha_que_se_adapta(painel_visivel, desktop_app) -> None:
     tabela = painel_visivel._others
-    painel_visivel._install(_meta(tags=(("longa", _FRASE),)), None)
+    painel_visivel._install(_meta(tags=(("longa", _frase(tabela)),)), None)
     _assentar(desktop_app)
     estreita = tabela.rowHeight(0)
     assert tabela.sizeHintForRow(0) <= estreita
@@ -699,7 +710,7 @@ def test_clique_duplo_na_alca_devolve_o_ajuste_automatico(painel_visivel, deskto
     from PySide6.QtTest import QTest
 
     tabela = painel_visivel._others
-    painel_visivel._install(_meta(tags=(("longa", _FRASE),)), None)
+    painel_visivel._install(_meta(tags=(("longa", _frase(tabela)),)), None)
     _assentar(desktop_app)
     automatica = tabela.rowHeight(0)
     _arrastar_alca_da_linha(tabela, 0, 90)
@@ -961,18 +972,51 @@ def test_arrastar_a_linha_de_volta_ao_ajuste_automatico_a_devolve_ao_automatico(
     o piso da tabela continuava segurando uma altura que ninguém mais pediu."""
     tabela = painel_visivel._others
     linha = _linha_do_campo(tabela, "synopsis")
-    automatica, piso = tabela.rowHeight(linha), tabela.minimumHeight()
+    piso = tabela.minimumHeight()
     _arrastar_alca_da_linha(tabela, linha, 120)
     _assentar(desktop_app)
     assert tabela._is_manual(linha) and tabela.minimumHeight() > piso
     _arrastar_alca_da_linha(tabela, linha, -120)  # de volta, exatamente
     _assentar(desktop_app)
-    assert tabela.rowHeight(linha) == automatica and not tabela._is_manual(linha)
-    assert tabela.minimumHeight() == piso
-    # E volta a acompanhar a largura da coluna:
-    _arrastar_divisao(tabela, -120)
+    assert not tabela._is_manual(linha) and tabela.minimumHeight() == piso
+    assert tabela.rowHeight(linha) == tabela._auto_height(linha)  # e é de novo a altura do texto
+
+
+def test_o_retorno_ao_automatico_nao_depende_de_a_altura_de_agora_ser_igual_a_de_antes(painel_visivel, desktop_app) -> None:
+    """A altura automática depende da largura do texto, que muda com a barra de rolagem e com
+    a fonte: na CI ela diferia da de antes do arrasto, e a linha de volta ao lugar ficava presa
+    como manual. Reproduzido aqui forçando a diferença, sem depender da fonte."""
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "synopsis")
+    antes = tabela.rowHeight(linha)
+    _arrastar_alca_da_linha(tabela, linha, 120)
     _assentar(desktop_app)
-    assert tabela.rowHeight(linha) < automatica
+    original = tabela._auto_height
+    tabela._auto_height = lambda row: original(row) + 14  # uma linha de texto a mais, como com outra largura
+    try:
+        _arrastar_alca_da_linha(tabela, linha, -120)
+        _assentar(desktop_app)
+        assert not tabela._is_manual(linha)  # encaixou na altura que a linha tinha ao começar o arrasto
+    finally:
+        del tabela._auto_height
+    assert antes > 0
+
+
+def test_a_linha_encaixa_no_automatico_com_uma_folga_de_alguns_pixels(painel_visivel, desktop_app) -> None:
+    from videomanager.presentation.qt.panels.metadata_panel import _SNAP
+
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "synopsis")
+    _arrastar_alca_da_linha(tabela, linha, 100)
+    _assentar(desktop_app)
+    _arrastar_alca_da_linha(tabela, linha, -100 + _SNAP)  # a poucos pixels da altura automática
+    _assentar(desktop_app)
+    assert not tabela._is_manual(linha)
+    _arrastar_alca_da_linha(tabela, linha, 100)
+    _assentar(desktop_app)
+    _arrastar_alca_da_linha(tabela, linha, -100 + _SNAP + 10)  # além da folga: o usuário quis aquela altura
+    _assentar(desktop_app)
+    assert tabela._is_manual(linha)
 
 
 def test_fechar_a_linha_para_menos_que_o_automatico_a_mantem_manual(painel_visivel, desktop_app) -> None:
@@ -1062,14 +1106,15 @@ def test_o_editor_mostra_o_texto_todo_sem_rolar_com_o_tema(painel_visivel, deskt
 
 
 def test_o_editor_de_um_texto_muito_longo_tem_teto_e_rola(painel_visivel, desktop_app) -> None:
-    from videomanager.presentation.qt.panels.metadata_panel import _EDITOR_CHROME_H, _EDITOR_MAX_LINES
+    from videomanager.presentation.qt.panels.metadata_panel import (
+        _EDITOR_CHROME_H, _EDITOR_MAX_LINES, _EDITOR_SPARE_LINES)
 
     tabela = painel_visivel._others
     painel_visivel._install(_meta(tags=(("longa", "\n".join(f"linha {n}" for n in range(60))),)), None)
     _assentar(desktop_app)
     editor = _abrir_editor(tabela, 0, 1, desktop_app)
-    esperado = (_EDITOR_MAX_LINES * editor.fontMetrics().lineSpacing() + 2 * editor.document().documentMargin()
-                + _EDITOR_CHROME_H)
+    esperado = ((_EDITOR_MAX_LINES + _EDITOR_SPARE_LINES) * editor.fontMetrics().lineSpacing()
+                + 2 * editor.document().documentMargin() + _EDITOR_CHROME_H)
     assert editor.height() == int(esperado)
     assert editor.verticalScrollBar().maximum() > 0  # e o resto se alcança rolando
     assert editor.verticalScrollBar().value() == 0  # abre no começo do texto, como o campo da aba Tags
