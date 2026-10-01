@@ -101,7 +101,13 @@ _AUTO_ROW_LINES = 8
 # de rolagem aparece ou some e o texto quebra de outro jeito): a segunda já costuma
 # estabilizar, e o limite impede um vaivém de nunca terminar.
 _FIT_PASSES = 5
-# Dado, no item da primeira coluna, que marca a linha que o usuário ajustou à mão.
+# Folga, em pixels, com que uma linha arrastada "de volta" volta ao ajuste automático:
+# ninguém acerta o pixel, e a altura automática de agora ainda muda com a barra de
+# rolagem e com a fonte.
+_SNAP = 4
+# Dado, no item da primeira coluna, que marca a linha que o usuário ajustou à mão: a
+# altura automática que ela tinha quando ele a tocou, para ela voltar a ela por um
+# arrasto de volta (a de agora pode ser outra, se a barra de rolagem mudou a largura).
 _MANUAL = Qt.ItemDataRole.UserRole + 1
 
 
@@ -116,6 +122,10 @@ _EDITOR_MAX_LINES = _AUTO_ROW_LINES
 # se o QSS mudar isso.
 _EDITOR_CHROME_H = 14
 _EDITOR_CHROME_W = 18
+# Linhas de folga embaixo do texto. O QPlainTextEdit gasta alguns pixels a mais do que
+# o QTextDocument mede (4 px medidos com a DejaVu, que a CI usa), e por 1 px a barra de
+# rolagem aparecia — com a fonte desta máquina a folga de 2 px bastava, e escondia isso.
+_EDITOR_SPARE_LINES = 1
 
 
 class _ValueDelegate(QStyledItemDelegate):
@@ -161,9 +171,10 @@ class _ValueDelegate(QStyledItemDelegate):
         document.setTextWidth(max(rect.width() - _EDITOR_CHROME_W - editor.verticalScrollBar().sizeHint().width(), 1))
         document.setPlainText(str(index.data(Qt.ItemDataRole.EditRole) or ""))
         line, margins = editor.fontMetrics().lineSpacing(), 2 * editor.document().documentMargin()
-        wanted = int(document.size().height()) + _EDITOR_CHROME_H + 2  # 2 px de folga de arredondamento
+        spare = _EDITOR_SPARE_LINES * line
+        wanted = int(document.size().height()) + _EDITOR_CHROME_H + spare
         height = int(min(max(wanted, _EDITOR_MIN_LINES * line + margins + _EDITOR_CHROME_H),
-                         _EDITOR_MAX_LINES * line + margins + _EDITOR_CHROME_H))
+                         _EDITOR_MAX_LINES * line + margins + _EDITOR_CHROME_H + spare))
         # Dentro da área visível: um editor alto no fim da tabela não pode ser cortado,
         # nem passar dela — numa janela estreita o texto pede mais que a tabela mostra,
         # e então é o editor que rola.
@@ -209,7 +220,8 @@ class _Table(QTableWidget):
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
         self._fit_timer.timeout.connect(self._fit_now)
-        self._drag: tuple[int, int, int] | None = None  # (linha, y na tela, altura) ao apertar a alça
+        # (linha, y na tela, altura, altura automática ao apertar — ou None se a linha já era manual)
+        self._drag: tuple[int, int, int, int | None] | None = None
         self._hover_row = -1
         self.verticalHeader().setVisible(False)
         if adjustable:
@@ -257,15 +269,19 @@ class _Table(QTableWidget):
 
     # --- linhas ---------------------------------------------------------------
 
-    def _is_manual(self, row: int) -> bool:
+    def _remembered_auto(self, row: int) -> int:
         item = self.item(row, 0)
-        return item is not None and bool(item.data(_MANUAL))
+        return int(item.data(_MANUAL) or 0) if item is not None else 0
 
-    def _set_manual(self, row: int, manual: bool) -> None:
+    def _is_manual(self, row: int) -> bool:
+        return self._remembered_auto(row) > 0
+
+    def _set_manual(self, row: int, auto: int | None) -> None:
+        """Marca a linha como ajustada à mão, lembrando a altura automática que tinha; ``None`` a solta."""
         item = self.item(row, 0)
         if item is not None:
             blocked = self.blockSignals(True)  # gravar o dado não é edição: não avisa ninguém
-            item.setData(_MANUAL, manual)
+            item.setData(_MANUAL, auto)
             self.blockSignals(blocked)
 
     def _auto_height(self, row: int) -> int:
@@ -325,7 +341,8 @@ class _Table(QTableWidget):
     def mousePressEvent(self, event) -> None:  # noqa: N802
         row = self._grip_row(int(event.position().y())) if self._adjustable else -1
         if row >= 0 and event.button() == Qt.MouseButton.LeftButton:
-            self._drag = (row, int(event.globalPosition().y()), self.rowHeight(row))
+            self._drag = (row, int(event.globalPosition().y()), self.rowHeight(row),
+                          None if self._is_manual(row) else self.rowHeight(row))
             event.accept()  # a alça não seleciona nem abre editor
             return
         super().mousePressEvent(event)
@@ -335,8 +352,9 @@ class _Table(QTableWidget):
             if not event.buttons() & Qt.MouseButton.LeftButton:  # soltou fora e o release se perdeu
                 self._drag = None
                 return
-            row, start, height = self._drag
-            self._set_manual(row, True)
+            row, start, height = self._drag[:3]
+            if not self._is_manual(row):
+                self._set_manual(row, self._drag[3])  # a altura automática de antes de tocar
             self.setRowHeight(row, max(self.verticalHeader().defaultSectionSize(),
                                        height + int(event.globalPosition().y()) - start))
             self._update_floor()
@@ -349,11 +367,13 @@ class _Table(QTableWidget):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if self._drag is not None:
             row, self._drag = self._drag[0], None
-            # Arrastada de volta à altura que o ajuste automático daria, a linha
-            # volta a ser automática: segue o texto e a largura de novo, e o piso
-            # da tabela deixa de segurá-la.
-            if self.rowHeight(row) == self._auto_height(row):
-                self._set_manual(row, False)
+            # Arrastada de volta à altura automática — a de agora ou a que tinha ao ser
+            # tocada, que pode ser outra se a barra de rolagem mudou a largura do texto
+            # —, a linha volta a ser automática: segue o texto e a largura de novo, e
+            # o piso da tabela deixa de segurá-la.
+            alvos = [self._auto_height(row), self._remembered_auto(row)]
+            if any(abs(self.rowHeight(row) - alvo) <= _SNAP for alvo in alvos if alvo > 0):
+                self._set_manual(row, None)
                 self.fit_rows()
             event.accept()
             return
@@ -362,7 +382,7 @@ class _Table(QTableWidget):
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         row = self._grip_row(int(event.position().y())) if self._adjustable else -1
         if row >= 0:
-            self._set_manual(row, False)
+            self._set_manual(row, None)
             self.fit_rows()
             event.accept()
             return
