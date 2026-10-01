@@ -22,7 +22,15 @@ e grava o resultado **numa cópia**. O original nunca é alterado.
   baixado, um campo criado por outro programa), com **Adicionar campo** e
   **Remover campo**. Campos que o próprio formato reescreve a cada gravação
   (`encoder`, `major_brand` e parecidos) não aparecem, porque editá-los não teria
-  efeito.
+  efeito. As linhas se ajustam sozinhas ao texto do valor — com quebra de linha,
+  até 8 linhas de altura —, então um valor de várias linhas aparece inteiro, sem
+  reticências. Para ampliar mais uma linha, arraste a alça (o traço duplo) no pé
+  dela, para baixo ou para cima; o clique duplo na alça — ou arrastá-la de volta
+  até a altura automática — devolve o ajuste automático. Arraste também a
+  **divisão entre Campo e Valor** para dar mais largura a um dos lados, e a alça
+  abaixo da tabela para ampliá-la (ela já cresce sozinha para mostrar as linhas
+  ajustadas). A divisão e a altura da tabela valem também para os próximos
+  arquivos; a altura de cada linha volta ao ajuste automático.
 - **Trilhas** — título e idioma de cada trilha de vídeo, áudio e legenda; o
   idioma é o código de três letras (`por`, `eng`, `spa`). No Ogg e no Opus os
   campos da trilha são os do próprio arquivo e se editam em Tags.
