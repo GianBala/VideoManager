@@ -1014,9 +1014,20 @@ def test_a_linha_encaixa_no_automatico_com_uma_folga_de_alguns_pixels(painel_vis
     assert not tabela._is_manual(linha)
     _arrastar_alca_da_linha(tabela, linha, 100)
     _assentar(desktop_app)
-    _arrastar_alca_da_linha(tabela, linha, -100 + _SNAP + 10)  # além da folga: o usuário quis aquela altura
-    _assentar(desktop_app)
-    assert tabela._is_manual(linha)
+    # A altura automática de agora é a do texto na largura de agora, e a barra de rolagem
+    # que aparece com a linha alta pode fazê-lo quebrar numa linha a mais — 14 px, quase o
+    # mesmo desvio que o teste usa: em 7 de 47 larguras, com a DejaVu, o Noto e a Liberation,
+    # a altura solta caía em cima dela e encaixava, e foi o que a CI viu. Fixá-la em
+    # vez de depender do texto deixa o teste só com o que ele afirma: 14 px da automática
+    # de antes, e da de agora, é além da folga.
+    antes = tabela._remembered_auto(linha)
+    tabela._auto_height = lambda row: antes
+    try:
+        _arrastar_alca_da_linha(tabela, linha, -100 + _SNAP + 10)  # além da folga: o usuário quis aquela altura
+        _assentar(desktop_app)
+        assert tabela._is_manual(linha)
+    finally:
+        del tabela._auto_height
 
 
 def test_fechar_a_linha_para_menos_que_o_automatico_a_mantem_manual(painel_visivel, desktop_app) -> None:
