@@ -14,7 +14,10 @@ e grava o resultado **numa cópia**. O original nunca é alterado.
 - **Tags** — os campos mais comuns, cada um com seu rótulo: Título, Artista,
   Álbum, Artista do álbum, Data, Nº da faixa, Nº do disco, Gênero, Compositor,
   Comentário, Descrição e Direitos autorais. Comentário e Descrição aceitam
-  várias linhas. Apagar o texto de um campo apaga o campo na cópia.
+  várias linhas: arraste a alça sob cada um deles para ampliá-lo e ler o texto
+  inteiro (clique duplo na alça volta ao tamanho original). O tamanho escolhido
+  vale também para os próximos arquivos que você abrir. Apagar o texto de um
+  campo apaga o campo na cópia.
 - **Outros campos** — tudo o mais que o arquivo traz (a sinopse de um vídeo
   baixado, um campo criado por outro programa), com **Adicionar campo** e
   **Remover campo**. Campos que o próprio formato reescreve a cada gravação
