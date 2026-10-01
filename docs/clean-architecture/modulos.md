@@ -13,7 +13,7 @@ de textos da camada. A tabela cobre os módulos de produção, incluindo as entr
 | [__main__.py](../../src/videomanager/__main__.py) | Entrada python -m videomanager e script inicial do PyInstaller; importa app.main de forma absoluta. |
 | [app.py](../../src/videomanager/app.py) | Preflight, QApplication, fontes, tema, idioma (aplicado antes da janela), ícone, integração desktop e montagem da janela; diagnóstico --smoke-test. |
 | [bootstrap.py](../../src/videomanager/bootstrap.py) | Constrói serviços e adaptadores; carrega preferências como DTO e injeta runtime, repositório e renderizador. |
-| [preflight.py](../../src/videomanager/preflight.py) | Detecta bibliotecas gráficas ausentes e produz diagnóstico, no idioma das preferências, antes da criação da QApplication. |
+| [preflight.py](../../src/videomanager/preflight.py) | Detecta bibliotecas gráficas ausentes e produz diagnóstico, no idioma das preferências, antes da criação da QApplication; desvia o cache de fontes do usuário quando um navegador o envenenou (`font_cache_isolation`). |
 
 ## Domínio
 

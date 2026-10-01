@@ -10,14 +10,14 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QFontDatabase, QIcon, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from videomanager import APP_TITLE
 from videomanager import APP_NAME
 from videomanager import __version__
 from videomanager.domain import i18n
-from videomanager.preflight import check_or_explain
+from videomanager.preflight import check_or_explain, font_cache_isolation
 from videomanager.presentation.qt.i18n import apply_language
 from videomanager.presentation.qt.main_window import MainWindow
 from videomanager.bootstrap import build_desktop_runtime
@@ -131,13 +131,25 @@ def _ensure_linux_desktop_integration() -> None:
         pass
 
 
+def _create_application(argv: list[str]) -> QApplication:
+    """O ``QApplication``, sob a defesa contra o cache de fontes envenenado."""
+    with font_cache_isolation() as isolated:
+        app = QApplication(argv)
+        if isolated:
+            # O Qt só lê a lista de fontes — e com ela o cache — quando alguém a
+            # pede. Adiada para depois do bloco, a leitura voltaria ao cache
+            # envenenado e o app cairia no primeiro texto com fonte de reserva.
+            QFontDatabase.families()
+    return app
+
+
 def build_app(argv: list[str] | None = None, *, audio_enabled: bool = True) -> tuple[QApplication, MainWindow]:
     """Cria a aplicação e a janela, sem entrar no laço de eventos.
 
     Separado de :func:`main` para que um teste possa montar a janela, inspecioná-la
     e fechá-la sem bloquear.
     """
-    app = QApplication(argv if argv is not None else sys.argv)
+    app = _create_application(argv if argv is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     # Com a versão: o Qt acrescenta o nome de exibição ao título de toda janela
     # que não termina com ele, e a janela principal, que se chama exatamente
