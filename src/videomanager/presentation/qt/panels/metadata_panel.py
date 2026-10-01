@@ -16,8 +16,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSize, Qt, QThreadPool, QTimer
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPainter, QPalette, QPen, QPixmap, QTextDocument, QTextOption
 from PySide6.QtWidgets import (
+    QAbstractItemDelegate,
     QAbstractItemView,
     QFileDialog,
     QFormLayout,
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QTableWidget,
+    QStyledItemDelegate,
     QTableWidgetItem,
     QToolTip,
     QVBoxLayout,
@@ -101,6 +103,80 @@ _AUTO_ROW_LINES = 8
 _FIT_PASSES = 5
 # Dado, no item da primeira coluna, que marca a linha que o usuário ajustou à mão.
 _MANUAL = Qt.ItemDataRole.UserRole + 1
+
+
+# Linhas de texto que o editor de um valor mostra de uma vez: no mínimo as do campo
+# Descrição da aba Tags, e no máximo o teto do ajuste automático das linhas.
+_EDITOR_MIN_LINES = 3
+_EDITOR_MAX_LINES = _AUTO_ROW_LINES
+# O que o campo de texto gasta fora das linhas, com o tema: borda de 1 px e
+# preenchimento de 6 px na vertical (14), e de 8 px nas laterais (18, sem contar a
+# barra de rolagem). Medido no QPlainTextEdit com o QSS; sem o tema seriam 2 e 16.
+# O teste do editor confere, nos dois temas, que o texto cabe sem rolar — e falha
+# se o QSS mudar isso.
+_EDITOR_CHROME_H = 14
+_EDITOR_CHROME_W = 18
+
+
+class _ValueDelegate(QStyledItemDelegate):
+    """Editor do valor de um campo livre: o mesmo campo de várias linhas da aba Tags.
+
+    O editor padrão da tabela é um ``QLineEdit`` apertado na célula de 30 px: sem
+    quebra de linha, sem ver o resto de um texto comprido, e com o Enter
+    fechando a edição — no valor de várias linhas, editar era um sofrimento.
+    Aqui o Enter quebra a linha, como no campo Descrição; o Tab ou um clique
+    fora confirma, o Esc desfaz, e o Ctrl+Enter confirma sem tirar a mão do
+    teclado. O editor flutua mais alto que a linha quando o texto pede.
+    """
+
+    def createEditor(self, parent, option, index):  # noqa: N802
+        editor = QPlainTextEdit(parent)
+        editor.setTabChangesFocus(True)
+        # Já com o tema: a fonte do QSS (10 pt) só vale depois do polimento, e medir
+        # o texto com a fonte antes dele errava as linhas — e a barra de rolagem
+        # aparecia, estreitando o texto e escondendo a primeira linha.
+        editor.ensurePolished()
+        return editor
+
+    def setEditorData(self, editor, index) -> None:  # noqa: N802
+        editor.setPlainText(str(index.data(Qt.ItemDataRole.EditRole) or ""))  # o cursor fica no começo, como na aba Tags
+
+    def setModelData(self, editor, model, index) -> None:  # noqa: N802
+        model.setData(index, editor.toPlainText(), Qt.ItemDataRole.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index) -> None:  # noqa: N802
+        rect, viewport = option.rect, option.widget.viewport()
+        document = QTextDocument()
+        document.setDefaultFont(editor.font())
+        wrap = document.defaultTextOption()
+        wrap.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)  # o mesmo do campo
+        document.setDefaultTextOption(wrap)
+        document.setDocumentMargin(editor.document().documentMargin())
+        # Já sem a largura da barra de rolagem. O editor nasce pequeno, com o texto
+        # dentro, e nessa hora a barra aparece e estreita o texto; medido sem ela,
+        # um texto no limite cabia em 4 linhas, o editor ganhava a altura de 4, e
+        # com a barra o texto passava a 5 e a barra ficava — dois estados estáveis,
+        # o errado escolhido nos casos limítrofes. Medindo já com a barra, não
+        # precisa dela em nenhum dos dois estados; no pior caso sobra uma linha.
+        document.setTextWidth(max(rect.width() - _EDITOR_CHROME_W - editor.verticalScrollBar().sizeHint().width(), 1))
+        document.setPlainText(str(index.data(Qt.ItemDataRole.EditRole) or ""))
+        line, margins = editor.fontMetrics().lineSpacing(), 2 * editor.document().documentMargin()
+        wanted = int(document.size().height()) + _EDITOR_CHROME_H + 2  # 2 px de folga de arredondamento
+        height = int(min(max(wanted, _EDITOR_MIN_LINES * line + margins + _EDITOR_CHROME_H),
+                         _EDITOR_MAX_LINES * line + margins + _EDITOR_CHROME_H))
+        # Dentro da área visível: um editor alto no fim da tabela não pode ser cortado,
+        # nem passar dela — numa janela estreita o texto pede mais que a tabela mostra,
+        # e então é o editor que rola.
+        height = min(max(height, rect.height()), viewport.height())
+        editor.setGeometry(rect.x(), max(0, min(rect.y(), viewport.height() - height)), rect.width(), height)
+
+    def eventFilter(self, editor, event) -> bool:  # noqa: N802
+        if (event.type() == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.commitData.emit(editor)
+            self.closeEditor.emit(editor, QAbstractItemDelegate.EndEditHint.NoHint)
+            return True
+        return super().eventFilter(editor, event)
 
 
 class _Table(QTableWidget):
@@ -580,6 +656,7 @@ class MetadataPanel(QWidget):
         box = QVBoxLayout(self._others_group)
         self._others = _Table(2, adjustable=True, row_tip=lambda: strings.META_ROW_TIP)
         self._others.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._others.setItemDelegateForColumn(1, _ValueDelegate(self._others))
         self._others.itemChanged.connect(self._refresh)
         bind(self._others.horizontalHeader(), "setToolTip", lambda: strings.META_COLUMN_TIP)
         # Tabela e alça num contêiner sem espaçamento: a alça fica colada, como

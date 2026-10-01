@@ -1003,6 +1003,203 @@ def test_a_linha_aberta_tambem_se_fecha_com_o_clique_duplo(painel_visivel, deskt
     assert tabela.rowHeight(linha) == antes and not tabela._is_manual(linha)
 
 
+# --- Editor do valor, na tabela "Outros campos" -----------------------------------------
+
+def _abrir_editor(tabela, linha: int, coluna: int, app):
+    tabela.setCurrentCell(linha, coluna)
+    tabela.editItem(tabela.item(linha, coluna))
+    _assentar(app)
+    # Pelo índice, e não procurando um filho: o editor fechado só some num deleteLater, que fora do laço não sai.
+    return tabela.indexWidget(tabela.model().index(linha, coluna))
+
+
+def test_o_editor_do_valor_e_um_campo_de_varias_linhas_como_o_da_aba_tags(painel_visivel, desktop_app) -> None:
+    from PySide6.QtWidgets import QLineEdit, QPlainTextEdit
+
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "synopsis")
+    editor = _abrir_editor(tabela, linha, 1, desktop_app)
+    assert type(editor) is type(painel_visivel._fields["description"]) is QPlainTextEdit  # o mesmo campo da aba Tags
+    assert editor.tabChangesFocus() and editor.toPlainText() == _SINOPSE  # o texto, com as quebras
+    assert editor.height() > tabela.rowHeight(linha) or editor.height() >= 3 * editor.fontMetrics().lineSpacing()
+    # Mostra o texto todo sem rolar, e fica dentro da área visível da tabela:
+    assert editor.verticalScrollBar().maximum() == 0
+    assert tabela.viewport().rect().contains(editor.geometry())
+    # A coluna do nome continua com o editor de uma linha.
+    assert isinstance(_abrir_editor(tabela, linha, 0, desktop_app), QLineEdit)
+
+
+@pytest.mark.parametrize("tema", ["dark", "light"])
+def test_o_editor_mostra_o_texto_todo_sem_rolar_com_o_tema(painel_visivel, desktop_app, tema) -> None:
+    """Com o tema a fonte e a folga do campo são outras, e em certas larguras o texto fica
+    no limite entre 4 e 5 linhas: o editor nascia com a barra de rolagem, que estreitava o
+    texto e o mantinha rolado. Varre as larguras da janela, e não uma só."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from videomanager.presentation.qt.theme import stylesheet
+
+    texto = ("Primeiro parágrafo da sinopse, longo o bastante para quebrar na coluna de valor.\n"
+             "Segundo parágrafo.\nTerceiro parágrafo da sinopse.")
+    anterior = desktop_app.styleSheet()
+    desktop_app.setStyleSheet(stylesheet(tema))
+    try:
+        _assentar(desktop_app)
+        painel_visivel._install(_meta(tags=(("synopsis", texto),)), None)
+        tabela = painel_visivel._others
+        for largura in range(760, 1500, 37):
+            painel_visivel.resize(largura, 900)
+            _assentar(desktop_app)
+            editor = _abrir_editor(tabela, 0, 1, desktop_app)
+            # Rolar só é aceitável quando o editor já ocupa toda a área visível da tabela.
+            assert (editor.verticalScrollBar().maximum() == 0 or editor.height() >= tabela.viewport().height()), \
+                f"barra de rolagem à toa com a janela em {largura} px"
+            assert editor.verticalScrollBar().value() == 0
+            assert tabela.viewport().rect().contains(editor.geometry())
+            QTest.keyClick(editor, Qt.Key.Key_Escape)
+            _assentar(desktop_app)
+    finally:
+        desktop_app.setStyleSheet(anterior)
+
+
+def test_o_editor_de_um_texto_muito_longo_tem_teto_e_rola(painel_visivel, desktop_app) -> None:
+    from videomanager.presentation.qt.panels.metadata_panel import _EDITOR_CHROME_H, _EDITOR_MAX_LINES
+
+    tabela = painel_visivel._others
+    painel_visivel._install(_meta(tags=(("longa", "\n".join(f"linha {n}" for n in range(60))),)), None)
+    _assentar(desktop_app)
+    editor = _abrir_editor(tabela, 0, 1, desktop_app)
+    esperado = (_EDITOR_MAX_LINES * editor.fontMetrics().lineSpacing() + 2 * editor.document().documentMargin()
+                + _EDITOR_CHROME_H)
+    assert editor.height() == int(esperado)
+    assert editor.verticalScrollBar().maximum() > 0  # e o resto se alcança rolando
+    assert editor.verticalScrollBar().value() == 0  # abre no começo do texto, como o campo da aba Tags
+
+
+def test_enter_quebra_a_linha_e_ctrl_enter_confirma(painel_visivel, desktop_app) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "purl")
+    editor = _abrir_editor(tabela, linha, 1, desktop_app)
+    editor.selectAll()
+    QTest.keyClicks(editor, "primeira")
+    QTest.keyClick(editor, Qt.Key.Key_Return)  # no campo de várias linhas, o Enter quebra a linha
+    QTest.keyClicks(editor, "segunda")
+    assert editor.toPlainText() == "primeira\nsegunda"
+    assert tabela.item(linha, 1).text() != "primeira\nsegunda"  # ainda não confirmou
+    QTest.keyClick(editor, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    _assentar(desktop_app)
+    assert tabela.item(linha, 1).text() == "primeira\nsegunda"
+    assert tabela.indexWidget(tabela.model().index(linha, 1)) is None  # o editor fechou
+    assert painel_visivel.has_unsaved_changes
+    assert ("purl", "primeira\nsegunda") in painel_visivel.current_edit().tags
+    assert tabela.sizeHintForRow(linha) <= tabela.rowHeight(linha)  # a linha já se ajustou às duas linhas
+
+
+def test_esc_desfaz_e_tab_confirma_o_editor_do_valor(painel_visivel, desktop_app) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "purl")
+    original = tabela.item(linha, 1).text()
+    editor = _abrir_editor(tabela, linha, 1, desktop_app)
+    QTest.keyClicks(editor, "XYZ")
+    QTest.keyClick(editor, Qt.Key.Key_Escape)
+    _assentar(desktop_app)
+    assert tabela.item(linha, 1).text() == original and not painel_visivel.has_unsaved_changes
+
+    editor = _abrir_editor(tabela, linha, 1, desktop_app)
+    editor.selectAll()
+    QTest.keyClicks(editor, "novo")
+    QTest.keyClick(editor, Qt.Key.Key_Tab)
+    _assentar(desktop_app)
+    assert tabela.item(linha, 1).text() == "novo" and painel_visivel.has_unsaved_changes
+
+
+def test_clicar_fora_confirma_o_editor_do_valor(painel_visivel, desktop_app) -> None:
+    from PySide6.QtTest import QTest
+
+    painel_visivel.activateWindow()
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "purl")
+    editor = _abrir_editor(tabela, linha, 1, desktop_app)
+    editor.selectAll()
+    QTest.keyClicks(editor, "fora")
+    painel_visivel._fields["title"].setFocus()  # o foco sai do editor, como num clique em outro campo
+    _assentar(desktop_app)
+    assert tabela.item(linha, 1).text() == "fora"
+
+
+def test_abrir_o_editor_e_confirmar_sem_digitar_nao_altera_o_valor(painel_visivel, desktop_app) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    tabela = painel_visivel._others
+    linha = _linha_do_campo(tabela, "synopsis")
+    editor = _abrir_editor(tabela, linha, 1, desktop_app)
+    QTest.keyClick(editor, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    _assentar(desktop_app)
+    assert tabela.item(linha, 1).text() == _SINOPSE and not painel_visivel.has_unsaved_changes
+
+
+def test_campo_novo_pelo_teclado_chega_ao_valor_de_varias_linhas(painel_visivel, desktop_app) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QLineEdit
+
+    tabela = painel_visivel._others
+    painel_visivel._add_other()  # abre o editor do nome da linha nova
+    _assentar(desktop_app)
+    nome = tabela.indexWidget(tabela.model().index(tabela.rowCount() - 1, 0))
+    assert isinstance(nome, QLineEdit)
+    QTest.keyClicks(nome, "novo_campo")
+    QTest.keyClick(nome, Qt.Key.Key_Return)  # no nome, uma linha só: o Enter confirma
+    _assentar(desktop_app)
+    linha = tabela.rowCount() - 1
+    editor = _abrir_editor(tabela, linha, 1, desktop_app)
+    QTest.keyClicks(editor, "um")
+    QTest.keyClick(editor, Qt.Key.Key_Return)
+    QTest.keyClicks(editor, "dois")
+    QTest.keyClick(editor, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    _assentar(desktop_app)
+    assert ("novo_campo", "um\ndois") in painel_visivel.current_edit().tags
+
+
+@pytest.mark.ffmpeg
+def test_valor_de_varias_linhas_editado_na_tabela_chega_a_copia_e_o_original_fica(painel, ffmpeg_tools, tmp_path,
+                                                                                    wait_until, desktop_app) -> None:
+    """Medido no arquivo gravado, e não pela ausência de erro: a tag de várias linhas
+    editada pelo editor da tabela volta do ffprobe igual, e o original não muda."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from videomanager.infrastructure.ffmpeg.metadata import read_metadata
+
+    origem = tmp_path / "video.mkv"
+    _run(ffmpeg_tools, *_RECEITAS["mkv"], "-metadata", "meu_campo=antigo", str(origem))
+    antes = origem.read_bytes()
+    painel.open_file(origem)
+    wait_until(lambda: painel._meta is not None, timeout=20)
+    painel.resize(1000, 900)
+    painel.show()
+    _assentar(desktop_app)
+    tabela = painel._others
+    linha = next(r for r in range(tabela.rowCount()) if tabela.item(r, 0).text().lower() == "meu_campo")  # o MKV põe em maiúsculas
+    editor = _abrir_editor(tabela, linha, 1, desktop_app)
+    editor.selectAll()
+    QTest.keyClicks(editor, "primeira linha")
+    QTest.keyClick(editor, Qt.Key.Key_Return)
+    QTest.keyClicks(editor, "segunda linha")
+    QTest.keyClick(editor, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    _assentar(desktop_app)
+    painel.save()
+    wait_until(lambda: painel._saved is not None, timeout=30)
+    gravadas = {chave.lower(): valor for chave, valor in read_metadata(painel._saved.path, ffmpeg_tools).tags}
+    assert gravadas["meu_campo"] == "primeira linha\nsegunda linha"
+    assert origem.read_bytes() == antes  # o original nunca é alterado
+
+
 def test_cancelar_o_worker_de_gravacao_nao_deixa_arquivo(desktop_app, tmp_path) -> None:
     """``WorkerRunner.cancel_all`` chama ``cancel`` do worker: tem de chegar ao
     processo e devolver a reserva, senão fica um arquivo vazio com o nome da cópia."""
