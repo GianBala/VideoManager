@@ -416,6 +416,150 @@ def test_tabela_nao_pede_o_palpite_fixo_de_192px(desktop_app) -> None:
         tabela.deleteLater()
 
 
+# --- Alça que amplia os campos de várias linhas ----------------------------------
+
+_LINHAS = "\n".join(f"linha {n} da descrição" for n in range(30))
+# Muda de número de linhas conforme a largura da coluna: 98 px a mais a fazem quebrar menos.
+_FRASE = "uma frase comprida que quebra conforme a largura " * 6
+_SINOPSE = ("Primeiro parágrafo da sinopse, longo o bastante para passar da largura da coluna de valor e quebrar.\n"
+            "Segundo parágrafo.\nTerceiro parágrafo.")
+
+
+@pytest.fixture
+def painel_visivel(desktop_app):
+    """Painel de verdade, aberto e com um arquivo: a alça só existe com o layout feito."""
+    from videomanager.application.preferences import Preferences
+    from videomanager.bootstrap import build_desktop_runtime
+    from videomanager.presentation.qt.panels.metadata_panel import MetadataPanel
+
+    painel = MetadataPanel(Preferences(), lambda: TOOLS, runtime=build_desktop_runtime(audio_enabled=False))
+    painel.resize(1000, 900)
+    painel.show()
+    desktop_app.processEvents()
+    painel._install(_meta(tags=(("title", "T"), ("comment", "um\ndois"), ("description", _LINHAS),
+                                ("synopsis", _SINOPSE), ("purl", "https://exemplo.com/video"))), None)
+    _assentar(desktop_app)
+    yield painel
+    painel.shutdown()
+    painel.deleteLater()
+
+
+def _assentar(app) -> None:
+    """Deixa o layout terminar: cada contêiner aninhado pede o seguinte numa volta do laço."""
+    for _ in range(10):
+        app.processEvents()
+
+
+def _arrastar(alca, dy: int) -> None:
+    """Aperta no meio da alça, move ``dy`` px na vertical e solta — eventos reais."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    inicio = QPoint(alca.width() // 2, alca.height() // 2)
+    QTest.mousePress(alca, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, inicio)
+    QTest.mouseMove(alca, inicio + QPoint(0, dy))
+    QTest.mouseRelease(alca, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, inicio + QPoint(0, dy))
+
+
+def test_so_os_campos_de_varias_linhas_tem_alca(painel_visivel) -> None:
+    from PySide6.QtWidgets import QPlainTextEdit
+    from videomanager.presentation.qt.panels.metadata_panel import _MULTILINE
+
+    assert set(painel_visivel._grips) == set(_MULTILINE)
+    assert all(isinstance(painel_visivel._fields[chave], QPlainTextEdit) for chave in _MULTILINE)
+
+
+def test_arrastar_a_alca_amplia_so_o_campo_dela(painel_visivel, desktop_app) -> None:
+    campos, alcas = painel_visivel._fields, painel_visivel._grips
+    descricao, comentario = campos["description"].height(), campos["comment"].height()
+    _arrastar(alcas["description"], 120)
+    _assentar(desktop_app)
+    assert campos["description"].height() == descricao + 120
+    assert campos["comment"].height() == comentario  # o irmão não se mexe
+    # A alça fica colada ao campo, na largura dele, e o rótulo continua no topo da linha:
+    topo = lambda w: w.mapTo(painel_visivel, w.rect().topLeft())  # noqa: E731
+    assert topo(alcas["description"]).y() == topo(campos["description"]).y() + campos["description"].height()
+    assert alcas["description"].width() == campos["description"].width()
+    rotulo = painel_visivel._labels[list(campos).index("description")]
+    assert topo(rotulo).y() == topo(campos["description"]).y()
+
+    _arrastar(alcas["comment"], 40)
+    _assentar(desktop_app)
+    assert campos["comment"].height() == comentario + 40 and campos["description"].height() == descricao + 120
+
+
+def test_o_campo_nao_encolhe_abaixo_do_tamanho_de_nascenca_e_o_clique_duplo_o_restaura(painel_visivel, desktop_app) -> None:
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    campo, alca = painel_visivel._fields["description"], painel_visivel._grips["description"]
+    base = campo.height()
+    _arrastar(alca, -60)
+    assert campo.height() == base  # o piso é a altura de nascença
+    _arrastar(alca, 90)
+    assert campo.height() == base + 90
+    QTest.mouseDClick(alca, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                      QPoint(alca.width() // 2, alca.height() // 2))
+    assert campo.height() == base
+
+
+def test_ampliar_o_campo_nao_conta_como_alteracao_nem_mexe_no_texto(painel_visivel) -> None:
+    antes = painel_visivel.current_edit()
+    assert not painel_visivel.has_unsaved_changes
+    _arrastar(painel_visivel._grips["description"], 100)
+    assert painel_visivel.current_edit() == antes and not painel_visivel.has_unsaved_changes
+    assert painel_visivel._fields["description"].toPlainText() == _LINHAS
+
+
+def test_o_tamanho_escolhido_vale_para_o_proximo_arquivo_e_para_descartar(painel_visivel) -> None:
+    campo = painel_visivel._fields["description"]
+    base = campo.height()
+    _arrastar(painel_visivel._grips["description"], 70)
+    painel_visivel._install(_meta(nome="b.mp4", tags=(("description", "outra"),)), None)
+    assert campo.height() == base + 70
+    painel_visivel._fields["description"].setPlainText("mexido")
+    painel_visivel._discard_changes()
+    assert campo.height() == base + 70 and campo.toPlainText() == "outra"
+
+
+@pytest.mark.parametrize("tema", ["dark", "light"])
+def test_a_alca_nao_pinta_fundo_proprio(painel_visivel, desktop_app, tema) -> None:
+    """Sem ``role=plain`` o contêiner herda o fundo da janela e pinta um retângulo
+    escuro sobre a superfície do grupo: a cor tem de ser a do grupo."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QColor
+    from videomanager.presentation.qt.theme import palette, stylesheet
+
+    anterior = desktop_app.styleSheet()
+    desktop_app.setStyleSheet(stylesheet(tema))
+    try:
+        _assentar(desktop_app)
+        imagem = painel_visivel.grab().toImage()
+        alca = painel_visivel._grips["description"]
+        canto = alca.mapTo(painel_visivel, QPoint(2, 1))
+        assert imagem.pixelColor(canto) == QColor(palette(tema)["surface"])
+    finally:
+        desktop_app.setStyleSheet(anterior)
+
+
+def test_a_alca_nao_entra_na_ordem_do_tab(painel_visivel) -> None:
+    """Os campos usam ``setTabChangesFocus``: uma parada de foco a mais entre o
+    comentário e a descrição prenderia quem navega pelo teclado numa alça sem teclado."""
+    from PySide6.QtCore import Qt
+
+    assert all(alca.focusPolicy() == Qt.FocusPolicy.NoFocus for alca in painel_visivel._grips.values())
+
+
+def test_a_dica_da_alca_segue_o_idioma(painel_visivel) -> None:
+    from videomanager.presentation.qt import i18n, strings
+
+    alca = painel_visivel._grips["description"]
+    em_portugues = alca.toolTip()
+    assert em_portugues == strings.META_GROW_TIP and em_portugues
+    i18n.apply_language("en")
+    assert alca.toolTip() == strings.META_GROW_TIP != em_portugues
+
+
 def test_cancelar_o_worker_de_gravacao_nao_deixa_arquivo(desktop_app, tmp_path) -> None:
     """``WorkerRunner.cancel_all`` chama ``cancel`` do worker: tem de chegar ao
     processo e devolver a reserva, senão fica um arquivo vazio com o nome da cópia."""

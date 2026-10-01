@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThreadPool
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPixmap
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -54,6 +54,8 @@ _COVER_SIZE = 160
 # um texto inteiro): numa linha só, as quebras viravam traços na tela.
 _MULTILINE = ("comment", "description")
 _MULTILINE_ROWS = 3
+# Alça de ampliar abaixo desses campos: alta o bastante para acertar com o mouse.
+_GRIP_HEIGHT = 8
 # Colunas editáveis da tabela de trilhas.
 _TITLE, _LANGUAGE = 3, 4
 # Linhas visíveis de cada tabela antes de rolar: sem piso próprio o Qt reserva
@@ -77,6 +79,72 @@ class _Table(QTableWidget):
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(super().sizeHint().width(), self.minimumHeight())
+
+
+class _Grip(QWidget):
+    """Alça sob um campo de texto: arrastar na vertical o amplia, clique duplo o restaura.
+
+    O Qt não tem campo de texto que o usuário redimensione (o ``QSizeGrip`` só
+    alcança janelas), e a descrição de um vídeo costuma ter dezenas de linhas
+    para três de altura. O campo nunca fica menor que ``base``, a altura de
+    nascença, então restaurar é só voltar a ela.
+
+    A posição é medida na tela, e não no widget: a alça anda junto com o campo
+    que cresce, e o ponteiro relativo a ela mudaria a cada passo.
+    """
+
+    def __init__(self, target: QPlainTextEdit, base: int) -> None:
+        super().__init__()
+        self._target = target
+        self._base = base
+        self._press: tuple[int, int] | None = None  # (y na tela, altura do campo) ao apertar
+        self._hover = False
+        self.setProperty("role", "plain")
+        self.setFixedHeight(_GRIP_HEIGHT)
+        self.setCursor(Qt.CursorShape.SizeVerCursor)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        # Cores do papel do tema, e não fixas: a paleta da aplicação já segue
+        # claro e escuro (ver ``theme.qpalette``).
+        role = QPalette.ColorRole.Highlight if self._hover or self._press else QPalette.ColorRole.PlaceholderText
+        painter = QPainter(self)
+        painter.setPen(QPen(self.palette().color(role), 1))
+        middle, left, right = self.height() // 2, self.width() // 2 - 12, self.width() // 2 + 12
+        for y in (middle - 1, middle + 1):
+            painter.drawLine(left, y, right, y)
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press = (int(event.globalPosition().y()), self._target.height())
+            self.update()
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._press is None:
+            return
+        if not event.buttons() & Qt.MouseButton.LeftButton:  # soltou fora e o release se perdeu
+            self._press = None
+            self.update()
+            return
+        start, height = self._press
+        self._target.setFixedHeight(max(self._base, height + int(event.globalPosition().y()) - start))
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._press = None
+        self.update()
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        self._target.setFixedHeight(self._base)
 
 
 class MetadataPanel(QWidget):
@@ -180,6 +248,7 @@ class MetadataPanel(QWidget):
         form.setHorizontalSpacing(10)
         form.setVerticalSpacing(6)
         self._fields: dict[str, QLineEdit | QPlainTextEdit] = {}
+        self._grips: dict[str, _Grip] = {}
         self._labels: list[QLabel] = []
         for key in COMMON_TAGS:
             label = bind(QLabel(), "setText", lambda key=key: strings.META_FIELDS[key])
@@ -187,14 +256,25 @@ class MetadataPanel(QWidget):
                 field = QPlainTextEdit()
                 field.setTabChangesFocus(True)
                 lines = field.fontMetrics().lineSpacing() * _MULTILINE_ROWS
-                field.setFixedHeight(lines + 2 * field.frameWidth() + 8)
+                base = lines + 2 * field.frameWidth() + 8
+                field.setFixedHeight(base)
                 field.textChanged.connect(self._refresh)
+                # ``plain``: sem ele o contêiner herda o fundo da janela e pinta
+                # um retângulo escuro sobre a superfície do grupo.
+                row = QWidget()
+                row.setProperty("role", "plain")
+                column = QVBoxLayout(row)
+                column.setContentsMargins(0, 0, 0, 0)
+                column.setSpacing(0)
+                column.addWidget(field)
+                self._grips[key] = bind(_Grip(field, base), "setToolTip", lambda: strings.META_GROW_TIP)
+                column.addWidget(self._grips[key])
             else:
-                field = QLineEdit()
+                field = row = QLineEdit()
                 field.textEdited.connect(self._refresh)
             self._fields[key] = field
             self._labels.append(label)
-            form.addRow(label, field)
+            form.addRow(label, row)
         align_label_column(self._labels)
         box.addLayout(form)
         return self._tags_group
