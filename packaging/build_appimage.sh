@@ -131,4 +131,7 @@ echo "==> conferindo que o AppImage abre"
 echo
 echo "pronto: $OUTPUT"
 du -h "$OUTPUT"
-sha256sum "$OUTPUT" > "$OUTPUT.sha256"
+# Só o nome do arquivo, sem a pasta: com "dist/" no caminho o `sha256sum -c`
+# só confere a partir da raiz do repositório, e não depois de o par ser movido
+# ou baixado.
+(cd "$DIST" && sha256sum "$(basename "$OUTPUT")") > "$OUTPUT.sha256"
