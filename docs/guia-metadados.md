@@ -26,7 +26,10 @@ e grava o resultado **numa cópia**. O original nunca é alterado.
   até 8 linhas de altura —, então um valor de várias linhas aparece inteiro, sem
   reticências. Para ampliar mais uma linha, arraste a alça (o traço duplo) no pé
   dela, para baixo ou para cima; o clique duplo na alça — ou arrastá-la de volta
-  até a altura automática — devolve o ajuste automático. Arraste também a
+  até a altura automática — devolve o ajuste automático. Para editar um valor,
+  dê um clique duplo nele: abre um campo de várias linhas, como o da Descrição
+  (Enter quebra a linha; Tab ou um clique fora confirma; Esc desfaz; Ctrl+Enter
+  confirma). Arraste também a
   **divisão entre Campo e Valor** para dar mais largura a um dos lados, e a alça
   abaixo da tabela para ampliá-la (ela já cresce sozinha para mostrar as linhas
   ajustadas). A divisão e a altura da tabela valem também para os próximos
