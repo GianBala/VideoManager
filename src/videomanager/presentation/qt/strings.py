@@ -272,6 +272,7 @@ META_TRACK_HEADERS = ("Nº", "Tipo", "Codec", "Título", "Idioma")
 META_TRACK_KINDS = {"video": "Vídeo", "audio": "Áudio", "subtitle": "Legenda", "data": "Dados"}
 META_TRACKS_ON_FILE = "No Ogg e no Opus, os campos da trilha são os do arquivo: edite-os em Tags."
 META_LANGUAGE_TIP = "Código de três letras (ISO 639-2), como por, eng ou spa"
+META_GROW_TIP = "Arraste para ampliar o campo; clique duplo volta ao tamanho original"
 META_COVER_GROUP = "Capa"
 META_COVER_NONE = "Sem capa"
 META_COVER_UNSUPPORTED = "Este formato não guarda capa."
