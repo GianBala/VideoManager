@@ -80,11 +80,8 @@ VM_BUNDLE_FFMPEG=0 ./packaging/build_appimage.sh  # sem ffmpeg embutido: ~290 MB
 Sem compilação cruzada aqui também: um AppImage x86_64 precisa ser gerado
 numa máquina x86_64.
 
-`scripts/generate_appimage.sh` faz o mesmo de ponta a ponta num só comando —
-cria o `.venv`, instala as dependências, testa, baixa os binários, empacota,
-monta o AppDir, gera o AppImage e calcula o SHA-256 — para quem parte de um
-clone limpo. Aceita `--skip-tests`, `--skip-deps`, `--no-bundle-ffmpeg` e
-`--reuse-dist`, e obedece a `VM_FAST_TESTS` como os scripts de `packaging/`.
+Os scripts esperam o `.venv` pronto e não o criam. Num clone limpo:
+`python3 -m venv .venv` e depois o script — as dependências ele mesmo instala.
 
 ## `fetch_binaries.py`
 
