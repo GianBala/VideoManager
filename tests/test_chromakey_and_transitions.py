@@ -197,6 +197,25 @@ def test_composer_chromakey_filter() -> None:
     assert simple_trim(p) is None
 
 
+@pytest.mark.parametrize("cor", ["#00B140", "0x00B140", "00b140"])
+def test_composer_chromakey_aceita_as_grafias_hexadecimais(cor) -> None:
+    media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=10.0, width=1920, height=1080)
+    clip = Clip(media=media, start=0.0, duration=5.0, chromakey_enabled=True, chromakey_color=cor)
+    filters = ";".join(build_graph(Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(clip,)),))).filters)
+    assert f"chromakey=color=0x{cor[-6:]}:similarity=" in filters
+
+
+def test_composer_chromakey_nao_deixa_cor_estranha_chegar_ao_grafo() -> None:
+    # Defesa em profundidade: a leitura do .vmp já recusa, mas o grafo não
+    # pode depender disso — a cor é o único texto livre que chega até ele.
+    media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=10.0, width=1920, height=1080)
+    hostil = "00FF00:similarity=1,metadata=mode=print:file=/tmp/vm-escrita"
+    clip = Clip(media=media, start=0.0, duration=5.0, chromakey_enabled=True, chromakey_color=hostil)
+    filters = ";".join(build_graph(Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(clip,)),))).filters)
+    assert "metadata" not in filters
+    assert "chromakey=color=0x00FF00:similarity=0.2500:blend=0.1000" in filters
+
+
 def test_composer_transitions_graph() -> None:
     media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=12.0)
     for stored, rendered in (
