@@ -323,7 +323,11 @@ def _diagnose_url(app: QApplication, window: MainWindow, url: str, report: Path 
         text += "VM_DIAGNOSE_OK\n" if ok else "VM_DIAGNOSE_FAILED\n"
         if report is not None:
             report.write_text(text, encoding="utf-8")
-        logging.getLogger(__name__).info("Diagnóstico de URL:\n%s", text)
+        # Só o desfecho vai para o log, que é permanente e promete não guardar
+        # URLs; o relatório inteiro, com a URL, sai no --report e na saída.
+        logging.getLogger(__name__).info(
+            "Diagnóstico de URL: %s", "VM_DIAGNOSE_OK" if ok else "VM_DIAGNOSE_FAILED"
+        )
         print(text, flush=True)
         window.close()
         app.exit(0 if ok else 1)
