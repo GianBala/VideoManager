@@ -31,6 +31,7 @@ from videomanager.infrastructure.yt_dlp.extras import TolerantEmbedThumbnailPP
 from videomanager.infrastructure.yt_dlp.extras import split_thumbnail_postprocessor
 from videomanager.infrastructure.yt_dlp.probe import _translate_error
 from videomanager.infrastructure.storage.outputs import FileOutputStore
+from videomanager.infrastructure.storage.outputs import temp_prefix
 
 from videomanager.application.events import Progress as Progress
 from videomanager.application.events import ProgressStage
@@ -326,7 +327,7 @@ def publish(staged: Path | None, staging: Path, destination: Path) -> Path | Non
             if item.stat().st_dev != lease.device:
                 # Cache e destino em volumes diferentes: a troca atômica só
                 # existe dentro do mesmo volume, então a cópia vem antes.
-                temporary = lease.path.with_name(f".videomanager-{uuid.uuid4().hex[:8]}{item.suffix}")
+                temporary = lease.path.with_name(f"{temp_prefix()}{uuid.uuid4().hex[:8]}{item.suffix}")
                 shutil.copyfile(item, temporary)
             store.commit(temporary, lease.path, lease=lease)
         except BaseException:

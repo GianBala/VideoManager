@@ -46,6 +46,7 @@ from pathlib import Path
 
 from videomanager.infrastructure.ffmpeg.command_assets import filter_script
 from videomanager.infrastructure.storage.outputs import FileOutputStore
+from videomanager.infrastructure.storage.outputs import temp_prefix
 from videomanager.application.ports.output import OutputLease
 
 from videomanager.application.capabilities import FFmpegTools
@@ -194,7 +195,7 @@ class ParallelExport:
         # recurso que esta aplicação já esgotou uma vez. E o destino pode estar
         # noutro disco — no Windows quase sempre está —, o que transformaria a
         # entrega final numa cópia do arquivo inteiro em vez de um rename.
-        temp = Path(tempfile.mkdtemp(prefix=".videomanager-", dir=self._destination.parent))
+        temp = Path(tempfile.mkdtemp(prefix=temp_prefix(), dir=self._destination.parent))
         try:
             return self._build(temp)
         except Exception:
