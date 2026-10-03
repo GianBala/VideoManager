@@ -383,3 +383,25 @@ class TestFalhaDeUmTrecho:
         export._render(0, tmp_path / "trecho.mp4")
 
         assert abriu == [], "não se abre um ffmpeg para trabalho já descartado"
+
+
+class TestFalhaInesperadaNumTrecho:
+    """Um erro que não seja ``ConversionError`` num trecho também derruba os irmãos.
+
+    Antes, só a ``ConversionError`` de montar o comando chamava ``_fail``: um
+    ``OSError`` de disco cheio ao gravar o script de filtro (ou qualquer outro
+    erro) matava a thread em silêncio, os outros ``minterpolate`` seguiam até o
+    fim — dezenas de minutos na única vaga local — e a tarefa terminava com
+    "trecho ausente", sem a causa.
+    """
+
+    def test_erro_inesperado_derruba_os_irmaos_e_guarda_a_causa(self, tmp_path: Path, monkeypatch) -> None:
+        export = exportacao(tmp_path / "saida.mp4")
+
+        def quebrar(*args, **kwargs):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(parallel_export, "segment_video_args", quebrar)
+        export._render(0, tmp_path / "trecho000.mp4")
+        assert export._aborted
+        assert any("No space left" in str(erro) for erro in export._errors)
