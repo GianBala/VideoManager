@@ -12,8 +12,11 @@ validade curta, então reaproveitar uma análise de dez minutos atrás falharia 
 
 from __future__ import annotations
 
+import shutil
+import uuid
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import yt_dlp
@@ -26,6 +29,7 @@ from videomanager.domain.i18n import Text, t
 from videomanager.infrastructure.yt_dlp.extras import TolerantEmbedThumbnailPP
 from videomanager.infrastructure.yt_dlp.extras import split_thumbnail_postprocessor
 from videomanager.infrastructure.yt_dlp.probe import _translate_error
+from videomanager.infrastructure.storage.outputs import FileOutputStore
 
 from videomanager.application.events import Progress as Progress
 from videomanager.application.events import ProgressStage
@@ -247,6 +251,43 @@ class Downloader:
             raise JobCancelled("Download cancelado.")
 
         return DownloadResult(path=self._final_path, title=title, log=self.log)
+
+def publish(staged: Path | None, staging: Path, destination: Path) -> Path | None:
+    """Leva o que o yt-dlp deixou em ``staging`` para ``destination``.
+
+    O yt-dlp grava na pasta da própria tarefa, e não no destino, porque lá ele
+    decide sozinho o que fazer com um nome já ocupado: o vídeo era dado por
+    "já baixado" e a tarefa entregava o **arquivo antigo** (outra qualidade,
+    mesmo container) sem aviso; o áudio extraído **apagava** o anterior. Aqui o
+    nome é reservado com ``O_EXCL``, como nas conversões: ocupado, vira
+    ``nome (2).ext``, e nada no destino é sobrescrito.
+
+    Publica tudo o que sobrou na pasta (legenda que não pôde ser embutida, por
+    exemplo), e devolve o caminho final de ``staged``.
+    """
+    store = FileOutputStore()
+    published = staged
+    for item in sorted(p for p in staging.rglob("*") if p.is_file()):
+        relative = item.relative_to(staging)
+        target = SimpleNamespace(extension=item.suffix.lstrip("."))
+        lease = store.reserve(item, target, destination / relative.parent, custom_stem=item.stem)
+        temporary = item
+        try:
+            if item.stat().st_dev != lease.device:
+                # Cache e destino em volumes diferentes: a troca atômica só
+                # existe dentro do mesmo volume, então a cópia vem antes.
+                temporary = lease.path.with_name(f".videomanager-{uuid.uuid4().hex[:8]}{item.suffix}")
+                shutil.copyfile(item, temporary)
+            store.commit(temporary, lease.path, lease=lease)
+        except BaseException:
+            if temporary != item:
+                temporary.unlink(missing_ok=True)
+            store.abort(lease.path, lease=lease)
+            raise
+        if staged is not None and item == staged:
+            published = lease.path
+    return published
+
 
 __all__ = [
     'DownloadFailedError',
