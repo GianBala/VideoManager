@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,9 @@ name = "videomanager"
 version = "3.1"
 description = "Downloader e conversor de vídeo/áudio multiplataforma (Windows e Linux)"
 readme = "README.md"
+# Expressão SPDX (PEP 639), que pede setuptools 77 ou mais novo.
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.10"
 dependencies = [
     "PySide6>=6.6",

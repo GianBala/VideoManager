@@ -47,6 +47,16 @@ fi
 echo "==> empacotando"
 "$PY" -m PyInstaller --noconfirm --clean --distpath "$DIST" --workpath "$BUILD" packaging/videomanager.spec
 
+echo "==> conferindo as licenças no pacote"
+# Sem elas o pacote redistribui ffmpeg (GPL) e Qt (LGPL) fora dos termos das
+# próprias licenças; ver THIRD_PARTY_NOTICES.md.
+for texto in LICENSE THIRD_PARTY_NOTICES.md LGPL-3.0.txt Deno-MIT.txt python/LICENSE.txt mutagen/COPYING; do
+    if [ ! -f "$DIST/VideoManager/_internal/licenses/$texto" ]; then
+        echo "falta licenses/$texto no pacote" >&2
+        exit 1
+    fi
+done
+
 echo "==> conferindo que o pacote abre"
 ./packaging/smoke_run.sh "$DIST/VideoManager/VideoManager"
 
