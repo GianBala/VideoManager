@@ -20,6 +20,7 @@ from videomanager.domain.i18n import Text
 from videomanager.application.jobs.models import Job
 from videomanager.infrastructure.qt.workers.signals import DownloadSignals
 from videomanager.infrastructure.qt.workers.signals import emit_safely
+from videomanager.infrastructure.qt.workers.signals import report_unexpected
 
 
 def task_dir(job: Job) -> Path:
@@ -95,6 +96,7 @@ class DownloadWorker(QRunnable):
         except VideoManagerError as exc:
             emit_safely(self.signals.failed, job_id, error_message(exc))
         except Exception as exc:  # noqa: BLE001
+            report_unexpected(exc)
             emit_safely(
                 self.signals.failed,
                 job_id,

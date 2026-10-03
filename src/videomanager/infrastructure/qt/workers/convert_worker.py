@@ -14,6 +14,7 @@ from videomanager.domain.i18n import Text
 from videomanager.application.jobs.models import Job
 from videomanager.infrastructure.qt.workers.signals import ConvertSignals
 from videomanager.infrastructure.qt.workers.signals import emit_safely
+from videomanager.infrastructure.qt.workers.signals import report_unexpected
 
 
 class ConvertWorker(QRunnable):
@@ -68,6 +69,7 @@ class ConvertWorker(QRunnable):
             self._converter.discard_reservation()
             emit_safely(self.signals.failed, job_id, error_message(exc))
         except Exception as exc:  # noqa: BLE001
+            report_unexpected(exc)
             self._converter.discard_reservation()
             emit_safely(
                 self.signals.failed,
