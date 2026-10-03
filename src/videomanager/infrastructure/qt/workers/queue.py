@@ -132,7 +132,19 @@ class JobQueue(QObject):
     def cancel(self, job_id):
         job = self.job(job_id)
         if job and not job.status.is_final and job_id in self._workers:
-            self._workers[job_id].cancel()
+            worker = self._workers[job_id]
+            pool = self._local if job.kind.runs_ffmpeg_locally else self._pool
+            if pool.tryTake(worker):
+                # Ainda esperando vaga: sai da fila agora. Só marcar o worker
+                # deixava a tarefa "Pendente" — e a reserva de 0 byte na pasta
+                # do usuário — até a vaga liberar, o que atrás de uma
+                # exportação interpolada leva minutos.
+                if isinstance(job.request, ConversionRequest):
+                    FileOutputStore().abort(job.request.destination, lease=job.request.lease)
+                receiver = self._receivers[job_id]
+                self._terminal(self.service.cancelled(job_id, receiver.attempt), job_id, receiver)
+                return
+            worker.cancel()
 
     def cancel_all(self):
         for job_id in list(self._workers):
