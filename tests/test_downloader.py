@@ -116,3 +116,38 @@ def test_erro_do_yt_dlp_sem_cancelamento_vira_falha_traduzida(ydl):
     ydl.roteiro = roteiro
     with pytest.raises(DownloadFailedError):
         modulo.Downloader({}).run("https://x/v")
+
+
+def test_o_yt_dlp_ainda_abre_processos_pela_classe_popen():
+    # O cancelamento do pós-processamento depende disto: se o yt-dlp mudar a
+    # forma de abrir o ffmpeg, cancelar volta a não alcançá-lo.
+    import inspect
+    import yt_dlp.postprocessor.ffmpeg as pos
+    import yt_dlp.utils as utilidades
+    assert pos.Popen is utilidades.Popen
+    assert inspect.ismethod(utilidades.Popen.run)  # classmethod: instancia ``cls``
+    assert utilidades.Popen.__init__ is modulo._registering_init
+
+
+def test_cancelar_termina_o_processo_do_pos_processamento(ydl):
+    # Antes: cancelar durante "Juntando" só valia quando o ffmpeg acabasse
+    # sozinho, e fechar a janela deixava o processo vivo.
+    import sys
+    import threading
+    import time
+    from yt_dlp.utils import Popen
+
+    baixador = modulo.Downloader({})
+    duracao = []
+
+    def roteiro(self):
+        inicio = time.monotonic()
+        _, _, codigo = Popen.run([sys.executable, "-c", "import time; time.sleep(20)"])
+        duracao.append(time.monotonic() - inicio)
+        raise DownloadError(f"ERROR: Postprocessing: ffmpeg saiu com {codigo}")
+
+    ydl.roteiro = roteiro
+    threading.Timer(0.5, baixador.cancel).start()
+    with pytest.raises(JobCancelled):
+        baixador.run("https://x/v")
+    assert duracao[0] < 5
