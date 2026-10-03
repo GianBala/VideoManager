@@ -135,18 +135,6 @@ class MainWindow(QMainWindow):
         self._probed_hardware = False
         self._split_by_user = False
         self._balancing = False
-        # Diretório temporário próprio: mantém .part e fragmentos fora da pasta
-        # de destino, que só recebe arquivo pronto.
-        #
-        # Fica no cache do usuário, e **não** em /tmp, pelos mesmos dois motivos
-        # que levaram ``ParallelExport`` a fugir de lá. Em muitas distribuições
-        # /tmp é tmpfs, ou seja memória: um download de vários GB passaria
-        # inteiro pela RAM, que é o recurso que esta aplicação já esgotou uma
-        # vez. E "/tmp/videomanager" é um caminho fixo dentro de um diretório em
-        # que todo usuário da máquina escreve — quem chegasse antes decidiria o
-        # que há lá dentro, ou impediria o download por falta de permissão.
-        self._temp_dir = self._runtime.download_cache
-
         self.setWindowTitle(APP_TITLE)
         # Altura escolhida para caber a aba inteira sem rolagem — barra de abas,
         # cabeçalho e controles — com a fila mostrando quatro linhas. Quem manda
@@ -753,7 +741,13 @@ class MainWindow(QMainWindow):
         if self._tools is None:
             return
         dest = self._runtime.download_directory(self._settings)
-        payload = DownloadRequest(request, media, dest, self._temp_dir, Preferences.from_dict(asdict(self._settings)))
+        # Temporários fora da pasta de destino, que só recebe arquivo pronto, e
+        # no cache do usuário, **não** em /tmp, pelos mesmos dois motivos que
+        # levaram ``ParallelExport`` a fugir de lá: /tmp é tmpfs (memória) em
+        # muitas distribuições, e um caminho fixo nele fica à mercê de quem
+        # chegar antes. A pasta da sessão só nasce no primeiro download.
+        payload = DownloadRequest(request, media, dest, self._runtime.download_cache,
+                                  Preferences.from_dict(asdict(self._settings)))
         job = self._downloads.prepare(payload)
         self._queue.submit(job)
 
@@ -1019,6 +1013,8 @@ class MainWindow(QMainWindow):
         if self._metadata is not None:
             self._metadata.shutdown()
         self._queue.shutdown()
+        # Sem a fila, nenhum .part é retomável: a pasta da sessão sai junto.
+        self._runtime.close_downloads()
         self._save_settings()
         event.accept()
 

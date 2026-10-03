@@ -112,7 +112,8 @@ class Downloader:
 
         O efeito é assíncrono: o download para no próximo hook de progresso,
         onde a exceção pode ser levantada de dentro do yt-dlp com segurança.
-        Interromper de fora deixaria arquivos temporários órfãos.
+        O yt-dlp **não** apaga o ``.part`` ao ser interrompido; quem limpa é o
+        worker, que apaga a pasta temporária da tarefa.
         """
         self._cancelled = True
 
@@ -128,7 +129,8 @@ class Downloader:
 
     def _check_cancel(self) -> None:
         if self._cancelled:
-            # Exceção reconhecida pelo yt-dlp, que então limpa os temporários.
+            # Exceção reconhecida pelo yt-dlp, que interrompe o download sem
+            # tratá-la como erro (o .part fica; ver ``cancel``).
             raise DownloadCancelled("cancelado pelo usuário")
 
     def _progress_hook(self, data: dict[str, Any]) -> None:
