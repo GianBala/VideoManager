@@ -72,9 +72,9 @@ def is_packaged() -> bool:
 class EngineUpdateWorker(QRunnable):
     """Atualiza o yt-dlp no ambiente em que a aplicação está rodando.
 
-    Usa o canal de pré-lançamento (``--pre``) porque é o recomendado pelo próprio
-    projeto: extratores quebram quando as plataformas mudam, e as correções saem
-    nas builds noturnas muito antes da versão estável seguinte.
+    Instala a versão estável, e não o canal de pré-lançamento (``--pre``): é a
+    que o projeto valida, e uma build de desenvolvimento quebrada derruba a aba
+    Download inteira de quem só queria um extrator corrigido.
 
     **Nunca inicie isto num pacote — confira :func:`is_packaged` antes.**
     ``sys.executable`` é o interpretador Python apenas quando se roda do
@@ -95,7 +95,7 @@ class EngineUpdateWorker(QRunnable):
     @Slot()
     def run(self) -> None:
         command = [
-            sys.executable, "-m", "pip", "install", "--upgrade", "--pre",
+            sys.executable, "-m", "pip", "install", "--upgrade",
             "--disable-pip-version-check", "--no-input", "yt-dlp",
         ]
         try:

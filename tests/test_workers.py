@@ -247,3 +247,20 @@ def test_quadro_parado_monta_o_comando_fora_da_interface(monkeypatch):
     assert thread in montado_em
     assert threading.current_thread() not in montado_em
     assert quadros == [7]
+
+
+def test_atualizacao_do_motor_instala_so_versao_estavel(monkeypatch):
+    # Com --pre, o menu instalava build de desenvolvimento do yt-dlp em quem
+    # roda do código-fonte; a versão estável é a que o projeto valida.
+    import subprocess
+    from videomanager.infrastructure.qt.workers import engine_worker
+    comandos = []
+
+    def executar(comando, **kwargs):
+        comandos.append(comando)
+        return subprocess.CompletedProcess(comando, 1, b"", b"sem rede")
+
+    monkeypatch.setattr(engine_worker.subprocess, "run", executar)
+    engine_worker.EngineUpdateWorker("2026.01.01").run()
+    assert comandos and "yt-dlp" in comandos[0]
+    assert "--pre" not in comandos[0]
