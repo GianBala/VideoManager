@@ -16,6 +16,7 @@ from videomanager.application.errors import JobCancelled
 from videomanager.application.errors import VideoManagerError
 from videomanager.domain.i18n import t
 from videomanager.infrastructure.qt.workers.signals import emit_safely
+from videomanager.infrastructure.qt.workers.signals import report_unexpected
 
 
 class FFmpegSetupSignals(QObject):
@@ -49,6 +50,7 @@ class FFmpegSetupWorker(QRunnable):
         except VideoManagerError as exc:
             emit_safely(self.signals.failed, str(exc))
         except Exception as exc:  # noqa: BLE001
+            report_unexpected(exc)
             emit_safely(self.signals.failed, f"{type(exc).__name__}: {exc}")
         else:
             emit_safely(self.signals.finished, tools)

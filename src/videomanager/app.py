@@ -359,6 +359,31 @@ def _argument(name: str) -> str | None:
     return None
 
 
+def startup_line() -> str:
+    """O que um log recebido de um usuário precisa dizer de onde veio."""
+    import platform
+
+    import PySide6
+    import yt_dlp
+    from PySide6.QtCore import qVersion
+    from videomanager.infrastructure.system.binaries import find_tools
+
+    tools = find_tools()
+    ffmpeg = f"{tools.ffmpeg} ({tools.source})" if tools else "ausente"
+    origem = "pacote" if getattr(sys, "frozen", False) else "código-fonte"
+    return (f"{APP_TITLE} {__version__} ({origem}) · Python {platform.python_version()} · "
+            f"PySide6 {PySide6.__version__} / Qt {qVersion()} · yt-dlp {yt_dlp.version.__version__} · "
+            f"ffmpeg {ffmpeg} · {platform.platform()}")
+
+
+def _qt_messages(mode, context, message) -> None:
+    """Avisos do próprio Qt também vão para o log, e continuam no terminal."""
+    from PySide6.QtCore import QtMsgType
+    print(message, file=sys.stderr)
+    if mode in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
+        logging.getLogger("videomanager.qt").warning("%s", message)
+
+
 def main() -> int:
     # Antes de tocar no Qt: se falta biblioteca do sistema, a criação do
     # QApplication aborta o processo e não sobra chance de explicar nada. A
@@ -372,6 +397,9 @@ def main() -> int:
     from videomanager.infrastructure.system.logs import configure_file_logging
 
     configure_file_logging()
+    from PySide6.QtCore import qInstallMessageHandler
+    qInstallMessageHandler(_qt_messages)
+    logging.getLogger("videomanager").info("Início: %s", startup_line())
     smoke = '--smoke-test' in sys.argv
     diagnose_url = _argument('--diagnose-url')
     headless = smoke or diagnose_url is not None

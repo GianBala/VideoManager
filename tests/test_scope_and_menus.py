@@ -460,3 +460,14 @@ def test_diagnostico_de_url_nao_grava_a_url_no_log(desktop_app, tmp_path, wait_u
     assert url in relatorio.read_text(encoding="utf-8")
     assert "assinatura" not in caplog.text
     assert "VM_DIAGNOSE_FAILED" in caplog.text
+
+
+def test_linha_de_partida_diz_de_que_versao_e_ambiente_veio_o_log():
+    # Um log recebido de um usuário não dizia versão, origem, ffmpeg nem sistema.
+    import PySide6
+    import yt_dlp
+    from videomanager import __version__
+    from videomanager import app as aplicativo
+    linha = aplicativo.startup_line()
+    for esperado in (__version__, PySide6.__version__, yt_dlp.version.__version__, "ffmpeg"):
+        assert esperado in linha
