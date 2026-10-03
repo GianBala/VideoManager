@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from videomanager.application import encoding as hwaccel
 from videomanager.application.preferences import Preferences as Settings
+from videomanager.application.preferences import RANGES
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.i18n import align_label_column
@@ -201,17 +202,17 @@ class SettingsDialog(QDialog):
         page, form = self._make_page()
 
         self._concurrent = QSpinBox()
-        self._concurrent.setRange(1, 10)
+        self._concurrent.setRange(*RANGES["max_concurrent_jobs"])
         self._concurrent.setValue(self._settings.max_concurrent_jobs)
         self._add_row(form, strings.SETTINGS_CONCURRENT, self._concurrent)
 
         self._fragments = QSpinBox()
-        self._fragments.setRange(1, 16)
+        self._fragments.setRange(*RANGES["concurrent_fragments"])
         self._fragments.setValue(self._settings.concurrent_fragments)
         self._add_row(form, strings.SETTINGS_FRAGMENTS, self._fragments)
 
         self._rate = QSpinBox()
-        self._rate.setRange(0, 1_000_000)
+        self._rate.setRange(*RANGES["rate_limit_kbps"])
         self._rate.setSingleStep(256)
         self._rate.setValue(self._settings.rate_limit_kbps)
         self._add_row(form, strings.SETTINGS_RATE_LIMIT, self._rate)
