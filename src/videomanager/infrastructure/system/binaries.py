@@ -443,17 +443,26 @@ def download_tools(
     os.close(handle)
     archive = Path(raw)
 
+    # Extrai numa pasta à parte e só troca de lugar depois de o ffmpeg rodar.
+    # Extraindo direto no nome final, uma queda ou disco cheio no meio deixava
+    # um binário truncado que ``_usable`` aceita (no Windows ``X_OK`` é sempre
+    # verdade): toda conversão falhava dali em diante e o aplicativo nunca mais
+    # oferecia o download.
+    staging = Path(tempfile.mkdtemp(dir=target, prefix=".extraindo-"))
     try:
         if _stream_download(url, archive, progress, cancelled) != expected:
             raise BinaryDownloadError(Text("FFMPEG_CHECKSUM_MISMATCH"))
-        _extract_wanted(archive, target)
+        _extract_wanted(archive, staging)
+        probe_version(staging / exe_name("ffmpeg"))  # valida de verdade; levanta se não executar
+        for name in (exe_name("ffmpeg"), exe_name("ffprobe")):
+            (staging / name).replace(target / name)
     finally:
         archive.unlink(missing_ok=True)
+        shutil.rmtree(staging, ignore_errors=True)
 
     found = _look_in(target)
     if not found:
         raise BinaryDownloadError(Text("FFMPEG_EXTRACTED_UNUSABLE", path=target))
-    probe_version(found[0])  # valida de verdade; levanta se não executar
     return FFmpegTools(found[0], found[1], "gerenciado")
 
 

@@ -204,6 +204,24 @@ class TestIntegridadeDoFfmpegBaixado:
         assert tools.ffmpeg.is_file() and tools.ffprobe.is_file()
 
 
+    def test_extracao_interrompida_nao_deixa_binario_truncado(self, tmp_path, monkeypatch):
+        # Antes a extração gravava direto no nome final: disco cheio ou queda
+        # no meio deixava um ffmpeg truncado, que _usable aceita (no Windows
+        # X_OK é sempre verdade), e o app nunca mais provisionava.
+        import hashlib
+        conteudo = self._arquivo()
+        binaries = self._preparar(tmp_path, monkeypatch, conteudo, hashlib.sha256(conteudo).hexdigest())
+
+        def copiar_pela_metade(origem, destino):
+            destino.write(origem.read(5))
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(binaries.shutil, "copyfileobj", copiar_pela_metade)
+        with pytest.raises(binaries.BinaryDownloadError):
+            binaries.download_tools()
+        assert list((tmp_path / "ger").iterdir()) == []
+
+
 @pytest.mark.network
 def test_resumos_fixados_conferem_com_a_publicacao():
     """Os resumos do código são os que o GitHub publica para cada arquivo."""
