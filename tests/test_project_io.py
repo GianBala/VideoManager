@@ -327,3 +327,31 @@ def test_suportes_negativos_exigem_v2_e_sobrevivem_roundtrip(tmp_path):
     encoded['version'] = 1
     with pytest.raises(ProjectError):
         project_from_dict(encoded)
+
+
+@pytest.mark.parametrize('cor', [
+    '#00FF00:similarity=1,metadata=mode=print:file=/tmp/vm-escrita',
+    '00FF00;[0:v]null',
+    "#00FF00'",
+    'green',
+    '#00FF0',
+    '#00FF00FF',
+])
+def test_cor_do_chroma_key_fora_do_padrao_e_recusada(cor):
+    # A cor entra no grafo do ffmpeg: um .vmp de terceiros com ':' ou ','
+    # nela encadeava filtros arbitrários — inclusive escrita de arquivo — só
+    # de abrir o projeto, porque a prévia monta o grafo na abertura.
+    data = {'version': 3, 'tracks': [{'kind': 'VIDEO', 'clips': [{
+        'duration': 2, 'chromakey_enabled': True, 'chromakey_color': cor,
+        'media': {'path': 'video.mp4', 'kind': 'VIDEO'}}]}]}
+    with pytest.raises(ProjectError):
+        project_from_dict(data)
+
+
+@pytest.mark.parametrize('cor', ['#00b140', '#00B140', '0x00B140', '00B140'])
+def test_cor_do_chroma_key_hexadecimal_continua_valida(cor):
+    data = {'version': 3, 'tracks': [{'kind': 'VIDEO', 'clips': [{
+        'duration': 2, 'chromakey_enabled': True, 'chromakey_color': cor,
+        'media': {'path': 'video.mp4', 'kind': 'VIDEO'}}]}]}
+    loaded, _ = project_from_dict(data)
+    assert loaded.clips[0].chromakey_color == cor

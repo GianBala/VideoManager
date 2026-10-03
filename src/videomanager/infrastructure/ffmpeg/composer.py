@@ -40,6 +40,7 @@ from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
+from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import fit_size
@@ -434,12 +435,10 @@ def _chromakey_filter(clip: Clip) -> str | None:
     if not clip.chromakey_enabled:
         return None
     raw_col = clip.chromakey_color or "#00FF00"
-    if raw_col.startswith("#"):
-        col = f"0x{raw_col[1:]}"
-    elif not raw_col.startswith("0x"):
-        col = f"0x{raw_col}"
-    else:
-        col = raw_col
+    # A leitura do .vmp já recusa outra grafia; o grafo não depende disso.
+    if not CHROMA_COLOR.fullmatch(raw_col):
+        raw_col = "#00FF00"
+    col = f"0x{raw_col[-6:]}"
     sim = max(0.001, min(1.0, clip.chromakey_similarity))
     blend = max(0.0, min(1.0, clip.chromakey_blend))
     return f"chromakey=color={col}:similarity={sim:.4f}:blend={blend:.4f}"

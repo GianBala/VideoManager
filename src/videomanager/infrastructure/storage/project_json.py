@@ -15,6 +15,7 @@ from pathlib import Path
 
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.errors import ProjectError
+from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip
@@ -300,6 +301,8 @@ def _validate_project(data: dict[str, object]) -> None:
                 ),
             )
             strings(clip, ("overlay_type", "text_content", "font_family", "text_color", "stroke_color", "filter_name", "transition_name", "chromakey_color"))
+            if "chromakey_color" in clip and not CHROMA_COLOR.fullmatch(clip["chromakey_color"]):
+                fail("chromakey_color")
             if clip.get("overlay_type", "none") not in ("none", "image", "text", "filter", "transition"):
                 fail(Text("PROJECT_FIELD_OVERLAY"))
             media = clip.get("media")
