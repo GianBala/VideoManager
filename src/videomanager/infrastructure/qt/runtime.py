@@ -19,6 +19,7 @@ from videomanager.infrastructure.system import binaries
 from videomanager.infrastructure.system import memory
 from videomanager.infrastructure.storage.settings import Settings
 from .audio import AudioPreview
+from .sessions import DownloadSession
 from .workers.queue import JobQueue
 from .workers.media_worker import MediaWorker
 from .workers.function_worker import FunctionWorker
@@ -33,6 +34,7 @@ from .workers.thumbnail_worker import ThumbnailWorker
 class DesktopRuntime:
     def __init__(self, *, audio_enabled=True):
         self._audio_enabled = audio_enabled
+        self._downloads = DownloadSession(Path(user_cache_dir(APP_NAME, appauthor=False)) / 'temp')
 
     def queue(self, settings, parent=None):
         return JobQueue(settings, parent)
@@ -207,7 +209,10 @@ class DesktopRuntime:
 
     @property
     def download_cache(self):
-        return Path(user_cache_dir(APP_NAME, appauthor=False)) / 'temp'
+        return self._downloads.path
+
+    def close_downloads(self):
+        self._downloads.close()
 
     def download_directory(self, settings):
         return Settings.from_dict(asdict(settings)).resolved_download_dir()

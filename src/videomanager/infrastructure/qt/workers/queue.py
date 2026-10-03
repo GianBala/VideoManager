@@ -1,4 +1,5 @@
 """Adaptador Qt da fila: pools e sinais; transições pertencem a JobService."""
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from PySide6.QtCore import QObject, QThreadPool, Signal, Slot
@@ -7,11 +8,13 @@ from videomanager.application.events import DownloadResult
 from videomanager.application.jobs.models import Job
 from videomanager.application.jobs.models import JobStatus
 from videomanager.application.jobs.requests import ConversionRequest
+from videomanager.application.jobs.requests import DownloadRequest
 from videomanager.application.jobs.service import JobService
 from videomanager.application.errors import error_message
 from videomanager.infrastructure.storage.outputs import FileOutputStore
 from videomanager.infrastructure.qt.workers.convert_worker import ConvertWorker
 from videomanager.infrastructure.qt.workers.download_worker import DownloadWorker
+from videomanager.infrastructure.qt.workers.download_worker import task_dir
 
 _LOCAL_JOBS = 1
 
@@ -157,6 +160,11 @@ class JobQueue(QObject):
         self._start(job)
 
     def remove_finished(self):
+        # Sem a tarefa na fila não há "Repetir": o .part que uma falha guardou
+        # para continuar o download não tem mais quem o use.
+        for job in self.service.jobs:
+            if job.status.is_final and isinstance(job.request, DownloadRequest):
+                shutil.rmtree(task_dir(job), ignore_errors=True)
         self.service.remove_finished()
         self.counts_changed.emit()
 
