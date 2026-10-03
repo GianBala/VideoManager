@@ -168,3 +168,71 @@ def test_sessao_nasce_no_primeiro_uso_e_fechar_apaga(tmp_path):
     assert sessao.path == pasta
     sessao.close()
     assert not pasta.exists()
+
+
+class _YtDlpNoDestino:
+    """Dublê com a semântica do yt-dlp no destino final (``paths.home``).
+
+    Vídeo: se o arquivo final já existe, devolve-o sem baixar ("has already
+    been downloaded"). Áudio extraído: o ``MoveFiles`` substitui o que houver.
+    """
+
+    modo = "video"
+
+    def __init__(self, opts, on_progress=None):
+        self.home = Path(opts["paths"]["home"])
+        self.log = ()
+
+    def cancel(self):
+        pass
+
+    def run(self, url):
+        final = self.home / "video [id].mp4"
+        if self.modo == "video" and final.exists():
+            return DownloadResult(path=final, title="t", log=())
+        final.parent.mkdir(parents=True, exist_ok=True)
+        final.write_bytes(b"NOVO")
+        return DownloadResult(path=final, title="t", log=())
+
+
+@pytest.mark.parametrize("modo", ["video", "audio"])
+def test_nome_ja_existente_no_destino_vira_um_arquivo_novo(modo, monkeypatch, tmp_path):
+    # Antes: o vídeo "baixado" era o arquivo antigo, entregue como resultado
+    # sem aviso; o áudio extraído apagava o arquivo antigo de mesmo nome.
+    destino = tmp_path / "destino"
+    destino.mkdir()
+    antigo = destino / "video [id].mp4"
+    antigo.write_bytes(b"ARQUIVO ANTERIOR")
+    monkeypatch.setattr(download_worker, "find_tools", lambda: object())
+    monkeypatch.setattr(download_worker, "build_opts",
+                        lambda sel, media, prefs, tools, dest, temp: ({"paths": {"home": str(dest), "temp": str(temp)}}, None))
+    monkeypatch.setattr(_YtDlpNoDestino, "modo", modo)
+    monkeypatch.setattr(download_worker, "Downloader", _YtDlpNoDestino)
+    w = download_worker.DownloadWorker(_Tarefa(1, _Pedido(tmp_path / "sessao", destination=destino)))
+    resultados = []
+    w.signals.finished.connect(lambda job_id, resultado: resultados.append(resultado))
+    w.run()
+    assert antigo.read_bytes() == b"ARQUIVO ANTERIOR"
+    assert resultados[0].path == destino / "video [id] (2).mp4"
+    assert resultados[0].path.read_bytes() == b"NOVO"
+    assert not download_worker.task_dir(w._job).exists()
+
+
+def test_publicar_entre_volumes_copia_antes_de_trocar(tmp_path):
+    # O cache do usuário e a pasta de downloads podem estar em volumes
+    # diferentes; a troca atômica só existe dentro de um volume.
+    import os
+    import tempfile
+    from videomanager.infrastructure.yt_dlp.downloader import publish
+    outro = Path("/dev/shm")
+    if not outro.is_dir() or os.stat(outro).st_dev == os.stat(tmp_path).st_dev:
+        pytest.skip("sem um segundo volume gravável")
+    with tempfile.TemporaryDirectory(dir=outro) as pasta:
+        staging = Path(pasta) / "pronto"
+        (staging / "Site").mkdir(parents=True)
+        pronto = staging / "Site" / "video [id].mp4"
+        pronto.write_bytes(b"NOVO")
+        final = publish(pronto, staging, tmp_path)
+    assert final == tmp_path / "Site" / "video [id].mp4"
+    assert final.read_bytes() == b"NOVO"
+    assert [p.name for p in final.parent.iterdir()] == ["video [id].mp4"]
