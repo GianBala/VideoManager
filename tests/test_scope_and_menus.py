@@ -436,3 +436,27 @@ def test_titulo_da_janela_nao_repete_o_nome_do_aplicativo(tmp_path):
     titulo, nome = ast.literal_eval(saida.stdout.strip().splitlines()[-1])
     assert titulo == f"Video Manager {videomanager.__version__}"
     assert titulo.endswith(nome)
+
+
+def test_diagnostico_de_url_nao_grava_a_url_no_log(desktop_app, tmp_path, wait_until, caplog):
+    # O log é permanente e rotativo, e a documentação promete que ele não
+    # guarda URLs; a URL fica só no relatório que quem roda o diagnóstico pede.
+    import logging
+    from types import SimpleNamespace
+    from videomanager import app as aplicativo
+
+    url = "https://exemplo.invalido/video?assinatura=segredo"
+    janela = SimpleNamespace(
+        _media=None, _probe_worker=None, _analyze=lambda: None, close=lambda: None,
+        _url=SimpleNamespace(setText=lambda texto: None),
+        _add_button=SimpleNamespace(isEnabled=lambda: False),
+    )
+    saidas = []
+    falso = SimpleNamespace(exit=saidas.append)
+    relatorio = tmp_path / "relatorio.txt"
+    with caplog.at_level(logging.INFO):
+        aplicativo._diagnose_url(falso, janela, url, relatorio, timeout=0)
+        wait_until(lambda: saidas, timeout=5)
+    assert url in relatorio.read_text(encoding="utf-8")
+    assert "assinatura" not in caplog.text
+    assert "VM_DIAGNOSE_FAILED" in caplog.text
