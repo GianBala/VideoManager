@@ -58,6 +58,39 @@ if os.environ.get("VM_BUNDLE_DENO", "1") != "0" and (_vendor / exe_name("deno"))
 # o pacote não resolvia os desafios do YouTube nem com um runtime disponível.
 from PyInstaller.utils.hooks import collect_data_files  # noqa: E402
 
+
+# Licenças do que vai dentro do pacote. Redistribuir o ffmpeg (GPL) e o Qt (LGPL)
+# sem os textos descumpre as próprias licenças; ver THIRD_PARTY_NOTICES.md. A
+# lista cobre as bibliotecas Python que o pacote embute: uma que falte no
+# ambiente derruba o build aqui, em vez de sair um pacote sem a licença dela.
+_PACOTES_COM_LICENCA = (
+    "yt-dlp", "yt-dlp-ejs", "platformdirs", "certifi", "requests", "urllib3",
+    "charset-normalizer", "idna", "brotli", "websockets", "mutagen", "pycryptodomex",
+)
+
+
+def _licencas() -> list[tuple[str, str]]:
+    import sysconfig
+    from importlib.metadata import distribution
+
+    datas = [
+        (str(REPO_ROOT / "LICENSE"), "licenses"),
+        (str(REPO_ROOT / "THIRD_PARTY_NOTICES.md"), "licenses"),
+        (str(REPO_ROOT / "packaging" / "licenses"), "licenses"),
+    ]
+    python = Path(sysconfig.get_path("stdlib")) / "LICENSE.txt"
+    if not python.is_file():
+        python = Path(sys.base_prefix) / "LICENSE.txt"  # Python oficial do Windows
+    datas.append((str(python), "licenses/python"))
+    for nome in _PACOTES_COM_LICENCA:
+        dist = distribution(nome)
+        textos = [f for f in dist.files or () if any(k in f.name.upper() for k in ("LICEN", "COPYING", "NOTICE"))]
+        if not textos:
+            raise SystemExit(f"{nome} não traz texto de licença nos metadados")
+        datas += [(str(dist.locate_file(f)), f"licenses/{nome}") for f in textos]
+    return datas
+
+
 a = Analysis(
     [str(REPO_ROOT / "src" / "videomanager" / "__main__.py")],
     pathex=[str(REPO_ROOT / "src")],
@@ -65,6 +98,7 @@ a = Analysis(
     datas=[
         (str(REPO_ROOT / "src" / "videomanager" / "resources"), "resources"),
         *collect_data_files("yt_dlp", includes=["**/*.js"]),
+        *_licencas(),
     ],
     # Os extratores do yt-dlp são carregados dinamicamente; sem coletá-los
     # explicitamente, o pacote reconhece só uma fração dos sites.

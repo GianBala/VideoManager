@@ -20,6 +20,9 @@ ABOUT_BODY = (
     "<b>Video Manager {version}</b><br><br>"
     "Downloads video and audio from hundreds of platforms and converts local files.<br><br>"
     "Uses <b>yt-dlp</b> {ytdlp} for extraction and <b>ffmpeg</b> for processing.<br><br>"
+    "Free software under the GPL-3.0 or later. Licenses of third-party "
+    "components (ffmpeg, Qt, Deno and others) in THIRD_PARTY_NOTICES, in the "
+    "package and on GitHub (GianBala/Video_Manager).<br><br>"
     "Respecting each platform's terms of use and copyright is the user's "
     "responsibility."
 )
