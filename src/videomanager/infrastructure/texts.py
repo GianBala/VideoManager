@@ -51,6 +51,12 @@ register({
         "O download do ffmpeg foi redirecionado para uma conexão sem criptografia e foi interrompido.",
         "The ffmpeg download was redirected to an unencrypted connection and was stopped.",
     ),
+    "FFMPEG_CHECKSUM_MISMATCH": (
+        "O ffmpeg baixado não confere com a publicação esperada (resumo SHA-256 diferente) e não "
+        "foi instalado. Tente de novo mais tarde.",
+        "The downloaded ffmpeg doesn't match the expected release (different SHA-256 digest) and "
+        "wasn't installed. Try again later.",
+    ),
     "FFMPEG_DOWNLOAD_FAILED": (
         "Falha ao baixar o ffmpeg: {reason}. Verifique a conexão.",
         "Couldn't download ffmpeg: {reason}. Check your connection.",
