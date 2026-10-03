@@ -30,6 +30,7 @@ from pathlib import Path
 
 from videomanager.infrastructure.ffmpeg.command_assets import filter_script
 from videomanager.infrastructure.storage.outputs import FileOutputStore
+from videomanager.infrastructure.storage.outputs import temp_prefix
 from videomanager.application.ports.output import OutputLease
 
 from videomanager.infrastructure.ffmpeg import hardware as hwaccel
@@ -612,7 +613,7 @@ class Converter:
             # publicação continua sendo uma substituição atômica.
             self._destination.parent.mkdir(parents=True, exist_ok=True)
             descriptor, name = tempfile.mkstemp(
-                prefix=".videomanager-", suffix=self._destination.suffix,
+                prefix=temp_prefix(), suffix=self._destination.suffix,
                 dir=self._destination.parent,
             )
             os.close(descriptor)

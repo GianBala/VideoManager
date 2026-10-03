@@ -185,8 +185,12 @@ def build_app(argv: list[str] | None = None, *, audio_enabled: bool = True) -> t
     # Antes da janela: abrir em inglês é já nascer em inglês, sem troca nenhuma.
     apply_language(settings.language)
 
+    runtime = build_desktop_runtime(audio_enabled=audio_enabled)
+    # Limpa o que uma sessão anterior que caiu deixou (temporários de download,
+    # reservas de 0 byte, renders parciais) e passa a anotar os desta.
+    runtime.start_session()
     window = MainWindow(settings, editor=build_editor_service(), processing=build_processing_service(),
-                        downloads=build_download_service(), runtime=build_desktop_runtime(audio_enabled=audio_enabled))
+                        downloads=build_download_service(), runtime=runtime)
     if not app_icon.isNull():
         window.setWindowIcon(app_icon)
     return app, window

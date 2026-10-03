@@ -1014,7 +1014,7 @@ class MainWindow(QMainWindow):
             self._metadata.shutdown()
         self._queue.shutdown()
         # Sem a fila, nenhum .part é retomável: a pasta da sessão sai junto.
-        self._runtime.close_downloads()
+        self._runtime.close_session()
         self._save_settings()
         event.accept()
 

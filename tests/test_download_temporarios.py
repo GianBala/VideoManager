@@ -161,7 +161,7 @@ def test_limpar_encerradas_apaga_o_part_guardado_para_repetir(desktop_app, worke
 
 
 def test_sessao_nasce_no_primeiro_uso_e_fechar_apaga(tmp_path):
-    sessao = sessions.DownloadSession(tmp_path / "temp")
+    sessao = sessions.Session(tmp_path / "temp")
     assert not (tmp_path / "temp").exists()
     pasta = sessao.path
     assert pasta.is_dir() and pasta.parent == tmp_path / "temp"
@@ -236,3 +236,40 @@ def test_publicar_entre_volumes_copia_antes_de_trocar(tmp_path):
     assert final == tmp_path / "Site" / "video [id].mp4"
     assert final.read_bytes() == b"NOVO"
     assert [p.name for p in final.parent.iterdir()] == ["video [id].mp4"]
+
+
+def test_sessao_morta_tem_reserva_e_temporarios_desfeitos_e_arquivo_do_usuario_poupado(tmp_path, monkeypatch):
+    # Uma queda no meio de uma exportação deixava na pasta do usuário a
+    # reserva de 0 byte com o nome do resultado (a seguinte virava "nome (2)")
+    # e o render parcial, e nada os apagava.
+    from videomanager.infrastructure.storage import outputs
+    from types import SimpleNamespace
+
+    raiz, saida = tmp_path / "temp", tmp_path / "Videos"
+    saida.mkdir()
+    morta = sessions.Session(raiz)
+    monkeypatch.setattr(outputs, "_journal", None)
+    monkeypatch.setattr(outputs, "_token", "")
+    morta.start()
+    alvo = SimpleNamespace(extension="mp4")
+    reserva = outputs.FileOutputStore().reserve(Path("a.mov"), alvo, saida)
+    publicada = outputs.FileOutputStore().reserve(Path("b.mov"), alvo, saida)
+    render = saida / f"{outputs.temp_prefix()}abc.mp4"
+    render.write_bytes(b"meio arquivo")
+    pasta_render = saida / f"{outputs.temp_prefix()}trechos"
+    pasta_render.mkdir()
+    pronto = saida / "pronto.mp4"
+    pronto.write_bytes(b"conteudo")
+    outputs.FileOutputStore().commit(pronto, publicada.path, lease=publicada)
+    alheio = saida / ".videomanager-outra-sessao.mp4"
+    alheio.write_bytes(b"de outra janela aberta")
+    pasta_sessao = morta.path
+    morta._lock.unlock()  # o processo "morreu" sem fechar a sessão
+
+    sessions.Session(raiz).start()
+
+    assert not reserva.path.exists()
+    assert not render.exists() and not pasta_render.exists()
+    assert publicada.path.read_bytes() == b"conteudo"
+    assert alheio.exists()
+    assert not pasta_sessao.exists()
