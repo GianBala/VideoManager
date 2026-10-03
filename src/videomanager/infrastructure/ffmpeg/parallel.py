@@ -291,12 +291,14 @@ class ParallelExport:
                 hardware=self._composition.hardware,
                 quality=self._composition.quality,
              text_assets=self._text_assets)
-        except ConversionError as exc:
+            with filter_script(args, destino.parent) as prepared:
+                self._render_command(index, prepared)
+        except Exception as exc:  # noqa: BLE001 - a thread do trecho não pode morrer calada
+            # Qualquer falha (não só a ``ConversionError`` de montar o comando:
+            # disco cheio ao gravar o script, por exemplo) derruba os irmãos e
+            # leva a causa; sem isto a thread morria em silêncio, os outros
+            # ``minterpolate`` iam até o fim e a tarefa só dizia "trecho ausente".
             self._fail(str(exc))
-            return
-
-        with filter_script(args, destino.parent) as prepared:
-            self._render_command(index, prepared)
 
     def _render_command(self, index: int, args: list[str]) -> None:
         _, span = self._bounds[index]
