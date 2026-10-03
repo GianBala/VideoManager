@@ -41,6 +41,7 @@ class _Trabalho(QRunnable):
 
     def run(self):
         local = self.job.kind.runs_ffmpeg_locally
+        self.registro["iniciados"].append(self.job.job_id)
         with self.registro["trava"]:
             self.registro["ativos"][local] += 1
             self.registro["pico"][local] = max(self.registro["pico"][local], self.registro["ativos"][local])
@@ -55,7 +56,7 @@ class _Trabalho(QRunnable):
 
 @pytest.fixture
 def registro(monkeypatch):
-    dados = {"criados": [], "cancelar": [], "trava": threading.Lock(), "ativos": {True: 0, False: 0}, "pico": {True: 0, False: 0}}
+    dados = {"criados": [], "cancelar": [], "iniciados": [], "trava": threading.Lock(), "ativos": {True: 0, False: 0}, "pico": {True: 0, False: 0}}
     monkeypatch.setattr(fila, "ConvertWorker", lambda job: _Trabalho(dados, job))
     monkeypatch.setattr(fila, "DownloadWorker", lambda job: _Trabalho(dados, job))
     return dados
@@ -149,3 +150,27 @@ def test_repetir_conversao_reserva_um_nome_novo(queue, registro, monkeypatch, wa
     assert job.request.lease.path == job.request.destination
     _liberar_todos(registro)
     wait_until(lambda: job.status is JobStatus.DONE)
+
+
+def test_cancelar_tarefa_que_espera_vaga_vale_na_hora(queue, registro, monkeypatch, wait_until):
+    # Antes, cancelar só marcava o worker: atrás de uma exportação longa na
+    # única vaga local, a tarefa seguia "Pendente" (medido: 2,84 s atrás de
+    # uma de 3 s; numa exportação interpolada, minutos) e a reserva de 0 byte
+    # ficava na pasta do usuário até lá.
+    devolvidas = []
+
+    class Saidas:
+        def abort(self, path, lease=None):
+            devolvidas.append((path, lease))
+
+    monkeypatch.setattr(fila, "FileOutputStore", Saidas)
+    primeira = queue.submit(Job("a.mp4", "a", "", kind=JobKind.EXPORT))
+    wait_until(lambda: registro["ativos"][True] == 1)
+    pedido = ConversionRequest(media=None, target="alvo", destination=Path("/saida/b.mp4"), lease="reserva")
+    segunda = queue.submit(Job("b.mp4", "b", "", kind=JobKind.EXPORT, request=pedido))
+    queue.cancel(segunda.job_id)
+    assert segunda.status is JobStatus.CANCELLED
+    assert devolvidas == [(Path("/saida/b.mp4"), "reserva")]
+    _liberar_todos(registro)
+    wait_until(lambda: primeira.status is JobStatus.DONE)
+    assert segunda.job_id not in registro["iniciados"]
