@@ -264,3 +264,34 @@ def test_atualizacao_do_motor_instala_so_versao_estavel(monkeypatch):
     engine_worker.EngineUpdateWorker("2026.01.01").run()
     assert comandos and "yt-dlp" in comandos[0]
     assert "--pre" not in comandos[0]
+
+
+def test_erro_inesperado_no_worker_deixa_a_pilha_no_log(monkeypatch, caplog):
+    # Antes, o except genérico transformava a exceção em texto para a fila e
+    # nada ia para o log: um defeito de código num .exe sem console não
+    # deixava rastro nenhum para diagnosticar.
+    import logging
+    from videomanager.infrastructure.qt.workers import function_worker
+
+    def quebrar():
+        raise KeyError("chave_que_nao_existe")
+
+    worker = function_worker.FunctionWorker(quebrar)
+    with caplog.at_level(logging.ERROR):
+        worker.run()
+    registro = [r for r in caplog.records if r.exc_info]
+    assert registro and registro[0].exc_info[0] is KeyError
+
+
+def test_falha_esperada_do_dominio_nao_vira_pilha_no_log(caplog):
+    # Projeto inválido, arquivo sem vídeo: é resposta, não defeito.
+    import logging
+    from videomanager.application.errors import ProjectError
+    from videomanager.infrastructure.qt.workers import function_worker
+
+    def recusar():
+        raise ProjectError("projeto inválido")
+
+    with caplog.at_level(logging.ERROR):
+        function_worker.FunctionWorker(recusar).run()
+    assert not [r for r in caplog.records if r.exc_info]

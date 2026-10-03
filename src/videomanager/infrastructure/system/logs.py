@@ -12,6 +12,7 @@ mensagens do próprio aplicativo e do extrator, que já as omitem.
 
 from __future__ import annotations
 
+import faulthandler
 import logging
 import sys
 import threading
@@ -25,6 +26,8 @@ from videomanager import APP_NAME
 _FORMAT = "%(asctime)s %(levelname)s %(name)s [%(threadName)s] %(message)s"
 _MAX_BYTES = 1024 * 1024
 _BACKUPS = 3
+# Aberto até o fim do processo: o faulthandler escreve nele na hora da queda.
+_crash_file = None
 
 
 def log_path() -> Path:
@@ -50,9 +53,24 @@ def configure_file_logging(level: int = logging.INFO) -> Path | None:
         handler._videomanager = True  # type: ignore[attr-defined]
         root.addHandler(handler)
         _install_exception_hooks()
+        _enable_crash_traces(path.with_name("videomanager-crash.log"))
     if root.level == logging.NOTSET or root.level > level:
         root.setLevel(level)
     return path
+
+
+def _enable_crash_traces(path: Path) -> None:
+    """Pilha das threads Python numa queda nativa (SIGSEGV, abort do Qt).
+
+    Uma queda dessas — a do cache de fontes envenenado foi uma — não passa
+    pelo ``excepthook`` e saía sem rastro nenhum.
+    """
+    global _crash_file
+    try:
+        _crash_file = path.open("a", encoding="utf-8")
+        faulthandler.enable(_crash_file)
+    except (OSError, RuntimeError, ValueError):
+        _crash_file = None
 
 
 def _install_exception_hooks() -> None:

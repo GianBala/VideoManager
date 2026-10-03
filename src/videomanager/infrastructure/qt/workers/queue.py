@@ -15,6 +15,7 @@ from videomanager.infrastructure.storage.outputs import FileOutputStore
 from videomanager.infrastructure.qt.workers.convert_worker import ConvertWorker
 from videomanager.infrastructure.qt.workers.download_worker import DownloadWorker
 from videomanager.infrastructure.qt.workers.download_worker import task_dir
+from videomanager.infrastructure.qt.workers.signals import report_unexpected
 
 _LOCAL_JOBS = 1
 
@@ -99,6 +100,7 @@ class JobQueue(QObject):
         try:
             worker = ConvertWorker(job) if job.kind.runs_ffmpeg_locally else DownloadWorker(job)
         except Exception as exc:
+            report_unexpected(exc)
             if isinstance(job.request, ConversionRequest):
                 path = job.request.destination
                 FileOutputStore().abort(path, lease=job.request.lease)
@@ -165,6 +167,7 @@ class JobQueue(QObject):
                 lease = FileOutputStore().reserve(Path(job.url), request.target, request.destination.parent,
                                           custom_stem=request.destination.stem)
             except Exception as exc:
+                report_unexpected(exc)
                 self.service.retry_failed(job_id, error_message(exc))
                 self.job_changed.emit(job)
                 return

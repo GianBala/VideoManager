@@ -28,6 +28,8 @@ som, um computador que não dá conta perde quadros e continua no tempo certo.
 
 from __future__ import annotations
 
+import logging
+
 import itertools
 import math
 from collections.abc import Callable
@@ -2334,7 +2336,9 @@ class EditPanel(QWidget):
                     if ref and ref.path == reference.path:
                         item.setIcon(icon)
         except Exception:
-            pass
+            # Sem miniatura o acervo continua usável; o erro vai para o log, que
+            # é onde um defeito aqui deixava de aparecer.
+            logging.getLogger(__name__).exception("Falha ao montar a miniatura do acervo")
 
     @staticmethod
     def _media_tooltip(reference: MediaRef) -> str:
