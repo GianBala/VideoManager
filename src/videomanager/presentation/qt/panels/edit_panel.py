@@ -3147,7 +3147,7 @@ class EditPanel(QWidget):
             )
             if clip.detached:
                 text = f"{text} · {strings.EDIT_CLIP_DETACHED}"
-            if abs(clip.speed - 1.0) >= 0.01:
+            if clip.changes_speed:
                 text = f"{text} · {clip.speed:.1f}x"
             return text
 
