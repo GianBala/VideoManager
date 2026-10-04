@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import math
-import tempfile
 import os
+import uuid
 from pathlib import Path
 
 from videomanager.application.capabilities import FFmpegTools
@@ -476,12 +476,21 @@ def save_project(project: Project, path: Path) -> None:
         data = project_to_dict(project, base_dir=path.parent)
         text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
         _backup_previous_version(path)
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                         prefix=f".{path.name}-", suffix=".tmp", delete=False) as handle:
-            tmp_path = Path(handle.name)
+        # Temporário criado com 0666 (a máscara do usuário corta o resto), e
+        # não pelo NamedTemporaryFile, que nasce 0600: a troca levava essa
+        # permissão junto, e um projeto numa pasta compartilhada deixava de
+        # ser legível por outros depois de qualquer gravação. Se o arquivo já
+        # existe, a permissão dele é a que vale.
+        tmp_path = path.with_name(f".{path.name}-{uuid.uuid4().hex[:8]}.tmp")
+        descriptor = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
+        try:
+            os.chmod(tmp_path, path.stat().st_mode & 0o7777)
+        except FileNotFoundError:
+            pass
         tmp_path.replace(path)
     except (OSError, ValueError) as exc:
         raise ProjectError(Text("PROJECT_SAVE_FAILED", path=path, error=str(exc))) from exc
