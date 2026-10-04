@@ -32,6 +32,8 @@ os dois caminhos é de minutos.
 
 from __future__ import annotations
 
+import math
+
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -109,7 +111,12 @@ def keyframe_times(
         "-v", "error",
         "-select_streams", "v:0",
         "-show_packets",
-        "-show_entries", "packet=pts_time,flags",
+        # O início do arquivo vem junto: é a referência do ``-ss``. TS, MTS e
+        # M2TS não começam em zero (o mpegts soma 1,4 s, e gravações de câmera
+        # e de TV trazem o relógio do aparelho); com os keyframes no tempo
+        # absoluto, o ponto anunciado não era o real, e com um início grande o
+        # corte rápido saía vazio.
+        "-show_entries", "packet=pts_time,flags:format=start_time",
         "-of", "csv=p=0",
         str(path),
     ]
@@ -134,16 +141,28 @@ def keyframe_times(
     if proc.returncode != 0:
         raise ConversionError(Text("TRIM_KEYFRAMES_UNREADABLE"))
 
+    lines = (stdout or b"").decode("utf-8", "replace").splitlines()
+    start = _start_line(lines[-1]) if lines else 0.0  # a seção do formato vem por último
     times: list[float] = []
-    for line in (stdout or b"").decode("utf-8", "replace").splitlines():
+    for line in lines:
         moment = _keyframe_line(line)
         if moment is None:
             continue
-        times.append(moment)
+        times.append(max(0.0, moment - start))
         if len(times) >= limit:
             break
     times.sort()
     return tuple(times)
+
+
+def _start_line(line: str) -> float:
+    """O ``start_time`` do formato: a única linha de um campo só."""
+    fields = line.strip().split(",")
+    try:
+        value = float(fields[0]) if len(fields) == 1 else 0.0
+    except ValueError:
+        return 0.0  # "N/A"
+    return value if math.isfinite(value) else 0.0
 
 
 def _keyframe_line(line: str) -> float | None:
