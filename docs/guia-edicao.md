@@ -257,7 +257,8 @@ vídeo, sobre o corte):
 - **Filtros** — Preto e Branco, Sépia, Alto Contraste, Vinheta e Inversão. Um
   filtro age sobre tudo que está **abaixo** da trilha dele.
 - **Transições** — Fade, Fade para Preto, Fade para Branco, Dissolve, Wipe e
-  Slide (esquerda/direita), com duração de 0,2 a 5 s (padrão 1 s) e a opção
+  Slide (esquerda/direita), com duração a partir de 0,2 s e até o que cabe nos
+  dois blocos do corte, no campo e na alça (padrão 1 s), e a opção
   **Afetar itens adicionais** descrita acima. O botão **+ Inserir Transição**
   usa o corte escolhido pelo bloco selecionado; sem cortes encostados, a aba
   avisa que é preciso encostar dois clipes de vídeo na mesma trilha.

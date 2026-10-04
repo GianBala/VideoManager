@@ -819,6 +819,47 @@ class Project:
             duration=duration,
         )
 
+    def transition_limit(self, marker: Clip) -> float:
+        """Maior duração da transição: o que cabe nos dois lados do corte.
+
+        Uma regra só para a alça e para o campo de duração. O campo parava em
+        5 s enquanto a alça ia até a duração dos blocos, e os dois discordavam
+        sobre a mesma transição; não há teto fixo, por decisão de produto.
+        """
+        context = self.transition_context(marker)
+        if context is None:
+            return marker.duration
+        return min(context.left.duration, context.right.duration)
+
+    def with_transition(self, track_index: int, left: Clip, right: Clip, name: str, label: str,
+                        duration: float, affects_additionals: bool) -> tuple[Project, int]:
+        """Põe uma transição no corte entre ``left`` e ``right``.
+
+        Como nos editores profissionais, um ponto de edição tem no máximo uma
+        transição: inserir outra naquele corte substitui a que havia. Devolve o
+        projeto e o id do marcador.
+        """
+        duration = min(duration, left.duration, right.duration)
+        existing = next((marker for marker in self.clips if marker.is_transition
+                         and marker.transition_left_id == left.clip_id
+                         and marker.transition_right_id == right.clip_id), None)
+        if existing is not None:
+            return self.with_updated_clip(existing.clip_id, transition_name=name, duration=duration,
+                                          transition_affects_additionals=affects_additionals), existing.clip_id
+        marker = Clip(
+            media=pseudo_media("transition", label, duration),
+            start=max(0.0, left.end - duration / 2.0),
+            duration=duration,
+            overlay_type="transition",
+            transition_name=name,
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+            transition_affects_additionals=affects_additionals,
+        )
+        # Transições pertencem à sequência de vídeo, no próprio corte: não são
+        # adicionais e podem ocupar o intervalo dos dois blocos que conectam.
+        return self.with_clip(track_index, marker), marker.clip_id
+
     def transition_contexts(self) -> tuple[TransitionContext, ...]:
         """Transições válidas, sem permitir duas no mesmo ponto de edição."""
         result: list[TransitionContext] = []
@@ -1150,16 +1191,8 @@ class Project:
                 if edge == "inicio"
                 else 2.0 * (seconds - context.cut)
             )
-            minimum = min(
-                MIN_TRANSITION_DURATION,
-                context.left.duration,
-                context.right.duration,
-            )
-            duration = min(
-                max(minimum, requested),
-                context.left.duration,
-                context.right.duration,
-            )
+            limit = self.transition_limit(clip)
+            duration = min(max(min(MIN_TRANSITION_DURATION, limit), requested), limit)
             return self.with_updated_clip(clip_id, duration=duration)
         floor, ceiling = self.tracks[index].free_range(
             (clip.start + clip.end) / 2, ignore=clip_id
