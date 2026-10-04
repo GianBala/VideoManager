@@ -289,6 +289,8 @@ register({
 
     # --- yt-dlp ---------------------------------------------------------------------
     "MEDIA_UNTITLED": ("Sem título", "Untitled"),
+    # Título de um item de playlist que o site não nomeia; dado, no idioma do momento.
+    "PLAYLIST_ITEM": ("Item {index}", "Item {index}"),
     # O motor se atualiza pelo menu Ferramentas; o texto apontava Configurações,
     # onde não há como fazer isso.
     "PROBE_UNSUPPORTED": (
