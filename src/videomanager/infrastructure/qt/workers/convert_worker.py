@@ -39,6 +39,11 @@ class ConvertWorker(QRunnable):
             max_bytes=job.request.max_bytes,
         )
 
+    @property
+    def log(self) -> tuple[str, ...]:
+        """Saída do ffmpeg numa falha, para a janela de detalhes da tarefa."""
+        return self._converter.log
+
     def cancel(self) -> None:
         self._cancel_requested = True
         self._converter.cancel()

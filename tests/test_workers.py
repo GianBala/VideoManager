@@ -295,3 +295,29 @@ def test_falha_esperada_do_dominio_nao_vira_pilha_no_log(caplog):
     with caplog.at_level(logging.ERROR):
         function_worker.FunctionWorker(recusar).run()
     assert not [r for r in caplog.records if r.exc_info]
+
+
+def test_tarefa_local_que_falha_oferece_os_detalhes_do_ffmpeg(monkeypatch):
+    # A fila só mostra "Ver detalhes técnicos" quando o worker tem ``log``, e
+    # só o worker de download tinha: a falha de conversão não deixava ver nada.
+    from types import SimpleNamespace
+    from videomanager.application.errors import ConversionError
+    from videomanager.infrastructure.qt.workers import convert_worker
+
+    class Conversor:
+        def __init__(self, **kwargs):
+            self.log = ()
+
+        def run(self):
+            self.log = ("[libx264 @ 0x1] width not divisible by 2 (3x3)", "Conversion failed!")
+            raise ConversionError("falhou")
+
+        def discard_reservation(self):
+            pass
+
+    monkeypatch.setattr(convert_worker, "find_tools", lambda: TOOLS)
+    monkeypatch.setattr(convert_worker, "Converter", Conversor)
+    pedido = SimpleNamespace(media=None, target=None, destination=Path("/x.mp4"), text_assets=(), lease=None, max_bytes=None)
+    worker = convert_worker.ConvertWorker(SimpleNamespace(job_id=1, request=pedido))
+    worker.run()
+    assert "width not divisible" in worker.log[0]

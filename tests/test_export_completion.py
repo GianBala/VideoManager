@@ -204,3 +204,38 @@ def test_juntar_audio_ligeiramente_mais_curto_preserva_todos_os_quadros(source, 
     video = json.loads(result.stdout)['streams'][0]
     assert int(video['nb_frames']) == 48
     assert float(video['duration']) == pytest.approx(2, abs=0.01)
+
+
+def test_falha_do_ffmpeg_mostra_a_causa_e_guarda_os_detalhes(source, tmp_path):
+    # Antes a tarefa dizia só "O ffmpeg falhou na conversão: Conversion
+    # failed!", e as 40 linhas do stderr morriam com a exceção: nem a tela
+    # nem o log tinham a causa.
+    from videomanager.application.errors import ConversionError
+    media, tools = source
+    quebrado = tmp_path / "quebrado.mp4"
+    quebrado.write_bytes(b"isto nao e um video" * 100)
+    media = replace(media, path=quebrado)
+    converter = Converter(media, Composition(new_project(media_ref(media))), tmp_path / "out.mp4", tools)
+    with pytest.raises(ConversionError) as erro:
+        converter.run()
+    assert "moov atom not found" in str(erro.value)
+    assert "Conversion failed" not in str(erro.value)
+    assert any("Invalid data" in linha for linha in converter.log)
+
+
+def test_causa_e_a_primeira_linha_que_explica_e_nao_o_resumo_final():
+    # Saída real do ffmpeg 7.1 codificando 3x3 em libx264.
+    from videomanager.infrastructure.ffmpeg.parallel import error_cause
+    cauda = [
+        "[libx264 @ 0x6271df36e840] width not divisible by 2 (3x3)",
+        "[vost#0:0/libx264 @ 0x6271df371b80] Error while opening encoder - maybe incorrect parameters",
+        "[vf#0:0 @ 0x6271df372880] Error sending frames to consumers: Generic error in an external library",
+        "[vf#0:0 @ 0x6271df372880] Task finished with error code: -542398533",
+        "[vost#0:0/libx264 @ 0x6271df371b80] Could not open encoder before EOF",
+        "[out#0/null @ 0x6271df371440] Nothing was written into output file",
+        "Conversion failed!",
+    ]
+    assert error_cause(cauda) == "libx264: width not divisible by 2 (3x3)"
+    filtro = ["[AVFilterGraph @ 0x59dc31161800] No such filter: 'naoexiste'",
+              "Error opening output file -.", "Error opening output files: Filter not found"]
+    assert error_cause(filtro) == "AVFilterGraph: No such filter: 'naoexiste'"
