@@ -1399,7 +1399,9 @@ class EditPanel(QWidget):
         dur_row = QHBoxLayout()
         dur_row.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_EXTRA_DURATION))
         self._trans_dur = QDoubleSpinBox()
-        self._trans_dur.setRange(MIN_TRANSITION_DURATION, 5.0)
+        # Sem teto fixo: o limite é o da alça, o que cabe nos dois lados do
+        # corte (``Project.transition_limit``), aplicado ao mudar o valor.
+        self._trans_dur.setRange(MIN_TRANSITION_DURATION, 3600.0)
         self._trans_dur.setValue(1.0)
         self._trans_dur.setSingleStep(0.1)
         self._trans_dur.setSuffix(" s")
@@ -1468,13 +1470,7 @@ class EditPanel(QWidget):
 
     def _transition_max_duration(self, marker: Clip) -> float:
         """Maior duração que permanece contida nos dois lados do corte."""
-        context = self._project.transition_context(marker)
-        if context is None:
-            return marker.duration
-        return max(
-            MIN_TRANSITION_DURATION,
-            min(5.0, context.left.duration, context.right.duration),
-        )
+        return max(MIN_TRANSITION_DURATION, self._project.transition_limit(marker))
 
     def _handle_apply_or_update_transition(self) -> None:
         clip = self._timeline.selected_clip
@@ -1548,54 +1544,13 @@ class EditPanel(QWidget):
                 strings.EDIT_TRANSITION_NEEDS_CUT,
             )
             return
-        video_index, left, right, cut = edit
-        duration = min(duration, left.duration, right.duration)
-        start = max(0.0, cut - duration / 2.0)
-
-        ref = pseudo_media("transition", label, duration)
-        # Como nos editores profissionais, um ponto de edição tem no máximo
-        # uma transição. Inserir outra naquele corte substitui seus ajustes.
-        existing = next(
-            (
-                marker
-                for marker in self._project.clips
-                if marker.is_transition
-                and marker.transition_left_id == left.clip_id
-                and marker.transition_right_id == right.clip_id
-            ),
-            None,
-        )
-        if existing is not None:
-            self._remember()
-            self._project = self._project.with_updated_clip(
-                existing.clip_id,
-                transition_name=tname,
-                duration=duration,
-                transition_affects_additionals=(
-                    self._trans_affect_additionals.isChecked()
-                ),
-            )
-            self._timeline.select(existing.clip_id)
-            self._after_edit()
-            return
-        clip = Clip(
-            media=ref,
-            start=start,
-            duration=duration,
-            overlay_type="transition",
-            transition_name=tname,
-            transition_left_id=left.clip_id,
-            transition_right_id=right.clip_id,
-            transition_affects_additionals=(
-                self._trans_affect_additionals.isChecked()
-            ),
-        )
-        # Transições pertencem à sequência de vídeo, no próprio corte. Elas
-        # não são overlays de Adicionais: podem ocupar o mesmo intervalo dos
-        # dois clipes que conectam.
+        video_index, left, right, _cut = edit
         self._remember()
-        self._project = self._project.with_clip(video_index, clip)
-        self._timeline.select(clip.clip_id)
+        self._project, marker_id = self._project.with_transition(
+            video_index, left, right, tname, label, duration,
+            self._trans_affect_additionals.isChecked(),
+        )
+        self._timeline.select(marker_id)
         self._after_edit()
 
     def _sync_extras_controls(self, clip: Clip | None) -> None:

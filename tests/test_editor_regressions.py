@@ -11,6 +11,7 @@ from videomanager.application.errors import ProjectError
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
+from videomanager.domain.project import Project
 from videomanager.domain.project import Track
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import next_clip_id
@@ -1213,7 +1214,6 @@ def test_keyframes_do_corte_rapido_vem_do_arquivo_que_sera_cortado(panel, tmp_pa
     o ``-ss`` do corte rápido saía de um mapa de outro arquivo.
     """
     from videomanager.domain.export_policy import reference_clip, simple_trim
-    from videomanager.domain.project import Project
     a, b = tmp_path / 'a.mp4', tmp_path / 'b.mp4'
     for caminho in (a, b):
         caminho.write_bytes(b'x')
@@ -1226,3 +1226,20 @@ def test_keyframes_do_corte_rapido_vem_do_arquivo_que_sera_cortado(panel, tmp_pa
     monkeypatch.setattr(panel, '_keyframes_for', lambda clip: pedidos.append(clip.media.path) or ())
     panel.install_project(projeto, None, [], {})
     assert panel._main_clip().media.path == b
+
+
+def test_campo_de_duracao_mostra_a_transicao_que_a_alca_esticou(panel):
+    # O campo parava em 5 s: uma transição de 12 s, esticada pela alça,
+    # aparecia como 5 s no campo, e qualquer ajuste a encurtava.
+    media = MediaRef(Path('video.mp4'), MediaKind.VIDEO, duration=40)
+    left = Clip(media, 0, 20)
+    right = Clip(media, 20, 20, in_point=20)
+    projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=(left, right)),))
+    projeto, marcador = projeto.with_transition(0, left, right, 'fade', 'Fade', 1.0, False)
+    projeto = projeto.resized(marcador, 'fim', 26.0)
+    panel.install_project(projeto, None, [], {})
+    panel._timeline.select(marcador)
+    panel._sync_extras_controls(projeto.find(marcador)[1])
+    assert panel._trans_dur.value() == pytest.approx(12.0)
+    panel._trans_dur.setValue(30.0)
+    assert panel._project.find(marcador)[1].duration == pytest.approx(20.0)
