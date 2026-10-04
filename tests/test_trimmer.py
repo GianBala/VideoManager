@@ -473,3 +473,38 @@ class TestDespachoDoConversor:
         assert "-map_chapters" not in args
 
 
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("deslocamento", [0.0, 30.0])
+def test_corte_rapido_em_ts_com_inicio_deslocado_corta_onde_anuncia(tmp_path, deslocamento):
+    """TS, MTS e M2TS não começam em zero (o mpegts soma 1,4 s, e gravações de
+    câmera e de TV trazem o relógio do aparelho). Os keyframes saíam no tempo
+    absoluto, e o ``-ss`` do ffmpeg conta a partir do início: o desvio
+    anunciado não era o real, e com 30 s de deslocamento o corte saía vazio."""
+    import subprocess
+    from videomanager.infrastructure.ffmpeg.converter import Converter, probe_file
+    from videomanager.infrastructure.ffmpeg.trimmer import keyframe_times
+    from videomanager.infrastructure.system.binaries import find_tools, subprocess_kwargs
+    tools = find_tools()
+    if tools is None:
+        pytest.skip("ffmpeg/ffprobe indisponíveis")
+    origem = tmp_path / "gravacao.ts"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+                    "testsrc2=s=160x90:r=25:d=12", "-c:v", "libx264", "-g", "50",
+                    "-output_ts_offset", str(deslocamento), str(origem)],
+                   check=True, timeout=30, **subprocess_kwargs())
+    tempos = keyframe_times(origem, tools)
+    # Relativos ao início do arquivo, que é a referência do ``-ss``: o primeiro
+    # fica a um ou dois quadros do zero (o atraso dos quadros B), não em 31,48.
+    assert tempos[0] < 0.2
+    assert [b - a for a, b in zip(tempos, tempos[1:3])] == pytest.approx([2.0, 2.0], abs=0.01)
+    ancora = keyframe_at_or_before(tempos, 5.0)
+    alvo = TrimTarget(segments=(Segment(5.0, 9.0),), container="mp4", mode=CutMode.FAST, anchor=ancora)
+    saida = Converter(probe_file(origem, tools), alvo, tmp_path / "corte.mp4", tools).run()
+    medida = subprocess.run([tools.ffprobe_str, "-v", "error", "-show_entries", "format=duration",
+                             "-of", "csv=p=0", str(saida)], **subprocess_kwargs()).stdout
+    # Dois quadros de folga: o atraso dos quadros B entra na duração medida
+    # também no MP4 que começa em zero. Antes, o erro era de 1,4 s — ou a
+    # saída vazia, com o início em 30 s.
+    assert float(medida) == pytest.approx(9.0 - ancora, abs=0.1)
