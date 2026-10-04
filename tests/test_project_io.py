@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -364,3 +365,25 @@ def test_projeto_com_eixos_explicitos_abre_como_gravado():
         'media': {'path': 'a.mp4', 'kind': 'VIDEO'}}]}]}
     clip = project_from_dict(data)[0].clips[0]
     assert (clip.scale_x, clip.scale_y) == (1.0, 1.0)
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='permissão POSIX')
+def test_salvar_preserva_a_permissao_do_projeto(tmp_path):
+    # O temporário do mkstemp nasce 0600 e a troca levava isso junto: um
+    # projeto numa pasta compartilhada deixava de ser legível por outros
+    # depois de qualquer gravação.
+    path = tmp_path / 'p.vmp'
+    save_project(_sample_project(tmp_path / 'video.mp4'), path)
+    path.chmod(0o664)
+    save_project(_sample_project(tmp_path / 'video.mp4'), path)
+    assert path.stat().st_mode & 0o777 == 0o664
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='permissão POSIX')
+def test_projeto_novo_segue_a_mascara_do_usuario(tmp_path):
+    antiga = os.umask(0o022)
+    try:
+        save_project(_sample_project(tmp_path / 'video.mp4'), tmp_path / 'novo.vmp')
+    finally:
+        os.umask(antiga)
+    assert (tmp_path / 'novo.vmp').stat().st_mode & 0o777 == 0o644
