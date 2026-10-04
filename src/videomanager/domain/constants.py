@@ -13,3 +13,6 @@ IMAGE_CODECS = frozenset({"mjpeg", "png", "bmp", "gif", "webp"})
 # chega ao grafo do ffmpeg, e um .vmp com ':' ou ',' nela encadeava filtros
 # arbitrários — escrita de arquivo inclusive — só de abrir a edição.
 CHROMA_COLOR = re.compile(r"(#|0x)?[0-9A-Fa-f]{6}")
+# Ganho abaixo disto é zero: o controle anda de 0,1 dB, e um resto de float
+# não pode virar um filtro "volume" no grafo nem tirar a edição do corte rápido.
+GAIN_EPSILON = 0.05

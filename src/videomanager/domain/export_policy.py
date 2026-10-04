@@ -56,13 +56,13 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     first = clips[0].media
     if any(clip.media.path != first.path for clip in clips):
         return None
-    if any(clip.muted or abs(clip.gain_db) >= 0.05 for clip in clips):
+    if any(clip.muted or clip.changes_gain for clip in clips):
         return None
     # Um bloco de "separar áudio" é só o som do arquivo, e copiar os dados
     # levaria a imagem junto: o que se pediu na tela deixaria de ser o que sai.
     if any(clip.audio_only or clip.detached for clip in clips):
         return None
-    if any(clip.speed != 1.0 or clip.opacity != 1.0 or clip.keyframes for clip in clips):
+    if any(clip.changes_speed or clip.opacity != 1.0 or clip.keyframes for clip in clips):
         return None
     if first.kind is MediaKind.IMAGE:
         return None

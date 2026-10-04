@@ -41,6 +41,7 @@ from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
 from videomanager.domain.constants import CHROMA_COLOR
+from videomanager.domain.constants import GAIN_EPSILON
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import fit_size
@@ -395,7 +396,9 @@ def _atempo_filters(speed: float) -> list[str]:
     while s < 0.5:
         filters.append("atempo=0.5")
         s /= 0.5
-    if abs(s - 1.0) > 0.005:
+    # O mesmo critério de ``Clip.changes_speed``: com 0,005 aqui, 1,005 cortava
+    # o trecho certo da mídia e o tocava na velocidade normal.
+    if abs(s - 1.0) > 1e-9:
         filters.append(f"atempo={s:.4f}")
     return filters
 
@@ -682,7 +685,7 @@ def _video_chain(
     if piece.still:
         _seek, margin = _still_seek(piece)
         steps.append(f"select='gte(t,{-margin:.6f})'")
-    if abs(clip.speed - 1.0) > 1e-9:
+    if clip.changes_speed:
         steps.append(f"trim=duration={piece.duration * clip.speed:.6f}")
         inv = 1.0 / clip.speed
         if piece.offset > 0:
@@ -922,12 +925,12 @@ def _audio_chain(
     o fade acontecerem vários segundos depois do corte.
     """
     clip = piece.clip
-    if abs(clip.speed - 1.0) >= 0.01:
+    if clip.changes_speed:
         steps = [f"atrim=duration={piece.duration * clip.speed:.6f}", "asetpts=PTS-STARTPTS"]
         steps += _atempo_filters(clip.speed)
     else:
         steps = [f"atrim=duration={piece.duration:.6f}", "asetpts=PTS-STARTPTS"]
-    if abs(clip.gain_db) >= 0.05:
+    if clip.changes_gain:
         steps.append(f"volume={clip.gain_db:.2f}dB")
     steps.append(_AUDIO_BASE)
     steps.append(
@@ -1194,7 +1197,7 @@ def _transition_audio_chain(side: _TransitionSide, label: str) -> str:
         "asetpts=PTS-STARTPTS",
         *_atempo_filters(side.playback_speed),
     ]
-    if abs(clip.gain_db) >= 0.05:
+    if clip.changes_gain:
         steps.append(f"volume={clip.gain_db:.2f}dB")
     steps.extend(
         (
@@ -1581,7 +1584,7 @@ def build_graph(
             continuous_source_cut
             and context.left.has_sound
             and context.right.has_sound
-            and abs(context.left.gain_db - context.right.gain_db) < 0.05
+            and abs(context.left.gain_db - context.right.gain_db) < GAIN_EPSILON
         )
         has_audio_transition = bool(
             has_audio_at_cut
