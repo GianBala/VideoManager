@@ -254,6 +254,8 @@ _IGUAIS = {
     "EDIT_CANVAS_FPS", "PROP_CLIP_ID", "EDIT_SLIDESHOW", "LANGUAGE_NAMES",
     # "Tags" e "Codec" são as mesmas palavras nas duas línguas.
     "META_OPEN_TIP", "META_TAGS_GROUP", "META_TRACK_HEADERS",
+    # "M" de mudo e de mute.
+    "EDIT_TRACK_MUTED_BADGE",
 }
 
 

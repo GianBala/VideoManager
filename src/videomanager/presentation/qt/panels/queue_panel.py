@@ -142,9 +142,10 @@ class QueueModel(QAbstractTableModel):
         if progress.speed:
             pieces.append(format_speed(progress.speed))
         if progress.eta:
-            pieces.append(f"faltam {format_eta(progress.eta)}")
+            pieces.append(strings.QUEUE_ETA.format(eta=format_eta(progress.eta)))
         if not pieces and progress.fragment_count:
-            pieces.append(f"parte {progress.fragment_index or 0}/{progress.fragment_count}")
+            pieces.append(strings.QUEUE_FRAGMENT.format(index=progress.fragment_index or 0,
+                                                        count=progress.fragment_count))
         return " · ".join(pieces) or DASH
 
     def job_at(self, row: int) -> Job | None:

@@ -166,7 +166,7 @@ def _as_playlist(info: dict[str, Any], url: str) -> PlaylistInfo:
         entries.append(
             PlaylistEntry(
                 url=str(entry_url),
-                title=str(entry.get("title") or f"Item {index}"),
+                title=str(entry.get("title") or t("PLAYLIST_ITEM", index=index)),
                 index=index,
                 media_id=str(entry.get("id") or ""),
                 duration=float(duration) if isinstance(duration, (int, float)) else None,
