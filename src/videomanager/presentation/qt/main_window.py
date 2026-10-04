@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager import APP_TITLE
-from videomanager import __version__
+from videomanager import ISSUES_URL, RELEASES_URL, __version__
 from videomanager.application import encoding as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.jobs.requests import DownloadRequest
@@ -503,7 +503,8 @@ class MainWindow(QMainWindow):
         self._update_engine_action.triggered.connect(self._update_engine)
         if self._runtime.is_packaged():
             self._update_engine_action.setEnabled(False)
-            bind(self._update_engine_action, "setToolTip", lambda: strings.DIALOG_ENGINE_PACKAGED)
+            bind(self._update_engine_action, "setToolTip",
+                 lambda: strings.DIALOG_ENGINE_PACKAGED.format(url=RELEASES_URL))
 
         # Ações da aba Converter
         self._convert_add_action = bind(QAction(self), "setText", lambda: strings.ACTION_CONVERT_ADD)
@@ -889,7 +890,7 @@ class MainWindow(QMainWindow):
             # num pacote, o comando abriria uma segunda janela do aplicativo em
             # vez de instalar coisa alguma.
             QMessageBox.information(
-                self, strings.DIALOG_ENGINE_TITLE, strings.DIALOG_ENGINE_PACKAGED
+                self, strings.DIALOG_ENGINE_TITLE, strings.DIALOG_ENGINE_PACKAGED.format(url=RELEASES_URL)
             )
             return
         current = self._runtime.engine_version
@@ -939,7 +940,8 @@ class MainWindow(QMainWindow):
             self,
             strings.ABOUT_TITLE,
             strings.ABOUT_BODY.format(
-                version=__version__, ytdlp=self._runtime.engine_version
+                version=__version__, ytdlp=self._runtime.engine_version,
+                releases=RELEASES_URL, issues=ISSUES_URL,
             ),
         )
 
