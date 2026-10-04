@@ -48,8 +48,10 @@ def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
     }
     if base_dir is not None and not is_pseudo and media.path.is_absolute():
         try:
-            rel = os.path.relpath(media.path, base_dir)
-            data["rel_path"] = rel
+            # Com "/", e não o separador do sistema: o Windows lê "/", mas o
+            # Linux toma "\\" como parte do nome, e um projeto salvo no
+            # Windows não achava as mídias no Linux.
+            data["rel_path"] = Path(os.path.relpath(media.path, base_dir)).as_posix()
         except ValueError:
             # Em sistemas como Windows com unidades diferentes (C: e D:),
             # relpath pode falhar.
@@ -69,13 +71,13 @@ def _dict_to_media(data: dict[str, object], base_dir: Path | None) -> tuple[Medi
         # Tenta pelo caminho relativo se disponível
         rel_path = data.get("rel_path")
         if rel_path and base_dir is not None:
-            candidate = (base_dir / str(rel_path)).resolve()
+            candidate = (base_dir / str(rel_path).replace("\\", "/")).resolve()
             if candidate.exists():
                 resolved_path = candidate
 
         # Tenta buscar diretamente pelo nome do arquivo na mesma pasta do projeto
         if not resolved_path.exists() and base_dir is not None:
-            candidate = (base_dir / raw_path.name).resolve()
+            candidate = (base_dir / str(raw_path).replace("\\", "/").rsplit("/", 1)[-1]).resolve()
             if candidate.exists():
                 resolved_path = candidate
 
