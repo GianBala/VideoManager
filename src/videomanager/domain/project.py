@@ -385,6 +385,18 @@ class Clip:
             return ""
         return f"{decimal(self.speed)}x"
 
+    def duration_at_speed(self, speed: float) -> float:
+        """Duração que toca, a ``speed``, o mesmo trecho da mídia.
+
+        O piso de ``MIN_SEGMENT`` só vale onde a mídia tem o que mostrar: num
+        bloco de um quadro, ele esticava a leitura além do fim do arquivo.
+        """
+        target = self.duration * self.speed / max(0.1, speed)
+        if self.is_image or self.is_additional:
+            return max(MIN_SEGMENT, target)
+        available = available_duration(self.media.duration or 0.0, self.in_point, max(0.1, speed))
+        return max(min(MIN_SEGMENT, available), target)
+
     @property
     def has_keyframes(self) -> bool:
         """Indica se este bloco possui animação definida por quadros-chave."""
@@ -1206,7 +1218,13 @@ class Project:
                 if not (clip.is_image or clip.is_additional)
                 else floor
             )
-            value = min(max(max(floor, limit), seconds), clip.end - MIN_SEGMENT)
+            # Teto pelo mínimo de duração, mas nunca depois do começo atual: num
+            # bloco já mais curto que o mínimo (mídia de um quadro), ``end -
+            # MIN_SEGMENT`` fica antes do começo, e a alça sobrepunha o vizinho
+            # e lia antes do primeiro quadro da mídia.
+            lower = max(floor, limit)
+            upper = max(clip.end - MIN_SEGMENT, clip.start)
+            value = min(max(lower, seconds), max(upper, lower))
             return self.with_updated_clip(
                 clip_id,
                 start=value,

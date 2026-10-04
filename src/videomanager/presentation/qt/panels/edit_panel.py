@@ -3020,9 +3020,7 @@ class EditPanel(QWidget):
             if c.start >= clip.start and c.start < ceiling:
                 ceiling = c.start
 
-        source_span = clip.duration * clip.speed
-        target_duration = source_span / max(0.1, value)
-        new_duration = max(MIN_SEGMENT, target_duration)
+        new_duration = clip.duration_at_speed(value)
         if clip.start + new_duration > ceiling + 1e-9:
             # Um arrasto contínuo no spinbox dispara valueChanged a cada passo:
             # sem essa marca, cada passo rejeitado reabria o aviso modal, e
