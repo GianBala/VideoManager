@@ -159,6 +159,11 @@ QUEUE_COPY_ERROR = "Copiar mensagem de erro"
 QUEUE_SHOW_LOG = "Ver detalhes técnicos"
 QUEUE_CLEAR_FINISHED = "Limpar encerrados"
 QUEUE_CANCEL_ALL = "Cancelar todos"
+QUEUE_CANCEL_ALL_TITLE = "Cancelar todas?"
+QUEUE_CANCEL_ALL_BODY = (
+    "Há {count} tarefa(s) em andamento ou na espera. Cancelar interrompe todas e "
+    "descarta os arquivos parciais."
+)
 QUEUE_LOG_TITLE = "Detalhes técnicos — {title}"
 QUEUE_LOG_CLOSE = "Fechar"
 

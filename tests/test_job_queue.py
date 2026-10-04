@@ -174,3 +174,23 @@ def test_cancelar_tarefa_que_espera_vaga_vale_na_hora(queue, registro, monkeypat
     _liberar_todos(registro)
     wait_until(lambda: primeira.status is JobStatus.DONE)
     assert segunda.job_id not in registro["iniciados"]
+
+
+def test_cancelar_todos_pergunta_antes_quando_ha_tarefa_ativa(queue, registro, desktop_app, monkeypatch, wait_until):
+    # O botão fica ao lado de "Limpar encerrados": um clique errado
+    # interrompia tudo, inclusive uma exportação longa.
+    from PySide6.QtWidgets import QMessageBox
+    from videomanager.presentation.qt.panels import queue_panel
+    painel = queue_panel.QueuePanel(queue, runtime=None)
+    perguntas = []
+    monkeypatch.setattr(queue_panel.QMessageBox, "question",
+                        lambda *a, **k: perguntas.append(a[2]) or QMessageBox.StandardButton.Cancel)
+    job = queue.submit(Job("a.mp4", "a", "", kind=JobKind.EXPORT))
+    wait_until(lambda: registro["ativos"][True] == 1)
+    painel._cancel_all.click()
+    assert perguntas and "1" in perguntas[0]
+    assert job.status is not JobStatus.CANCELLED
+    monkeypatch.setattr(queue_panel.QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    painel._cancel_all.click()
+    wait_until(lambda: job.status is JobStatus.CANCELLED)
+    painel.deleteLater()
