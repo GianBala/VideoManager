@@ -408,3 +408,39 @@ def test_caminho_relativo_e_gravado_com_barra(tmp_path):
     video.write_bytes(b'x')
     data = project_to_dict(_sample_project(video), base_dir=tmp_path)
     assert data['tracks'][0]['clips'][0]['media']['rel_path'] == 'media/video.mp4'
+
+
+# As chaves que a versão 3 do .vmp grava. Uma versão anterior que abre um
+# arquivo com chave nova a perde em silêncio ao salvar (a leitura ignora o
+# que não conhece), e keyframes e opacity já entraram assim, sem subir a
+# versão. Mudou este conjunto? Suba PROJECT_VERSION: a versão anterior passa
+# a recusar o arquivo com mensagem, em vez de apagar o que não entende.
+_CHAVES_V3 = {
+    'projeto': {'version', 'width', 'height', 'fps', 'text_reference_width', 'text_reference_height', 'tracks'},
+    'trilha': {'track_id', 'name', 'kind', 'muted', 'visible', 'clips'},
+    'bloco': {'clip_id', 'start', 'duration', 'in_point', 'gain_db', 'muted', 'detached', 'audio_only', 'speed',
+              'x', 'y', 'scale', 'scale_x', 'scale_y', 'rotation', 'overlay_type', 'text_content',
+              'font_family', 'font_size', 'font_bold', 'font_italic', 'text_color', 'stroke_color',
+              'stroke_width', 'filter_name', 'transition_name', 'transition_left_id', 'transition_right_id',
+              'transition_affects_additionals', 'chromakey_enabled', 'chromakey_color',
+              'chromakey_similarity', 'chromakey_blend', 'opacity', 'keyframes', 'media'},
+    'midia': {'path', 'rel_path', 'kind', 'duration', 'width', 'height', 'fps', 'has_audio', 'channels'},
+    'quadro_chave': {'time_offset', 'x', 'y', 'scale_x', 'scale_y', 'rotation', 'opacity', 'easing'},
+}
+
+
+def test_campo_novo_no_projeto_exige_subir_a_versao(tmp_path):
+    from videomanager.domain.keyframe import Keyframe
+    from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+    video = tmp_path / 'video.mp4'
+    video.write_bytes(b'x')
+    projeto = _sample_project(video)
+    clip = projeto.clips[0]
+    projeto = projeto.with_updated_clip(clip.clip_id, keyframes=(Keyframe(0.0, x=0.2),))
+    data = project_to_dict(projeto, base_dir=tmp_path)
+    trilha = data['tracks'][0]
+    bloco = trilha['clips'][0]
+    gravado = {'projeto': set(data), 'trilha': set(trilha), 'bloco': set(bloco),
+               'midia': set(bloco['media']), 'quadro_chave': set(bloco['keyframes'][0])}
+    assert PROJECT_VERSION == 3, 'versão nova: atualize _CHAVES_V3 para o conjunto dela'
+    assert gravado == _CHAVES_V3

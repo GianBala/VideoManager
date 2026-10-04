@@ -30,6 +30,12 @@ from videomanager.domain.project import reserve_project_ids
 
 # 3: imagens vivem na trilha de vídeo e se ajustam à tela. Ao abrir 1 ou 2, as
 # imagens das trilhas de Adicionais migram com a escala convertida.
+#
+# Todo campo novo no arquivo sobe esta versão. A leitura ignora chaves que não
+# conhece, então uma versão anterior que abrisse um arquivo com campo novo o
+# perderia em silêncio ao salvar — keyframes e opacity entraram assim. Com a
+# versão nova, a anterior recusa o arquivo com mensagem. O teste
+# ``test_campo_novo_no_projeto_exige_subir_a_versao`` trava as chaves da 3.
 PROJECT_VERSION = 3
 
 
