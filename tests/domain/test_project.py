@@ -954,3 +954,38 @@ def test_escala_global_proporcional_respeita_limites_da_curva_inteira():
     item = clip(duration=4, keyframes=(Keyframe(0), Keyframe(3, scale_x=10, scale_y=5)))
     changed = item.with_edited_transform(0, {'scale_x': 2, 'scale_y': 2}, fps=30, whole_animation=True)
     assert changed.keyframes == item.keyframes
+
+
+class TestBlocoMaisCurtoQueOMinimo:
+    """Mídia de um quadro (ou bloco curto acelerado) tem menos que ``MIN_SEGMENT``.
+
+    A alça inicial usava ``clip.end - MIN_SEGMENT`` como teto, que nesse caso
+    fica antes do começo do bloco: puxar a alça sobrepunha o vizinho e lia
+    antes do primeiro quadro da mídia (``in_point`` negativo). Mudar a
+    velocidade punha o piso de ``MIN_SEGMENT`` na duração e lia além do fim.
+    """
+
+    QUADRO = 1 / 29.97
+
+    def projeto(self):
+        base = Clip(MediaRef(Path("a.mp4"), MediaKind.VIDEO, duration=5), 0.0, 5.0)
+        curto = Clip(MediaRef(Path("quadro.mp4"), MediaKind.VIDEO, duration=self.QUADRO), 5.0, self.QUADRO)
+        return Project(tracks=(Track(TrackKind.VIDEO, clips=(base, curto)),)), curto
+
+    def test_alca_inicial_nao_sobrepoe_o_vizinho_nem_le_antes_da_midia(self):
+        projeto, curto = self.projeto()
+        mexido = projeto.resized(curto.clip_id, "inicio", 4.0).find(curto.clip_id)[1]
+        assert mexido.start >= 5.0 - 1e-9
+        assert mexido.in_point >= 0.0
+        assert mexido.duration > 0
+
+    def test_velocidade_nao_estica_alem_do_que_a_midia_tem(self):
+        _projeto, curto = self.projeto()
+        duracao = curto.duration_at_speed(1.0)
+        assert duracao * 1.0 <= self.QUADRO + 1e-9
+        assert curto.duration_at_speed(0.5) == pytest.approx(2 * self.QUADRO)
+
+    def test_bloco_normal_continua_com_o_piso_de_sempre(self):
+        clip = Clip(MediaRef(Path("a.mp4"), MediaKind.VIDEO, duration=10), 0.0, 0.08)
+        from videomanager.domain.constants import MIN_SEGMENT
+        assert clip.duration_at_speed(4.0) == pytest.approx(MIN_SEGMENT)
