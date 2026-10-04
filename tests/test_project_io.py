@@ -355,3 +355,12 @@ def test_cor_do_chroma_key_hexadecimal_continua_valida(cor):
         'media': {'path': 'video.mp4', 'kind': 'VIDEO'}}]}]}
     loaded, _ = project_from_dict(data)
     assert loaded.clips[0].chromakey_color == cor
+
+
+def test_projeto_com_eixos_explicitos_abre_como_gravado():
+    # Com scale=2 e os eixos em 1, o __post_init__ reaplicava o 2.
+    data = {'version': 3, 'tracks': [{'kind': 'VIDEO', 'clips': [{
+        'duration': 5, 'scale': 2.0, 'scale_x': 1.0, 'scale_y': 1.0,
+        'media': {'path': 'a.mp4', 'kind': 'VIDEO'}}]}]}
+    clip = project_from_dict(data)[0].clips[0]
+    assert (clip.scale_x, clip.scale_y) == (1.0, 1.0)
