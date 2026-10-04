@@ -25,6 +25,7 @@ import subprocess
 import threading
 import tempfile
 from collections import deque
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
@@ -45,6 +46,7 @@ from videomanager.domain.composition import Composition
 from videomanager.infrastructure.ffmpeg.composer import export_args
 from videomanager.infrastructure.ffmpeg.parallel import ParallelExport
 from videomanager.infrastructure.ffmpeg.parallel import plan_segments
+from videomanager.infrastructure.ffmpeg.parallel import error_cause
 from videomanager.infrastructure.ffmpeg.thumbnail import embed_thumbnail
 from videomanager.domain.timing import TrimTarget
 from videomanager.infrastructure.ffmpeg.trimmer import build_trim_args
@@ -487,6 +489,7 @@ _PHASES = {
     Composition: "PHASE_EXPORTING",
 }
 
+_LOG = logging.getLogger(__name__)
 _PROGRESS_LINE = re.compile(r"^(\w+)=(.*)$")
 _TIMESTAMP = re.compile(r"^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$")
 
@@ -519,6 +522,8 @@ class Converter:
     ) -> None:
         self._text_assets = text_assets
         self._max_bytes = max_bytes
+        # Cauda do stderr da última falha do ffmpeg, para a fila mostrar.
+        self.log: tuple[str, ...] = ()
         self._media = media
         self._target = target
         self._destination = destination
@@ -707,8 +712,11 @@ class Converter:
 
         self._postprocess.check()
         if process.returncode != 0:
-            detail = _last_error_line(stderr)
-            raise ConversionError(Text("CONVERT_FAILED", detail=detail))
+            # A cauda inteira vai para "Ver detalhes técnicos" da fila e para o
+            # log; na mensagem, só a linha que explica.
+            self.log = tuple(stderr_tail)
+            _LOG.warning("ffmpeg terminou com %s:\n%s", process.returncode, stderr)
+            raise ConversionError(Text("CONVERT_FAILED", detail=error_cause(stderr_tail, "ERROR_NO_DETAIL")))
         if not render_target.is_file() or render_target.stat().st_size == 0:
             raise ConversionError(Text("CONVERT_NO_OUTPUT"))
 
@@ -729,9 +737,3 @@ class Converter:
             pass
 
         return self._destination
-
-
-def _last_error_line(stderr: str) -> str | Text:
-    """Última linha significativa do stderr — onde o ffmpeg diz a causa."""
-    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
-    return lines[-1] if lines else Text("ERROR_NO_DETAIL")
