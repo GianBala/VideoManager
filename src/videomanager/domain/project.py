@@ -161,6 +161,22 @@ def display_width(width: int | None, sar: float | None) -> int | None:
     return max(2, round(width * sar / 2) * 2)
 
 
+# Prefixo do caminho dos blocos sem arquivo (texto, filtro, transição). É
+# identificador gravado no .vmp — por ele a leitura sabe que não há arquivo a
+# procurar —, então não se traduz nem muda: projetos salvos dependem dele.
+# Morava como literal na tela que cria o bloco e repetido na persistência.
+PSEUDO_PREFIXES = {"text": "Texto_", "filter": "Filtro_", "transition": "Transição_"}
+
+
+def pseudo_media(overlay: str, label: str, duration: float) -> MediaRef:
+    """A "mídia" de um bloco sem arquivo: caminho-identificador e duração."""
+    return MediaRef(path=Path(f"{PSEUDO_PREFIXES[overlay]}{label}"), kind=MediaKind.IMAGE, duration=duration)
+
+
+def is_pseudo_path(path: Path | str) -> bool:
+    return str(path).startswith(tuple(PSEUDO_PREFIXES.values()))
+
+
 def media_ref(local: LocalMedia) -> MediaRef:
     """Constrói a referência a partir de um arquivo já inspecionado.
 

@@ -19,6 +19,7 @@ from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip
+from videomanager.domain.project import is_pseudo_path
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
 from videomanager.domain.project import Project
@@ -34,7 +35,7 @@ PROJECT_VERSION = 3
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
     path_str = str(media.path)
-    is_pseudo = path_str.startswith(("Texto_", "Filtro_", "Transição_"))
+    is_pseudo = is_pseudo_path(path_str)
     data: dict[str, object] = {
         "path": path_str if is_pseudo else str(media.path.resolve() if media.path.is_absolute() else media.path),
         "kind": media.kind.name,
@@ -60,7 +61,7 @@ def _dict_to_media(data: dict[str, object], base_dir: Path | None) -> tuple[Medi
     raw_path = Path(str(data["path"]))
     resolved_path = raw_path
     missing: Path | None = None
-    is_pseudo = str(raw_path).startswith(("Texto_", "Filtro_", "Transição_"))
+    is_pseudo = is_pseudo_path(raw_path)
     if not is_pseudo and not raw_path.is_absolute() and base_dir is not None:
         resolved_path = (base_dir / raw_path).resolve()
 
