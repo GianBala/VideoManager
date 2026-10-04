@@ -1,10 +1,42 @@
 """Elegibilidade de corte direto e interpolação, sem comandos do backend."""
+from collections.abc import Callable
+
 from videomanager.domain.project import Project
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.timing import Segment
 from videomanager.domain.timing import CutMode
 from videomanager.domain.timing import TrimTarget
+
+_SEM_ARQUIVO = ("text", "filter", "transition")
+
+
+def reference_clip(project: Project, usable: Callable[[Clip], bool] = lambda clip: True) -> Clip | None:
+    """O bloco que dá nome, pasta e formato à saída — e cujo arquivo o corte
+    rápido copia, e cujos keyframes ancoram o corte.
+
+    Regra única para painel, janela de exportação e serviço. Eram três versões,
+    e a do painel ignorava a visibilidade: com a trilha de baixo oculta, os
+    keyframes vinham de um arquivo e o corte rápido cortava outro.
+
+    Ordem: o primeiro vídeo da trilha de vídeo visível mais baixa (a de base;
+    pegar o primeiro bloco de qualquer trilha faria a montagem herdar o nome de
+    uma foto sobreposta); depois foto; depois mídia de qualquer trilha visível;
+    por último qualquer bloco visível, para ainda haver nome. ``usable`` deixa
+    de fora, nas três primeiras, o que o chamador não pode usar (arquivo que
+    não existe mais).
+    """
+    visible = [track for track in project.tracks if track.visible]
+    media = [clip for track in visible for clip in track.sorted_clips()
+             if clip.overlay_type not in _SEM_ARQUIVO and usable(clip)]
+    base = [clip for track in reversed(project.video_tracks) if track.visible
+            for clip in track.sorted_clips() if clip in media]
+    for pool in ([c for c in base if not c.is_image], [c for c in base if c.is_image], media,
+                 [clip for track in visible for clip in track.sorted_clips()]):
+        if pool:
+            return pool[0]
+    return None
+
 
 def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     """Se o projeto é só um recorte de um arquivo, devolve os trechos dele.

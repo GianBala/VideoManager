@@ -1203,3 +1203,26 @@ def test_mapa_de_keyframes_que_falhou_e_lido_de_novo(monkeypatch, wait_until):
         assert lidos == ["um.mp4", "dois.mp4", "um.mp4"]
     finally:
         painel.shutdown()
+
+
+def test_keyframes_do_corte_rapido_vem_do_arquivo_que_sera_cortado(panel, tmp_path, monkeypatch):
+    """O bloco de referência da exportação era escolhido de três jeitos.
+
+    O do painel ignorava a visibilidade: com a trilha de baixo oculta, ele
+    pedia os keyframes de ``a.mp4`` enquanto a exportação cortava ``b.mp4``, e
+    o ``-ss`` do corte rápido saía de um mapa de outro arquivo.
+    """
+    from videomanager.domain.export_policy import reference_clip, simple_trim
+    from videomanager.domain.project import Project
+    a, b = tmp_path / 'a.mp4', tmp_path / 'b.mp4'
+    for caminho in (a, b):
+        caminho.write_bytes(b'x')
+    oculta = Track(TrackKind.VIDEO, clips=(Clip(MediaRef(a, MediaKind.VIDEO, duration=30), 0, 30),), visible=False)
+    visivel = Track(TrackKind.VIDEO, clips=(Clip(MediaRef(b, MediaKind.VIDEO, duration=30), 0, 5, in_point=7),))
+    projeto = Project(tracks=(visivel, oculta))
+    assert simple_trim(projeto)
+    assert reference_clip(projeto).media.path == b
+    pedidos = []
+    monkeypatch.setattr(panel, '_keyframes_for', lambda clip: pedidos.append(clip.media.path) or ())
+    panel.install_project(projeto, None, [], {})
+    assert panel._main_clip().media.path == b
