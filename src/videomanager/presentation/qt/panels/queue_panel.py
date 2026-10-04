@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QMenu,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QStyle,
@@ -299,12 +300,28 @@ class QueuePanel(QGroupBox):
         actions = QHBoxLayout()
         actions.addStretch(1)
         self._cancel_all = bind(QPushButton(), "setText", lambda: strings.QUEUE_CANCEL_ALL)
-        self._cancel_all.clicked.connect(queue.cancel_all)
+        self._cancel_all.clicked.connect(self._confirm_cancel_all)
         actions.addWidget(self._cancel_all)
         self._clear = bind(QPushButton(), "setText", lambda: strings.QUEUE_CLEAR_FINISHED)
         self._clear.clicked.connect(self._clear_finished)
         actions.addWidget(self._clear)
         layout.addLayout(actions)
+
+    def _confirm_cancel_all(self) -> None:
+        """Confirma antes de cancelar: o botão fica ao lado de "Limpar encerrados".
+
+        Um clique errado interrompia todas as tarefas de uma vez — inclusive uma
+        exportação interpolada longa, que "Repetir" recomeça do zero.
+        """
+        unfinished = sum(1 for job in self._queue.jobs if not job.status.is_final)
+        if not unfinished:
+            return
+        answer = QMessageBox.question(
+            self, strings.QUEUE_CANCEL_ALL_TITLE, strings.QUEUE_CANCEL_ALL_BODY.format(count=unfinished),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._queue.cancel_all()
 
     def _fit_min_height(self) -> None:
         # Piso de quatro linhas inteiras, medido nas métricas reais do cabeçalho
