@@ -105,7 +105,7 @@ def _clip_name(clip: Clip) -> str:
     return clip.media.name if clip.media else strings.PROP_KINDS.get(clip.overlay_type, clip.overlay_type)
 
 
-def _index_of(box: QComboBox, value: object) -> int:
+def index_of(box: QComboBox, value: object) -> int:
     """Posição do item que guarda este dado, ou -1.
 
     Não é o ``findData`` do Qt: ele compara os dados como ``QVariant``, e dois

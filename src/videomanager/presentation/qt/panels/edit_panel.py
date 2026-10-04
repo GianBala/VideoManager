@@ -121,7 +121,8 @@ from videomanager.presentation.qt import icons
 from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.i18n import bind, on_language_change, release, retext_items, switching
 from videomanager.presentation.qt.editor_project import EditorProject
-from videomanager.presentation.qt.export_dialog import CANVAS_PRESETS, ExportDialog, canvas_options
+from videomanager.presentation.qt.export_dialog import ExportDialog, canvas_options
+from videomanager.application.editor.canvas import aspect_of, canvas_for_aspect, output_canvas
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
 from videomanager.presentation.qt.theme import palette
 from videomanager.presentation.qt.panels.timeline import AUDIO_TRACK_HEIGHT
@@ -131,7 +132,7 @@ from videomanager.presentation.qt.panels.timeline import Timeline
 from videomanager.presentation.qt.panels.timeline import image_from_frame
 from videomanager.presentation.qt.panels.timeline import pixmap_from_frame
 
-from videomanager.presentation.qt.panels.edit_widgets import _index_of as _index_of
+from videomanager.presentation.qt.panels.edit_widgets import index_of
 from videomanager.presentation.qt.panels.edit_widgets import _clip_name, _filter_label, _transition_label
 from videomanager.presentation.qt.panels.edit_widgets import _VolumePopup as _VolumePopup
 from videomanager.presentation.qt.panels.edit_widgets import _SpeedPopup as _SpeedPopup
@@ -3205,9 +3206,7 @@ class EditPanel(QWidget):
         As duas metades são independentes: dá para fixar o tamanho e deixar a
         taxa seguir o material, ou o contrário.
         """
-        material = auto_canvas(self._project)
-        width, height = self._canvas_choice or (material.width, material.height)
-        fps = self._rate_choice or material.fps
+        width, height, fps = output_canvas(self._project, self._canvas_choice, self._rate_choice)
         if (self._project.width, self._project.height, self._project.fps) == (
             width, height, fps
         ):
@@ -3239,29 +3238,14 @@ class EditPanel(QWidget):
         if self._syncing or index < 0:
             return
         self._aspect_choice = self._aspect_box.itemData(index)
-        if self._aspect_choice is None:
-            self._canvas_choice = None
-        else:
-            cur_aspect = (
-                format_aspect_ratio(*self._canvas_choice)
-                if self._canvas_choice
-                else None
-            )
-            if cur_aspect != self._aspect_choice:
-                for w, h in CANVAS_PRESETS:
-                    if format_aspect_ratio(w, h) == self._aspect_choice:
-                        self._canvas_choice = (w, h)
-                        break
+        self._canvas_choice = canvas_for_aspect(self._aspect_choice, self._canvas_choice)
         self._after_edit()
 
     def _on_canvas_choice(self, index: int) -> None:
         if self._syncing or index < 0:
             return
         self._canvas_choice = self._canvas_box.itemData(index)
-        if self._canvas_choice is not None:
-            self._aspect_choice = format_aspect_ratio(*self._canvas_choice)
-        else:
-            self._aspect_choice = None
+        self._aspect_choice = aspect_of(self._canvas_choice)
         self._after_edit()
 
     def _refresh_canvas_controls(self) -> None:
@@ -3279,7 +3263,7 @@ class EditPanel(QWidget):
                 self._aspect_box.clear()
                 for label, data in aspect_opts:
                     self._aspect_box.addItem(label, data)
-            idx_a = _index_of(self._aspect_box, self._aspect_choice)
+            idx_a = index_of(self._aspect_box, self._aspect_choice)
             self._aspect_box.setCurrentIndex(max(0, idx_a))
 
             box = self._canvas_box
@@ -3292,7 +3276,7 @@ class EditPanel(QWidget):
                     box.addItem(label, data)
             # A escolha em vigor sempre está na lista (ver canvas_options):
             # todo caminho que muda a tela ajusta a proporção junto.
-            box.setCurrentIndex(max(0, _index_of(box, self._canvas_choice)))
+            box.setCurrentIndex(max(0, index_of(box, self._canvas_choice)))
         finally:
             self._syncing = False
 
