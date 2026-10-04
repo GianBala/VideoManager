@@ -989,3 +989,23 @@ class TestBlocoMaisCurtoQueOMinimo:
         clip = Clip(MediaRef(Path("a.mp4"), MediaKind.VIDEO, duration=10), 0.0, 0.08)
         from videomanager.domain.constants import MIN_SEGMENT
         assert clip.duration_at_speed(4.0) == pytest.approx(MIN_SEGMENT)
+
+
+class TestEscalaPorEixo:
+    """``scale`` antigo não pode passar por cima de ``scale_x``/``scale_y`` explícitos.
+
+    O ``__post_init__`` copiava ``scale`` para os eixos sempre que os dois
+    valiam 1: ``replace(clip, scale_x=1, scale_y=1)`` num bloco com escala 2
+    voltava a 2, e um .vmp com ``scale=2, scale_x=1, scale_y=1`` abria com 2.
+    """
+
+    MEDIA = MediaRef(Path("a.mp4"), MediaKind.VIDEO, duration=5)
+
+    def test_voltar_os_eixos_a_um_vale(self):
+        dobrado = Clip(self.MEDIA, 0.0, 5.0, scale=2.0, scale_x=2.0, scale_y=2.0)
+        volta = replace(dobrado, scale_x=1.0, scale_y=1.0)
+        assert (volta.scale_x, volta.scale_y) == (1.0, 1.0)
+
+    def test_so_a_escala_unica_ainda_vale_para_os_dois_eixos(self):
+        clip = Clip(self.MEDIA, 0.0, 5.0, scale=1.5)
+        assert (clip.scale_x, clip.scale_y) == (1.5, 1.5)

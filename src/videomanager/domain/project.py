@@ -250,8 +250,12 @@ class Clip:
     x: float = 0.5  # Centro X normalizado (0.0 a 1.0)
     y: float = 0.5  # Centro Y normalizado (0.0 a 1.0)
     scale: float = 1.0  # Fator de escala uniforme (1.0 = padrão)
-    scale_x: float = 1.0  # Escala horizontal (1.0 = padrão)
-    scale_y: float = 1.0  # Escala vertical (1.0 = padrão)
+    # Escala por eixo. Omitida, vale ``scale`` — a forma antiga, de um fator só.
+    # O padrão é ``None``, e não 1,0, porque só assim dá para distinguir "não
+    # informado" de "informado como 1": com 1,0, ``replace(clip, scale_x=1,
+    # scale_y=1)`` num bloco com escala 2 voltava a 2.
+    scale_x: float = None  # type: ignore[assignment]
+    scale_y: float = None  # type: ignore[assignment]
     rotation: float = 0.0  # Rotação em graus (0.0 a 360.0)
     # Metadados de sobreposições de adicionais
     overlay_type: str = "none"  # "none", "image", "text", "filter"
@@ -288,8 +292,9 @@ class Clip:
 
     def __post_init__(self) -> None:
         _clip_ids.reserve(self.clip_id)
-        if self.scale != 1.0 and self.scale_x == 1.0 and self.scale_y == 1.0:
+        if self.scale_x is None:
             object.__setattr__(self, "scale_x", self.scale)
+        if self.scale_y is None:
             object.__setattr__(self, "scale_y", self.scale)
         object.__setattr__(self, "opacity", max(0.0, min(1.0, float(self.opacity))))
         if self.keyframes and not isinstance(self.keyframes, tuple):
