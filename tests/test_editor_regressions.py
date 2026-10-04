@@ -1243,3 +1243,24 @@ def test_campo_de_duracao_mostra_a_transicao_que_a_alca_esticou(panel):
     assert panel._trans_dur.value() == pytest.approx(12.0)
     panel._trans_dur.setValue(30.0)
     assert panel._project.find(marcador)[1].duration == pytest.approx(20.0)
+
+
+def test_digitar_no_campo_de_tamanho_da_fonte_e_um_passo_de_desfazer(panel):
+    # valueChanged vem a cada tecla válida: digitar "100" passava por 10 e
+    # virava dois passos, e o Ctrl+Z voltava primeiro para um tamanho 10 que
+    # ninguém pediu.
+    from PySide6.QtTest import QTest
+    from videomanager.domain.project import pseudo_media
+    texto = Clip(pseudo_media('text', 'Olá', 5.0), 0.0, 5.0, overlay_type='text', text_content='Olá', font_size=48)
+    projeto = Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(texto,)),))
+    panel.install_project(projeto, None, [], {})
+    panel._timeline.select(texto.clip_id)
+    panel._sync_extras_controls(texto)
+    campo = panel._font_size_spin
+    antes = len(panel._session.history)
+    campo.lineEdit().selectAll()
+    QTest.keyClicks(campo.lineEdit(), '100')
+    assert campo.value() == 100
+    assert len(panel._session.history) == antes + 1
+    panel._undo_edit()
+    assert panel._project.find(texto.clip_id)[1].font_size == 48
