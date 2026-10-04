@@ -687,6 +687,15 @@ class EditPanel(QWidget):
         self._properties_session_timer.setSingleShot(True)
         self._properties_session_timer.setInterval(400)
         self._properties_session_timer.timeout.connect(self._end_properties_session)
+        # Campo numérico da coluna de adicionais (tamanho da fonte, duração do
+        # filtro e da transição): o valueChanged vem a cada tecla, e digitar
+        # "10" virava dois passos de desfazer. Uma sessão por campo e bloco
+        # junta o que vem a menos de 400 ms.
+        self._field_session: tuple[str, int] | None = None
+        self._field_timer = QTimer(self)
+        self._field_timer.setSingleShot(True)
+        self._field_timer.setInterval(400)
+        self._field_timer.timeout.connect(self._end_field_session)
 
         self._pose_settle_timer = QTimer(self)
         self._pose_settle_timer.setSingleShot(True)
@@ -1227,7 +1236,7 @@ class EditPanel(QWidget):
     def _on_filter_dur_changed(self, dur: float) -> None:
         clip = self._timeline.selected_clip
         if not self._syncing and clip is not None and clip.overlay_type == "filter":
-            self._remember()
+            self._remember_field("filter-duration", clip.clip_id)
             self._apply(self._filter_resized(clip, dur))
 
     def _filter_resized(self, clip: Clip, duration: float) -> Project:
@@ -1279,7 +1288,7 @@ class EditPanel(QWidget):
         color = self._text_color
         stroke_color = self._stroke_color
         stroke_width = self._stroke_spin.value() if self._stroke_checkbox.isChecked() else 0
-        self._remember()
+        self._remember_field("text-style", clip.clip_id)
         self._apply(
             self._project.with_updated_clip(
                 clip.clip_id,
@@ -1455,7 +1464,7 @@ class EditPanel(QWidget):
                 self._trans_dur.blockSignals(True)
                 self._trans_dur.setValue(dur)
                 self._trans_dur.blockSignals(False)
-            self._remember()
+            self._remember_field("transition-duration", clip.clip_id)
             self._apply(self._project.with_updated_clip(clip.clip_id, duration=dur))
 
     def _on_transition_affect_additionals_changed(self, checked: bool) -> None:
@@ -2591,6 +2600,17 @@ class EditPanel(QWidget):
             sizes[2] = max(200, sizes[2] - diff)
             self._top_splitter.setSizes(sizes)
 
+    def _remember_field(self, field: str, clip_id: int) -> None:
+        """Um passo de desfazer por digitação num campo, e não um por tecla."""
+        if self._field_session != (field, clip_id):
+            self._remember()
+            self._field_session = (field, clip_id)
+        self._field_timer.start()
+
+    def _end_field_session(self) -> None:
+        self._field_session = None
+        self._field_timer.stop()
+
     def _end_properties_session(self) -> None:
         self._properties_session = -1
         self._properties_session_timer.stop()
@@ -2616,6 +2636,7 @@ class EditPanel(QWidget):
         self._session.commit_edit()
 
     def _end_edit_groups(self) -> None:
+        self._end_field_session()
         self._end_typing_session()
         self._end_properties_session()
         self._end_gain_session()
