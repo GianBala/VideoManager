@@ -84,7 +84,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from videomanager.application.media.preview import PreviewFrameInbox, PreviewResultKey, playback_clock
+from videomanager.application.media.preview import FrameContext, PreviewFrameInbox, PreviewResultKey, accept_frame, playback_clock
 from videomanager.application.media.interaction import interaction_plan
 from videomanager.application.media.scrub import ScrubFrameCache
 from videomanager.domain.export_policy import reference_clip
@@ -3540,55 +3540,28 @@ class EditPanel(QWidget):
             return
         if (self._overlay_drag_session >= 0 or self._pose_live) and self._preview._interaction_visible:
             return
-        current = True
-        gesture = False
-        # O fluxo do começo do loop sai no instante exato do fim, e a troca de
-        # dono só acontece no tique seguinte (até 40 ms depois). Os quadros dele
-        # entram já, senão o primeiro do começo se perdia e o último do fim
-        # ficava parado na tela.
-        loop_frame = self._playing and self._loop_token != 0 and token == self._loop_token
-        if (token == self._play_token and self._playing) or loop_frame:
-            if not loop_frame and self._loop_video_live:
-                return
-            current = getattr(self, "_playback_project", self._project) is self._project
-        else:
-            key = self._frame_key
-            if key is None:
-                if token != self._frame_token:
-                    return
-            else:
-                if (self._playing or key.token != token or key.generation != self._generation
-                        or key.size != self._preview_size()):
-                    return
-                gesture = (self._session.editing or self._overlay_drag_session >= 0
-                           or self._properties_session >= 0 or self._typing_session >= 0)
-                if key.revision != self._frame_revision and not gesture:
-                    return
-                if key.revision != self._frame_revision and self._preview._interaction_visible:
-                    # As camadas já mostram a pose nova; um quadro composto
-                    # antes dela voltaria o objeto até o definitivo chegar.
-                    return
-                if self._cache_shown_for is not None and key.seconds != self._wanted:
-                    # A tela já mostra o quadro guardado de um instante mais
-                    # novo: o exato de um ponto anterior do arrasto voltaria no
-                    # tempo.
-                    return
-                # Arrastar a agulha pede um quadro por evento, e o instante
-                # pedido já mudou quando o anterior fica pronto. Exigir
-                # ``key.seconds == self._wanted`` descartava **todos** esses
-                # quadros: a imagem só voltava quando a mão parava. O quadro
-                # entra com o próprio instante e ``current`` continua falso,
-                # então o cursor pedido e o que está na tela seguem distintos.
-                current = (token == self._frame_token
-                           and key.revision == self._frame_revision
-                           and key.seconds == self._wanted)
-                # Durante um gesto, apresentar snapshots completos em ordem
-                # evita esperar a mão parar. A indicação de atualização só
-                # desaparece quando chega a revisão final, nunca num seek antigo.
-                if (self._presented_key is not None and self._presented_key.generation == key.generation
-                        and self._presented_key.revision > key.revision):
-                    return
-                self._presented_key = key
+        verdict = accept_frame(token, FrameContext(
+            playing=self._playing,
+            play_token=self._play_token,
+            loop_token=self._loop_token,
+            loop_video_live=self._loop_video_live,
+            playback_current=getattr(self, "_playback_project", self._project) is self._project,
+            frame_key=self._frame_key,
+            frame_token=self._frame_token,
+            frame_revision=self._frame_revision,
+            generation=self._generation,
+            preview_size=self._preview_size(),
+            gesture=(self._session.editing or self._overlay_drag_session >= 0
+                     or self._properties_session >= 0 or self._typing_session >= 0),
+            interaction_visible=self._preview._interaction_visible,
+            cache_shown_for=self._cache_shown_for,
+            wanted=self._wanted,
+            presented=self._presented_key,
+        ))
+        if not verdict.show:
+            return
+        self._presented_key = verdict.presented
+        current, gesture, loop_frame = verdict.current, verdict.gesture, verdict.loop_frame
         if current:
             self._end_loading_hint()
         elif gesture:
