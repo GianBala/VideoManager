@@ -31,6 +31,7 @@ from videomanager.application.capabilities import FFmpegTools
 from videomanager.domain.export_policy import can_interpolate
 from videomanager.application.media.export_description import describe_export
 from videomanager.domain.render_cost import interpolation_bytes
+from videomanager.domain.export_policy import reference_clip
 from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.media import LocalMedia
 from videomanager.application import encoding as hwaccel
@@ -695,25 +696,7 @@ class ExportDialog(QDialog):
         )
 
     def _main_clip(self, proj: Project) -> Clip | None:
-        # Primeiro um vídeo da trilha mais baixa; foto só na falta de vídeo.
-        for skip_images in (True, False):
-            for track in reversed(proj.video_tracks):
-                if track.visible and track.clips:
-                    for clip in track.sorted_clips():
-                        if skip_images and clip.is_image:
-                            continue
-                        if clip.overlay_type not in ("text", "filter", "transition") and clip.media and clip.media.path.is_file():
-                            return clip
-        for t in proj.tracks:
-            if t.visible:
-                for c in t.clips:
-                    if c.overlay_type not in ("text", "filter", "transition") and c.media and c.media.path.is_file():
-                        return c
-        clips = [c for t in proj.tracks if t.visible for c in t.clips if c.overlay_type not in ("text", "filter", "transition")]
-        if clips:
-            return clips[0]
-        all_visible = [c for t in proj.tracks if t.visible for c in t.clips]
-        return all_visible[0] if all_visible else None
+        return reference_clip(proj, lambda clip: clip.media.path.is_file())
 
     def _container(self, proj: Project) -> str:
         video = self._main_clip(proj)

@@ -87,6 +87,7 @@ from PySide6.QtWidgets import (
 from videomanager.application.media.preview import PreviewFrameInbox, PreviewResultKey, playback_clock
 from videomanager.application.media.interaction import interaction_plan
 from videomanager.application.media.scrub import ScrubFrameCache
+from videomanager.domain.export_policy import reference_clip
 from videomanager.domain.scrub import render_signature, signature_at, signature_segments
 from videomanager.domain.project import slideshow_canvas
 from videomanager.application.capabilities import FFmpegTools
@@ -4789,23 +4790,8 @@ class EditPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _main_clip(self) -> Clip | None:
-        """O bloco que dá nome e formato à saída.
-
-        É o primeiro da trilha de vídeo **mais baixa** — a principal, onde fica
-        o material de base. Pegar o primeiro bloco de qualquer trilha faria uma
-        montagem inteira herdar o nome de uma foto sobreposta.
-        """
-        for track in reversed(self._project.video_tracks):
-            # Foto não dá formato à saída: numa trilha que começa com uma
-            # imagem, o nome e o container vêm do primeiro vídeo.
-            videos = [c for c in track.sorted_clips() if not c.is_image and not c.is_transition]
-            if videos:
-                return videos[0]
-        for track in reversed(self._project.video_tracks):
-            if track.clips:
-                return track.sorted_clips()[0]
-        clips = self._project.clips
-        return clips[0] if clips else None
+        """O bloco que dá nome e formato à saída (ver ``reference_clip``)."""
+        return reference_clip(self._project, lambda clip: clip.media.path.is_file())
 
     # ------------------------------------------------------------------
     # Sincronização geral
