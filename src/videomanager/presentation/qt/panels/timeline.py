@@ -652,7 +652,7 @@ class Timeline(QWidget):
             font_m.setBold(True)
             painter.setFont(font_m)
             painter.drawText(
-                box, int(Qt.AlignmentFlag.AlignCenter), "M"
+                box, int(Qt.AlignmentFlag.AlignCenter), strings.EDIT_TRACK_MUTED_BADGE
             )
 
     def _paint_eye_icon(self, painter: QPainter, box: QRectF, visible: bool) -> None:
