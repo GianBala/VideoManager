@@ -318,6 +318,21 @@ class TestReservaDoDestino:
         assert destino.is_file()
         assert destino.stat().st_size == 0
 
+    @pytest.mark.parametrize("nome", ["Parte 1: final", "a?b", "a*b", 'a"b', "a<b", "a>b", "a|b",
+                                      "CON", "nul", "com1", "LPT9", "fim.", "a\x01b"])
+    def test_nome_digitado_invalido_no_windows_e_recusado(self, tmp_path: Path, nome: str) -> None:
+        # O nome vale em qualquer sistema porque o arquivo vai para pendrive e
+        # rede. No NTFS, "Parte 1: final" virava "Parte 1" com um fluxo
+        # alternativo, e CON ou NUL apontam para dispositivos.
+        with pytest.raises(ConversionError):
+            output_path(tmp_path / "a.mp4", AudioTarget(codec="mp3"), tmp_path, custom_stem=nome)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_nome_derivado_da_origem_nao_e_recusado(self, tmp_path: Path) -> None:
+        # Um arquivo do Linux pode ter ":" no nome; convertê-lo não é recusado.
+        destino = output_path(tmp_path / "aula 1: intro.mp4", AudioTarget(codec="mp3"), tmp_path)
+        assert destino.name == "aula 1: intro.mp3"
+
     def test_pasta_de_destino_e_criada(self, tmp_path: Path) -> None:
         destino = output_path(
             tmp_path / "a.mp4", AudioTarget(codec="mp3"), tmp_path / "nova" / "pasta"
