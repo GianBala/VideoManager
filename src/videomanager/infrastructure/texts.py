@@ -299,6 +299,14 @@ register({
         "No extractor recognizes this URL. Check the address; if the site is new, updating the "
         "download engine from the Tools menu may help.",
     ),
+    # No pacote o motor vem congelado e o item do menu fica desligado: quem
+    # recebe a mensagem acima procura um menu cinza e não sabe onde ir.
+    "PROBE_UNSUPPORTED_PACKAGED": (
+        "Nenhum extrator reconhece esta URL. Confira o endereço; se o site for novo ou tiver "
+        "mudado, uma versão mais nova do Video Manager pode resolver: {url}",
+        "No extractor recognizes this URL. Check the address; if the site is new or has "
+        "changed, a newer version of Video Manager may help: {url}",
+    ),
     "PROBE_DRM": (
         "Esta mídia é protegida por DRM e não pode ser baixada.",
         "This media is DRM-protected and can't be downloaded.",

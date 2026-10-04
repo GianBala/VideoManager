@@ -22,7 +22,8 @@ ABOUT_BODY = (
     "Uses <b>yt-dlp</b> {ytdlp} for extraction and <b>ffmpeg</b> for processing.<br><br>"
     "Free software under the GPL-3.0 or later. Licenses of third-party "
     "components (ffmpeg, Qt, Deno and others) in THIRD_PARTY_NOTICES, in the "
-    "package and on GitHub (GianBala/Video_Manager).<br><br>"
+    "package.<br><br>"
+    '<a href="{releases}">New versions</a> · <a href="{issues}">Report a problem</a><br><br>'
     "Respecting each platform's terms of use and copyright is the user's "
     "responsibility."
 )
@@ -787,8 +788,8 @@ DIALOG_ENGINE_UPTODATE = "yt-dlp is already at the latest version ({version})."
 DIALOG_ENGINE_FAILED = "Update failed:\n\n{error}"
 DIALOG_ENGINE_PACKAGED = (
     "This is a packaged build: yt-dlp comes bundled and is updated together with "
-    "the application. Download the latest version of Video Manager to get the "
-    "new extractors."
+    "the application. Download the latest version of Video Manager, at {url}, "
+    "to get the new extractors."
 )
 
 # Leitura assíncrona da edição

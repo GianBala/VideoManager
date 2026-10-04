@@ -13,8 +13,8 @@ ABOUT_BODY = (
     "Baixa vídeo e áudio de centenas de plataformas e converte arquivos locais.<br><br>"
     "Usa <b>yt-dlp</b> {ytdlp} para extração e <b>ffmpeg</b> para processamento.<br><br>"
     "Software livre sob a GPL-3.0 ou posterior. Licenças dos componentes de "
-    "terceiros (ffmpeg, Qt, Deno e outros) em THIRD_PARTY_NOTICES, no pacote e "
-    "no GitHub (GianBala/Video_Manager).<br><br>"
+    "terceiros (ffmpeg, Qt, Deno e outros) em THIRD_PARTY_NOTICES, no pacote.<br><br>"
+    '<a href="{releases}">Versões novas</a> · <a href="{issues}">Relatar um problema</a><br><br>'
     "Respeitar os termos de uso e os direitos autorais de cada plataforma é "
     "responsabilidade de quem usa."
 )
@@ -800,8 +800,8 @@ DIALOG_ENGINE_FAILED = "Falha ao atualizar:\n\n{error}"
 # infrastructure/qt/workers/engine_worker.py.
 DIALOG_ENGINE_PACKAGED = (
     "Esta é uma versão empacotada: o yt-dlp vem embutido e é atualizado junto "
-    "com o aplicativo. Baixe a versão mais recente do Video Manager para "
-    "receber os extratores novos."
+    "com o aplicativo. Baixe a versão mais recente do Video Manager, em "
+    "{url}, para receber os extratores novos."
 )
 
 # Leitura assíncrona da edição
