@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
+from videomanager.domain.constants import GAIN_EPSILON
 from videomanager.domain.keyframe import ClipTransform
 from videomanager.domain.geometry import image_base_size, natural_image_size
 from videomanager.domain.i18n import decimal, t, variants
@@ -375,7 +376,7 @@ class Clip:
             return t("CLIP_DETACHED")
         if self.muted:
             return t("CLIP_MUTED")
-        if abs(self.gain_db) < 0.05:
+        if not self.changes_gain:
             return ""
         return f"{decimal(self.gain_db, sign=True)} dB"
 
@@ -384,6 +385,20 @@ class Clip:
         if abs(self.speed - 1.0) < 0.05:
             return ""
         return f"{decimal(self.speed)}x"
+
+    @property
+    def changes_speed(self) -> bool:
+        """Se o bloco toca noutra velocidade — a mesma resposta para imagem e som.
+
+        O vídeo aplicava velocidade a partir de 1e-9 de diferença e o áudio só a
+        partir de 0,01: 1,005 (só possível editando o .vmp, o campo anda de 0,1)
+        esticava a imagem e não o som, 0,5% de dessincronia.
+        """
+        return abs(self.speed - 1.0) > 1e-9
+
+    @property
+    def changes_gain(self) -> bool:
+        return abs(self.gain_db) >= GAIN_EPSILON
 
     def duration_at_speed(self, speed: float) -> float:
         """Duração que toca, a ``speed``, o mesmo trecho da mídia.
