@@ -387,3 +387,24 @@ def test_projeto_novo_segue_a_mascara_do_usuario(tmp_path):
     finally:
         os.umask(antiga)
     assert (tmp_path / 'novo.vmp').stat().st_mode & 0o777 == 0o644
+
+
+def test_projeto_salvo_no_windows_acha_as_midias_no_linux(tmp_path):
+    # O rel_path saía com o separador do sistema: "media\\clipe.mp4" gravado
+    # no Windows não era achado no Linux, que lê "\\" como parte do nome.
+    from videomanager.infrastructure.storage.project_json import project_from_dict
+    (tmp_path / 'media').mkdir()
+    (tmp_path / 'media' / 'clipe ação.mp4').write_bytes(b'x')
+    data = {'version': 3, 'tracks': [{'kind': 'VIDEO', 'clips': [{'duration': 2, 'media': {
+        'path': 'C:\\Users\\x\\Videos\\clipe ação.mp4', 'rel_path': 'media\\clipe ação.mp4', 'kind': 'VIDEO'}}]}]}
+    projeto, ausentes = project_from_dict(data, base_dir=tmp_path)
+    assert not ausentes
+    assert projeto.clips[0].media.path == (tmp_path / 'media' / 'clipe ação.mp4').resolve()
+
+
+def test_caminho_relativo_e_gravado_com_barra(tmp_path):
+    (tmp_path / 'media').mkdir()
+    video = tmp_path / 'media' / 'video.mp4'
+    video.write_bytes(b'x')
+    data = project_to_dict(_sample_project(video), base_dir=tmp_path)
+    assert data['tracks'][0]['clips'][0]['media']['rel_path'] == 'media/video.mp4'
