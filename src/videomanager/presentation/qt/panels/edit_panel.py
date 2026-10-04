@@ -88,6 +88,7 @@ from videomanager.application.media.preview import PreviewFrameInbox, PreviewRes
 from videomanager.application.media.interaction import interaction_plan
 from videomanager.application.media.scrub import ScrubFrameCache
 from videomanager.domain.export_policy import reference_clip
+from videomanager.domain.project import pseudo_media
 from videomanager.domain.scrub import render_signature, signature_at, signature_segments
 from videomanager.domain.project import slideshow_canvas
 from videomanager.application.capabilities import FFmpegTools
@@ -1335,11 +1336,7 @@ class EditPanel(QWidget):
         stroke_color = self._stroke_color
         stroke_width = self._stroke_spin.value() if self._stroke_checkbox.isChecked() else 0
 
-        ref = MediaRef(
-            path=Path(f"Texto_{text[:15]}"),
-            kind=MediaKind.IMAGE,
-            duration=IMAGE_DURATION,
-        )
+        ref = pseudo_media("text", text[:15], IMAGE_DURATION)
         clip = Clip(
             media=ref,
             start=max(0.0, self._position),
@@ -1365,11 +1362,7 @@ class EditPanel(QWidget):
         label = _filter_label(fname) or fname
         duration = self._filter_dur.value()
 
-        ref = MediaRef(
-            path=Path(f"Filtro_{label}"),
-            kind=MediaKind.IMAGE,
-            duration=duration,
-        )
+        ref = pseudo_media("filter", label, duration)
         clip = Clip(
             media=ref,
             start=max(0.0, self._position),
@@ -1559,11 +1552,7 @@ class EditPanel(QWidget):
         duration = min(duration, left.duration, right.duration)
         start = max(0.0, cut - duration / 2.0)
 
-        ref = MediaRef(
-            path=Path(f"Transição_{label}"),
-            kind=MediaKind.IMAGE,
-            duration=duration,
-        )
+        ref = pseudo_media("transition", label, duration)
         # Como nos editores profissionais, um ponto de edição tem no máximo
         # uma transição. Inserir outra naquele corte substitui seus ajustes.
         existing = next(
