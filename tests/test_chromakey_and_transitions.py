@@ -822,3 +822,32 @@ def test_fullscreen_preview_resize_signal(qapp: QApplication) -> None:
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
 pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+def _par_com_corte(duracao: float = 20.0):
+    media = MediaRef(Path("video.mp4"), MediaKind.VIDEO, duration=2 * duracao)
+    left = Clip(media, start=0.0, duration=duracao)
+    right = Clip(media, start=duracao, duration=duracao, in_point=duracao)
+    return Project(tracks=(Track(TrackKind.VIDEO, clips=(left, right)),)), left, right
+
+
+def test_uma_transicao_por_corte_e_inserir_de_novo_substitui():
+    projeto, left, right = _par_com_corte()
+    projeto, primeira = projeto.with_transition(0, left, right, "fade", "Fade", 1.0, False)
+    projeto, segunda = projeto.with_transition(0, left, right, "wipeleft", "Wipe", 2.0, True)
+    marcadores = [c for c in projeto.clips if c.is_transition]
+    assert primeira == segunda and len(marcadores) == 1
+    assert (marcadores[0].transition_name, marcadores[0].duration) == ("wipeleft", 2.0)
+    assert marcadores[0].start == pytest.approx(19.0)
+
+
+def test_sem_teto_fixo_a_transicao_vai_ate_o_que_cabe_nos_dois_lados():
+    # O campo parava em 5 s e a alça ia até 12: os dois discordavam sobre a
+    # mesma transição. Sem teto fixo (decisão do usuário), vale o que cabe.
+    projeto, left, right = _par_com_corte(20.0)
+    projeto, marcador = projeto.with_transition(0, left, right, "fade", "Fade", 30.0, False)
+    clip = projeto.find(marcador)[1]
+    assert clip.duration == pytest.approx(20.0)
+    assert projeto.transition_limit(clip) == pytest.approx(20.0)
+    puxada = projeto.resized(marcador, "fim", 20.0 + 6.0)
+    assert puxada.find(marcador)[1].duration == pytest.approx(12.0)
