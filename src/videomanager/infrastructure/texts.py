@@ -220,8 +220,10 @@ register({
 
     # --- arquivos de saída e de projeto --------------------------------------------
     "OUTPUT_BAD_NAME": (
-        "Use somente um nome de arquivo, sem caminhos ou separadores.",
-        "Use just a file name, without paths or separators.",
+        "Use somente um nome de arquivo: sem caminhos, sem os caracteres \\ / : * ? \" < > |, "
+        "sem terminar em ponto ou espaço e sem nomes reservados do Windows (CON, NUL, COM1…).",
+        "Use just a file name: no paths, none of the characters \\ / : * ? \" < > |, "
+        "not ending in a dot or space, and no names reserved by Windows (CON, NUL, COM1…).",
     ),
     # Nome do arquivo, e por isso dado: sai no idioma do momento em que é criado.
     "OUTPUT_CONVERTED_SUFFIX": (" (convertido)", " (converted)"),
