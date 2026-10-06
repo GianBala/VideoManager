@@ -3508,8 +3508,7 @@ class EditPanel(QWidget):
             text_assets=partial(self.editor.text_assets, proj),
         )
         worker.signals.frame.connect(self._on_frame)
-        if hasattr(worker.signals, "failed"):
-            worker.signals.failed.connect(self._on_preview_failed)
+        worker.signals.failed.connect(self._on_preview_failed)
         worker.signals.done.connect(
             lambda key=key: self._on_frame_done(key.revision, key.token)
         )
@@ -4261,8 +4260,7 @@ class EditPanel(QWidget):
         )
         worker.signals.frame.connect(self._on_frame)
         worker.signals.primed.connect(self._on_playback_primed)
-        if hasattr(worker.signals, "failed"):
-            worker.signals.failed.connect(self._on_preview_failed)
+        worker.signals.failed.connect(self._on_preview_failed)
         worker.signals.done.connect(
             lambda token=token: self._on_playback_worker_done(token)
         )
@@ -4338,8 +4336,7 @@ class EditPanel(QWidget):
         )
         worker.signals.frame.connect(self._on_frame)
         worker.signals.primed.connect(self._on_playback_primed)
-        if hasattr(worker.signals, "failed"):
-            worker.signals.failed.connect(self._on_preview_failed)
+        worker.signals.failed.connect(self._on_preview_failed)
         worker.signals.done.connect(
             lambda token=self._play_token: self._on_playback_worker_done(token)
         )
@@ -4395,8 +4392,7 @@ class EditPanel(QWidget):
                 fps=preview_fps(self._fps), text_assets=text_assets, autostart=False,
             )
             worker.signals.frame.connect(self._on_frame)
-            if hasattr(worker.signals, "failed"):
-                worker.signals.failed.connect(self._on_preview_failed)
+            worker.signals.failed.connect(self._on_preview_failed)
             worker.signals.done.connect(lambda token=token: self._on_loop_worker_done(token))
             self._loop_worker, self._loop_token = worker, token
             self._runner.start(worker, worker.signals.done)

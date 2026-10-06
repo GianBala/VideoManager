@@ -7,6 +7,15 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2] / 'src' / 'videomanager'
 
+# O que domínio e aplicação podem importar da biblioteca padrão. Lista do
+# permitido, e não do proibido: com a proibida, os, ctypes, multiprocessing,
+# asyncio e importlib passavam. Módulo novo aqui é decisão de arquitetura,
+# tomada ao mexer nesta lista.
+_STDLIB_INTERNO = {
+    '__future__', 'bisect', 'collections', 'dataclasses', 'enum', 'itertools',
+    'math', 'pathlib', 're', 'threading', 'time', 'typing',
+}
+
 
 def test_camadas_internas_nao_conhecem_adaptadores():
     violations = []
@@ -22,12 +31,14 @@ def test_camadas_internas_nao_conhecem_adaptadores():
                 elif isinstance(node, ast.ImportFrom):
                     base = importlib.util.resolve_name('.' * node.level + (node.module or ''), package) if node.level else node.module or ''
                     names = [base] + [base + '.' + a.name for a in node.names]
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '__import__':
+                    violations.append(f'{path.relative_to(ROOT)}:{node.lineno} -> __import__')
                 for name in names:
                     parts = name.split('.')
                     if parts[0] == 'videomanager':
                         valid = len(parts) == 1 or parts[1] in allowed
                     else:
-                        valid = parts[0] in sys.stdlib_module_names and parts[0] not in {'subprocess', 'socket', 'urllib', 'http'}
+                        valid = parts[0] in _STDLIB_INTERNO
                     if not valid:
                         violations.append(f'{path.relative_to(ROOT)}:{node.lineno} -> {name}')
     assert not violations, '\n'.join(violations)
@@ -65,7 +76,12 @@ def test_fronteiras_externas_e_ausencia_de_ciclos():
                 base = importlib.util.resolve_name('.' * node.level + (node.module or ''), package) if node.level else node.module or ''
                 targets = [base] + [base + '.' + a.name for a in node.names]
             for target in targets:
-                if layer == 'presentation' and target.startswith(('videomanager.infrastructure', 'videomanager.bootstrap', 'yt_dlp', 'subprocess', 'platformdirs')):
+                # app e preflight montam a aplicação e rodam antes do Qt: a tela que os
+                # importasse dependeria de quem a monta.
+                if layer == 'presentation' and (
+                        target.startswith(('videomanager.infrastructure', 'videomanager.bootstrap', 'yt_dlp',
+                                           'subprocess', 'platformdirs'))
+                        or target.split('.')[:2] in (['videomanager', 'app'], ['videomanager', 'preflight'])):
                     violations.append(f'{name}:{node.lineno} -> {target}')
                 if layer == 'infrastructure' and target.startswith(('videomanager.presentation', 'videomanager.bootstrap')):
                     violations.append(f'{name}:{node.lineno} -> {target}')
