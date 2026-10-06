@@ -1844,8 +1844,20 @@ def test_properties_resize_anchored_bottom_left_right_and_up(
         panel.shutdown()
 
 
-def test_calibri_and_rapier_zero_fonts_availability(qapp: QApplication) -> None:
-    """Verifica que Calibri e Rapier Zero estão disponíveis no seletor e renderizam com sucesso."""
+def test_fontes_embutidas_sao_da_ofl() -> None:
+    """A GPL promete a quem recebe o pacote poder vendê-lo; uma fonte de uso só
+    não comercial dentro dele (a Rapier Zero, da Pixel Sagas) quebrava a promessa."""
+    from videomanager.presentation.qt.fonts import _fonts_dir
+
+    fontes = [f for f in _fonts_dir().iterdir() if f.suffix.lower() in (".ttf", ".otf")]
+    assert fontes
+    ofl = "SIL Open Font License".encode("utf-16-be")
+    assert [f.name for f in fontes if ofl not in f.read_bytes()] == []
+
+
+def test_calibri_font_availability(qapp: QApplication) -> None:
+    """Calibri está no seletor e renderiza; projeto salvo com a Rapier Zero,
+    que saiu do pacote, continua renderizando o texto com a fonte substituta."""
     from videomanager.infrastructure.qt.text import QtTextRasterizer
     render_text_to_image = QtTextRasterizer().render
     from videomanager.domain.project import Clip
@@ -1857,18 +1869,7 @@ def test_calibri_and_rapier_zero_fonts_availability(qapp: QApplication) -> None:
 
     all_fonts = [selector._font_list.item(i).text() for i in range(selector._font_list.count())]
     assert "Calibri" in all_fonts
-    assert "Rapier Zero" in all_fonts
-    assert "Rapier Zero Hollow" in all_fonts
 
-    # Teste de seleção de Rapier Zero
-    for i in range(selector._font_list.count()):
-        item = selector._font_list.item(i)
-        if item.text() == "Rapier Zero":
-            selector._on_item_clicked(item)
-            break
-    assert selector.current_family() == "Rapier Zero"
-
-    # Teste de renderização gráfica com as duas fontes
     clip_rapier = Clip(
         media=None,
         start=0.0,
