@@ -40,9 +40,10 @@ repositório para uma visão geral rápida; esta pasta traz o manual completo.
 - [**Empacotamento**](empacotamento.md) — gerar os pacotes de Linux
   (pasta e AppImage) e Windows.
 
-`AGENTS.md` na raiz oferece uma visão geral para trabalho no repositório.
-`CLAUDE.md`, quando disponível localmente, registra decisões históricas e pode
-conter caminhos anteriores à migração; o guia acima descreve o código atual.
+`AGENTS.md` e `CLAUDE.md`, quando existem, são arquivos locais, fora do git:
+instruções para agentes e decisões históricas, que podem conter caminhos
+anteriores à migração. Um clone não os traz; o guia acima descreve o código
+atual.
 
 ## Aviso
 
