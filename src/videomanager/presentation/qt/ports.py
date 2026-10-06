@@ -5,6 +5,25 @@ negócio; sessão, preparação e estados continuam nos serviços da aplicação
 """
 from typing import Protocol
 
+from PySide6.QtCore import SignalInstance
+
+
+class PreviewSignals(Protocol):
+    """O que a aba de edição escuta de um worker de quadro ou de reprodução.
+
+    ``failed`` faz parte do contrato: sem ele a falha da prévia não chega à
+    tela, e o painel não precisa perguntar se o worker o tem.
+    """
+
+    frame: SignalInstance
+    primed: SignalInstance
+    failed: SignalInstance
+    done: SignalInstance
+
+
+class PreviewWorker(Protocol):
+    signals: PreviewSignals
+
 
 class DesktopRuntimePort(Protocol):
     def queue(self, settings, parent=None): ...
@@ -35,8 +54,9 @@ class DesktopRuntimePort(Protocol):
 
     def keyframe_worker(self, *args, **kwargs): ...
 
-    def frame_worker(self, project, seconds, size, tools, token, *, text_assets=None): ...
-    def interaction_worker(self, plan, size, tools, token, *, text_assets=None): ...
+    def frame_worker(self, project, seconds, size, tools, token, *, text_assets=None) -> PreviewWorker: ...
+
+    def interaction_worker(self, plan, size, tools, token, *, text_assets=None) -> PreviewWorker: ...
 
     def playback_worker(
         self,
@@ -49,7 +69,7 @@ class DesktopRuntimePort(Protocol):
         fps,
         text_assets=None,
         autostart=True,
-    ): ...
+    ) -> PreviewWorker: ...
 
     def scrub_cache_worker(self, project, seconds, span, size, tools, token, *, fps, first_index,
                            text_assets=None): ...
