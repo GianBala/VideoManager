@@ -58,7 +58,7 @@ class ProcessingService:
             raise ConversionError(Text('ERROR_PROJECT_EMPTY'))
         cache = probed or {}
         reference = reference_clip(project, lambda clip: self.catalog.exists(clip.media.path))
-        source = (reference.media.path if reference is not None and reference.overlay_type not in ('text', 'filter', 'transition')
+        source = (reference.media.path if reference is not None and reference.has_media_file
                   and self.catalog.exists(reference.media.path) else None)
         local = cache.get(source)
         if source is not None and not isinstance(local, LocalMedia):

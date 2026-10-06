@@ -50,6 +50,7 @@ from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from videomanager.domain.project import Clip
+from videomanager.domain.project import OverlayType
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import Project
 from videomanager.domain.project import TrackKind
@@ -770,7 +771,7 @@ class Timeline(QWidget):
             grad.setColorAt(1.0, QColor("#b45309"))
             painter.fillRect(rect, grad)
         elif track.kind is TrackKind.ADDITIONAL:
-            if clip.overlay_type == "filter":
+            if clip.overlay_type is OverlayType.FILTER:
                 fname = clip.filter_name
                 if fname == "pb":
                     grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
@@ -799,7 +800,7 @@ class Timeline(QWidget):
                     painter.fillRect(rect, grad)
                 else:
                     painter.fillRect(rect, QColor(94, 53, 177, 200))
-            elif clip.is_image or clip.overlay_type == "image":
+            elif clip.is_image or clip.overlay_type is OverlayType.IMAGE:
                 painter.fillRect(rect, QColor("#1e1e24"))
             else:
                 painter.fillRect(rect, QColor(106, 27, 154, 190))
@@ -808,7 +809,7 @@ class Timeline(QWidget):
 
         if clip.is_transition:
             pass
-        elif track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type == "image":
+        elif track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type is OverlayType.IMAGE:
             self._paint_thumbs(painter, clip, rect)
         elif track.kind is TrackKind.AUDIO:
             self._paint_wave(painter, clip, rect)
@@ -822,7 +823,7 @@ class Timeline(QWidget):
         elif clip.is_transition:
             border_pen = QPen(QColor("#fbbf24"), 1)
         elif track.kind is TrackKind.ADDITIONAL:
-            if clip.overlay_type == "filter":
+            if clip.overlay_type is OverlayType.FILTER:
                 f_borders = {
                     "pb": QColor("#90a4ae"),
                     "sepia": QColor("#bcaaa4"),
@@ -831,7 +832,7 @@ class Timeline(QWidget):
                     "contraste": QColor("#ffb74d"),
                 }
                 border_pen = QPen(f_borders.get(clip.filter_name, QColor(186, 104, 200)), 1)
-            elif clip.is_image or clip.overlay_type == "image":
+            elif clip.is_image or clip.overlay_type is OverlayType.IMAGE:
                 border_pen = QPen(QColor("#00bcd4"), 1)
             else:
                 border_pen = QPen(QColor(186, 104, 200), 1)
@@ -888,7 +889,7 @@ class Timeline(QWidget):
         strip = self._strips.get(clip.clip_id)
         if strip is None or not strip.thumbs:
             return
-        if clip.is_image or clip.overlay_type == "image":
+        if clip.is_image or clip.overlay_type is OverlayType.IMAGE:
             first_thumb = next(iter(strip.thumbs.values()), None)
             if first_thumb is not None:
                 area = QRectF(
@@ -936,16 +937,16 @@ class Timeline(QWidget):
         if clip.gain_label:
             badges.append(clip.gain_label)
 
-        if clip.overlay_type == "text":
+        if clip.overlay_type is OverlayType.TEXT:
             text = f"🔤 {clip.text_content or strings.EDIT_CLIP_TEXT}"
-        elif clip.overlay_type == "filter":
+        elif clip.overlay_type is OverlayType.FILTER:
             name = strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
             text = f"🎨 {name}"
-        elif clip.overlay_type == "transition":
+        elif clip.overlay_type is OverlayType.TRANSITION:
             name = strings.EDIT_TRANSITIONS.get(clip.transition_name,
                                                 ("", clip.transition_name or strings.EDIT_CLIP_TRANSITION))[1]
             text = f"⏳ {name}"
-        elif clip.overlay_type == "image" or clip.is_image:
+        elif clip.overlay_type is OverlayType.IMAGE or clip.is_image:
             text = f"🖼️ {clip.media.name}"
         else:
             text = clip.media.name
