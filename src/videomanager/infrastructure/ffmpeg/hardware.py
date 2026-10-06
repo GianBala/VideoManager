@@ -415,24 +415,6 @@ def encode_args(
     return ["-c:v", encoder.name, *encoder.quality]
 
 
-def device_args(
-    family: str,
-    preference: str,
-    tools: FFmpegTools | None,
-    quality: str = QUALITY_BALANCED,
-) -> list[str]:
-    return list(resolve(family, preference, tools, quality=quality).device)
-
-
-def filter_suffix(
-    family: str,
-    preference: str,
-    tools: FFmpegTools | None,
-    quality: str = QUALITY_BALANCED,
-) -> str:
-    return resolve(family, preference, tools, quality=quality).filter_suffix
-
-
 __all__ = [
     'FFmpegTools',
     'SOFTWARE',

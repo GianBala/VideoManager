@@ -543,8 +543,8 @@ def _video_chain(
             steps.append("setpts=PTS-STARTPTS")
         steps.append(f"fps={fps:.6f}")
         steps.append("format=rgba")
-        sx = getattr(clip, "scale_x", clip.scale)
-        sy = getattr(clip, "scale_y", clip.scale)
+        sx = clip.scale_x
+        sy = clip.scale_y
         origin = _clip_stream_origin(piece)
         has_anim_scale = clip.has_keyframes and (
             any(
@@ -613,8 +613,8 @@ def _video_chain(
         )
         max_diag: int | None = None
         if clip.has_keyframes:
-            all_k_sx = [getattr(clip, "scale_x", clip.scale)] + [k.scale_x for k in clip.keyframes]
-            all_k_sy = [getattr(clip, "scale_y", clip.scale)] + [k.scale_y for k in clip.keyframes]
+            all_k_sx = [clip.scale_x] + [k.scale_x for k in clip.keyframes]
+            all_k_sy = [clip.scale_y] + [k.scale_y for k in clip.keyframes]
             max_k_sx = max(all_k_sx)
             max_k_sy = max(all_k_sy)
             if clip.overlay_type == "text":
@@ -699,8 +699,8 @@ def _video_chain(
         else:
             steps.append("setpts=PTS-STARTPTS")
 
-    sx = getattr(clip, "scale_x", clip.scale)
-    sy = getattr(clip, "scale_y", clip.scale)
+    sx = clip.scale_x
+    sy = clip.scale_y
     has_keyframes = clip.has_keyframes
     origin = _clip_stream_origin(piece)
     has_anim_scale = has_keyframes and (
@@ -772,8 +772,8 @@ def _video_chain(
 
         max_diag: int | None = None
         if clip.has_keyframes:
-            all_k_sx = [getattr(clip, "scale_x", clip.scale)] + [k.scale_x for k in clip.keyframes]
-            all_k_sy = [getattr(clip, "scale_y", clip.scale)] + [k.scale_y for k in clip.keyframes]
+            all_k_sx = [clip.scale_x] + [k.scale_x for k in clip.keyframes]
+            all_k_sy = [clip.scale_y] + [k.scale_y for k in clip.keyframes]
             max_k_sx = max(all_k_sx)
             max_k_sy = max(all_k_sy)
             max_diag = max(2, int(math.ceil(math.hypot(base_w * max_k_sx, base_h * max_k_sy))) // 2 * 2)
@@ -1281,8 +1281,8 @@ def _compose_video_piece(
         piece.clip.has_keyframes
         or abs(piece.clip.x - 0.5) > 1e-9
         or abs(piece.clip.y - 0.5) > 1e-9
-        or abs(getattr(piece.clip, "scale_x", piece.clip.scale) - 1.0) > 1e-9
-        or abs(getattr(piece.clip, "scale_y", piece.clip.scale) - 1.0) > 1e-9
+        or abs(piece.clip.scale_x - 1.0) > 1e-9
+        or abs(piece.clip.scale_y - 1.0) > 1e-9
         or abs(piece.clip.rotation) > 1e-9
         or piece.clip.chromakey_enabled
         or piece.clip.opacity < 1 - 1e-9

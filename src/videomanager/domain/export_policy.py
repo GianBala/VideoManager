@@ -5,8 +5,6 @@ from videomanager.domain.project import Project
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.timing import Segment
-from videomanager.domain.timing import CutMode
-from videomanager.domain.timing import TrimTarget
 
 _SEM_ARQUIVO = ("text", "filter", "transition")
 
@@ -84,8 +82,8 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     if any(
         abs(clip.x - 0.5) > 1e-9
         or abs(clip.y - 0.5) > 1e-9
-        or abs(getattr(clip, "scale_x", clip.scale) - 1.0) > 1e-9
-        or abs(getattr(clip, "scale_y", clip.scale) - 1.0) > 1e-9
+        or abs(clip.scale_x - 1.0) > 1e-9
+        or abs(clip.scale_y - 1.0) > 1e-9
         or abs(clip.rotation) > 1e-9
         or clip.chromakey_enabled
         for clip in clips
@@ -111,17 +109,6 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     ):
         return None
     return tuple(Segment(clip.in_point, clip.out_point) for clip in ordered)
-
-
-def as_trim_target(
-    project: Project, container: str, mode: CutMode, anchor: float | None
-) -> TrimTarget | None:
-    segments = simple_trim(project)
-    if segments is None:
-        return None
-    return TrimTarget(
-        segments=segments, container=container, mode=mode, anchor=anchor
-    )
 
 
 def _interpolated_clips(project: Project) -> list[Clip]:

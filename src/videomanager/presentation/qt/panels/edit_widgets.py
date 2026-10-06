@@ -1563,8 +1563,8 @@ class _ClipPropertiesWidget(QWidget):
                 self._base_w = float(self._proj_w)
                 self._base_h = float(self._proj_h)
 
-            sx = getattr(clip, "scale_x", clip.scale)
-            sy = getattr(clip, "scale_y", clip.scale)
+            sx = clip.scale_x
+            sy = clip.scale_y
             cur_w = max(1, round(self._base_w * sx))
             cur_h = max(1, round(self._base_h * sy))
             self._aspect_ratio = max(0.001, cur_w / max(1.0, float(cur_h)))
