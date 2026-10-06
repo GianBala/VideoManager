@@ -74,34 +74,39 @@ class TestEscolha:
         assert hwaccel.family_for("mkv") == "h264"
 
 
+def _args(family: str, preference: str, tools=None, quality: str = hwaccel.QUALITY_BALANCED) -> list[str]:
+    encoder = hwaccel.resolve(family, preference, tools, quality=quality)
+    return hwaccel.video_encoder_args(encoder.name, encoder.quality, "mkv")
+
+
 class TestArgumentos:
     def test_cada_encoder_leva_a_propria_escala_de_qualidade(self) -> None:
         # "-crf" não tem efeito num encoder de placa: cada família tem a sua.
         fingir(nvenc=True)
-        args = hwaccel.encode_args("h264", "nvenc", TOOLS)
+        args = _args("h264", "nvenc", TOOLS)
         assert args[:2] == ["-c:v", "h264_nvenc"]
         assert "-qp" in args and "-crf" not in args
 
     def test_software_usa_crf_equilibrado_por_padrao(self) -> None:
-        args = hwaccel.encode_args("h264", hwaccel.SOFTWARE, TOOLS)
+        args = _args("h264", hwaccel.SOFTWARE, TOOLS)
         assert args[args.index("-crf") + 1] == "23"
 
     def test_software_qualidade_alta_e_economica(self) -> None:
-        args_high = hwaccel.encode_args("h264", hwaccel.SOFTWARE, TOOLS, quality=hwaccel.QUALITY_HIGH)
+        args_high = _args("h264", hwaccel.SOFTWARE, TOOLS, quality=hwaccel.QUALITY_HIGH)
         assert args_high[args_high.index("-crf") + 1] == "18"
 
-        args_eco = hwaccel.encode_args("h264", hwaccel.SOFTWARE, TOOLS, quality=hwaccel.QUALITY_ECONOMY)
+        args_eco = _args("h264", hwaccel.SOFTWARE, TOOLS, quality=hwaccel.QUALITY_ECONOMY)
         assert args_eco[args_eco.index("-crf") + 1] == "28"
 
     def test_nvenc_ajusta_qp_conforme_qualidade(self) -> None:
         fingir(nvenc=True)
-        args_bal = hwaccel.encode_args("h264", "nvenc", TOOLS, quality=hwaccel.QUALITY_BALANCED)
+        args_bal = _args("h264", "nvenc", TOOLS, quality=hwaccel.QUALITY_BALANCED)
         assert args_bal[args_bal.index("-qp") + 1] == "23"
 
-        args_high = hwaccel.encode_args("h264", "nvenc", TOOLS, quality=hwaccel.QUALITY_HIGH)
+        args_high = _args("h264", "nvenc", TOOLS, quality=hwaccel.QUALITY_HIGH)
         assert args_high[args_high.index("-qp") + 1] == "18"
 
-        args_eco = hwaccel.encode_args("h264", "nvenc", TOOLS, quality=hwaccel.QUALITY_ECONOMY)
+        args_eco = _args("h264", "nvenc", TOOLS, quality=hwaccel.QUALITY_ECONOMY)
         assert args_eco[args_eco.index("-qp") + 1] == "28"
 
     def test_nvenc_declara_o_controle_de_taxa(self) -> None:
@@ -134,6 +139,15 @@ class TestArgumentos:
     def test_encoder_de_software_nao_pede_dispositivo(self) -> None:
         encoder = hwaccel.resolve("h264", hwaccel.SOFTWARE, TOOLS)
         assert encoder.device == () and encoder.filter_suffix == ""
+
+    def test_montagem_unica_leva_teto_e_etiqueta_onde_cabem(self) -> None:
+        # Corte, conversão, exportação e trecho paralelo passam por aqui: o
+        # corte não punha a etiqueta e só a conversão punha o teto.
+        assert hwaccel.video_encoder_args("libx265", ("-crf", "28"), "mov", 2000) == [
+            "-c:v", "libx265", "-crf", "28", "-maxrate", "2000k", "-bufsize", "2000k", "-tag:v", "hvc1"]
+        assert hwaccel.video_encoder_args("libsvtav1", ("-crf", "35"), "mp4", 2000)[-2:] == ["-svtav1-params", "mbr=2000"]
+        assert hwaccel.video_encoder_args("hevc_nvenc", ("-qp", "23"), "mkv", 2000) == ["-c:v", "hevc_nvenc", "-qp", "23"]
+        assert hwaccel.hevc_tag("hevc", "mp4") == ["-tag:v", "hvc1"] and hwaccel.hevc_tag("h264", "mp4") == []
 
 
 class TestTextoDaTela:

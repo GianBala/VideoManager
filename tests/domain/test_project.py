@@ -20,6 +20,7 @@ from videomanager.domain.project import IMAGE_DURATION
 from videomanager.domain.project import MAX_AUTO_FPS
 from videomanager.domain.project import Clip
 from videomanager.domain.project import OverlayType
+from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
 from videomanager.domain.project import Project
@@ -1029,3 +1030,22 @@ class TestTipoDoBloco:
     def test_tipo_desconhecido_e_recusado(self):
         with pytest.raises(ValueError):
             Clip(self.MEDIA, 0.0, 5.0, overlay_type="sticker")
+
+
+class TestAnimacao:
+    MEDIA = MediaRef(Path("/x.png"), MediaKind.IMAGE, duration=5.0)
+
+    def test_quadro_igual_ao_bloco_nao_anima(self):
+        clip = Clip(self.MEDIA, 0.0, 5.0, scale=1.5, rotation=10.0,
+                    keyframes=(Keyframe(0.0, scale_x=1.5, scale_y=1.5, rotation=10.0),))
+        assert not any(clip.animates(prop) for prop in ("scale", "rotation", "opacity"))
+
+    def test_cada_propriedade_responde_pela_sua(self):
+        clip = Clip(self.MEDIA, 0.0, 5.0, keyframes=(Keyframe(0.0), Keyframe(2.0, opacity=0.4)))
+        assert (clip.animates("scale"), clip.animates("rotation"), clip.animates("opacity")) == (False, False, True)
+
+    def test_vizinhos_diferentes_animam_mesmo_perto_do_bloco(self):
+        # Os dois a menos de 1e-9 do bloco, mas a 1,6e-9 um do outro: a
+        # comparação entre vizinhos é o que pega. A prévia não a fazia.
+        clip = Clip(self.MEDIA, 0.0, 5.0, keyframes=(Keyframe(0.0, scale_x=1 - 8e-10), Keyframe(1.0, scale_x=1 + 8e-10)))
+        assert clip.animates("scale")
