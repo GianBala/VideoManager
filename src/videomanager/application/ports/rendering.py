@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import Protocol
 from videomanager.domain.project import Clip
+from videomanager.domain.project import OverlayType
 from videomanager.domain.project import Project
 
 
@@ -10,7 +11,7 @@ class TextRasterizer(Protocol):
 
 
 def collect_text_assets(project: Project, rasterizer: TextRasterizer | None) -> dict[int, Path]:
-    clips = [clip for clip in project.clips if clip.overlay_type == 'text']
+    clips = [clip for clip in project.clips if clip.overlay_type is OverlayType.TEXT]
     if clips and rasterizer is None:
         raise ValueError('O renderizador de textos não foi fornecido.')
     return {clip.clip_id: rasterizer.render(clip) for clip in clips}

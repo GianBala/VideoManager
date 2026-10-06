@@ -6,7 +6,6 @@ from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.timing import Segment
 
-_SEM_ARQUIVO = ("text", "filter", "transition")
 
 
 def reference_clip(project: Project, usable: Callable[[Clip], bool] = lambda clip: True) -> Clip | None:
@@ -26,7 +25,7 @@ def reference_clip(project: Project, usable: Callable[[Clip], bool] = lambda cli
     """
     visible = [track for track in project.tracks if track.visible]
     media = [clip for track in visible for clip in track.sorted_clips()
-             if clip.overlay_type not in _SEM_ARQUIVO and usable(clip)]
+             if clip.has_media_file and usable(clip)]
     base = [clip for track in reversed(project.video_tracks) if track.visible
             for clip in track.sorted_clips() if clip in media]
     for pool in ([c for c in base if not c.is_image], [c for c in base if c.is_image], media,

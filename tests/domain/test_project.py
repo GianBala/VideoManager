@@ -19,6 +19,7 @@ from videomanager.domain.media import LocalStream
 from videomanager.domain.project import IMAGE_DURATION
 from videomanager.domain.project import MAX_AUTO_FPS
 from videomanager.domain.project import Clip
+from videomanager.domain.project import OverlayType
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
 from videomanager.domain.project import Project
@@ -1009,3 +1010,22 @@ class TestEscalaPorEixo:
     def test_so_a_escala_unica_ainda_vale_para_os_dois_eixos(self):
         clip = Clip(self.MEDIA, 0.0, 5.0, scale=1.5)
         assert (clip.scale_x, clip.scale_y) == (1.5, 1.5)
+
+
+class TestTipoDoBloco:
+    MEDIA = MediaRef(Path("/x.png"), MediaKind.IMAGE, duration=5.0)
+
+    def test_texto_vira_tipo_e_o_tipo_se_escreve_pelo_valor(self):
+        clip = Clip(self.MEDIA, 0.0, 5.0, overlay_type="text")
+        assert clip.overlay_type is OverlayType.TEXT
+        # O Python 3.12 formata Enum misto pelo nome; o .vmp e os textos
+        # esperam o valor.
+        assert (str(clip.overlay_type), f"{clip.overlay_type}") == ("text", "text")
+
+    def test_so_imagem_e_midia_comum_apontam_para_arquivo(self):
+        com_arquivo = {kind for kind in OverlayType if Clip(self.MEDIA, 0.0, 5.0, overlay_type=kind).has_media_file}
+        assert com_arquivo == {OverlayType.NONE, OverlayType.IMAGE}
+
+    def test_tipo_desconhecido_e_recusado(self):
+        with pytest.raises(ValueError):
+            Clip(self.MEDIA, 0.0, 5.0, overlay_type="sticker")
