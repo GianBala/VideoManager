@@ -516,3 +516,31 @@ def test_fechar_com_tarefa_em_andamento_pergunta_e_cancelar_mantem_tudo(qapp, mo
     finally:
         window._queue = fila
         window.close()
+
+
+def test_pacote_diz_o_commit_no_log_e_no_sobre(qapp, tmp_path, monkeypatch):
+    """"3.1" vale para vários commits: o pacote diz qual (OPS-002)."""
+    import sys
+
+    from videomanager import APP_TITLE, build_commit
+    from videomanager import app as aplicativo
+
+    assert build_commit() is None, "no código-fonte não há commit gravado"
+    (tmp_path / "resources").mkdir()
+    (tmp_path / "resources" / "build_commit.txt").write_text("v3.1-12-gabc1234\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert build_commit() == "v3.1-12-gabc1234"
+    linha = aplicativo.startup_line()
+    assert linha.startswith(f"{APP_TITLE} (código-fonte v3.1-12-gabc1234) ·"), linha
+
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.ensure_ffmpeg", lambda parent, **kw: None)
+    window = MainWindow(Settings(), editor=build_editor_service(), processing=build_processing_service(),
+                        downloads=build_download_service(), runtime=build_desktop_runtime())
+    sobre = []
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.QMessageBox.about",
+                        lambda parent, title, body: sobre.append(body))
+    try:
+        window._show_about()
+        assert "Video Manager 3.1 (v3.1-12-gabc1234)" in sobre[0]
+    finally:
+        window.close()
