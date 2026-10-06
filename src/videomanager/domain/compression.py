@@ -60,7 +60,7 @@ _AUDIO_KEEP = {"mp3": "mp3", "aac": "m4a", "opus": "opus", "vorbis": "vorbis"}
 # AAC, que é de bitrate médio (saiu até 3,7% acima do pedido).
 _CEILING_SLACK = 1.05
 # O VBV começa com o buffer cheio e pode gastá-lo além do teto: um excesso fixo,
-# que não cresce com a duração. Medido com o buffer de 1 s (``_bitrate_cap``):
+# que não cresce com a duração. Medido com o buffer de 1 s (``bitrate_cap``):
 # no máximo 0,45 s de teto a mais, em 6, 20 e 60 s, no x264 e no x265.
 _VBV_SECONDS = 1.0
 

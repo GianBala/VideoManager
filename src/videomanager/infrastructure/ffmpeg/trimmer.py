@@ -278,7 +278,7 @@ def build_single_args(
             args[1:1] = list(encoder.device)
             if encoder.filter_suffix:
                 args += ["-vf", f"format=nv12,{encoder.filter_suffix}"]
-            args += ["-c:v", encoder.name, *encoder.quality]
+            args += hwaccel.video_encoder_args(encoder.name, encoder.quality, target.container)
         if media.has_audio:
             # O áudio é recodificado junto: copiá-lo manteria os quadros de som
             # inteiros da origem, que começam antes do corte e empurram a
@@ -343,7 +343,7 @@ def build_join_args(
             steps[-1] = steps[-1].replace("[v]", "[vsw]")
             steps.append(f"[vsw]{encoder.filter_suffix}[v]")
             args[args.index("-filter_complex") + 1] = ";".join(steps)
-        args += ["-map", "[v]", "-c:v", encoder.name, *encoder.quality]
+        args += ["-map", "[v]", *hwaccel.video_encoder_args(encoder.name, encoder.quality, target.container)]
     if has_audio:
         args += ["-map", "[a]"] + _audio_encode_args(_audio_encoder(target.container))
 

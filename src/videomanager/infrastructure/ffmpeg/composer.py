@@ -547,17 +547,7 @@ def _video_chain(
         sx = clip.scale_x
         sy = clip.scale_y
         origin = _clip_stream_origin(piece)
-        has_anim_scale = clip.has_keyframes and (
-            any(
-                abs(k.scale_x - sx) > 1e-9 or abs(k.scale_y - sy) > 1e-9
-                for k in clip.keyframes
-            )
-            or any(
-                abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x) > 1e-9
-                or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y) > 1e-9
-                for i in range(len(clip.keyframes) - 1)
-            )
-        )
+        has_anim_scale = clip.animates("scale")
         if has_anim_scale:
             expr_sx = _keyframe_expr(clip.keyframes, "scale_x", origin, sx, time_var="t")
             expr_sy = _keyframe_expr(clip.keyframes, "scale_y", origin, sy, time_var="t")
@@ -605,13 +595,7 @@ def _video_chain(
             if ck:
                 steps.append(ck)
 
-        has_anim_rotation = clip.has_keyframes and (
-            any(abs(k.rotation - clip.rotation) > 1e-9 for k in clip.keyframes)
-            or any(
-                abs(clip.keyframes[i].rotation - clip.keyframes[i + 1].rotation) > 1e-9
-                for i in range(len(clip.keyframes) - 1)
-            )
-        )
+        has_anim_rotation = clip.animates("rotation")
         max_diag: int | None = None
         if clip.has_keyframes:
             all_k_sx = [clip.scale_x] + [k.scale_x for k in clip.keyframes]
@@ -660,12 +644,7 @@ def _video_chain(
                 )
 
         if clip.has_keyframes:
-            has_anim_opacity = any(
-                abs(k.opacity - clip.opacity) > 1e-9 for k in clip.keyframes
-            ) or any(
-                abs(clip.keyframes[i].opacity - clip.keyframes[i + 1].opacity) > 1e-9
-                for i in range(len(clip.keyframes) - 1)
-            )
+            has_anim_opacity = clip.animates("opacity")
             if has_anim_opacity:
                 expr_op = _keyframe_expr(
                     clip.keyframes, "opacity", origin, clip.opacity, time_var="T"
@@ -704,24 +683,8 @@ def _video_chain(
     sy = clip.scale_y
     has_keyframes = clip.has_keyframes
     origin = _clip_stream_origin(piece)
-    has_anim_scale = has_keyframes and (
-        any(
-            abs(k.scale_x - sx) > 1e-9 or abs(k.scale_y - sy) > 1e-9
-            for k in clip.keyframes
-        )
-        or any(
-            abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x) > 1e-9
-            or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y) > 1e-9
-            for i in range(len(clip.keyframes) - 1)
-        )
-    )
-    has_anim_rotation = has_keyframes and (
-        any(abs(k.rotation - clip.rotation) > 1e-9 for k in clip.keyframes)
-        or any(
-            abs(clip.keyframes[i].rotation - clip.keyframes[i + 1].rotation) > 1e-9
-            for i in range(len(clip.keyframes) - 1)
-        )
-    )
+    has_anim_scale = clip.animates("scale")
+    has_anim_rotation = clip.animates("rotation")
     has_transform = (
         standalone
         or has_keyframes
@@ -803,12 +766,7 @@ def _video_chain(
                 )
 
         if clip.has_keyframes:
-            has_anim_opacity = any(
-                abs(k.opacity - clip.opacity) > 1e-9 for k in clip.keyframes
-            ) or any(
-                abs(clip.keyframes[i].opacity - clip.keyframes[i + 1].opacity) > 1e-9
-                for i in range(len(clip.keyframes) - 1)
-            )
+            has_anim_opacity = clip.animates("opacity")
             if has_anim_opacity:
                 expr_op = _keyframe_expr(
                     clip.keyframes, "opacity", origin, clip.opacity, time_var="T"
@@ -1924,7 +1882,7 @@ def export_args(
         filter_text = ";".join(filters)
         args += ["-filter_complex", filter_text]
     if video_label:
-        args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality, *_hevc_tag(encoder.name, container)]
+        args += ["-map", video_label, *hwaccel.video_encoder_args(encoder.name, encoder.quality, container)]
     if graph.audio_label:
         args += ["-map", graph.audio_label, *encode_audio_args(container)]
     elif video_label:
@@ -1933,17 +1891,6 @@ def export_args(
         raise ConversionError(Text("COMPOSE_ALL_MUTED"))
     return args + tail_args(container, destination, map_metadata=False)
 
-
-def _hevc_tag(encoder: str, container: str) -> list[str]:
-    """Etiqueta ``hvc1`` do HEVC em MP4 e MOV.
-
-    Sem ela o ffmpeg grava ``hev1``, que o QuickTime, os aparelhos Apple e o
-    app Filmes e TV do Windows não abrem. Uma função só para a exportação e
-    para os trechos paralelos: com a regra repetida, o trecho paralelo em MOV
-    saía sem a etiqueta, e a emenda copia o que o trecho tiver.
-    """
-    hevc = encoder in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi")
-    return ["-tag:v", "hvc1"] if hevc and container in ("mp4", "mov") else []
 
 
 def _limited_inputs(inputs: list[str]) -> list[str]:
@@ -2300,7 +2247,7 @@ def segment_video_args(
         video_label = "[vhw]"
     filter_text = ";".join(filters)
     args += ["-filter_complex", filter_text]
-    args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality, *_hevc_tag(encoder.name, container)]
+    args += ["-map", video_label, *hwaccel.video_encoder_args(encoder.name, encoder.quality, container)]
     # ``-t`` na saída, e não ``-frames:v``: a conta que interessa é a do tempo,
     # e é ela que faz a soma dos trechos bater com a duração do projeto.
     return args + [

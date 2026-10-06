@@ -481,22 +481,7 @@ class _Preview(QLabel):
             int(round(canonical_h * compose_h / self._proj_h / 2.0) * 2),
         )
 
-        base_sx = clip.scale_x
-        base_sy = clip.scale_y
-        animated_scale = clip.has_keyframes and (
-            any(
-                abs(k.scale_x - base_sx) > 1e-9
-                or abs(k.scale_y - base_sy) > 1e-9
-                for k in clip.keyframes
-            )
-            or any(
-                abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x)
-                > 1e-9
-                or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y)
-                > 1e-9
-                for i in range(len(clip.keyframes) - 1)
-            )
-        )
+        animated_scale = clip.animates("scale")
         if animated_scale:
             # O filtro com ``eval=frame`` usa ``trunc``; o caminho estático usa
             # ``round`` ao montar o comando.
@@ -580,8 +565,7 @@ class _Preview(QLabel):
             compose_w, compose_h = fit_size(self._proj_w, self._proj_h,
                                            min(self._proj_w, output_w), min(self._proj_h, output_h))
             base_w, base_h = fit_size(mw, mh, compose_w, compose_h)
-            animated = any(abs(k.scale_x - clip.scale_x) > 1e-9 or abs(k.scale_y - clip.scale_y) > 1e-9
-                           for k in clip.keyframes)
+            animated = clip.animates("scale")
             quantize = int if animated else round
             w, h = max(2, int(quantize(base_w * sx / 2)) * 2), max(2, int(quantize(base_h * sy / 2)) * 2)
             left = float(f'{transform.x:.6f}') * compose_w - w / 2
