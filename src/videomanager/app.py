@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication
 from videomanager import APP_TITLE
 from videomanager import APP_NAME
 from videomanager import __version__
+from videomanager import build_commit
 from videomanager.domain import i18n
 from videomanager.preflight import check_or_explain, font_cache_isolation
 from videomanager.presentation.qt.i18n import apply_language
@@ -371,7 +372,10 @@ def startup_line() -> str:
     tools = find_tools()
     ffmpeg = f"{tools.ffmpeg} ({tools.source})" if tools else "ausente"
     origem = "pacote" if getattr(sys, "frozen", False) else "código-fonte"
-    return (f"{APP_TITLE} {__version__} ({origem}) · Python {platform.python_version()} · "
+    commit = build_commit()
+    if commit:
+        origem += f" {commit}"
+    return (f"{APP_TITLE} ({origem}) · Python {platform.python_version()} · "
             f"PySide6 {PySide6.__version__} / Qt {qVersion()} · yt-dlp {yt_dlp.version.__version__} · "
             f"ffmpeg {ffmpeg} · {platform.platform()}")
 

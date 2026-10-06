@@ -9,7 +9,7 @@ CLAUDE.md
 .claude
 AGENTS.md
 # Binários de ffmpeg baixados/empacotados: nunca versionados
-vendor/
+vendor
 
 # Saídas locais de teste manual
 downloads/

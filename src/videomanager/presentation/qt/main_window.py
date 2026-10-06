@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager import APP_TITLE
-from videomanager import ISSUES_URL, RELEASES_URL, __version__
+from videomanager import ISSUES_URL, RELEASES_URL, __version__, build_commit
 from videomanager.application import encoding as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.jobs.requests import DownloadRequest
@@ -945,7 +945,8 @@ class MainWindow(QMainWindow):
             self,
             strings.ABOUT_TITLE,
             strings.ABOUT_BODY.format(
-                version=__version__, ytdlp=self._runtime.engine_version,
+                version=f"{__version__} ({commit})" if (commit := build_commit()) else __version__,
+                ytdlp=self._runtime.engine_version,
                 releases=RELEASES_URL, issues=ISSUES_URL,
             ),
         )

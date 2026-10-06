@@ -19,6 +19,7 @@ Não há compilação cruzada: cada sistema gera o seu próprio pacote. Rode
 """
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -91,12 +92,30 @@ def _licencas() -> list[tuple[str, str]]:
     return datas
 
 
+def _commit() -> Path:
+    """Grava o ``git describe`` do build, que o Sobre e o log mostram.
+
+    "3.1" vale para vários commits; ``--dirty`` marca o pacote gerado com
+    alteração local (só passa pelo build com VM_ALLOW_DIRTY=1).
+    """
+    try:
+        texto = subprocess.run(["git", "describe", "--tags", "--always", "--dirty"], cwd=REPO_ROOT,
+                               capture_output=True, text=True, timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        texto = ""
+    destino = Path(workpath) / "build_commit.txt"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(texto or "desconhecido", encoding="utf-8")
+    return destino
+
+
 a = Analysis(
     [str(REPO_ROOT / "src" / "videomanager" / "__main__.py")],
     pathex=[str(REPO_ROOT / "src")],
     binaries=binaries_to_bundle,
     datas=[
         (str(REPO_ROOT / "src" / "videomanager" / "resources"), "resources"),
+        (str(_commit()), "resources"),
         *collect_data_files("yt_dlp", includes=["**/*.js"]),
         *_licencas(),
     ],

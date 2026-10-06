@@ -188,6 +188,22 @@ máquina sem FUSE, ainda roda assim:
 ./Video_Manager-<versão>-x86_64.AppImage --appimage-extract-and-run
 ```
 
+## Publicar uma versão
+
+1. Suba o número em `pyproject.toml` e `src/videomanager/__init__.py` (ver
+   [desenvolvimento](desenvolvimento.md#versões)), num commit próprio.
+2. Crie a tag no commit da versão: `git tag v<versão>` e `git push origin v<versão>`.
+3. Gere os pacotes **a partir da tag, com a árvore limpa**: `build_linux.sh`,
+   `build_appimage.sh` e, no Windows, `build_windows.ps1`. Os scripts recusam
+   árvore com alteração não commitada (`VM_ALLOW_DIRTY=1` gera assim mesmo, e
+   o commit gravado leva `-dirty`). O spec grava o `git describe` no pacote,
+   e o Sobre e a primeira linha do log o mostram.
+4. Calcule o SHA-256 dos dois pacotes: o AppImage já sai com o `.sha256` ao
+   lado; no Windows, `Get-FileHash dist\VideoManager.exe -Algorithm SHA256`.
+5. Publique a release da tag com os dois pacotes, os dois resumos e as notas
+   da versão: o que mudou, a licença (GPL-3.0 ou posterior) e a origem do
+   código-fonte do ffmpeg embutido (ver `THIRD_PARTY_NOTICES.md`).
+
 ## Diagnóstico e diretórios isolados
 
 O build Windows executa `packaging/smoke_windows.ps1` e exige código zero
