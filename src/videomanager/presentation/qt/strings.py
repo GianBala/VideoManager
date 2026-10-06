@@ -10,7 +10,7 @@ from __future__ import annotations
 ABOUT_TITLE = "Sobre o Video Manager"
 ABOUT_BODY = (
     "<b>Video Manager {version}</b><br><br>"
-    "Baixa vídeo e áudio de centenas de plataformas e converte arquivos locais.<br><br>"
+    "Baixa vídeo e áudio de centenas de plataformas, converte e edita arquivos locais e ajusta os metadados deles.<br><br>"
     "Usa <b>yt-dlp</b> {ytdlp} para extração e <b>ffmpeg</b> para processamento.<br><br>"
     "Software livre sob a GPL-3.0 ou posterior. Licenças dos componentes de "
     "terceiros (ffmpeg, Qt, Deno e outros) em THIRD_PARTY_NOTICES, no pacote.<br><br>"
@@ -788,7 +788,7 @@ DIALOG_QUIT_BODY = (
     "Há {count} tarefa(s) em andamento. Sair agora cancela tudo e descarta os "
     "arquivos parciais."
 )
-DIALOG_ENGINE_TITLE = "Atualizar engine"
+DIALOG_ENGINE_TITLE = "Atualizar motor de download"
 DIALOG_ENGINE_BODY = (
     "As plataformas mudam com frequência e os extratores do yt-dlp precisam "
     "acompanhar. Atualizar agora?\n\nVersão instalada: {current}"

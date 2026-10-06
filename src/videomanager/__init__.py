@@ -1,4 +1,4 @@
-"""Video Manager — downloader e conversor de vídeo/áudio multiplataforma."""
+"""Video Manager — baixa, converte e edita vídeo e áudio, e ajusta metadados."""
 
 import sys
 from pathlib import Path

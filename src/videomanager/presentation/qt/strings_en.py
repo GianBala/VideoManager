@@ -18,7 +18,7 @@ from __future__ import annotations
 ABOUT_TITLE = "About Video Manager"
 ABOUT_BODY = (
     "<b>Video Manager {version}</b><br><br>"
-    "Downloads video and audio from hundreds of platforms and converts local files.<br><br>"
+    "Downloads video and audio from hundreds of platforms, converts and edits local files and adjusts their metadata.<br><br>"
     "Uses <b>yt-dlp</b> {ytdlp} for extraction and <b>ffmpeg</b> for processing.<br><br>"
     "Free software under the GPL-3.0 or later. Licenses of third-party "
     "components (ffmpeg, Qt, Deno and others) in THIRD_PARTY_NOTICES, in the "
@@ -778,7 +778,7 @@ DIALOG_QUIT_BODY = (
     "There are {count} task(s) in progress. Quitting now cancels everything and "
     "discards the partial files."
 )
-DIALOG_ENGINE_TITLE = "Update Engine"
+DIALOG_ENGINE_TITLE = "Update Download Engine"
 DIALOG_ENGINE_BODY = (
     "Platforms change often and the yt-dlp extractors need to keep up. "
     "Update now?\n\nInstalled version: {current}"
