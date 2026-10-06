@@ -29,7 +29,7 @@ from typing import cast
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QMimeData, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QMimeData, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -81,6 +81,13 @@ _HANDLE_WIDTH = 5
 # o ícone entre clipes do CapCut. A duração real segue sendo dada pela régua;
 # só a área interativa recebe este piso visual.
 _TRANSITION_MIN_WIDTH = 36
+# Quadro-chave aceso quando a agulha está a menos disto dele, em segundos.
+_KEYFRAME_ACTIVE = 0.05
+# Meia largura da cabeça da agulha (12 px) mais a linha e a suavização.
+_PLAYHEAD_HALF = 9
+# Folga do recorte por área: o marcador de transição tem largura mínima maior
+# que a do trecho que ocupa, e a borda do bloco se desenha um pouco por fora.
+_CLIP_MARGIN = _TRANSITION_MIN_WIDTH
 _SNAP_PIXELS = 7
 _MIN_VIEW = 0.4
 
@@ -381,12 +388,27 @@ class Timeline(QWidget):
 
     def set_position(self, seconds: float, *, follow: bool = True) -> None:
         previous = self._position
+        view = (self._view_start, self._view_end)
         self._position = min(max(0.0, seconds), max(0.0, self._project.duration))
         if follow:
             self._keep_visible(self._position)
-        self.update()
+        if (self._view_start, self._view_end) == view:
+            # Só a faixa da agulha, onde estava e onde está. Repintar a linha
+            # inteira a cada tique da reprodução (40 ms) custava, medido, 21 ms
+            # com 600 blocos — metade do intervalo, disputando com os quadros.
+            self.update(self._playhead_band(previous))
+            self.update(self._playhead_band(self._position))
+        else:
+            self.update()
         if self._position != previous:
             self.position_changed.emit(self._position)
+
+    def _playhead_band(self, seconds: float) -> QRect:
+        """O que muda quando a agulha passa por ``seconds``: ela e os diamantes
+        de quadro-chave que se acendem a menos de 0,05 s dela."""
+        left = self._x_of(seconds - _KEYFRAME_ACTIVE) - _PLAYHEAD_HALF
+        right = self._x_of(seconds + _KEYFRAME_ACTIVE) + _PLAYHEAD_HALF
+        return QRect(int(left), 0, int(right - left) + 2, self.height())
 
     def set_strip(self, clip_id: int, in_point: float, out_point: float, count: int) -> None:
         # As imagens anteriores ficam até as novas chegarem: apagá-las aqui
@@ -556,13 +578,18 @@ class Timeline(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), self._color("bg"))
+        # Só os blocos que tocam a área a pintar: na faixa da agulha, percorrer
+        # e desenhar os 600 blocos da trilha era quase todo o custo do tique.
+        self._dirty = event.rect()
 
         # Trilhas primeiro e recortadas abaixo da régua: ao rolar, elas passam
         # por baixo dela em vez de a empurrar para fora da vista.
         painter.save()
         painter.setClipRect(QRectF(0, RULER_HEIGHT, self.width(), max(0, self.height() - RULER_HEIGHT)))
+        headers = self._dirty.left() < HEADER_WIDTH
         for index, track in enumerate(self._project.tracks):
-            self._paint_header(painter, index, track)
+            if headers:
+                self._paint_header(painter, index, track)
             self._paint_lane(painter, index, track)
         if (
             self._drag == "cabecalho"
@@ -587,8 +614,12 @@ class Timeline(QWidget):
             _RULER_STEPS[-1],
         )
         painter.setClipRect(QRectF(HEADER_WIDTH, 0, self._lane_width, RULER_HEIGHT))
-        moment = int(self._view_start / step) * step
-        while moment <= self._view_end:
+        # Os rótulos que tocam a área a pintar: o de antes começa até um rótulo
+        # à esquerda dela.
+        first = max(self._view_start, self._time_of(self._dirty.left() - _RULER_LABEL_SPACE))
+        last = min(self._view_end, self._time_of(self._dirty.right()))
+        moment = int(first / step) * step
+        while moment <= last:
             x = self._x_of(moment)
             painter.setPen(QPen(self._color("border"), 1))
             painter.drawLine(int(x), RULER_HEIGHT - 5, int(x), RULER_HEIGHT)
@@ -715,7 +746,11 @@ class Timeline(QWidget):
         # Clipes comuns primeiro, marcador de transição por último. Ele ocupa o
         # mesmo trecho dos dois vizinhos e precisa permanecer visível e clicável
         # em cima deles.
+        first = self._time_of(self._dirty.left() - _CLIP_MARGIN)
+        last = self._time_of(self._dirty.right() + _CLIP_MARGIN)
         for clip in sorted(track.clips, key=lambda item: item.is_transition):
+            if clip.end < first or clip.start > last:
+                continue
             self._paint_clip(painter, index, clip, track)
         painter.restore()
 
@@ -827,7 +862,7 @@ class Timeline(QWidget):
             cx = self._x_of(kf_time)
             if cx < rect.left() - 4.0 or cx > rect.right() + 4.0:
                 continue
-            is_active = abs(self._position - kf_time) < 0.05
+            is_active = abs(self._position - kf_time) < _KEYFRAME_ACTIVE
             poly = QPolygonF([
                 QPointF(cx, cy - 4.5),
                 QPointF(cx + 4.5, cy),
