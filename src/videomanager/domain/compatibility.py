@@ -18,6 +18,10 @@ _EQUIVALENT_SOURCE_CODECS = {
 }
 
 
+# O que a conversão copia sem recodificar, por container (None = tudo). O
+# download tem a sua tabela (application/media/download_policy.py), em dois
+# níveis e com os nomes do yt-dlp; o que é seguro em MP4 tem de ser o mesmo
+# nas duas. Lá está por que elas diferem.
 _CONTAINER_VIDEO_OK: dict[str, set[str] | None] = {
     "mp4": {"h264", "hevc", "av1", "mpeg4"},
     "mkv": None,
