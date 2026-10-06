@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "videomanager"
 version = "3.1"
-description = "Downloader e conversor de vídeo/áudio multiplataforma (Windows e Linux)"
+description = "Baixa, converte e edita vídeo e áudio, e ajusta metadados (Windows e Linux)"
 readme = "README.md"
 # Expressão SPDX (PEP 639), que pede setuptools 77 ou mais novo.
 license = "GPL-3.0-or-later"

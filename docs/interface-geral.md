@@ -56,7 +56,7 @@ status continua contando as tarefas em andamento mesmo sem a fila visível.
 ## A fila de tarefas
 
 Tabela com as colunas **Título**, **Saída**, **Situação**, **Progresso** e
-**Velocidade**, compartilhada pelas três abas — um download, uma conversão e
+**Velocidade**, compartilhada por Download, Convert e Editar — um download, uma conversão e
 uma exportação de edição aparecem lado a lado na mesma lista, na ordem em que
 foram enfileirados. Com a fila vazia, ela mostra "A fila está vazia."
 

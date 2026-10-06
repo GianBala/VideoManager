@@ -35,7 +35,7 @@ gerado, e cada pasta `licenses/<pacote>/` traz o texto da versão embutida.
 ## Código-fonte
 
 O código-fonte deste programa está em
-[github.com/GianBala/Video_Manager](https://github.com/GianBala/Video_Manager),
+[github.com/GianBala/VideoManager](https://github.com/GianBala/VideoManager),
 na tag de cada versão. O dos componentes GPL e LGPL está nos endereços da
 tabela, sem custo. Se algum deles deixar de estar disponível, peça pelo
 repositório (aba Issues) e uma cópia do código-fonte correspondente será
