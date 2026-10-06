@@ -71,3 +71,23 @@ def test_foco_do_teclado_tem_pelo_menos_3_para_1_em_cada_controle(desktop_app, t
         host.close()
         desktop_app.setStyleSheet(estilo)
         desktop_app.setPalette(paleta)
+
+
+# Pares de texto e fundo que a interface usa, e o contraste mínimo de cada um:
+# 4,5:1 para texto (WCAG 1.4.3), 3:1 para indicadores (1.4.11).
+_TEXTO = [("text", "bg"), ("text", "surface"), ("text", "surface_alt"), ("text_dim", "bg"),
+          ("text_dim", "surface"), ("text_dim", "surface_alt"), ("accent_text", "accent_fill"),
+          ("accent_text", "accent_fill_hover"), ("accent_fg", "surface"), ("warn", "bg"),
+          ("warn", "surface"), ("accent_text", "live")]
+_INDICADOR = [("focus", "border"), ("focus", "accent_fill"), ("accent", "surface_alt"), ("accent", "border")]
+
+
+@pytest.mark.parametrize("tema", ["dark", "light"])
+def test_texto_e_indicadores_tem_o_contraste_minimo(tema):
+    from videomanager.presentation.qt.theme import palette
+    cores = palette(tema)
+    fracos = [f"{a}/{b}: {contraste(cores[a], cores[b]):.2f}" for a, b in _TEXTO
+              if contraste(cores[a], cores[b]) < 4.5]
+    fracos += [f"{a}/{b}: {contraste(cores[a], cores[b]):.2f}" for a, b in _INDICADOR
+               if contraste(cores[a], cores[b]) < 3.0]
+    assert fracos == []
