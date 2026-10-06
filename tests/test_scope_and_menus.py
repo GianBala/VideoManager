@@ -471,3 +471,48 @@ def test_linha_de_partida_diz_de_que_versao_e_ambiente_veio_o_log():
     linha = aplicativo.startup_line()
     for esperado in (__version__, PySide6.__version__, yt_dlp.version.__version__, "ffmpeg"):
         assert esperado in linha
+
+
+def test_fechar_com_tarefa_em_andamento_pergunta_e_cancelar_mantem_tudo(qapp, monkeypatch):
+    """RN-27: sair com tarefa não encerrada pede confirmação, dizendo quantas.
+
+    Cancelar mantém a janela e a fila de pé; confirmar encerra a fila.
+    """
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.ensure_ffmpeg", lambda parent, **kw: None)
+    window = MainWindow(Settings(), editor=build_editor_service(), processing=build_processing_service(),
+                        downloads=build_download_service(), runtime=build_desktop_runtime())
+    fila = window._queue
+    encerradas = []
+
+    class _Fila:
+        jobs = [SimpleNamespace(status=SimpleNamespace(is_final=False)),
+                SimpleNamespace(status=SimpleNamespace(is_final=False)),
+                SimpleNamespace(status=SimpleNamespace(is_final=True))]
+
+        def shutdown(self):
+            encerradas.append(True)
+            fila.shutdown()
+
+        def __getattr__(self, name):
+            return getattr(fila, name)
+
+    perguntas = []
+    resposta = [QMessageBox.StandardButton.Cancel]
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.QMessageBox.question",
+                        lambda parent, title, body, *args: (perguntas.append(body), resposta[0])[1])
+    window._queue = _Fila()
+    window.show()
+    try:
+        assert window.close() is False
+        assert window.isVisible() and not encerradas
+        assert perguntas == [strings.DIALOG_QUIT_BODY.format(count=2)]
+        resposta[0] = QMessageBox.StandardButton.Yes
+        assert window.close() is True
+        assert encerradas == [True]
+    finally:
+        window._queue = fila
+        window.close()
