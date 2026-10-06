@@ -17,7 +17,7 @@ def _fonts_dir() -> Path:
 
 
 def ensure_application_fonts() -> None:
-    """Carrega fontes embutidas (ex: Rapier Zero, Carlito/Calibri) no QFontDatabase.
+    """Carrega as fontes embutidas (a Carlito, no lugar da Calibri) no QFontDatabase.
 
     Configura também substituição de fonte para que 'Calibri' resolva perfeitamente
     tanto em plataformas Windows (onde Calibri é nativa do sistema) quanto em

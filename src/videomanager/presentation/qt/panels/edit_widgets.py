@@ -2125,8 +2125,6 @@ _POPULAR_FONTS = [
     "Inter",
     "Liberation Sans",
     "Monospace",
-    "Rapier Zero",
-    "Rapier Zero Hollow",
     "Roboto",
     "Sans Serif",
     "Serif",
