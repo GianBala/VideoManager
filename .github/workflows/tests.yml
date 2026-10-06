@@ -58,7 +58,14 @@ jobs:
         env:
           PYTHONPATH: src
         run: python packaging/fetch_binaries.py
-      - run: python -m pyflakes src/videomanager tests
+      - run: python -m pyflakes src/videomanager tests scripts
+      # Nomes e atributos que não existem: o pyflakes não segue importação nem
+      # self. Fica aqui, e não no job internal, porque importa os módulos para
+      # conferir — sem o PySide6 e o yt-dlp, acusa 712 falsos.
+      - name: Referências sem destino
+        env:
+          PYTHONPATH: src
+        run: python scripts/check_references.py
       - run: python -m pytest -q
       - name: Gerar pacote Linux
         if: runner.os == 'Linux' && matrix.python == '3.12'
