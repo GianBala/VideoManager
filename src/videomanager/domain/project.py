@@ -244,6 +244,9 @@ def media_ref(local: LocalMedia) -> MediaRef:
     )
 
 
+_ANIMATED_FIELDS = {"scale": ("scale_x", "scale_y"), "rotation": ("rotation",), "opacity": ("opacity",)}
+
+
 @dataclass(frozen=True)
 class Clip:
     """Um pedaço de mídia colocado num instante da linha do tempo."""
@@ -366,6 +369,19 @@ class Clip:
     @property
     def has_media_file(self) -> bool:
         return self.overlay_type.has_media_file
+
+    def animates(self, prop: str) -> bool:
+        """Se os quadros-chave mudam ``prop`` ("scale", "rotation" ou "opacity").
+
+        Compara cada quadro com o valor do bloco e com o vizinho. A pergunta é
+        de quem monta o filtro (expressão no tempo ou valor fixo) e de quem
+        desenha a alça na prévia: respondida em quatro lugares, um esqueceu a
+        comparação entre vizinhos.
+        """
+        fields = _ANIMATED_FIELDS[prop]
+        frames = self.keyframes
+        return any(abs(getattr(k, f) - getattr(self, f)) > 1e-9 for k in frames for f in fields) or any(
+            abs(getattr(a, f) - getattr(b, f)) > 1e-9 for a, b in zip(frames, frames[1:]) for f in fields)
 
     @property
     def is_overlay(self) -> bool:

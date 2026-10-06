@@ -1187,6 +1187,13 @@ class TestExportacaoDaEdicao:
         assert len(pcm) == pytest.approx(esperado, rel=0.02)
 
 
+def _encoder_args(family: str, preference: str, tools) -> list[str]:
+    from videomanager.infrastructure.ffmpeg import hardware as hwaccel
+
+    encoder = hwaccel.resolve(family, preference, tools)
+    return hwaccel.video_encoder_args(encoder.name, encoder.quality, "mp4")
+
+
 class TestCodificacaoPorPlaca:
     """A placa precisa **obedecer** ao número de qualidade, não só aceitar o argumento.
 
@@ -1247,11 +1254,11 @@ class TestCodificacaoPorPlaca:
         origem = self._fonte_exigente(tmp_path, tools)
         placa = self._codificar(
             origem, tmp_path / "placa.mp4", tools,
-            hwaccel.encode_args("h264", "nvenc", tools),
+            _encoder_args("h264", "nvenc", tools),
         )
         software = self._codificar(
             origem, tmp_path / "software.mp4", tools,
-            hwaccel.encode_args("h264", hwaccel.SOFTWARE, tools),
+            _encoder_args("h264", hwaccel.SOFTWARE, tools),
         )
         # Comparar com o software, e não com um número fixo, é o que mantém o
         # teste válido quando o material de teste ou a build do ffmpeg mudarem.
