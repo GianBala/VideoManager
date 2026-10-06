@@ -19,6 +19,7 @@ from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip
+from videomanager.domain.project import OverlayType
 from videomanager.domain.project import is_pseudo_path
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
@@ -139,7 +140,7 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                     "scale_x": clip.scale_x,
                     "scale_y": clip.scale_y,
                     "rotation": clip.rotation,
-                    "overlay_type": clip.overlay_type,
+                    "overlay_type": clip.overlay_type.value,
                     "text_content": clip.text_content,
                     "font_family": clip.font_family,
                     "font_size": clip.font_size,
@@ -267,7 +268,7 @@ def _validate_project(data: dict[str, object]) -> None:
             for name in ("start", "stroke_width", "chromakey_similarity", "chromakey_blend"):
                 number(clip, name, minimum=0, integer=name == "stroke_width")
             media_data = clip.get("media")
-            static = (isinstance(media_data, dict) and media_data.get("kind") == "IMAGE") or clip.get("overlay_type") in ("text", "filter")
+            static = (isinstance(media_data, dict) and media_data.get("kind") == "IMAGE") or clip.get("overlay_type") in (OverlayType.TEXT, OverlayType.FILTER)
             # Versões anteriores geravam entrada negativa ao estender um
             # adicional. Recuperar só fontes estáticas, sem aceitar NaN/inf.
             number(clip, "in_point", minimum=None if static else 0)
@@ -312,7 +313,7 @@ def _validate_project(data: dict[str, object]) -> None:
             strings(clip, ("overlay_type", "text_content", "font_family", "text_color", "stroke_color", "filter_name", "transition_name", "chromakey_color"))
             if "chromakey_color" in clip and not CHROMA_COLOR.fullmatch(clip["chromakey_color"]):
                 fail("chromakey_color")
-            if clip.get("overlay_type", "none") not in ("none", "image", "text", "filter", "transition"):
+            if clip.get("overlay_type", OverlayType.NONE) not in tuple(OverlayType):
                 fail(Text("PROJECT_FIELD_OVERLAY"))
             media = clip.get("media")
             if not isinstance(media, dict) or not isinstance(media.get("path"), str) or not media["path"]:
@@ -383,9 +384,9 @@ def _project_from_dict(
             media_data = c_data.get("media")
             if not isinstance(media_data, dict):
                 continue
-            overlay_type = str(c_data.get("overlay_type", "none"))
+            overlay_type = OverlayType(str(c_data.get("overlay_type", OverlayType.NONE)))
             media, missing = _dict_to_media(media_data, base_dir)
-            if overlay_type not in ("text", "filter", "transition") and missing is not None and missing not in missing_files:
+            if overlay_type.has_media_file and missing is not None and missing not in missing_files:
                 missing_files.append(missing)
 
             keyframes_raw = c_data.get("keyframes", [])
@@ -410,7 +411,7 @@ def _project_from_dict(
                 media=media,
                 start=float(c_data.get("start", 0.0)),
                 duration=float(c_data.get("duration", 0.0)),
-                in_point=(0.0 if media.kind is MediaKind.IMAGE or overlay_type in ("text", "filter")
+                in_point=(0.0 if media.kind is MediaKind.IMAGE or overlay_type in (OverlayType.TEXT, OverlayType.FILTER)
                           else float(c_data.get("in_point", 0.0))),
                 gain_db=float(c_data.get("gain_db", 0.0)),
                 muted=bool(c_data.get("muted", False)),
@@ -425,7 +426,7 @@ def _project_from_dict(
                 rotation=float(c_data.get("rotation", 0.0)),
                 opacity=float(c_data.get("opacity", 1.0)),
                 keyframes=tuple(clip_kfs),
-                overlay_type=str(c_data.get("overlay_type", "none")),
+                overlay_type=overlay_type,
                 text_content=str(c_data.get("text_content", "")),
                 font_family=str(c_data.get("font_family", "Sans Serif")),
                 font_size=int(c_data.get("font_size", 36)),

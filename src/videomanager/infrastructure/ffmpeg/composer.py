@@ -46,6 +46,7 @@ from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import fit_size
 from videomanager.domain.project import Clip
+from videomanager.domain.project import OverlayType
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import Project
 from videomanager.domain.project import TrackKind
@@ -162,7 +163,7 @@ def _pieces(
             has_a = want_audio and clip.has_sound and not track.muted
             if not has_v and not has_a:
                 continue
-            is_overlay_filter = clip.overlay_type in ("filter", "transition")
+            is_overlay_filter = clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION)
             idx = -1 if is_overlay_filter else input_idx
             if not is_overlay_filter:
                 input_idx += 1
@@ -317,9 +318,9 @@ def _input_args(
     text_assets: dict[int, Path] | None = None,
 ) -> list[str]:
     clip = piece.clip
-    if clip.overlay_type in ("filter", "transition"):
+    if clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION):
         return []
-    if clip.overlay_type == "text":
+    if clip.overlay_type is OverlayType.TEXT:
         path = (text_assets or {}).get(clip.clip_id)
         if path is None:
             raise ConversionError(Text("COMPOSE_TEXT_ASSETS_MISSING"))
@@ -534,7 +535,7 @@ def _video_chain(
 ) -> str:
     """Ajusta um bloco ao formato da tela e o coloca no instante certo."""
     clip = piece.clip
-    is_overlay = clip.overlay_type in ("image", "text") or clip.is_image
+    is_overlay = clip.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT) or clip.is_image
     if is_overlay:
         steps = [f"trim=duration={_whole_frames(piece.duration, fps):.6f}"]
         if piece.offset > 0:
@@ -560,7 +561,7 @@ def _video_chain(
         if has_anim_scale:
             expr_sx = _keyframe_expr(clip.keyframes, "scale_x", origin, sx, time_var="t")
             expr_sy = _keyframe_expr(clip.keyframes, "scale_y", origin, sy, time_var="t")
-            if clip.overlay_type == "text":
+            if clip.overlay_type is OverlayType.TEXT:
                 steps.append(
                     f"scale=w='max(2,trunc(iw*({expr_sx})/2)*2)':h='max(2,trunc(ih*({expr_sy})/2)*2)':eval=frame"
                 )
@@ -579,10 +580,10 @@ def _video_chain(
                 steps.append(
                     f"scale=w='max(2,trunc({base_w}*({expr_sx})/2)*2)':h='max(2,trunc({base_h}*({expr_sy})/2)*2)':eval=frame"
                 )
-        elif clip.overlay_type == "text":
+        elif clip.overlay_type is OverlayType.TEXT:
             if abs(sx - 1.0) > 1e-9 or abs(sy - 1.0) > 1e-9:
                 steps.append(f"scale=w='max(2,trunc(iw*{sx:.6f}/2)*2)':h='max(2,trunc(ih*{sy:.6f}/2)*2)'")
-        elif clip.overlay_type == "image" or clip.is_image:
+        elif clip.overlay_type is OverlayType.IMAGE or clip.is_image:
             canon_w, canon_h = canonical_size or (project.width, project.height)
             canon_base_w, canon_base_h = image_base_size(
                 clip.media.width if clip.media else None,
@@ -617,7 +618,7 @@ def _video_chain(
             all_k_sy = [clip.scale_y] + [k.scale_y for k in clip.keyframes]
             max_k_sx = max(all_k_sx)
             max_k_sy = max(all_k_sy)
-            if clip.overlay_type == "text":
+            if clip.overlay_type is OverlayType.TEXT:
                 tw = project.width
                 th = project.height
                 max_diag = max(2, int(math.ceil(math.hypot(tw * max_k_sx, th * max_k_sy))) // 2 * 2)
@@ -1046,7 +1047,7 @@ def _transition_additional_pieces(
             end = min(context.end, end)
             if end - begin <= 1e-6:
                 continue
-            index = -1 if clip.overlay_type == "filter" else next_input
+            index = -1 if clip.overlay_type is OverlayType.FILTER else next_input
             if index >= 0:
                 next_input += 1
             result.append(
@@ -1251,7 +1252,7 @@ def _compose_video_piece(
         enable += (
             f"*not(gte(t,{excluded_start:.6f})*lt(t,{excluded_end:.6f}))"
         )
-    if piece.clip.overlay_type == "filter":
+    if piece.clip.overlay_type is OverlayType.FILTER:
         name = piece.clip.filter_name
         if name == "pb":
             expression = f"hue=s=0:enable='{enable}'"
@@ -1276,7 +1277,7 @@ def _compose_video_piece(
     filters.append(_video_chain(piece, project, fps, interpolate, canonical_size=canonical_size)
                    .replace(f'[v{piece.index}]', video_label))
     label = f"[o{order}]"
-    is_overlay_item = piece.clip.overlay_type in ("image", "text") or piece.clip.is_image
+    is_overlay_item = piece.clip.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT) or piece.clip.is_image
     has_transform = (
         piece.clip.has_keyframes
         or abs(piece.clip.x - 0.5) > 1e-9
@@ -1421,7 +1422,7 @@ def _compose_additional_transition(filters: list[str], current: str, render: _Tr
     """Aplica a passagem na camada original do adicional, sem rebaixá-lo ao vídeo."""
     sides = [[p for p in pieces if p.track_index == track_index]
              for pieces in (render.left_additionals, render.right_additionals)]
-    effects = [p for side in sides for p in side if p.clip.overlay_type == 'filter']
+    effects = [p for side in sides for p in side if p.clip.overlay_type is OverlayType.FILTER]
     if effects:
         # Filtros recebem os pixels compostos de cada lado, inclusive o fundo.
         # As passagens espaciais compensam o movimento desse fundo abaixo.

@@ -63,6 +63,7 @@ from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import create_preset_keyframes
 from videomanager.presentation.qt.fonts import ensure_application_fonts
 from videomanager.domain.project import MAX_GAIN_DB
+from videomanager.domain.project import OverlayType
 from videomanager.domain.project import MIN_GAIN_DB
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaRef
@@ -95,11 +96,11 @@ def _clip_name(clip: Clip) -> str:
     foi inserido. Mostrado como nome, editar o texto deixava o antigo na tela,
     e a interface em inglês exibia "Transição_".
     """
-    if clip.overlay_type == "text":
+    if clip.overlay_type is OverlayType.TEXT:
         return clip.text_content or strings.EDIT_CLIP_TEXT
-    if clip.overlay_type == "filter":
+    if clip.overlay_type is OverlayType.FILTER:
         return strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
-    if clip.overlay_type == "transition":
+    if clip.overlay_type is OverlayType.TRANSITION:
         tname = clip.transition_name or "fade"
         return strings.EDIT_TRANSITION_TITLE.format(name=strings.EDIT_TRANSITIONS.get(tname, ("", tname))[1])
     return clip.media.name if clip.media else strings.PROP_KINDS.get(clip.overlay_type, clip.overlay_type)
@@ -534,12 +535,12 @@ class _Preview(QLabel):
             return None
         t_offset = max(0.0, self._position - clip.start)
         transform = clip.transform_at(t_offset)
-        if clip.overlay_type == "image" or clip.is_image:
+        if clip.overlay_type is OverlayType.IMAGE or clip.is_image:
             return self._image_overlay_geometry(clip, transform, vrect)
         sx = max(0.05, transform.scale_x)
         sy = max(0.05, transform.scale_y)
 
-        if clip.overlay_type == "text":
+        if clip.overlay_type is OverlayType.TEXT:
             ensure_application_fonts()
             font = QFont(clip.font_family or "Sans Serif", clip.font_size or 36)
             font.setBold(clip.font_bold)
@@ -597,7 +598,7 @@ class _Preview(QLabel):
     ) -> tuple[str | None, tuple[float, float, float, float] | None]:
         if (
             clip is None
-            or clip.overlay_type == "filter"
+            or clip.overlay_type is OverlayType.FILTER
             or not clip.contains(self._position)
         ):
             return None, None
@@ -1023,7 +1024,7 @@ class _Preview(QLabel):
             and clip is not None
             and clip.has_image
             and not clip.audio_only
-            and clip.overlay_type not in ("filter", "transition")
+            and clip.overlay_type not in (OverlayType.FILTER, OverlayType.TRANSITION)
             and clip.contains(self._position)
         )
 
@@ -1082,7 +1083,7 @@ class _Preview(QLabel):
         if has_active:
             t_offset = max(0.0, self._position - clip.start)
             transform = clip.transform_at(t_offset)
-            if clip.overlay_type == "image" or clip.is_image:
+            if clip.overlay_type is OverlayType.IMAGE or clip.is_image:
                 vrect = self._video_rect()
                 geom = self._image_overlay_geometry(clip, transform, vrect)
             else:
@@ -1532,7 +1533,7 @@ class _ClipPropertiesWidget(QWidget):
             self._refresh_header()
 
             # Calcular base_w e base_h
-            if clip.overlay_type == "text":
+            if clip.overlay_type is OverlayType.TEXT:
                 font = QFont(clip.font_family or "Sans Serif", clip.font_size or 36)
                 font.setBold(clip.font_bold)
                 font.setItalic(clip.font_italic)
@@ -1548,7 +1549,7 @@ class _ClipPropertiesWidget(QWidget):
                 self._base_h = float(max(40, ((total_text_h + pad * 2 + 3) // 4) * 4))
                 self._base_w *= text_ratio
                 self._base_h *= text_ratio
-            elif clip.overlay_type == "image" or clip.is_image:
+            elif clip.overlay_type is OverlayType.IMAGE or clip.is_image:
                 if clip.media is not None:
                     bw, bh = image_base_size(clip.media.width, clip.media.height, self._proj_w, self._proj_h)
                     self._base_w, self._base_h = float(bw), float(bh)
@@ -1569,11 +1570,11 @@ class _ClipPropertiesWidget(QWidget):
             cur_h = max(1, round(self._base_h * sy))
             self._aspect_ratio = max(0.001, cur_w / max(1.0, float(cur_h)))
 
-            is_trans = clip.overlay_type == "transition"
+            is_trans = clip.overlay_type is OverlayType.TRANSITION
             has_image_media = bool(clip.media and (clip.media.has_video or clip.is_image))
-            can_chroma = has_image_media and clip.overlay_type not in ("text", "filter", "transition")
+            can_chroma = has_image_media and clip.has_media_file
 
-            can_animate = clip.overlay_type not in ("transition", "filter") and (clip.has_image or clip.is_additional)
+            can_animate = clip.overlay_type not in (OverlayType.TRANSITION, OverlayType.FILTER) and (clip.has_image or clip.is_additional)
             self._transform_group.setVisible(can_animate)
             self._animation_group.setVisible(can_animate)
             self._chromakey_group.setVisible(can_chroma)

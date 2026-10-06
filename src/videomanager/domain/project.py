@@ -162,14 +162,35 @@ def display_width(width: int | None, sar: float | None) -> int | None:
     return max(2, round(width * sar / 2) * 2)
 
 
+class OverlayType(str, Enum):
+    """O que o bloco é além de mídia comum. O valor é o que o .vmp grava."""
+
+    NONE = "none"
+    IMAGE = "image"
+    TEXT = "text"
+    FILTER = "filter"
+    TRANSITION = "transition"
+
+    # Formatado, vale o valor e não "OverlayType.TEXT": o Python 3.12 passou a
+    # formatar Enum misto pelo nome, e o tipo aparece em textos e no .vmp.
+    __str__ = str.__str__
+    __format__ = str.__format__
+
+    @property
+    def has_media_file(self) -> bool:
+        """Se o bloco aponta para um arquivo de verdade. Texto, filtro e
+        transição têm só um caminho-identificador (ver ``PSEUDO_PREFIXES``)."""
+        return self not in PSEUDO_PREFIXES
+
+
 # Prefixo do caminho dos blocos sem arquivo (texto, filtro, transição). É
 # identificador gravado no .vmp — por ele a leitura sabe que não há arquivo a
 # procurar —, então não se traduz nem muda: projetos salvos dependem dele.
 # Morava como literal na tela que cria o bloco e repetido na persistência.
-PSEUDO_PREFIXES = {"text": "Texto_", "filter": "Filtro_", "transition": "Transição_"}
+PSEUDO_PREFIXES = {OverlayType.TEXT: "Texto_", OverlayType.FILTER: "Filtro_", OverlayType.TRANSITION: "Transição_"}
 
 
-def pseudo_media(overlay: str, label: str, duration: float) -> MediaRef:
+def pseudo_media(overlay: OverlayType | str, label: str, duration: float) -> MediaRef:
     """A "mídia" de um bloco sem arquivo: caminho-identificador e duração."""
     return MediaRef(path=Path(f"{PSEUDO_PREFIXES[overlay]}{label}"), kind=MediaKind.IMAGE, duration=duration)
 
@@ -258,7 +279,7 @@ class Clip:
     scale_y: float = None  # type: ignore[assignment]
     rotation: float = 0.0  # Rotação em graus (0.0 a 360.0)
     # Metadados de sobreposições de adicionais
-    overlay_type: str = "none"  # "none", "image", "text", "filter"
+    overlay_type: OverlayType = OverlayType.NONE
     text_content: str = ""
     font_family: str = "Sans Serif"
     font_size: int = 36
@@ -292,6 +313,8 @@ class Clip:
 
     def __post_init__(self) -> None:
         _clip_ids.reserve(self.clip_id)
+        # Quem lê o .vmp e os testes passam o texto; o bloco guarda o tipo.
+        object.__setattr__(self, "overlay_type", OverlayType(self.overlay_type))
         if self.scale_x is None:
             object.__setattr__(self, "scale_x", self.scale)
         if self.scale_y is None:
@@ -325,7 +348,7 @@ class Clip:
         """
         if self.is_transition:
             return False
-        if self.overlay_type in ("image", "text", "filter"):
+        if self.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT, OverlayType.FILTER):
             return True
         return bool(self.media and self.media.has_video and not self.audio_only)
 
@@ -338,17 +361,21 @@ class Clip:
         adicional neste sentido e mesmo assim vive na trilha de vídeo (ver
         :attr:`is_overlay`).
         """
-        return self.overlay_type in ("image", "text", "filter", "transition") or self.is_image
+        return self.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT, OverlayType.FILTER, OverlayType.TRANSITION) or self.is_image
+
+    @property
+    def has_media_file(self) -> bool:
+        return self.overlay_type.has_media_file
 
     @property
     def is_overlay(self) -> bool:
         """Texto e filtro: o que vive nas trilhas de Adicionais."""
-        return self.overlay_type in ("text", "filter")
+        return self.overlay_type in (OverlayType.TEXT, OverlayType.FILTER)
 
     @property
     def is_transition(self) -> bool:
         """Se este bloco representa uma transição entre dois vídeos."""
-        return self.overlay_type == "transition"
+        return self.overlay_type is OverlayType.TRANSITION
 
     @property
     def can_adjust_sound(self) -> bool:
@@ -363,7 +390,7 @@ class Clip:
     @property
     def is_image(self) -> bool:
         return (
-            self.overlay_type in ("none", "image")
+            self.overlay_type in (OverlayType.NONE, OverlayType.IMAGE)
             and self.media is not None
             and self.media.kind is MediaKind.IMAGE
         )
@@ -647,7 +674,7 @@ class Project:
         return min(self.width / self.text_reference_width, self.height / self.text_reference_height)
 
     def with_output_canvas(self, width: int, height: int, fps: float | None = None) -> Project:
-        has_text = any(c.overlay_type == "text" for c in self.clips)
+        has_text = any(c.overlay_type is OverlayType.TEXT for c in self.clips)
         return replace(self, width=width, height=height, fps=self.fps if fps is None else fps,
                        text_reference_width=self.text_reference_width if has_text else width,
                        text_reference_height=self.text_reference_height if has_text else height)
@@ -661,7 +688,7 @@ class Project:
         tracks = tuple(replace(t, clips=tuple(
             replace(c, scale=1.0, scale_x=c.scale_x * ratio, scale_y=c.scale_y * ratio,
                     keyframes=tuple(replace(k, scale_x=k.scale_x * ratio, scale_y=k.scale_y * ratio)
-                                    for k in c.keyframes)) if c.overlay_type == "text" else c
+                                    for k in c.keyframes)) if c.overlay_type is OverlayType.TEXT else c
             for c in t.clips)) for t in self.tracks)
         return replace(self, tracks=tracks, width=width, height=height,
                        text_reference_width=width, text_reference_height=height)
@@ -870,10 +897,10 @@ class Project:
             return self.with_updated_clip(existing.clip_id, transition_name=name, duration=duration,
                                           transition_affects_additionals=affects_additionals), existing.clip_id
         marker = Clip(
-            media=pseudo_media("transition", label, duration),
+            media=pseudo_media(OverlayType.TRANSITION, label, duration),
             start=max(0.0, left.end - duration / 2.0),
             duration=duration,
-            overlay_type="transition",
+            overlay_type=OverlayType.TRANSITION,
             transition_name=name,
             transition_left_id=left.clip_id,
             transition_right_id=right.clip_id,
@@ -1575,7 +1602,7 @@ def slideshow_canvas(project: Project) -> tuple[int, int] | None:
     if any(c.media and c.media.kind is MediaKind.VIDEO for c in clips):
         return None
     photos = [c.media for c in clips if c.is_image and c.media and c.media.width and c.media.height
-              and c.overlay_type not in ('text', 'filter', 'transition')]
+              and c.has_media_file]
     if not photos:
         return None
     biggest = max(photos, key=lambda m: m.width * m.height)

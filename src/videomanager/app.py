@@ -202,7 +202,7 @@ def _smoke_check(app: QApplication, window: MainWindow) -> None:
     import tempfile
     from PySide6.QtGui import QFontDatabase
     from videomanager.bootstrap import build_text_rasterizer
-    from videomanager.domain.project import Clip, MediaKind, MediaRef, new_project
+    from videomanager.domain.project import Clip, MediaKind, MediaRef, OverlayType, new_project
     from videomanager.domain.composition import Composition
     from videomanager.infrastructure.system.binaries import find_tools
     from videomanager.infrastructure.ffmpeg.composer import frame_command
@@ -246,7 +246,7 @@ def _smoke_check(app: QApplication, window: MainWindow) -> None:
         if tools is None:
             raise RuntimeError('FFmpeg/ffprobe ausentes; provisione ou inclua no PATH.')
         clip = Clip(MediaRef(Path('Texto'), MediaKind.IMAGE), 0, 1,
-                    overlay_type='text', text_content='Video Manager', font_family='Carlito')
+                    overlay_type=OverlayType.TEXT, text_content='Video Manager', font_family='Carlito')
         project = replace(new_project().with_clip(0, clip), width=320, height=180, fps=24)
         rasterizer = build_text_rasterizer()
         assets = {clip.clip_id: rasterizer.render(clip)}
