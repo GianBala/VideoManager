@@ -17,6 +17,7 @@ ffmpeg pisca um console preto na frente da janela.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -57,10 +58,18 @@ from videomanager.application.capabilities import FFmpegTools as FFmpegTools
 # A build estável, com o mesmo driver, codifica sem reclamar. Empacotar o ramo
 # de desenvolvimento troca estabilidade por novidades que este aplicativo não
 # usa, e cobra isso justamente de quem tem placa de vídeo.
-_ARCHIVES: dict[str, str] = {
-    "linux64": "ffmpeg-n7.1.5-12-g1fdbca85aa-linux64-gpl-7.1.tar.xz",
-    "linuxarm64": "ffmpeg-n7.1.5-12-g1fdbca85aa-linuxarm64-gpl-7.1.tar.xz",
-    "win64": "ffmpeg-n7.1.5-12-g1fdbca85aa-win64-gpl-7.1.zip",
+#
+# Cada arquivo vai com o SHA-256 que o GitHub publica para ele (campo "digest"
+# do asset): o executável roda com os privilégios do usuário, e sem o resumo a
+# integridade dependia só do TLS e da conta do fornecedor. Trocar de publicação
+# é trocar os resumos junto — o teste de rede compara os dois.
+_ARCHIVES: dict[str, tuple[str, str]] = {
+    "linux64": ("ffmpeg-n7.1.5-12-g1fdbca85aa-linux64-gpl-7.1.tar.xz",
+                "c1e6caf48923dd8e6bc5e54d51ba70c321175b8162ae9c414c392990e72f0e79"),
+    "linuxarm64": ("ffmpeg-n7.1.5-12-g1fdbca85aa-linuxarm64-gpl-7.1.tar.xz",
+                   "a9a50c5782ef5e45306d58d1a9a819015b472d8da30ab6a77f15f571c861a71b"),
+    "win64": ("ffmpeg-n7.1.5-12-g1fdbca85aa-win64-gpl-7.1.zip",
+              "c067a1ca58f4fc4449f4bab0890fbcd65cbb3e5f46e066cf9c768e06c0c1d4d9"),
 }
 # O fornecedor retirou 7.1 do latest. Uma publicação mensal fixa mantém o
 # provisionamento e a compatibilidade de drivers testada. Atualizações desta
@@ -320,7 +329,7 @@ def probe_version(ffmpeg: Path) -> str:
 def download_url() -> str:
     key = platform_key()
     try:
-        return _RELEASE_BASE + _ARCHIVES[key]
+        return _RELEASE_BASE + _ARCHIVES[key][0]
     except KeyError:
         raise BinaryDownloadError(Text("FFMPEG_NO_BUILD", platform=key)) from None
 
@@ -330,8 +339,10 @@ def _stream_download(
     dest: Path,
     progress: ProgressCb | None,
     cancelled: CancelCheck | None = None,
-) -> None:
+) -> str:
+    """Grava o download em ``dest`` e devolve o SHA-256 do que foi gravado."""
     request = Request(url, headers={"User-Agent": f"{APP_NAME}/instalador"})
+    digest = hashlib.sha256()
     try:
         with urlopen(request, timeout=60) as response:  # noqa: S310 - URL fixa e https
             # O urllib segue redirecionamento em silêncio, **inclusive de https
@@ -354,6 +365,7 @@ def _stream_download(
                     if not chunk:
                         break
                     handle.write(chunk)
+                    digest.update(chunk)
                     received += len(chunk)
                     if progress:
                         progress(received, total)
@@ -361,6 +373,7 @@ def _stream_download(
         raise BinaryDownloadError(Text("FFMPEG_DOWNLOAD_FAILED", reason=str(exc.reason))) from exc
     except OSError as exc:
         raise BinaryDownloadError(Text("FFMPEG_WRITE_FAILED", error=str(exc))) from exc
+    return digest.hexdigest()
 
 
 def _extract_wanted(archive: Path, target_dir: Path) -> None:
@@ -412,11 +425,13 @@ def download_tools(
     """Baixa e instala ffmpeg/ffprobe no diretório gerenciado.
 
     Usa a publicação fixa declarada acima, exige HTTPS também após os
-    redirecionamentos e executa ``ffmpeg -version`` ao final. Esse diagnóstico
+    redirecionamentos, confere o SHA-256 antes de extrair e executa
+    ``ffmpeg -version`` ao final. Esse diagnóstico
     detecta executável truncado ou arquitetura incompatível. A publicação e
     os nomes dos assets são cobertos por verificação de rede opt-in.
     """
     url = download_url()
+    expected = _ARCHIVES[platform_key()][1]
     target = managed_dir()
     target.mkdir(parents=True, exist_ok=True)
     # Nome único, e não "download.tar.xz": duas janelas abertas ao mesmo tempo
@@ -428,16 +443,26 @@ def download_tools(
     os.close(handle)
     archive = Path(raw)
 
+    # Extrai numa pasta à parte e só troca de lugar depois de o ffmpeg rodar.
+    # Extraindo direto no nome final, uma queda ou disco cheio no meio deixava
+    # um binário truncado que ``_usable`` aceita (no Windows ``X_OK`` é sempre
+    # verdade): toda conversão falhava dali em diante e o aplicativo nunca mais
+    # oferecia o download.
+    staging = Path(tempfile.mkdtemp(dir=target, prefix=".extraindo-"))
     try:
-        _stream_download(url, archive, progress, cancelled)
-        _extract_wanted(archive, target)
+        if _stream_download(url, archive, progress, cancelled) != expected:
+            raise BinaryDownloadError(Text("FFMPEG_CHECKSUM_MISMATCH"))
+        _extract_wanted(archive, staging)
+        probe_version(staging / exe_name("ffmpeg"))  # valida de verdade; levanta se não executar
+        for name in (exe_name("ffmpeg"), exe_name("ffprobe")):
+            (staging / name).replace(target / name)
     finally:
         archive.unlink(missing_ok=True)
+        shutil.rmtree(staging, ignore_errors=True)
 
     found = _look_in(target)
     if not found:
         raise BinaryDownloadError(Text("FFMPEG_EXTRACTED_UNUSABLE", path=target))
-    probe_version(found[0])  # valida de verdade; levanta se não executar
     return FFmpegTools(found[0], found[1], "gerenciado")
 
 

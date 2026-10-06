@@ -801,6 +801,15 @@ class TestVelocidadeEFiltros:
         filter_str = ";".join(graph.filters)
         assert "atempo=1.5000" in filter_str
 
+    def test_velocidade_fora_do_passo_da_tela_estica_imagem_e_som_juntos(self) -> None:
+        # O vídeo aplicava velocidade acima de 1e-9 de diferença, o áudio só a
+        # partir de 0,01: 1,005 (só editando o .vmp) esticava a imagem e não o
+        # som — 0,5% de dessincronia, cerca de 18 s por hora.
+        proj = projeto(video_track(clip(VIDEO, speed=1.005)))
+        filter_str = ";".join(build_graph(proj).filters)
+        assert "setpts=0.995025" in filter_str
+        assert "atempo=1.0050" in filter_str
+
     def test_filtro_preto_e_branco(self) -> None:
         c_filter = clip(VIDEO, overlay_type="filter", filter_name="pb")
         t_add = Track(kind=TrackKind.ADDITIONAL, name="Adicionais 1", clips=(c_filter,))

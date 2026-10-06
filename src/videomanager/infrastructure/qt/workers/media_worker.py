@@ -15,6 +15,7 @@ from videomanager.application.editor.media import MediaResult
 from videomanager.application.editor.media import ReadMedia
 from videomanager.infrastructure.storage.projects import JsonProjectRepository
 from videomanager.infrastructure.qt.workers.signals import emit_safely
+from videomanager.infrastructure.qt.workers.signals import report_unexpected
 
 
 class MediaSignals(QObject):
@@ -61,6 +62,7 @@ class MediaWorker(QRunnable):
         except JobCancelled:
             emit_safely(self.signals.cancelled, self.token)
         except Exception as exc:
+            report_unexpected(exc)
             emit_safely(self.signals.failed, self.token, str(exc))
         finally:
             emit_safely(self.signals.done)

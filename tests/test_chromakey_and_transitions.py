@@ -197,6 +197,25 @@ def test_composer_chromakey_filter() -> None:
     assert simple_trim(p) is None
 
 
+@pytest.mark.parametrize("cor", ["#00B140", "0x00B140", "00b140"])
+def test_composer_chromakey_aceita_as_grafias_hexadecimais(cor) -> None:
+    media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=10.0, width=1920, height=1080)
+    clip = Clip(media=media, start=0.0, duration=5.0, chromakey_enabled=True, chromakey_color=cor)
+    filters = ";".join(build_graph(Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(clip,)),))).filters)
+    assert f"chromakey=color=0x{cor[-6:]}:similarity=" in filters
+
+
+def test_composer_chromakey_nao_deixa_cor_estranha_chegar_ao_grafo() -> None:
+    # Defesa em profundidade: a leitura do .vmp já recusa, mas o grafo não
+    # pode depender disso — a cor é o único texto livre que chega até ele.
+    media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=10.0, width=1920, height=1080)
+    hostil = "00FF00:similarity=1,metadata=mode=print:file=/tmp/vm-escrita"
+    clip = Clip(media=media, start=0.0, duration=5.0, chromakey_enabled=True, chromakey_color=hostil)
+    filters = ";".join(build_graph(Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(clip,)),))).filters)
+    assert "metadata" not in filters
+    assert "chromakey=color=0x00FF00:similarity=0.2500:blend=0.1000" in filters
+
+
 def test_composer_transitions_graph() -> None:
     media = MediaRef(path=Path("video.mp4"), kind=MediaKind.VIDEO, duration=12.0)
     for stored, rendered in (
@@ -803,3 +822,32 @@ def test_fullscreen_preview_resize_signal(qapp: QApplication) -> None:
 
 # Estes cenários exercitam adaptadores ou apresentação Qt.
 pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
+
+
+def _par_com_corte(duracao: float = 20.0):
+    media = MediaRef(Path("video.mp4"), MediaKind.VIDEO, duration=2 * duracao)
+    left = Clip(media, start=0.0, duration=duracao)
+    right = Clip(media, start=duracao, duration=duracao, in_point=duracao)
+    return Project(tracks=(Track(TrackKind.VIDEO, clips=(left, right)),)), left, right
+
+
+def test_uma_transicao_por_corte_e_inserir_de_novo_substitui():
+    projeto, left, right = _par_com_corte()
+    projeto, primeira = projeto.with_transition(0, left, right, "fade", "Fade", 1.0, False)
+    projeto, segunda = projeto.with_transition(0, left, right, "wipeleft", "Wipe", 2.0, True)
+    marcadores = [c for c in projeto.clips if c.is_transition]
+    assert primeira == segunda and len(marcadores) == 1
+    assert (marcadores[0].transition_name, marcadores[0].duration) == ("wipeleft", 2.0)
+    assert marcadores[0].start == pytest.approx(19.0)
+
+
+def test_sem_teto_fixo_a_transicao_vai_ate_o_que_cabe_nos_dois_lados():
+    # O campo parava em 5 s e a alça ia até 12: os dois discordavam sobre a
+    # mesma transição. Sem teto fixo (decisão do usuário), vale o que cabe.
+    projeto, left, right = _par_com_corte(20.0)
+    projeto, marcador = projeto.with_transition(0, left, right, "fade", "Fade", 30.0, False)
+    clip = projeto.find(marcador)[1]
+    assert clip.duration == pytest.approx(20.0)
+    assert projeto.transition_limit(clip) == pytest.approx(20.0)
+    puxada = projeto.resized(marcador, "fim", 20.0 + 6.0)
+    assert puxada.find(marcador)[1].duration == pytest.approx(12.0)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -327,3 +328,119 @@ def test_suportes_negativos_exigem_v2_e_sobrevivem_roundtrip(tmp_path):
     encoded['version'] = 1
     with pytest.raises(ProjectError):
         project_from_dict(encoded)
+
+
+@pytest.mark.parametrize('cor', [
+    '#00FF00:similarity=1,metadata=mode=print:file=/tmp/vm-escrita',
+    '00FF00;[0:v]null',
+    "#00FF00'",
+    'green',
+    '#00FF0',
+    '#00FF00FF',
+])
+def test_cor_do_chroma_key_fora_do_padrao_e_recusada(cor):
+    # A cor entra no grafo do ffmpeg: um .vmp de terceiros com ':' ou ','
+    # nela encadeava filtros arbitrários — inclusive escrita de arquivo — só
+    # de abrir o projeto, porque a prévia monta o grafo na abertura.
+    data = {'version': 3, 'tracks': [{'kind': 'VIDEO', 'clips': [{
+        'duration': 2, 'chromakey_enabled': True, 'chromakey_color': cor,
+        'media': {'path': 'video.mp4', 'kind': 'VIDEO'}}]}]}
+    with pytest.raises(ProjectError):
+        project_from_dict(data)
+
+
+@pytest.mark.parametrize('cor', ['#00b140', '#00B140', '0x00B140', '00B140'])
+def test_cor_do_chroma_key_hexadecimal_continua_valida(cor):
+    data = {'version': 3, 'tracks': [{'kind': 'VIDEO', 'clips': [{
+        'duration': 2, 'chromakey_enabled': True, 'chromakey_color': cor,
+        'media': {'path': 'video.mp4', 'kind': 'VIDEO'}}]}]}
+    loaded, _ = project_from_dict(data)
+    assert loaded.clips[0].chromakey_color == cor
+
+
+def test_projeto_com_eixos_explicitos_abre_como_gravado():
+    # Com scale=2 e os eixos em 1, o __post_init__ reaplicava o 2.
+    data = {'version': 3, 'tracks': [{'kind': 'VIDEO', 'clips': [{
+        'duration': 5, 'scale': 2.0, 'scale_x': 1.0, 'scale_y': 1.0,
+        'media': {'path': 'a.mp4', 'kind': 'VIDEO'}}]}]}
+    clip = project_from_dict(data)[0].clips[0]
+    assert (clip.scale_x, clip.scale_y) == (1.0, 1.0)
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='permissão POSIX')
+def test_salvar_preserva_a_permissao_do_projeto(tmp_path):
+    # O temporário do mkstemp nasce 0600 e a troca levava isso junto: um
+    # projeto numa pasta compartilhada deixava de ser legível por outros
+    # depois de qualquer gravação.
+    path = tmp_path / 'p.vmp'
+    save_project(_sample_project(tmp_path / 'video.mp4'), path)
+    path.chmod(0o664)
+    save_project(_sample_project(tmp_path / 'video.mp4'), path)
+    assert path.stat().st_mode & 0o777 == 0o664
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='permissão POSIX')
+def test_projeto_novo_segue_a_mascara_do_usuario(tmp_path):
+    antiga = os.umask(0o022)
+    try:
+        save_project(_sample_project(tmp_path / 'video.mp4'), tmp_path / 'novo.vmp')
+    finally:
+        os.umask(antiga)
+    assert (tmp_path / 'novo.vmp').stat().st_mode & 0o777 == 0o644
+
+
+def test_projeto_salvo_no_windows_acha_as_midias_no_linux(tmp_path):
+    # O rel_path saía com o separador do sistema: "media\\clipe.mp4" gravado
+    # no Windows não era achado no Linux, que lê "\\" como parte do nome.
+    from videomanager.infrastructure.storage.project_json import project_from_dict
+    (tmp_path / 'media').mkdir()
+    (tmp_path / 'media' / 'clipe ação.mp4').write_bytes(b'x')
+    data = {'version': 3, 'tracks': [{'kind': 'VIDEO', 'clips': [{'duration': 2, 'media': {
+        'path': 'C:\\Users\\x\\Videos\\clipe ação.mp4', 'rel_path': 'media\\clipe ação.mp4', 'kind': 'VIDEO'}}]}]}
+    projeto, ausentes = project_from_dict(data, base_dir=tmp_path)
+    assert not ausentes
+    assert projeto.clips[0].media.path == (tmp_path / 'media' / 'clipe ação.mp4').resolve()
+
+
+def test_caminho_relativo_e_gravado_com_barra(tmp_path):
+    (tmp_path / 'media').mkdir()
+    video = tmp_path / 'media' / 'video.mp4'
+    video.write_bytes(b'x')
+    data = project_to_dict(_sample_project(video), base_dir=tmp_path)
+    assert data['tracks'][0]['clips'][0]['media']['rel_path'] == 'media/video.mp4'
+
+
+# As chaves que a versão 3 do .vmp grava. Uma versão anterior que abre um
+# arquivo com chave nova a perde em silêncio ao salvar (a leitura ignora o
+# que não conhece), e keyframes e opacity já entraram assim, sem subir a
+# versão. Mudou este conjunto? Suba PROJECT_VERSION: a versão anterior passa
+# a recusar o arquivo com mensagem, em vez de apagar o que não entende.
+_CHAVES_V3 = {
+    'projeto': {'version', 'width', 'height', 'fps', 'text_reference_width', 'text_reference_height', 'tracks'},
+    'trilha': {'track_id', 'name', 'kind', 'muted', 'visible', 'clips'},
+    'bloco': {'clip_id', 'start', 'duration', 'in_point', 'gain_db', 'muted', 'detached', 'audio_only', 'speed',
+              'x', 'y', 'scale', 'scale_x', 'scale_y', 'rotation', 'overlay_type', 'text_content',
+              'font_family', 'font_size', 'font_bold', 'font_italic', 'text_color', 'stroke_color',
+              'stroke_width', 'filter_name', 'transition_name', 'transition_left_id', 'transition_right_id',
+              'transition_affects_additionals', 'chromakey_enabled', 'chromakey_color',
+              'chromakey_similarity', 'chromakey_blend', 'opacity', 'keyframes', 'media'},
+    'midia': {'path', 'rel_path', 'kind', 'duration', 'width', 'height', 'fps', 'has_audio', 'channels'},
+    'quadro_chave': {'time_offset', 'x', 'y', 'scale_x', 'scale_y', 'rotation', 'opacity', 'easing'},
+}
+
+
+def test_campo_novo_no_projeto_exige_subir_a_versao(tmp_path):
+    from videomanager.domain.keyframe import Keyframe
+    from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+    video = tmp_path / 'video.mp4'
+    video.write_bytes(b'x')
+    projeto = _sample_project(video)
+    clip = projeto.clips[0]
+    projeto = projeto.with_updated_clip(clip.clip_id, keyframes=(Keyframe(0.0, x=0.2),))
+    data = project_to_dict(projeto, base_dir=tmp_path)
+    trilha = data['tracks'][0]
+    bloco = trilha['clips'][0]
+    gravado = {'projeto': set(data), 'trilha': set(trilha), 'bloco': set(bloco),
+               'midia': set(bloco['media']), 'quadro_chave': set(bloco['keyframes'][0])}
+    assert PROJECT_VERSION == 3, 'versão nova: atualize _CHAVES_V3 para o conjunto dela'
+    assert gravado == _CHAVES_V3

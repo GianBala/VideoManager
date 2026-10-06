@@ -29,7 +29,7 @@ from typing import cast
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QMimeData, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QMimeData, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -50,6 +50,7 @@ from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from videomanager.domain.project import Clip
+from videomanager.domain.project import OverlayType
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import Project
 from videomanager.domain.project import TrackKind
@@ -81,6 +82,13 @@ _HANDLE_WIDTH = 5
 # o ícone entre clipes do CapCut. A duração real segue sendo dada pela régua;
 # só a área interativa recebe este piso visual.
 _TRANSITION_MIN_WIDTH = 36
+# Quadro-chave aceso quando a agulha está a menos disto dele, em segundos.
+_KEYFRAME_ACTIVE = 0.05
+# Meia largura da cabeça da agulha (12 px) mais a linha e a suavização.
+_PLAYHEAD_HALF = 9
+# Folga do recorte por área: o marcador de transição tem largura mínima maior
+# que a do trecho que ocupa, e a borda do bloco se desenha um pouco por fora.
+_CLIP_MARGIN = _TRANSITION_MIN_WIDTH
 _SNAP_PIXELS = 7
 _MIN_VIEW = 0.4
 
@@ -381,12 +389,27 @@ class Timeline(QWidget):
 
     def set_position(self, seconds: float, *, follow: bool = True) -> None:
         previous = self._position
+        view = (self._view_start, self._view_end)
         self._position = min(max(0.0, seconds), max(0.0, self._project.duration))
         if follow:
             self._keep_visible(self._position)
-        self.update()
+        if (self._view_start, self._view_end) == view:
+            # Só a faixa da agulha, onde estava e onde está. Repintar a linha
+            # inteira a cada tique da reprodução (40 ms) custava, medido, 21 ms
+            # com 600 blocos — metade do intervalo, disputando com os quadros.
+            self.update(self._playhead_band(previous))
+            self.update(self._playhead_band(self._position))
+        else:
+            self.update()
         if self._position != previous:
             self.position_changed.emit(self._position)
+
+    def _playhead_band(self, seconds: float) -> QRect:
+        """O que muda quando a agulha passa por ``seconds``: ela e os diamantes
+        de quadro-chave que se acendem a menos de 0,05 s dela."""
+        left = self._x_of(seconds - _KEYFRAME_ACTIVE) - _PLAYHEAD_HALF
+        right = self._x_of(seconds + _KEYFRAME_ACTIVE) + _PLAYHEAD_HALF
+        return QRect(int(left), 0, int(right - left) + 2, self.height())
 
     def set_strip(self, clip_id: int, in_point: float, out_point: float, count: int) -> None:
         # As imagens anteriores ficam até as novas chegarem: apagá-las aqui
@@ -556,13 +579,18 @@ class Timeline(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), self._color("bg"))
+        # Só os blocos que tocam a área a pintar: na faixa da agulha, percorrer
+        # e desenhar os 600 blocos da trilha era quase todo o custo do tique.
+        self._dirty = event.rect()
 
         # Trilhas primeiro e recortadas abaixo da régua: ao rolar, elas passam
         # por baixo dela em vez de a empurrar para fora da vista.
         painter.save()
         painter.setClipRect(QRectF(0, RULER_HEIGHT, self.width(), max(0, self.height() - RULER_HEIGHT)))
+        headers = self._dirty.left() < HEADER_WIDTH
         for index, track in enumerate(self._project.tracks):
-            self._paint_header(painter, index, track)
+            if headers:
+                self._paint_header(painter, index, track)
             self._paint_lane(painter, index, track)
         if (
             self._drag == "cabecalho"
@@ -587,8 +615,12 @@ class Timeline(QWidget):
             _RULER_STEPS[-1],
         )
         painter.setClipRect(QRectF(HEADER_WIDTH, 0, self._lane_width, RULER_HEIGHT))
-        moment = int(self._view_start / step) * step
-        while moment <= self._view_end:
+        # Os rótulos que tocam a área a pintar: o de antes começa até um rótulo
+        # à esquerda dela.
+        first = max(self._view_start, self._time_of(self._dirty.left() - _RULER_LABEL_SPACE))
+        last = min(self._view_end, self._time_of(self._dirty.right()))
+        moment = int(first / step) * step
+        while moment <= last:
             x = self._x_of(moment)
             painter.setPen(QPen(self._color("border"), 1))
             painter.drawLine(int(x), RULER_HEIGHT - 5, int(x), RULER_HEIGHT)
@@ -652,7 +684,7 @@ class Timeline(QWidget):
             font_m.setBold(True)
             painter.setFont(font_m)
             painter.drawText(
-                box, int(Qt.AlignmentFlag.AlignCenter), "M"
+                box, int(Qt.AlignmentFlag.AlignCenter), strings.EDIT_TRACK_MUTED_BADGE
             )
 
     def _paint_eye_icon(self, painter: QPainter, box: QRectF, visible: bool) -> None:
@@ -715,7 +747,11 @@ class Timeline(QWidget):
         # Clipes comuns primeiro, marcador de transição por último. Ele ocupa o
         # mesmo trecho dos dois vizinhos e precisa permanecer visível e clicável
         # em cima deles.
+        first = self._time_of(self._dirty.left() - _CLIP_MARGIN)
+        last = self._time_of(self._dirty.right() + _CLIP_MARGIN)
         for clip in sorted(track.clips, key=lambda item: item.is_transition):
+            if clip.end < first or clip.start > last:
+                continue
             self._paint_clip(painter, index, clip, track)
         painter.restore()
 
@@ -735,7 +771,7 @@ class Timeline(QWidget):
             grad.setColorAt(1.0, QColor("#b45309"))
             painter.fillRect(rect, grad)
         elif track.kind is TrackKind.ADDITIONAL:
-            if clip.overlay_type == "filter":
+            if clip.overlay_type is OverlayType.FILTER:
                 fname = clip.filter_name
                 if fname == "pb":
                     grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
@@ -764,7 +800,7 @@ class Timeline(QWidget):
                     painter.fillRect(rect, grad)
                 else:
                     painter.fillRect(rect, QColor(94, 53, 177, 200))
-            elif clip.is_image or clip.overlay_type == "image":
+            elif clip.is_image or clip.overlay_type is OverlayType.IMAGE:
                 painter.fillRect(rect, QColor("#1e1e24"))
             else:
                 painter.fillRect(rect, QColor(106, 27, 154, 190))
@@ -773,7 +809,7 @@ class Timeline(QWidget):
 
         if clip.is_transition:
             pass
-        elif track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type == "image":
+        elif track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type is OverlayType.IMAGE:
             self._paint_thumbs(painter, clip, rect)
         elif track.kind is TrackKind.AUDIO:
             self._paint_wave(painter, clip, rect)
@@ -787,7 +823,7 @@ class Timeline(QWidget):
         elif clip.is_transition:
             border_pen = QPen(QColor("#fbbf24"), 1)
         elif track.kind is TrackKind.ADDITIONAL:
-            if clip.overlay_type == "filter":
+            if clip.overlay_type is OverlayType.FILTER:
                 f_borders = {
                     "pb": QColor("#90a4ae"),
                     "sepia": QColor("#bcaaa4"),
@@ -796,7 +832,7 @@ class Timeline(QWidget):
                     "contraste": QColor("#ffb74d"),
                 }
                 border_pen = QPen(f_borders.get(clip.filter_name, QColor(186, 104, 200)), 1)
-            elif clip.is_image or clip.overlay_type == "image":
+            elif clip.is_image or clip.overlay_type is OverlayType.IMAGE:
                 border_pen = QPen(QColor("#00bcd4"), 1)
             else:
                 border_pen = QPen(QColor(186, 104, 200), 1)
@@ -827,7 +863,7 @@ class Timeline(QWidget):
             cx = self._x_of(kf_time)
             if cx < rect.left() - 4.0 or cx > rect.right() + 4.0:
                 continue
-            is_active = abs(self._position - kf_time) < 0.05
+            is_active = abs(self._position - kf_time) < _KEYFRAME_ACTIVE
             poly = QPolygonF([
                 QPointF(cx, cy - 4.5),
                 QPointF(cx + 4.5, cy),
@@ -853,7 +889,7 @@ class Timeline(QWidget):
         strip = self._strips.get(clip.clip_id)
         if strip is None or not strip.thumbs:
             return
-        if clip.is_image or clip.overlay_type == "image":
+        if clip.is_image or clip.overlay_type is OverlayType.IMAGE:
             first_thumb = next(iter(strip.thumbs.values()), None)
             if first_thumb is not None:
                 area = QRectF(
@@ -901,16 +937,16 @@ class Timeline(QWidget):
         if clip.gain_label:
             badges.append(clip.gain_label)
 
-        if clip.overlay_type == "text":
+        if clip.overlay_type is OverlayType.TEXT:
             text = f"🔤 {clip.text_content or strings.EDIT_CLIP_TEXT}"
-        elif clip.overlay_type == "filter":
+        elif clip.overlay_type is OverlayType.FILTER:
             name = strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
             text = f"🎨 {name}"
-        elif clip.overlay_type == "transition":
+        elif clip.overlay_type is OverlayType.TRANSITION:
             name = strings.EDIT_TRANSITIONS.get(clip.transition_name,
                                                 ("", clip.transition_name or strings.EDIT_CLIP_TRANSITION))[1]
             text = f"⏳ {name}"
-        elif clip.overlay_type == "image" or clip.is_image:
+        elif clip.overlay_type is OverlayType.IMAGE or clip.is_image:
             text = f"🖼️ {clip.media.name}"
         else:
             text = clip.media.name

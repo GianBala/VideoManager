@@ -392,3 +392,60 @@ def test_abre_direto_no_idioma_das_preferencias(tmp_path):
                            timeout=120, cwd=raiz)
     # A única troca é a da abertura, antes de existir widget: nada a reaplicar.
     assert saida.stdout.split() == ["Edit", "Convert", "[0]"], saida.stderr[-2000:]
+
+
+def test_coluna_de_velocidade_da_fila_acompanha_o_idioma(desktop_app):
+    # "faltam 0:41" e "parte 3/20" nasciam no código da fila e ficavam em
+    # português na interface em inglês, em todo download com tempo restante.
+    from videomanager.application.events import Progress
+    from videomanager.application.jobs.models import Job, JobStatus
+    from videomanager.presentation.qt.panels.queue_panel import QueueModel
+    tarefa = Job("https://x/v", "v", "", status=JobStatus.RUNNING,
+                 progress=Progress(phase="", speed=1_000_000.0, eta=41))
+    fragmentos = Job("https://x/v", "v", "", status=JobStatus.RUNNING,
+                     progress=Progress(phase="", fragment_index=3, fragment_count=20))
+    idioma.apply_language(i18n.ENGLISH)
+    try:
+        assert "left" in QueueModel._speed_text(tarefa)
+        assert "faltam" not in QueueModel._speed_text(tarefa)
+        assert QueueModel._speed_text(fragmentos) == "part 3/20"
+    finally:
+        idioma.apply_language(i18n.PORTUGUESE)
+    assert "faltam" in QueueModel._speed_text(tarefa)
+
+
+def _sem_nome(janela, app) -> list[str]:
+    import re
+    from PySide6.QtGui import QAccessible
+    from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QAbstractSlider, QAbstractSpinBox,
+                                   QHeaderView, QLineEdit, QPlainTextEdit, QScrollBar)
+    palavra = re.compile(r"[^\W\d_]{2,}")
+    faltando = []
+    for indice in range(janela._tabs.count()):
+        janela._tabs.setCurrentIndex(indice)
+        for _ in range(4):
+            app.processEvents()
+        for tipo in (QAbstractButton, QAbstractSlider, QAbstractSpinBox, QAbstractItemView, QLineEdit, QPlainTextEdit):
+            for widget in janela.findChildren(tipo):
+                if (not widget.isVisible() or isinstance(widget, (QScrollBar, QHeaderView))
+                        or (isinstance(widget, QLineEdit) and isinstance(widget.parent(), QAbstractSpinBox))):
+                    continue
+                nome = QAccessible.queryAccessibleInterface(widget).text(QAccessible.Text.Name) or ""
+                if not palavra.search(nome):
+                    faltando.append(f"aba {indice}: {type(widget).__name__} {nome!r} {widget.toolTip()[:30]!r}")
+    return faltando
+
+
+def test_todo_controle_visivel_tem_nome_acessivel_nos_dois_idiomas(janelas, desktop_app):
+    # Leitor de tela anunciava "botão" ou "triângulo apontando para a direita":
+    # 34 de 131 controles visíveis sem nome e 24 com nome só de símbolo.
+    janela = janelas()
+    assert _sem_nome(janela, desktop_app) == []
+    desfazer = janela._edit._undo
+    idioma.apply_language(i18n.ENGLISH)
+    try:
+        assert _sem_nome(janela, desktop_app) == []
+        assert desfazer.accessibleName().startswith("Undo")
+    finally:
+        idioma.apply_language(i18n.PORTUGUESE)
+    assert desfazer.accessibleName().startswith("Desfazer")

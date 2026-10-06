@@ -27,6 +27,7 @@ O diálogo tem três abas.
 | **Fragmentos simultâneos por download** | De 1 a 16 — paralelismo dentro de **um** download (streams fragmentados, como HLS/DASH). |
 | **Limite de banda** | Em KB/s; `0` = sem limite. |
 | **Ler cookies do navegador** | "Não usar cookies" ou a lista de navegadores suportados pelo yt-dlp instalados na máquina. Necessário para vídeos com restrição de idade, privados, de assinantes/membros, e para as resoluções mais altas do BiliBili — nesses casos o site exige uma sessão conectada, e esta opção reaproveita os cookies já salvos naquele navegador em vez de pedir login dentro do app. |
+| **Arquivo de cookies (.txt)** (+ *Escolher…*) | Opcional: um `cookies.txt` exportado no formato Netscape. Tem prioridade sobre a leitura do navegador e serve quando ela falha — o Chrome recente no Windows cifra o banco de cookies, e navegadores em sandbox não o deixam ler. |
 
 ## Legendas e metadados
 

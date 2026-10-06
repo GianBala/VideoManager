@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import json
 import math
-import tempfile
 import os
+import uuid
 from pathlib import Path
 
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.errors import ProjectError
+from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip
+from videomanager.domain.project import OverlayType
+from videomanager.domain.project import is_pseudo_path
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
 from videomanager.domain.project import Project
@@ -28,12 +31,18 @@ from videomanager.domain.project import reserve_project_ids
 
 # 3: imagens vivem na trilha de vídeo e se ajustam à tela. Ao abrir 1 ou 2, as
 # imagens das trilhas de Adicionais migram com a escala convertida.
+#
+# Todo campo novo no arquivo sobe esta versão. A leitura ignora chaves que não
+# conhece, então uma versão anterior que abrisse um arquivo com campo novo o
+# perderia em silêncio ao salvar — keyframes e opacity entraram assim. Com a
+# versão nova, a anterior recusa o arquivo com mensagem. O teste
+# ``test_campo_novo_no_projeto_exige_subir_a_versao`` trava as chaves da 3.
 PROJECT_VERSION = 3
 
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
     path_str = str(media.path)
-    is_pseudo = path_str.startswith(("Texto_", "Filtro_", "Transição_"))
+    is_pseudo = is_pseudo_path(path_str)
     data: dict[str, object] = {
         "path": path_str if is_pseudo else str(media.path.resolve() if media.path.is_absolute() else media.path),
         "kind": media.kind.name,
@@ -46,8 +55,10 @@ def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
     }
     if base_dir is not None and not is_pseudo and media.path.is_absolute():
         try:
-            rel = os.path.relpath(media.path, base_dir)
-            data["rel_path"] = rel
+            # Com "/", e não o separador do sistema: o Windows lê "/", mas o
+            # Linux toma "\\" como parte do nome, e um projeto salvo no
+            # Windows não achava as mídias no Linux.
+            data["rel_path"] = Path(os.path.relpath(media.path, base_dir)).as_posix()
         except ValueError:
             # Em sistemas como Windows com unidades diferentes (C: e D:),
             # relpath pode falhar.
@@ -59,7 +70,7 @@ def _dict_to_media(data: dict[str, object], base_dir: Path | None) -> tuple[Medi
     raw_path = Path(str(data["path"]))
     resolved_path = raw_path
     missing: Path | None = None
-    is_pseudo = str(raw_path).startswith(("Texto_", "Filtro_", "Transição_"))
+    is_pseudo = is_pseudo_path(raw_path)
     if not is_pseudo and not raw_path.is_absolute() and base_dir is not None:
         resolved_path = (base_dir / raw_path).resolve()
 
@@ -67,13 +78,13 @@ def _dict_to_media(data: dict[str, object], base_dir: Path | None) -> tuple[Medi
         # Tenta pelo caminho relativo se disponível
         rel_path = data.get("rel_path")
         if rel_path and base_dir is not None:
-            candidate = (base_dir / str(rel_path)).resolve()
+            candidate = (base_dir / str(rel_path).replace("\\", "/")).resolve()
             if candidate.exists():
                 resolved_path = candidate
 
         # Tenta buscar diretamente pelo nome do arquivo na mesma pasta do projeto
         if not resolved_path.exists() and base_dir is not None:
-            candidate = (base_dir / raw_path.name).resolve()
+            candidate = (base_dir / str(raw_path).replace("\\", "/").rsplit("/", 1)[-1]).resolve()
             if candidate.exists():
                 resolved_path = candidate
 
@@ -129,7 +140,7 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                     "scale_x": clip.scale_x,
                     "scale_y": clip.scale_y,
                     "rotation": clip.rotation,
-                    "overlay_type": clip.overlay_type,
+                    "overlay_type": clip.overlay_type.value,
                     "text_content": clip.text_content,
                     "font_family": clip.font_family,
                     "font_size": clip.font_size,
@@ -257,7 +268,7 @@ def _validate_project(data: dict[str, object]) -> None:
             for name in ("start", "stroke_width", "chromakey_similarity", "chromakey_blend"):
                 number(clip, name, minimum=0, integer=name == "stroke_width")
             media_data = clip.get("media")
-            static = (isinstance(media_data, dict) and media_data.get("kind") == "IMAGE") or clip.get("overlay_type") in ("text", "filter")
+            static = (isinstance(media_data, dict) and media_data.get("kind") == "IMAGE") or clip.get("overlay_type") in (OverlayType.TEXT, OverlayType.FILTER)
             # Versões anteriores geravam entrada negativa ao estender um
             # adicional. Recuperar só fontes estáticas, sem aceitar NaN/inf.
             number(clip, "in_point", minimum=None if static else 0)
@@ -300,7 +311,9 @@ def _validate_project(data: dict[str, object]) -> None:
                 ),
             )
             strings(clip, ("overlay_type", "text_content", "font_family", "text_color", "stroke_color", "filter_name", "transition_name", "chromakey_color"))
-            if clip.get("overlay_type", "none") not in ("none", "image", "text", "filter", "transition"):
+            if "chromakey_color" in clip and not CHROMA_COLOR.fullmatch(clip["chromakey_color"]):
+                fail("chromakey_color")
+            if clip.get("overlay_type", OverlayType.NONE) not in tuple(OverlayType):
                 fail(Text("PROJECT_FIELD_OVERLAY"))
             media = clip.get("media")
             if not isinstance(media, dict) or not isinstance(media.get("path"), str) or not media["path"]:
@@ -371,9 +384,9 @@ def _project_from_dict(
             media_data = c_data.get("media")
             if not isinstance(media_data, dict):
                 continue
-            overlay_type = str(c_data.get("overlay_type", "none"))
+            overlay_type = OverlayType(str(c_data.get("overlay_type", OverlayType.NONE)))
             media, missing = _dict_to_media(media_data, base_dir)
-            if overlay_type not in ("text", "filter", "transition") and missing is not None and missing not in missing_files:
+            if overlay_type.has_media_file and missing is not None and missing not in missing_files:
                 missing_files.append(missing)
 
             keyframes_raw = c_data.get("keyframes", [])
@@ -398,7 +411,7 @@ def _project_from_dict(
                 media=media,
                 start=float(c_data.get("start", 0.0)),
                 duration=float(c_data.get("duration", 0.0)),
-                in_point=(0.0 if media.kind is MediaKind.IMAGE or overlay_type in ("text", "filter")
+                in_point=(0.0 if media.kind is MediaKind.IMAGE or overlay_type in (OverlayType.TEXT, OverlayType.FILTER)
                           else float(c_data.get("in_point", 0.0))),
                 gain_db=float(c_data.get("gain_db", 0.0)),
                 muted=bool(c_data.get("muted", False)),
@@ -413,7 +426,7 @@ def _project_from_dict(
                 rotation=float(c_data.get("rotation", 0.0)),
                 opacity=float(c_data.get("opacity", 1.0)),
                 keyframes=tuple(clip_kfs),
-                overlay_type=str(c_data.get("overlay_type", "none")),
+                overlay_type=overlay_type,
                 text_content=str(c_data.get("text_content", "")),
                 font_family=str(c_data.get("font_family", "Sans Serif")),
                 font_size=int(c_data.get("font_size", 36)),
@@ -472,12 +485,21 @@ def save_project(project: Project, path: Path) -> None:
         data = project_to_dict(project, base_dir=path.parent)
         text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
         _backup_previous_version(path)
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                         prefix=f".{path.name}-", suffix=".tmp", delete=False) as handle:
-            tmp_path = Path(handle.name)
+        # Temporário criado com 0666 (a máscara do usuário corta o resto), e
+        # não pelo NamedTemporaryFile, que nasce 0600: a troca levava essa
+        # permissão junto, e um projeto numa pasta compartilhada deixava de
+        # ser legível por outros depois de qualquer gravação. Se o arquivo já
+        # existe, a permissão dele é a que vale.
+        tmp_path = path.with_name(f".{path.name}-{uuid.uuid4().hex[:8]}.tmp")
+        descriptor = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
+        try:
+            os.chmod(tmp_path, path.stat().st_mode & 0o7777)
+        except FileNotFoundError:
+            pass
         tmp_path.replace(path)
     except (OSError, ValueError) as exc:
         raise ProjectError(Text("PROJECT_SAVE_FAILED", path=path, error=str(exc))) from exc

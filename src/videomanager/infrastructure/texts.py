@@ -51,6 +51,12 @@ register({
         "O download do ffmpeg foi redirecionado para uma conexão sem criptografia e foi interrompido.",
         "The ffmpeg download was redirected to an unencrypted connection and was stopped.",
     ),
+    "FFMPEG_CHECKSUM_MISMATCH": (
+        "O ffmpeg baixado não confere com a publicação esperada (resumo SHA-256 diferente) e não "
+        "foi instalado. Tente de novo mais tarde.",
+        "The downloaded ffmpeg doesn't match the expected release (different SHA-256 digest) and "
+        "wasn't installed. Try again later.",
+    ),
     "FFMPEG_DOWNLOAD_FAILED": (
         "Falha ao baixar o ffmpeg: {reason}. Verifique a conexão.",
         "Couldn't download ffmpeg: {reason}. Check your connection.",
@@ -214,8 +220,10 @@ register({
 
     # --- arquivos de saída e de projeto --------------------------------------------
     "OUTPUT_BAD_NAME": (
-        "Use somente um nome de arquivo, sem caminhos ou separadores.",
-        "Use just a file name, without paths or separators.",
+        "Use somente um nome de arquivo: sem caminhos, sem os caracteres \\ / : * ? \" < > |, "
+        "sem terminar em ponto ou espaço e sem nomes reservados do Windows (CON, NUL, COM1…).",
+        "Use just a file name: no paths, none of the characters \\ / : * ? \" < > |, "
+        "not ending in a dot or space, and no names reserved by Windows (CON, NUL, COM1…).",
     ),
     # Nome do arquivo, e por isso dado: sai no idioma do momento em que é criado.
     "OUTPUT_CONVERTED_SUFFIX": (" (convertido)", " (converted)"),
@@ -281,6 +289,8 @@ register({
 
     # --- yt-dlp ---------------------------------------------------------------------
     "MEDIA_UNTITLED": ("Sem título", "Untitled"),
+    # Título de um item de playlist que o site não nomeia; dado, no idioma do momento.
+    "PLAYLIST_ITEM": ("Item {index}", "Item {index}"),
     # O motor se atualiza pelo menu Ferramentas; o texto apontava Configurações,
     # onde não há como fazer isso.
     "PROBE_UNSUPPORTED": (
@@ -288,6 +298,14 @@ register({
         "motor de download, no menu Ferramentas, pode resolver.",
         "No extractor recognizes this URL. Check the address; if the site is new, updating the "
         "download engine from the Tools menu may help.",
+    ),
+    # No pacote o motor vem congelado e o item do menu fica desligado: quem
+    # recebe a mensagem acima procura um menu cinza e não sabe onde ir.
+    "PROBE_UNSUPPORTED_PACKAGED": (
+        "Nenhum extrator reconhece esta URL. Confira o endereço; se o site for novo ou tiver "
+        "mudado, uma versão mais nova do Video Manager pode resolver: {url}",
+        "No extractor recognizes this URL. Check the address; if the site is new or has "
+        "changed, a newer version of Video Manager may help: {url}",
     ),
     "PROBE_DRM": (
         "Esta mídia é protegida por DRM e não pode ser baixada.",

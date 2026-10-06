@@ -382,7 +382,8 @@ def test_erro_do_ffmpeg_aparece_mesmo_com_titulo_em_utf8(ffmpeg_tools, tmp_path,
     assert isinstance(result, ConversionError), result
     # Com a leitura morta, a "última linha" era o cabeçalho do arquivo de entrada.
     assert "Input #0" not in str(result)
-    assert "output" in str(result).lower()
+    # A causa, e não o resumo final ("Error opening output files: ...").
+    assert "'map'" in str(result)
 
 
 def _capture(call):
@@ -444,20 +445,20 @@ def test_mensagem_do_trecho_aponta_a_causa_e_nao_a_estatistica() -> None:
     """
     from collections import deque
 
-    from videomanager.infrastructure.ffmpeg.parallel import _last_line
+    from videomanager.infrastructure.ffmpeg.parallel import error_cause
 
     cauda = deque([
         "[libvpx-vp9 @ 000] Invalid argument",
         "[out#0/webm @ 000] video:0KiB audio:0KiB",
         "[libvpx-vp9 @ 000] CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A",
     ])
-    assert "Invalid argument" in _last_line(cauda)
+    assert "Invalid argument" in error_cause(cauda)
 
     sem_marca = deque(["[out#0/webm @ 000] video:0KiB audio:0KiB", "  ",
                        "[libvpx-vp9 @ 000] CPB properties: bitrate max/min/avg: 0/0/0"])
-    resposta = _last_line(sem_marca)
+    resposta = error_cause(sem_marca)
     assert "CPB properties" in resposta and "video:0KiB" in resposta
-    assert str(_last_line(deque())) == "sem detalhes do ffmpeg"
+    assert str(error_cause(deque())) == "sem detalhes do ffmpeg"
 
 
 # --- Compressão de verdade ----------------------------------------------------

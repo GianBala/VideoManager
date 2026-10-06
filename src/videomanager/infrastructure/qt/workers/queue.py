@@ -1,4 +1,5 @@
 """Adaptador Qt da fila: pools e sinais; transições pertencem a JobService."""
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from PySide6.QtCore import QObject, QThreadPool, Signal, Slot
@@ -7,11 +8,14 @@ from videomanager.application.events import DownloadResult
 from videomanager.application.jobs.models import Job
 from videomanager.application.jobs.models import JobStatus
 from videomanager.application.jobs.requests import ConversionRequest
+from videomanager.application.jobs.requests import DownloadRequest
 from videomanager.application.jobs.service import JobService
 from videomanager.application.errors import error_message
 from videomanager.infrastructure.storage.outputs import FileOutputStore
 from videomanager.infrastructure.qt.workers.convert_worker import ConvertWorker
 from videomanager.infrastructure.qt.workers.download_worker import DownloadWorker
+from videomanager.infrastructure.qt.workers.download_worker import task_dir
+from videomanager.infrastructure.qt.workers.signals import report_unexpected
 
 _LOCAL_JOBS = 1
 
@@ -96,6 +100,7 @@ class JobQueue(QObject):
         try:
             worker = ConvertWorker(job) if job.kind.runs_ffmpeg_locally else DownloadWorker(job)
         except Exception as exc:
+            report_unexpected(exc)
             if isinstance(job.request, ConversionRequest):
                 path = job.request.destination
                 FileOutputStore().abort(path, lease=job.request.lease)
@@ -129,7 +134,19 @@ class JobQueue(QObject):
     def cancel(self, job_id):
         job = self.job(job_id)
         if job and not job.status.is_final and job_id in self._workers:
-            self._workers[job_id].cancel()
+            worker = self._workers[job_id]
+            pool = self._local if job.kind.runs_ffmpeg_locally else self._pool
+            if pool.tryTake(worker):
+                # Ainda esperando vaga: sai da fila agora. Só marcar o worker
+                # deixava a tarefa "Pendente" — e a reserva de 0 byte na pasta
+                # do usuário — até a vaga liberar, o que atrás de uma
+                # exportação interpolada leva minutos.
+                if isinstance(job.request, ConversionRequest):
+                    FileOutputStore().abort(job.request.destination, lease=job.request.lease)
+                receiver = self._receivers[job_id]
+                self._terminal(self.service.cancelled(job_id, receiver.attempt), job_id, receiver)
+                return
+            worker.cancel()
 
     def cancel_all(self):
         for job_id in list(self._workers):
@@ -150,6 +167,7 @@ class JobQueue(QObject):
                 lease = FileOutputStore().reserve(Path(job.url), request.target, request.destination.parent,
                                           custom_stem=request.destination.stem)
             except Exception as exc:
+                report_unexpected(exc)
                 self.service.retry_failed(job_id, error_message(exc))
                 self.job_changed.emit(job)
                 return
@@ -157,6 +175,11 @@ class JobQueue(QObject):
         self._start(job)
 
     def remove_finished(self):
+        # Sem a tarefa na fila não há "Repetir": o .part que uma falha guardou
+        # para continuar o download não tem mais quem o use.
+        for job in self.service.jobs:
+            if job.status.is_final and isinstance(job.request, DownloadRequest):
+                shutil.rmtree(task_dir(job), ignore_errors=True)
         self.service.remove_finished()
         self.counts_changed.emit()
 

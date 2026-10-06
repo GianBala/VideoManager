@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager import APP_TITLE
-from videomanager import __version__
+from videomanager import ISSUES_URL, RELEASES_URL, __version__, build_commit
 from videomanager.application import encoding as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.jobs.requests import DownloadRequest
@@ -55,6 +55,7 @@ from videomanager.domain.selection import VideoRequest
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.accessibility import name_controls
 from videomanager.presentation.qt.i18n import apply_language, bind, on_language_change
 from videomanager.presentation.qt.ffmpeg_setup import ensure_ffmpeg
 from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
@@ -135,18 +136,6 @@ class MainWindow(QMainWindow):
         self._probed_hardware = False
         self._split_by_user = False
         self._balancing = False
-        # Diretório temporário próprio: mantém .part e fragmentos fora da pasta
-        # de destino, que só recebe arquivo pronto.
-        #
-        # Fica no cache do usuário, e **não** em /tmp, pelos mesmos dois motivos
-        # que levaram ``ParallelExport`` a fugir de lá. Em muitas distribuições
-        # /tmp é tmpfs, ou seja memória: um download de vários GB passaria
-        # inteiro pela RAM, que é o recurso que esta aplicação já esgotou uma
-        # vez. E "/tmp/videomanager" é um caminho fixo dentro de um diretório em
-        # que todo usuário da máquina escreve — quem chegasse antes decidiria o
-        # que há lá dentro, ou impediria o download por falta de permissão.
-        self._temp_dir = self._runtime.download_cache
-
         self.setWindowTitle(APP_TITLE)
         # Altura escolhida para caber a aba inteira sem rolagem — barra de abas,
         # cabeçalho e controles — com a fila mostrando quatro linhas. Quem manda
@@ -165,6 +154,7 @@ class MainWindow(QMainWindow):
         self._update_menu_scope(_TAB_DOWNLOAD)
         self._update_status()
         on_language_change(self._retranslate)
+        name_controls(self)
         # Rótulos e avisos mudam de altura com o texto: a altura que as abas
         # pedem também, medida depois de todos os layouts assentarem.
         on_language_change(self._balance_panes, after_layout=True)
@@ -261,6 +251,8 @@ class MainWindow(QMainWindow):
                                       strings.TAB_METADATA)):
             self._tabs.setTabText(index, text)
         self._update_status()
+        # Os nomes acessíveis tirados das dicas acompanham as dicas novas.
+        name_controls(self)
 
     def _on_split_moved(self, *_: int) -> None:
         self._split_by_user = not self._balancing
@@ -270,6 +262,7 @@ class MainWindow(QMainWindow):
         if self._metadata is None:
             self._metadata = MetadataPanel(self._settings, self._tools_for_convert, runtime=self._runtime)
             self._metadata_page.layout().addWidget(self._wrap_tab(self._metadata))
+            name_controls(self._metadata)
         return self._metadata
 
     def _on_tab_changed(self, index: int) -> None:
@@ -515,7 +508,8 @@ class MainWindow(QMainWindow):
         self._update_engine_action.triggered.connect(self._update_engine)
         if self._runtime.is_packaged():
             self._update_engine_action.setEnabled(False)
-            bind(self._update_engine_action, "setToolTip", lambda: strings.DIALOG_ENGINE_PACKAGED)
+            bind(self._update_engine_action, "setToolTip",
+                 lambda: strings.DIALOG_ENGINE_PACKAGED.format(url=RELEASES_URL))
 
         # Ações da aba Converter
         self._convert_add_action = bind(QAction(self), "setText", lambda: strings.ACTION_CONVERT_ADD)
@@ -753,7 +747,13 @@ class MainWindow(QMainWindow):
         if self._tools is None:
             return
         dest = self._runtime.download_directory(self._settings)
-        payload = DownloadRequest(request, media, dest, self._temp_dir, Preferences.from_dict(asdict(self._settings)))
+        # Temporários fora da pasta de destino, que só recebe arquivo pronto, e
+        # no cache do usuário, **não** em /tmp, pelos mesmos dois motivos que
+        # levaram ``ParallelExport`` a fugir de lá: /tmp é tmpfs (memória) em
+        # muitas distribuições, e um caminho fixo nele fica à mercê de quem
+        # chegar antes. A pasta da sessão só nasce no primeiro download.
+        payload = DownloadRequest(request, media, dest, self._runtime.download_cache,
+                                  Preferences.from_dict(asdict(self._settings)))
         job = self._downloads.prepare(payload)
         self._queue.submit(job)
 
@@ -895,7 +895,7 @@ class MainWindow(QMainWindow):
             # num pacote, o comando abriria uma segunda janela do aplicativo em
             # vez de instalar coisa alguma.
             QMessageBox.information(
-                self, strings.DIALOG_ENGINE_TITLE, strings.DIALOG_ENGINE_PACKAGED
+                self, strings.DIALOG_ENGINE_TITLE, strings.DIALOG_ENGINE_PACKAGED.format(url=RELEASES_URL)
             )
             return
         current = self._runtime.engine_version
@@ -945,7 +945,9 @@ class MainWindow(QMainWindow):
             self,
             strings.ABOUT_TITLE,
             strings.ABOUT_BODY.format(
-                version=__version__, ytdlp=self._runtime.engine_version
+                version=f"{__version__} ({commit})" if (commit := build_commit()) else __version__,
+                ytdlp=self._runtime.engine_version,
+                releases=RELEASES_URL, issues=ISSUES_URL,
             ),
         )
 
@@ -1019,6 +1021,8 @@ class MainWindow(QMainWindow):
         if self._metadata is not None:
             self._metadata.shutdown()
         self._queue.shutdown()
+        # Sem a fila, nenhum .part é retomável: a pasta da sessão sai junto.
+        self._runtime.close_session()
         self._save_settings()
         event.accept()
 

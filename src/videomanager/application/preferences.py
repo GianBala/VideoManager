@@ -5,6 +5,16 @@ from typing import Any
 
 from videomanager.domain.i18n import LANGUAGES, PORTUGUESE
 
+# Faixas dos campos numéricos: as mesmas da tela de configurações, que as lê
+# daqui. Um settings.json editado à mão (ou de outra versão) com 200 downloads
+# simultâneos abria 200 downloads simultâneos; a leitura prende o valor.
+RANGES: dict[str, tuple[int, int]] = {
+    "max_concurrent_jobs": (1, 10),
+    "concurrent_fragments": (1, 16),
+    "rate_limit_kbps": (0, 1_000_000),
+    "preview_volume": (0, 100),
+}
+
 @dataclass
 class Preferences:
     """Preferências da aplicação. Todos os campos têm padrão utilizável."""
@@ -19,7 +29,6 @@ class Preferences:
     # obriga a recodificar. Ver infrastructure/yt_dlp/selector.py.
     default_container: str = "mkv"
     default_height: int = 1080
-    default_fps_cap: int = 0  # 0 = sem limite
 
     # --- padrões de áudio ---
     default_audio_format: str = "mp3"
@@ -61,7 +70,6 @@ class Preferences:
     theme: str = "dark"
     # Idioma da interface, pelo código de videomanager.domain.i18n.
     language: str = PORTUGUESE
-    window_geometry: str = ""  # QByteArray serializado em base64
     # Volume da prévia da aba de edição, de 0 a 100. Guardado porque é ajustado
     # pelo ambiente em que se edita (fone, caixa, escritório), e não pelo vídeo:
     # reencontrar o volume de ontem a cada abertura seria trabalho repetido.
@@ -88,7 +96,8 @@ class Preferences:
             if spec.type in ("bool", bool) and isinstance(value, bool):
                 kwargs[name] = value
             elif spec.type in ("int", int) and isinstance(value, int) and not isinstance(value, bool):
-                kwargs[name] = value
+                low, high = RANGES.get(name, (value, value))
+                kwargs[name] = min(max(value, low), high)
             elif spec.type in ("str", str) and isinstance(value, str):
                 kwargs[name] = value
             elif spec.type in ("list[str]",) and isinstance(value, list):

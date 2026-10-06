@@ -661,6 +661,10 @@ class MetadataPanel(QWidget):
                 column.addWidget(field)
                 self._grips[key] = bind(_Grip(field, base), "setToolTip", lambda: strings.META_GROW_TIP)
                 column.addWidget(self._grips[key])
+                # O rótulo do formulário aponta para o contêiner da linha, e o Qt
+                # só procura o rótulo entre os vizinhos do campo: sem o nome
+                # posto aqui, o leitor de tela anunciava um campo sem nome.
+                bind(field, "setAccessibleName", lambda key=key: strings.META_FIELDS[key])
             else:
                 field = row = QLineEdit()
                 field.textEdited.connect(self._refresh)
@@ -675,6 +679,7 @@ class MetadataPanel(QWidget):
         self._others_group = bind(QGroupBox(), "setTitle", lambda: strings.META_OTHER_FIELDS)
         box = QVBoxLayout(self._others_group)
         self._others = _Table(2, adjustable=True, row_tip=lambda: strings.META_ROW_TIP)
+        bind(self._others, "setAccessibleName", lambda: strings.META_OTHER_FIELDS)
         self._others.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._others.setItemDelegateForColumn(1, _ValueDelegate(self._others))
         self._others.itemChanged.connect(self._refresh)
@@ -727,6 +732,7 @@ class MetadataPanel(QWidget):
         self._tracks_group = bind(QGroupBox(), "setTitle", lambda: strings.META_TRACKS_GROUP)
         box = QVBoxLayout(self._tracks_group)
         self._tracks = _Table(len(strings.META_TRACK_HEADERS))
+        bind(self._tracks, "setAccessibleName", lambda: strings.META_TRACKS_GROUP)
         header = self._tracks.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(_TITLE, QHeaderView.ResizeMode.Stretch)

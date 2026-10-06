@@ -78,15 +78,43 @@ cp "$APPDIR/videomanager.png" "$APPDIR/.DirIcon"
 # Cache fora de build/, que build_linux.sh apaga a cada execução — senão o
 # appimagetool seria rebaixado toda vez.
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/videomanager-packaging"
-TOOL="$CACHE/appimagetool-${ARCH}.AppImage"
-if [ ! -x "$TOOL" ]; then
-    echo "==> baixando appimagetool"
-    mkdir -p "$CACHE"
-    curl -fL --progress-bar -o "$TOOL.parcial" \
-        "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${ARCH}.AppImage"
-    chmod +x "$TOOL.parcial"
-    mv "$TOOL.parcial" "$TOOL"
-fi
+
+# Versões fixas, conferidas pelo SHA-256 que o GitHub publica para cada arquivo.
+# O canal "continuous" muda sem aviso, e as duas ferramentas montam o binário
+# que o usuário executa: o que entra no pacote tem de ser o que foi conferido.
+# Trocar de versão é trocar os resumos junto.
+APPIMAGETOOL_VERSION="1.9.1"
+RUNTIME_VERSION="20251108"
+case "$ARCH" in
+    x86_64)
+        APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+        RUNTIME_SHA256="2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d" ;;
+    aarch64)
+        APPIMAGETOOL_SHA256="f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"
+        RUNTIME_SHA256="00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444" ;;
+    *) echo "arquitetura sem ferramentas conferidas: $ARCH" >&2; exit 1 ;;
+esac
+
+# Baixa para o cache só se ainda não estiver lá, e confere o resumo sempre: um
+# cache adulterado é tão ruim quanto um download adulterado.
+baixar_conferido() {  # destino url sha256
+    if [ ! -f "$1" ]; then
+        mkdir -p "$CACHE"
+        curl -fL --progress-bar -o "$1.parcial" "$2"
+        mv "$1.parcial" "$1"
+    fi
+    if ! echo "$3  $1" | sha256sum -c --quiet -; then
+        echo "SHA-256 não confere: $1 (apague-o do cache para baixar de novo)" >&2
+        exit 1
+    fi
+}
+
+TOOL="$CACHE/appimagetool-${APPIMAGETOOL_VERSION}-${ARCH}.AppImage"
+echo "==> appimagetool $APPIMAGETOOL_VERSION"
+baixar_conferido "$TOOL" \
+    "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${ARCH}.AppImage" \
+    "$APPIMAGETOOL_SHA256"
+chmod +x "$TOOL"
 
 # O appimagetool é ele próprio um AppImage e precisa de FUSE para se montar.
 # Onde não há (contêiner, CI, máquina sem libfuse2), ele sabe se auto-extrair.
@@ -98,29 +126,18 @@ fi
 echo "==> gerando o AppImage"
 mkdir -p "$DIST"
 rm -f "$OUTPUT"
-RUNTIME="$CACHE/runtime-${ARCH}"
-RUNTIME_ARG=()
-if [ ! -f "$RUNTIME" ]; then
-    echo "==> baixando runtime type2 para $ARCH"
-    mkdir -p "$CACHE"
-    if curl -fL --progress-bar -o "$RUNTIME.part" \
-        "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${ARCH}"; then
-        mv "$RUNTIME.part" "$RUNTIME"
-    else
-        rm -f "$RUNTIME.part"
-        echo "Falha ao baixar runtime; o cache não foi atualizado." >&2
-        exit 1
-    fi
-fi
+RUNTIME="$CACHE/runtime-${RUNTIME_VERSION}-${ARCH}"
+echo "==> runtime type2 $RUNTIME_VERSION"
+baixar_conferido "$RUNTIME" \
+    "https://github.com/AppImage/type2-runtime/releases/download/${RUNTIME_VERSION}/runtime-${ARCH}" \
+    "$RUNTIME_SHA256"
 
-if [ -f "$RUNTIME" ]; then
-    # Altera uma cópia: o cache continua utilizável por outras execuções.
-    cp "$RUNTIME" "$BUILD/runtime-${ARCH}"
-    if ! "$PY" packaging/patch_runtime.py "$BUILD/runtime-${ARCH}"; then
-        echo "Runtime sem patch: use APPIMAGE_EXTRACT_AND_RUN=1 quando não houver FUSE." >&2
-    fi
-    RUNTIME_ARG=("--runtime-file" "$BUILD/runtime-${ARCH}")
+# Altera uma cópia: o cache continua utilizável por outras execuções.
+cp "$RUNTIME" "$BUILD/runtime-${ARCH}"
+if ! "$PY" packaging/patch_runtime.py "$BUILD/runtime-${ARCH}"; then
+    echo "Runtime sem patch: use APPIMAGE_EXTRACT_AND_RUN=1 quando não houver FUSE." >&2
 fi
+RUNTIME_ARG=("--runtime-file" "$BUILD/runtime-${ARCH}")
 
 ARCH="$ARCH" "$TOOL" "${RUNTIME_ARG[@]}" "$APPDIR" "$OUTPUT"
 chmod +x "$OUTPUT"

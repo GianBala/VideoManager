@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 from videomanager.application.capabilities import FFmpegTools
+from videomanager.infrastructure.storage.outputs import temp_prefix
 from videomanager.infrastructure.system.process import ProcessControl
 
 _LOG = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ def embed_thumbnail(destination: Path, tools: FFmpegTools,
     if container not in (".mp4", ".mov", ".m4v", ".mkv", ".matroska"):
         return
     try:
-        with tempfile.TemporaryDirectory(prefix=".videomanager-cover-", dir=destination.parent) as temp:
+        with tempfile.TemporaryDirectory(prefix=temp_prefix("cover-"), dir=destination.parent) as temp:
             thumbnail = Path(temp) / "cover.jpg"
             probe = control.run([
                 tools.ffprobe_str, "-v", "error", "-show_entries", "format=duration",

@@ -31,10 +31,23 @@ DARK = {
     "accent": "#4c8bf5",
     "accent_hover": "#6ba0f7",
     "accent_text": "#ffffff",
+    # Preenchimento que leva texto branco (botão primário, seleções) e destaque
+    # usado como texto: separados porque o mesmo azul não serve aos dois. Com
+    # "accent" nos dois papéis, o texto do botão primário ficava em 3,32:1, o
+    # primário sob o mouse em 2,63:1 e a aba selecionada em 4,27:1 — a
+    # referência para texto é 4,5:1.
+    "accent_fill": "#3170dc",
+    "accent_fill_hover": "#2b64c8",
+    "accent_fg": "#6ba0f7",
+    # Fundo do selo "ao vivo": o vermelho de erro deixava o texto branco em 3,7:1.
+    "live": "#c0392f",
     "ok": "#3fb950",
     "warn": "#d99b28",
     "error": "#e5534b",
     "track": "#353b47",
+    # Borda de foco do teclado: pelo menos 3:1 contra a borda sem foco e contra
+    # o preenchimento do botão primário.
+    "focus": "#ffffff",
 }
 
 LIGHT = {
@@ -47,10 +60,16 @@ LIGHT = {
     "accent": "#2f6fd0",
     "accent_hover": "#3f80e0",
     "accent_text": "#ffffff",
+    "accent_fill": "#2860b8",
+    "accent_fill_hover": "#255aad",
+    "accent_fg": "#2f6fd0",
+    "live": "#cf222e",
     "ok": "#1a7f37",
-    "warn": "#9a6700",
+    # 4,46:1 com o "#9a6700" anterior sobre o fundo da janela.
+    "warn": "#8f6000",
     "error": "#cf222e",
     "track": "#dfe3e9",
+    "focus": "#000000",
 }
 
 _QSS = """
@@ -101,7 +120,7 @@ QLabel[role="dim"] {{ color: {text_dim}; }}
    controles, para a coluna não pedir altura que a prévia ao lado perderia. */
 QLabel[role="note"] {{ color: {text_dim}; font-size: 11px; }}
 QLabel[role="title"] {{ font-size: 13pt; font-weight: 600; }}
-QLabel[role="live"] {{ color: {accent_text}; background: {error};
+QLabel[role="live"] {{ color: {accent_text}; background: {live};
     border-radius: 4px; padding: 2px 6px; font-weight: 700; font-size: 8pt; }}
 QLabel[role="warn"] {{ color: {warn}; }}
 
@@ -110,7 +129,7 @@ QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QListWidget, QTreeWidget {{
     border: 1px solid {border};
     border-radius: 6px;
     padding: 6px 8px;
-    selection-background-color: {accent};
+    selection-background-color: {accent_fill};
     selection-color: {accent_text};
 }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {accent}; }}
@@ -119,7 +138,7 @@ QComboBox::drop-down {{ border: none; width: 20px; }}
 QComboBox QAbstractItemView {{
     background: {surface_alt};
     border: 1px solid {border};
-    selection-background-color: {accent};
+    selection-background-color: {accent_fill};
     selection-color: {accent_text};
     outline: none;
 }}
@@ -133,16 +152,16 @@ QPushButton {{
 QPushButton:hover {{ border-color: {accent}; }}
 QPushButton:disabled {{ color: {text_dim}; border-color: {border}; }}
 QPushButton[role="primary"] {{
-    background: {accent};
+    background: {accent_fill};
     color: {accent_text};
     /* Borda da mesma cor do fundo em vez de "none": mantém a altura idêntica à
        do botão comum, senão o botão primário fica 2 px mais alto e desalinha a
        linha inteira em que estiver. */
-    border: 1px solid {accent};
+    border: 1px solid {accent_fill};
     font-weight: 600;
     padding: 7px 16px;
 }}
-QPushButton[role="primary"]:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}
+QPushButton[role="primary"]:hover {{ background: {accent_fill_hover}; border-color: {accent_fill_hover}; }}
 QPushButton[role="primary"]:disabled {{
     background: {track}; color: {text_dim}; border-color: {track};
 }}
@@ -163,7 +182,7 @@ QPushButton[role="transport"] {{
     font-size: 13px;
 }}
 QPushButton[role="transport"]:hover {{ border-color: {accent}; }}
-QPushButton[role="transport"]:checked {{ background: {accent}; color: {accent_text}; border-color: {accent}; }}
+QPushButton[role="transport"]:checked {{ background: {accent_fill}; color: {accent_text}; border-color: {accent_fill}; }}
 QPushButton[role="transport"]:disabled {{ color: {text_dim}; border-color: {border}; }}
 
 QPushButton[role="spin-tool"] {{
@@ -180,7 +199,7 @@ QPushButton[role="spin-tool"] {{
     font-weight: bold;
 }}
 QPushButton[role="spin-tool"]:hover {{ border-color: {accent}; }}
-QPushButton[role="spin-tool"]:pressed {{ background: {accent}; color: {accent_text}; }}
+QPushButton[role="spin-tool"]:pressed {{ background: {accent_fill}; color: {accent_text}; }}
 
 /* Escolha entre opções (filtros, transições, fonte): texto à esquerda e a
    marcada com a borda da cor de destaque. Letra de 12 px: com a do resto da
@@ -193,7 +212,7 @@ QPushButton[role="option"]:checked {{ border: 2px solid {accent}; font-weight: 6
 QListWidget[role="picker"] {{ background: transparent; border: none; }}
 QListWidget[role="picker"]::item {{ padding: 4px 6px; border-radius: 3px; }}
 QListWidget[role="picker"]::item:hover {{ background: {surface_alt}; }}
-QListWidget[role="picker"]::item:selected {{ background: {accent}; color: {accent_text}; }}
+QListWidget[role="picker"]::item:selected {{ background: {accent_fill}; color: {accent_text}; }}
 QLineEdit[role="picker"] {{ padding: 4px 6px; font-size: 11px; }}
 /* Botão curto de atalho de valor (tamanhos de fonte, predefinições). */
 QPushButton[role="chip"] {{ padding: 2px 4px; font-size: 11px; }}
@@ -215,6 +234,13 @@ QRadioButton::indicator, QCheckBox::indicator {{
 }}
 QRadioButton::indicator {{ border-radius: 8px; }}
 QCheckBox::indicator {{ border-radius: 4px; }}
+/* Foco do teclado: anel de 2 px na cor de foco, com o miolo 2 px menor — os
+   mesmos 16 px. Mudar só a cor da borda fina não chegava a 3:1 contra o
+   cinza do indicador sem foco. Fica antes de :checked, que manda no tamanho
+   do marcado. */
+QRadioButton::indicator:focus, QCheckBox::indicator:focus {{
+    width: 12px; height: 12px; border: 2px solid {focus};
+}}
 QRadioButton::indicator:checked {{
     /* Anel grosso da cor de destaque em volta do miolo escuro: é o ponto do
        botão de rádio, sem depender de imagem embutida. */
@@ -225,6 +251,7 @@ QRadioButton::indicator:checked {{
 }}
 QCheckBox::indicator:checked {{ background: {accent}; border-color: {accent}; }}
 QRadioButton::indicator:hover, QCheckBox::indicator:hover {{ border-color: {accent}; }}
+QRadioButton::indicator:checked:focus, QCheckBox::indicator:checked:focus {{ border-color: {focus}; }}
 QRadioButton:disabled, QCheckBox:disabled {{ color: {text_dim}; }}
 QRadioButton::indicator:disabled, QCheckBox::indicator:disabled {{
     border-color: {border};
@@ -236,7 +263,7 @@ QTableView {{
     border: 1px solid {border};
     border-radius: 8px;
     gridline-color: {border};
-    selection-background-color: {accent};
+    selection-background-color: {accent_fill};
     selection-color: {accent_text};
 }}
 QHeaderView::section {{
@@ -287,6 +314,7 @@ QSlider::handle:horizontal:hover {{
 QSlider::handle:horizontal:disabled {{
     background: {text_dim};
 }}
+QSlider::handle:horizontal:focus {{ border: 2px solid {focus}; margin: -5px 0; }}
 
 /* Alça larga e transparente: quem separa os painéis são as bordas dos grupos, e
    uma alça de 1 px colava o título do grupo de baixo no conteúdo do de cima. */
@@ -297,7 +325,7 @@ QSplitter::handle:hover {{ background: {border}; }}
 
 QMenuBar, QMenu {{ background: {surface}; }}
 QMenuBar::item:selected, QMenu::item:selected {{
-    background: {accent}; color: {accent_text};
+    background: {accent_fill}; color: {accent_text};
 }}
 QMenu {{ border: 1px solid {border}; padding: 4px; }}
 QMenu::item {{ padding: 6px 22px; border-radius: 4px; }}
@@ -331,8 +359,17 @@ QTabBar::tab {{
 QTabBar::tab:hover {{ color: {text}; }}
 QTabBar::tab:selected {{
     background: {surface}; border-color: {border};
-    color: {accent}; font-weight: 600;
+    color: {accent_fg}; font-weight: 600;
 }}
+QTabBar::tab:focus {{ border-color: {focus}; }}
+
+/* Foco do teclado nos botões: só a cor da borda muda, para a geometria não
+   pular. Antes só os campos de texto mostravam foco: medido, 1,1 a 1,6:1
+   entre o botão com e sem foco, onde a referência pede 3:1, e quem navega
+   por Tab não sabia em que botão o Enter ia cair. No fim do estilo para
+   valer sobre o :hover e os papéis. */
+QPushButton:focus, QPushButton[role="primary"]:focus, QPushButton[role="transport"]:focus,
+QPushButton[role="profile"]:focus, QPushButton[role="spin-tool"]:focus {{ border-color: {focus}; }}
 """
 
 
@@ -367,11 +404,11 @@ def qpalette(theme: str) -> QPalette:
         QPalette.ColorRole.PlaceholderText: colors["text_dim"],
         QPalette.ColorRole.Button: colors["surface_alt"],
         QPalette.ColorRole.ButtonText: colors["text"],
-        QPalette.ColorRole.Highlight: colors["accent"],
+        QPalette.ColorRole.Highlight: colors["accent_fill"],
         QPalette.ColorRole.HighlightedText: colors["accent_text"],
         QPalette.ColorRole.ToolTipBase: colors["surface_alt"],
         QPalette.ColorRole.ToolTipText: colors["text"],
-        QPalette.ColorRole.Link: colors["accent"],
+        QPalette.ColorRole.Link: colors["accent_fg"],
     }
     for group in groups:
         for role, value in roles.items():

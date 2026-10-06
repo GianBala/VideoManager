@@ -9,7 +9,7 @@ import pytest
 from videomanager.application.formatting import format_bitrate, format_rate, format_size
 from videomanager.domain import i18n
 from videomanager.domain.project import Clip, MediaKind, MediaRef
-from videomanager.domain.timing import format_span, format_timecode, parse_timecode
+from videomanager.domain.timing import format_span, format_timecode
 
 i18n.register({
     "TESTE_SAUDACAO": ("Olá, {nome}", "Hello, {nome}"),
@@ -98,14 +98,6 @@ def test_timecode_e_trecho_no_separador_do_idioma():
     assert format_timecode(62.5, milliseconds=False) == "0:01:02"
     assert format_span(4.25) == "4.25 s"
     assert format_span(125.0) == "02:05.000"
-
-
-@pytest.mark.parametrize("idioma", i18n.LANGUAGES)
-def test_timecode_le_os_dois_separadores_nos_dois_idiomas(idioma):
-    i18n.set_language(idioma)
-    assert parse_timecode("1:02,5") == pytest.approx(62.5)
-    assert parse_timecode("1:02.5") == pytest.approx(62.5)
-    assert parse_timecode(format_timecode(3725.25)) == pytest.approx(3725.25)
 
 
 def test_formatacao_de_numeros_em_ingles(ingles):

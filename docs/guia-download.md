@@ -106,4 +106,4 @@ podem não aparecer.
 ## Acompanhando o download
 
 Depois de **Adicionar à fila**, o progresso aparece na
-[fila de tarefas](interface-geral.md#a-fila-de-tarefas), comum às três abas.
+[fila de tarefas](interface-geral.md#a-fila-de-tarefas), comum às abas Download, Convert e Editar.

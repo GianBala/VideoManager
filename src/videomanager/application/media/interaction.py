@@ -1,7 +1,7 @@
 """Planos imutáveis para manipulação imediata de um objeto em um instante."""
 from dataclasses import dataclass, replace
 
-from ...domain.project import Clip, Project, TrackKind
+from ...domain.project import Clip, OverlayType, Project, TrackKind
 
 
 @dataclass(frozen=True)
@@ -24,9 +24,9 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     if selected is None:
         return None
     clip = ordered[selected]
-    if clip.overlay_type in ('filter', 'transition'):
+    if clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION):
         return None
-    if any(c.overlay_type in ('filter', 'transition') for c in ordered[selected + 1:]):
+    if any(c.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION) for c in ordered[selected + 1:]):
         return None
 
     def subset(clips: list[Clip]) -> Project:

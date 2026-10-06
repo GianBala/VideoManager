@@ -2,7 +2,6 @@
 from __future__ import annotations
 import bisect
 import math
-import re
 from dataclasses import dataclass
 from enum import Enum
 from videomanager.domain.media import LocalMedia
@@ -30,46 +29,8 @@ def available_duration(duration: float, in_point: float, speed: float) -> float:
     return max(0.0, duration - in_point) / speed
 
 
-# Aceita "12", "12,5", "1:23.45", "01:02:03,250" nos dois idiomas: o texto
-# mostrado usa o separador do idioma, mas o teclado numérico e o conteúdo colado
-# trazem qualquer um dos dois, e recusar o outro seria erro por um detalhe.
-_SECONDS = re.compile(r"^\d{1,2}(?:[.,]\d{1,6})?$")
-
-
-_WHOLE = re.compile(r"^\d{1,3}$")
-
-
-def parse_timecode(text: str) -> float | None:
-    """Converte ``h:mm:ss,mmm`` em segundos. ``None`` se não for um timecode.
-
-    Devolver ``None`` em vez de levantar é deliberado: quem chama é um campo de
-    texto sendo digitado, onde um valor incompleto é o estado normal e não um
-    erro a relatar.
-    """
-    parts = text.strip().split(":")
-    if not 1 <= len(parts) <= 3 or not _SECONDS.match(parts[-1]):
-        return None
-    if any(not _WHOLE.match(part) for part in parts[:-1]):
-        return None
-
-    total = float(parts[-1].replace(",", "."))
-    # Com minuto ou hora à frente, os campos seguintes são de timecode e não
-    # aceitam transbordo: "1:99" tanto pode ser um erro de digitação quanto
-    # 2:39, e num campo de precisão adivinhar é pior que devolver o valor
-    # anterior, que continua à vista.
-    if len(parts) >= 2:
-        if total >= 60:
-            return None
-        total += int(parts[-2]) * 60
-    if len(parts) == 3:
-        if int(parts[-2]) >= 60:
-            return None
-        total += int(parts[0]) * 3600
-    return total
-
-
 def format_timecode(seconds: float | None, *, milliseconds: bool = True) -> str:
-    """Segundos como ``h:mm:ss,mmm`` (ou ``.mmm`` em inglês) — a forma que o campo de tempo aceita de volta.
+    """Segundos como ``h:mm:ss,mmm`` (ou ``.mmm`` em inglês).
 
     Arredondado ao milissegundo, e não truncado: um instante marcado em 5,3 s
     chega aqui como 5,2999999 (é o que o float guarda), e truncar mostraria
@@ -159,19 +120,6 @@ class Segment:
     def contains(self, seconds: float) -> bool:
         return self.start <= seconds <= self.end
 
-    def split_at(self, seconds: float) -> tuple[Segment, ...]:
-        """Divide no instante dado. Devolve o trecho intacto se o corte não couber.
-
-        É a operação da tesoura: dividir onde não há espaço para os dois lados
-        criaria um trecho de duração zero, que o ffmpeg recusa.
-        """
-        if (
-            seconds - self.start < MIN_SEGMENT
-            or self.end - seconds < MIN_SEGMENT
-        ):
-            return (self,)
-        return (Segment(self.start, seconds), Segment(seconds, self.end))
-
     @property
     def label(self) -> str:
         return (
@@ -245,16 +193,6 @@ def keyframe_after(times: tuple[float, ...], seconds: float) -> float | None:
         return None
     position = bisect.bisect_right(times, seconds + 1e-6)
     return times[position] if position < len(times) else None
-
-
-def nearest_keyframe(times: tuple[float, ...], seconds: float) -> float | None:
-    before = keyframe_at_or_before(times, seconds)
-    after = keyframe_after(times, seconds)
-    if before is None:
-        return after
-    if after is None:
-        return before
-    return before if seconds - before <= after - seconds else after
 
 
 def has_real_video(media: LocalMedia) -> bool:

@@ -1,0 +1,8 @@
+# Propõe as versões novas das actions da CI, que vão fixadas pelo commit
+# (ver o comentário em workflows/tests.yml).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
