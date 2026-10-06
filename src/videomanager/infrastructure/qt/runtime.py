@@ -98,18 +98,28 @@ class DesktopRuntime:
         *,
         text_assets = None,
     ):
-        request = prepare_preview(project, seconds, size, token, text_assets=text_assets)
+        # ``text_assets`` pode vir como função: o texto vira PNG no worker, e não
+        # na interface. Medido, cada estado novo de um texto grande custava de
+        # 24 a 51 ms na thread da interface — a cada tecla digitada.
+        lazy = callable(text_assets)
+        request = prepare_preview(project, seconds, size, token, text_assets=None if lazy else text_assets)
+
         # Montado no worker, e não aqui: no último quadro de um bloco o comando
         # lê o fim do arquivo com o ffprobe (ver ``lastframe``), e isso não pode
         # travar a interface.
-        command = partial(composer.frame_command, request.project, request.seconds, request.size, tools,
-                          text_assets=dict(request.text_assets))
+        def command():
+            assets = text_assets() if lazy else dict(request.text_assets)
+            return composer.frame_command(request.project, request.seconds, request.size, tools,
+                                          text_assets=assets)
         return FrameWorker(command, request.size, request.seconds, request.token)
 
     def interaction_worker(self, plan, size, tools, token, *, text_assets=None):
-        # Pelo mesmo motivo do quadro parado: fundo e frente são quadros parados.
-        return InteractionWorker(partial(composer.interaction_commands, plan, size, tools,
-                                         text_assets=text_assets), token)
+        # Pelo mesmo motivo do quadro parado: fundo e frente são quadros parados,
+        # e o texto (``text_assets`` como função) também vira PNG no worker.
+        def commands():
+            assets = text_assets() if callable(text_assets) else text_assets
+            return composer.interaction_commands(plan, size, tools, text_assets=assets)
+        return InteractionWorker(commands, token)
 
     def playback_worker(
         self,

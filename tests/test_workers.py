@@ -321,3 +321,27 @@ def test_tarefa_local_que_falha_oferece_os_detalhes_do_ffmpeg(monkeypatch):
     worker = convert_worker.ConvertWorker(SimpleNamespace(job_id=1, request=pedido))
     worker.run()
     assert "width not divisible" in worker.log[0]
+
+
+def test_texto_vira_png_no_worker_do_quadro_e_nao_na_interface(monkeypatch):
+    # Cada estado novo de um texto grande custava de 24 a 51 ms na thread da
+    # interface, a cada tecla: o PNG era feito antes de criar o worker.
+    import threading
+    from videomanager.infrastructure.qt.runtime import DesktopRuntime
+    from videomanager.infrastructure.ffmpeg import composer
+    chamadas = []
+
+    def ativos():
+        chamadas.append(threading.current_thread() is threading.main_thread())
+        return {}
+
+    monkeypatch.setattr(composer, "frame_command", lambda *a, **k: ["ffmpeg"])
+    monkeypatch.setattr(composer, "interaction_commands", lambda *a, **k: [])
+    runtime = DesktopRuntime(audio_enabled=False)
+    from videomanager.domain.project import new_project
+    quadro = runtime.frame_worker(new_project(), 0.0, (64, 36), TOOLS, 1, text_assets=ativos)
+    camadas = runtime.interaction_worker(object(), (64, 36), TOOLS, 2, text_assets=ativos)
+    assert chamadas == []
+    quadro._command()
+    camadas._commands()
+    assert len(chamadas) == 2  # só quando o comando do worker é montado
