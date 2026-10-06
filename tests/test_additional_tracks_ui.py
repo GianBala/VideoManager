@@ -487,23 +487,23 @@ def test_botao_de_quadro_chave_tem_a_mesma_letra_marcado_e_desmarcado(qapp: QApp
     widget.deleteLater()
 
 
-def test_font_selector_popular_fonts_and_search(qapp: QApplication) -> None:
+def test_font_selector_lists_installed_fonts_and_search(qapp: QApplication) -> None:
+    # Um nome que não está instalado sai desenhado com outra fonte, sem aviso.
+    from PySide6.QtGui import QFontDatabase
     selector = _FontSelectorWidget("Sans Serif")
-    # Verify popular fonts exist
     items = [selector._font_list.item(i).text() for i in range(selector._font_list.count())]
-    assert "Arial" in items
-    assert "Comic Sans MS" in items
-    assert "Times New Roman" in items
+    instaladas = set(QFontDatabase.families())
+    assert "Carlito" in items
+    assert [f for f in items if f not in instaladas] == []
 
-    # Test filtering
-    selector._filter_fonts("Comic")
+    selector._filter_fonts("carlito")
     visible = [
         selector._font_list.item(i).text()
         for i in range(selector._font_list.count())
         if not selector._font_list.item(i).isHidden()
     ]
-    assert "Comic Sans MS" in visible
-    assert "Arial" not in visible
+    assert "Carlito" in visible
+    assert all("carlito" in f.lower() for f in visible)
 
     # Test clear filter
     selector._filter_fonts("")
@@ -1856,8 +1856,8 @@ def test_fontes_embutidas_sao_da_ofl() -> None:
 
 
 def test_calibri_font_availability(qapp: QApplication) -> None:
-    """Calibri está no seletor e renderiza; projeto salvo com a Rapier Zero,
-    que saiu do pacote, continua renderizando o texto com a fonte substituta."""
+    """Carlito, a substituta embutida da Calibri, está no seletor; Calibri e a
+    Rapier Zero, que saiu do pacote, continuam renderizando em projeto salvo."""
     from videomanager.infrastructure.qt.text import QtTextRasterizer
     render_text_to_image = QtTextRasterizer().render
     from videomanager.domain.project import Clip
@@ -1868,7 +1868,7 @@ def test_calibri_font_availability(qapp: QApplication) -> None:
     selector = _FontSelectorWidget("Calibri")
 
     all_fonts = [selector._font_list.item(i).text() for i in range(selector._font_list.count())]
-    assert "Calibri" in all_fonts
+    assert "Carlito" in all_fonts
 
     clip_rapier = Clip(
         media=None,
