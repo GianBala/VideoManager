@@ -34,6 +34,7 @@ import itertools
 import math
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QThreadPool, QTimer, Signal
@@ -3405,7 +3406,7 @@ class EditPanel(QWidget):
         self._interaction_token = next(self._tokens)
         plan = key[2]
         worker = self._runtime.interaction_worker(plan, key[1], tools, self._interaction_token,
-                                                  text_assets=self.editor.text_assets(self._project))
+                                                  text_assets=partial(self.editor.text_assets, self._project))
         self._interaction_worker = worker
         worker.signals.frame.connect(self._on_interaction_ready)
         worker.signals.done.connect(self._on_interaction_done)
@@ -3503,7 +3504,7 @@ class EditPanel(QWidget):
 
         worker = self._runtime.frame_worker(
             proj, self._wanted, size, tools, self._frame_token,
-            text_assets=self.editor.text_assets(proj),
+            text_assets=partial(self.editor.text_assets, proj),
         )
         worker.signals.frame.connect(self._on_frame)
         if hasattr(worker.signals, "failed"):
