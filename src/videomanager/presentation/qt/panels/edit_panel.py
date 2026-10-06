@@ -1017,6 +1017,7 @@ class EditPanel(QWidget):
         self._font_size_spin.setFixedHeight(28)
         self._font_size_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self._font_size_spin.valueChanged.connect(lambda _: self._on_text_style_changed())
+        lbl_size.setBuddy(self._font_size_spin)
         row_size.addWidget(self._font_size_spin, 1)
 
         btn_inc = QPushButton("+")
@@ -1046,6 +1047,7 @@ class EditPanel(QWidget):
         b_font.setBold(True)
         self._bold_btn.setFont(b_font)
         self._bold_btn.setFixedWidth(36)
+        bind(self._bold_btn, "setToolTip", lambda: strings.EDIT_FONT_BOLD_TIP)
         self._bold_btn.toggled.connect(lambda _: self._on_text_style_changed())
         row_style.addWidget(self._bold_btn)
 
@@ -1055,6 +1057,7 @@ class EditPanel(QWidget):
         i_font.setItalic(True)
         self._italic_btn.setFont(i_font)
         self._italic_btn.setFixedWidth(36)
+        bind(self._italic_btn, "setToolTip", lambda: strings.EDIT_FONT_ITALIC_TIP)
         self._italic_btn.toggled.connect(lambda _: self._on_text_style_changed())
         row_style.addWidget(self._italic_btn)
 
@@ -1077,6 +1080,7 @@ class EditPanel(QWidget):
             btn = QPushButton()
             btn.setFixedSize(22, 22)
             btn.setStyleSheet(f"background: {c}; border: 1px solid #444; border-radius: 3px;")
+            bind(btn, "setToolTip", lambda col=c: strings.EDIT_TEXT_SWATCH_TIP.format(color=col.upper()))
             btn.clicked.connect(lambda _, col=c: self._set_text_color(col))
             pal_row.addWidget(btn)
         pal_row.addStretch(1)
@@ -1122,6 +1126,7 @@ class EditPanel(QWidget):
             btn = QPushButton()
             btn.setFixedSize(22, 22)
             btn.setStyleSheet(f"background: {c}; border: 1px solid #444; border-radius: 3px;")
+            bind(btn, "setToolTip", lambda col=c: strings.EDIT_STROKE_SWATCH_TIP.format(color=col.upper()))
             btn.clicked.connect(lambda _, col=c: self._set_stroke_color(col))
             stroke_pal_row.addWidget(btn)
         stroke_pal_row.addStretch(1)

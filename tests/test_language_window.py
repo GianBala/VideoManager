@@ -412,3 +412,40 @@ def test_coluna_de_velocidade_da_fila_acompanha_o_idioma(desktop_app):
     finally:
         idioma.apply_language(i18n.PORTUGUESE)
     assert "faltam" in QueueModel._speed_text(tarefa)
+
+
+def _sem_nome(janela, app) -> list[str]:
+    import re
+    from PySide6.QtGui import QAccessible
+    from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QAbstractSlider, QAbstractSpinBox,
+                                   QHeaderView, QLineEdit, QPlainTextEdit, QScrollBar)
+    palavra = re.compile(r"[^\W\d_]{2,}")
+    faltando = []
+    for indice in range(janela._tabs.count()):
+        janela._tabs.setCurrentIndex(indice)
+        for _ in range(4):
+            app.processEvents()
+        for tipo in (QAbstractButton, QAbstractSlider, QAbstractSpinBox, QAbstractItemView, QLineEdit, QPlainTextEdit):
+            for widget in janela.findChildren(tipo):
+                if (not widget.isVisible() or isinstance(widget, (QScrollBar, QHeaderView))
+                        or (isinstance(widget, QLineEdit) and isinstance(widget.parent(), QAbstractSpinBox))):
+                    continue
+                nome = QAccessible.queryAccessibleInterface(widget).text(QAccessible.Text.Name) or ""
+                if not palavra.search(nome):
+                    faltando.append(f"aba {indice}: {type(widget).__name__} {nome!r} {widget.toolTip()[:30]!r}")
+    return faltando
+
+
+def test_todo_controle_visivel_tem_nome_acessivel_nos_dois_idiomas(janelas, desktop_app):
+    # Leitor de tela anunciava "botão" ou "triângulo apontando para a direita":
+    # 34 de 131 controles visíveis sem nome e 24 com nome só de símbolo.
+    janela = janelas()
+    assert _sem_nome(janela, desktop_app) == []
+    desfazer = janela._edit._undo
+    idioma.apply_language(i18n.ENGLISH)
+    try:
+        assert _sem_nome(janela, desktop_app) == []
+        assert desfazer.accessibleName().startswith("Undo")
+    finally:
+        idioma.apply_language(i18n.PORTUGUESE)
+    assert desfazer.accessibleName().startswith("Desfazer")

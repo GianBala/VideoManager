@@ -52,6 +52,7 @@ _GETTERS = {
     "setWindowTitle": "windowTitle",
     "setTitle": "title",
     "setStatusTip": "statusTip",
+    "setAccessibleName": "accessibleName",
 }
 
 # objeto → {setter: (origem, texto aplicado)}. Referência fraca: o registro não
