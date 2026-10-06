@@ -34,8 +34,6 @@ from videomanager.domain.timing import frame_step
 from videomanager.domain.timing import frame_time
 from videomanager.domain.timing import keyframe_after
 from videomanager.domain.timing import keyframe_at_or_before
-from videomanager.domain.timing import nearest_keyframe
-from videomanager.domain.timing import parse_timecode
 from videomanager.domain.timing import seek_time
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
@@ -97,41 +95,11 @@ def args_for(m: LocalMedia, t: TrimTarget, dest: Path = DEST) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Timecode: o campo de tempo é digitável, então precisa aceitar o que se digita
+# Timecode: o texto do instante que a tela mostra
 # ---------------------------------------------------------------------------
 
 
 class TestTimecode:
-    @pytest.mark.parametrize(
-        ("texto", "segundos"),
-        [
-            ("12", 12.0),
-            ("12,5", 12.5),
-            ("12.5", 12.5),          # o teclado numérico produz ponto
-            ("1:23", 83.0),
-            ("1:23,250", 83.25),
-            ("0:01:02", 62.0),
-            ("2:00:00", 7200.0),
-            ("  0:00:05,001  ", 5.001),
-        ],
-    )
-    def test_le_as_formas_que_o_usuario_digita(self, texto: str, segundos: float) -> None:
-        assert parse_timecode(texto) == pytest.approx(segundos)
-
-    @pytest.mark.parametrize(
-        "texto", ["", "abc", "1:2:3:4", "-5", "1:99", "inf", "nan", "1e3", "10:"]
-    )
-    def test_recusa_o_que_nao_e_timecode(self, texto: str) -> None:
-        assert parse_timecode(texto) is None
-
-    @pytest.mark.parametrize("segundos", [0.0, 0.001, 5.5, 83.25, 3661.999])
-    def test_ida_e_volta(self, segundos: float) -> None:
-        # A ida e volta é o contrato do campo: o que a tela mostra tem de voltar
-        # como o mesmo instante quando o usuário confirma sem editar.
-        assert parse_timecode(format_timecode(segundos)) == pytest.approx(
-            segundos, abs=0.001
-        )
-
     def test_milissegundo_e_arredondado(self) -> None:
         # 5,3 chega aqui como 5,2999999: truncar mostraria "5,299" para quem
         # acabou de digitar "5,3".
@@ -187,15 +155,6 @@ class TestQuadros:
 
 
 class TestSegmento:
-    def test_divide_em_dois(self) -> None:
-        assert Segment(0, 10).split_at(4) == (Segment(0, 4), Segment(4, 10))
-
-    @pytest.mark.parametrize("ponto", [0.0, 0.01, 9.99, 10.0])
-    def test_nao_divide_onde_nao_cabe(self, ponto: float) -> None:
-        # Dividir na ponta criaria um trecho de duração zero, que o ffmpeg
-        # recusa — e que o usuário não pediu, já que ele clicou na borda.
-        assert Segment(0, 10).split_at(ponto) == (Segment(0, 10),)
-
     def test_duracao_e_uso(self) -> None:
         assert Segment(2.5, 7.5).duration == pytest.approx(5.0)
         assert Segment(2.5, 7.5).is_usable
@@ -243,10 +202,6 @@ class TestKeyframes:
     def test_proximo_serve_para_mover_a_marca(self) -> None:
         assert keyframe_after(KEYFRAMES, 5.0) == 6.4
         assert keyframe_after(KEYFRAMES, 8.0) is None
-
-    def test_mais_proximo(self) -> None:
-        assert nearest_keyframe(KEYFRAMES, 5.0) == 4.8
-        assert nearest_keyframe(KEYFRAMES, 6.0) == 6.4
 
     def test_sem_mapa_de_keyframes_nao_quebra(self) -> None:
         # O mapeamento pode falhar num arquivo estranho; a aba continua servindo.

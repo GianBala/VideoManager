@@ -35,10 +35,6 @@ class ScrubFrameCache:
         return len(self._frames)
 
     @property
-    def bytes_used(self) -> int:
-        return self._bytes
-
-    @property
     def average_frame_bytes(self) -> int | None:
         return self._bytes // len(self._frames) if self._frames else None
 

@@ -438,8 +438,8 @@ class Clip:
         return ClipTransform(
             x=self.x,
             y=self.y,
-            scale_x=getattr(self, "scale_x", self.scale),
-            scale_y=getattr(self, "scale_y", self.scale),
+            scale_x=self.scale_x,
+            scale_y=self.scale_y,
             rotation=self.rotation,
             opacity=self.opacity,
         )
@@ -520,15 +520,6 @@ class Clip:
             k for k in self.keyframes if k not in self.visible_keyframes or abs(k.time_offset - time_offset) >= tolerance
         )
         return replace(self, keyframes=filtered)
-
-    def nearest_keyframe(
-        self, time_offset: float, tolerance: float = 1e-4
-    ) -> Keyframe | None:
-        """Retorna o keyframe mais próximo dentro da tolerância, ou None."""
-        for k in self.visible_keyframes:
-            if abs(k.time_offset - time_offset) <= tolerance:
-                return k
-        return None
 
 
 @dataclass(frozen=True)
