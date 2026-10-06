@@ -235,3 +235,17 @@ def test_resumos_fixados_conferem_com_a_publicacao():
         publicados = {a["name"]: a.get("digest") for a in json.load(response)["assets"]}
     for nome, resumo in binaries._ARCHIVES.values():
         assert publicados[nome] == f"sha256:{resumo}"
+
+
+def test_ffmpeg_empacotado_e_do_ramo_estavel_na_variante_gpl():
+    """RN-29: ramo n7.1 e variante GPL, estática.
+
+    O master exigia a API NVENC 13.1 (driver 610+) e recusava codificar numa
+    placa capaz com o driver 580; a LGPL não tem libx264, libx265 nem
+    libmp3lame; a "shared" carrega a libavcodec que o Qt também traz.
+    """
+    import re
+    from videomanager.infrastructure.system import binaries
+
+    for plataforma, (nome, _resumo) in binaries._ARCHIVES.items():
+        assert re.fullmatch(rf"ffmpeg-n7\.1(\.\d+)*-\d+-g[0-9a-f]+-{plataforma}-gpl-7\.1\.(tar\.xz|zip)", nome), nome
