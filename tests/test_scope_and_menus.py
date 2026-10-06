@@ -544,3 +544,40 @@ def test_pacote_diz_o_commit_no_log_e_no_sobre(qapp, tmp_path, monkeypatch):
         assert "Video Manager 3.1 (v3.1-12-gabc1234)" in sobre[0]
     finally:
         window.close()
+
+
+def test_atalho_do_linux_segue_a_copia_aberta_e_nao_fica_quebrado(tmp_path, monkeypatch):
+    """O atalho em ~/.local/share/applications aponta para a cópia aberta.
+
+    Ele apontava para onde o app rodou na primeira vez e só era regravado
+    quando o ícone mudava. Apagada a pasta de build, ou movido o AppImage, o
+    GLib descarta o atalho cujo Exec não existe, e a janela perde a logo na
+    barra de tarefas — e abrir outra cópia não consertava.
+    """
+    import sys
+
+    from videomanager import app as aplicativo
+
+    dados = tmp_path / "dados"
+    monkeypatch.setenv("XDG_DATA_HOME", str(dados))
+    atalho = dados / "applications" / "videomanager.desktop"
+
+    def exec_do_atalho() -> str:
+        return next(linha for linha in atalho.read_text(encoding="utf-8").splitlines()
+                    if linha.startswith("Exec="))
+
+    # Ícone já instalado e um atalho apontando para uma cópia que sumiu.
+    aplicativo._ensure_linux_desktop_integration()
+    atalho.write_text(atalho.read_text(encoding="utf-8").replace(
+        exec_do_atalho(), 'Exec="/tmp/build-apagado/VideoManager"'), encoding="utf-8")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", "/opt/vm/VideoManager")
+    monkeypatch.setenv("APPIMAGE", "/home/x/Apps/Video_Manager-3.1-x86_64.AppImage")
+    aplicativo._ensure_linux_desktop_integration()
+    assert exec_do_atalho() == 'Exec="/home/x/Apps/Video_Manager-3.1-x86_64.AppImage"'
+
+    # A pasta do pacote, fora do AppImage: o executável, sem o "-m" do Python.
+    monkeypatch.delenv("APPIMAGE")
+    aplicativo._ensure_linux_desktop_integration()
+    assert exec_do_atalho() == 'Exec="/opt/vm/VideoManager"'
