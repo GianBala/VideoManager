@@ -102,9 +102,13 @@ def _ensure_linux_desktop_integration() -> None:
         apps_dir = data_home / "applications"
         desktop_file = apps_dir / "videomanager.desktop"
 
+        # A cópia aberta agora: o AppImage (não o ponto de montagem, que muda a
+        # cada execução), o executável do pacote ou o Python do código-fonte.
         appimage_path = os.environ.get("APPIMAGE")
         if appimage_path:
             exec_cmd = f'"{appimage_path}"'
+        elif getattr(sys, "frozen", False):
+            exec_cmd = f'"{sys.executable}"'
         else:
             exec_cmd = f'"{sys.executable}" -m videomanager'
 
@@ -114,18 +118,27 @@ def _ensure_linux_desktop_integration() -> None:
             "Name=Video Manager\n"
             # O ambiente escolhe pelo idioma do sistema, não pelo do aplicativo:
             # o inglês é o de quem não tem tradução, e o português vem marcado.
-            "Comment=Download, edit and convert video and audio\n"
-            "Comment[pt_BR]=Baixe, edite e converta vídeo e áudio\n"
+            "Comment=Download, convert and edit video and audio, and adjust metadata\n"
+            "Comment[pt_BR]=Baixe, converta e edite vídeo e áudio, e ajuste metadados\n"
             f"Exec={exec_cmd}\n"
             "Icon=videomanager\n"
             "Terminal=false\n"
             "Categories=AudioVideo;Video;\n"
-            "Keywords=video;audio;download;convert;editor;ffmpeg;\n"
-            "Keywords[pt_BR]=vídeo;áudio;download;converter;editor;ffmpeg;\n"
+            "Keywords=video;audio;download;convert;editor;metadata;tags;yt-dlp;ffmpeg;\n"
+            "Keywords[pt_BR]=vídeo;áudio;download;converter;editor;metadados;tags;yt-dlp;ffmpeg;\n"
             "StartupWMClass=VideoManager\n"
         )
 
-        if not desktop_file.is_file() or need_update:
+        # Regravado sempre que mudar, e não só quando o ícone muda. O GLib
+        # descarta o atalho cujo Exec não existe — pasta de build apagada,
+        # AppImage movido —, e sem atalho a barra de tarefas não acha a logo
+        # da janela. Abrir outra cópia não consertava, porque o ícone já
+        # estava instalado e nada era regravado.
+        try:
+            current = desktop_file.read_text(encoding="utf-8")
+        except OSError:
+            current = None
+        if current != desktop_content:
             apps_dir.mkdir(parents=True, exist_ok=True)
             desktop_file.write_text(desktop_content, encoding="utf-8")
     except Exception:
