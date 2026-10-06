@@ -29,7 +29,6 @@ class Preferences:
     # obriga a recodificar. Ver infrastructure/yt_dlp/selector.py.
     default_container: str = "mkv"
     default_height: int = 1080
-    default_fps_cap: int = 0  # 0 = sem limite
 
     # --- padrões de áudio ---
     default_audio_format: str = "mp3"
@@ -71,7 +70,6 @@ class Preferences:
     theme: str = "dark"
     # Idioma da interface, pelo código de videomanager.domain.i18n.
     language: str = PORTUGUESE
-    window_geometry: str = ""  # QByteArray serializado em base64
     # Volume da prévia da aba de edição, de 0 a 100. Guardado porque é ajustado
     # pelo ambiente em que se edita (fone, caixa, escritório), e não pelo vídeo:
     # reencontrar o volume de ontem a cada abertura seria trabalho repetido.

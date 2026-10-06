@@ -3090,8 +3090,8 @@ class EditPanel(QWidget):
             self._session.begin_edit()
             self._overlay_drag_session = clip_id
         active = self._preview._active_clip
-        sx = getattr(active, "scale_x", scale) if active else scale
-        sy = getattr(active, "scale_y", scale) if active else scale
+        sx = active.scale_x if active else scale
+        sy = active.scale_y if active else scale
         if active is not None and active.has_keyframes:
             self._project = self._project.with_updated_clip(
                 clip_id,
