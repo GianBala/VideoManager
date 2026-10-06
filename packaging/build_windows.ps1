@@ -8,6 +8,14 @@ $ErrorActionPreference = "Stop"
 
 Set-Location (Join-Path $PSScriptRoot "..")
 
+# Um pacote com numero de versao sai de um commit: com alteracao local, o
+# "3.1" do Sobre nao diria o que o usuario roda. VM_ALLOW_DIRTY=1 gera assim
+# mesmo, e o commit gravado leva o sufixo -dirty.
+if ((git status --porcelain) -and $env:VM_ALLOW_DIRTY -ne "1") {
+    git status --short
+    throw "Arvore com alteracoes nao commitadas; commite ou use VM_ALLOW_DIRTY=1"
+}
+
 $venv = if ($env:VENV) { $env:VENV } else { ".venv" }
 $py = Join-Path $venv "Scripts\python.exe"
 

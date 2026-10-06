@@ -12,6 +12,15 @@ PY="$VENV/bin/python"
 DIST="${VM_DIST_DIR:-dist}"
 BUILD="${VM_BUILD_DIR:-build}"
 
+# Um pacote com número de versão sai de um commit: com alteração local, o
+# "3.1" do Sobre não diria o que o usuário roda. VM_ALLOW_DIRTY=1 gera assim
+# mesmo, e o commit gravado leva o sufixo -dirty.
+if [ -n "$(git status --porcelain)" ] && [ "${VM_ALLOW_DIRTY:-0}" != "1" ]; then
+    echo "árvore com alterações não commitadas; commite ou use VM_ALLOW_DIRTY=1" >&2
+    git status --short >&2
+    exit 1
+fi
+
 if [ ! -x "$PY" ]; then
     echo "venv não encontrado em $VENV. Crie com: python3 -m venv $VENV" >&2
     exit 1
