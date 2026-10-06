@@ -55,6 +55,7 @@ from videomanager.domain.selection import VideoRequest
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.accessibility import name_controls
 from videomanager.presentation.qt.i18n import apply_language, bind, on_language_change
 from videomanager.presentation.qt.ffmpeg_setup import ensure_ffmpeg
 from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
@@ -153,6 +154,7 @@ class MainWindow(QMainWindow):
         self._update_menu_scope(_TAB_DOWNLOAD)
         self._update_status()
         on_language_change(self._retranslate)
+        name_controls(self)
         # Rótulos e avisos mudam de altura com o texto: a altura que as abas
         # pedem também, medida depois de todos os layouts assentarem.
         on_language_change(self._balance_panes, after_layout=True)
@@ -249,6 +251,8 @@ class MainWindow(QMainWindow):
                                       strings.TAB_METADATA)):
             self._tabs.setTabText(index, text)
         self._update_status()
+        # Os nomes acessíveis tirados das dicas acompanham as dicas novas.
+        name_controls(self)
 
     def _on_split_moved(self, *_: int) -> None:
         self._split_by_user = not self._balancing
@@ -258,6 +262,7 @@ class MainWindow(QMainWindow):
         if self._metadata is None:
             self._metadata = MetadataPanel(self._settings, self._tools_for_convert, runtime=self._runtime)
             self._metadata_page.layout().addWidget(self._wrap_tab(self._metadata))
+            name_controls(self._metadata)
         return self._metadata
 
     def _on_tab_changed(self, index: int) -> None:
