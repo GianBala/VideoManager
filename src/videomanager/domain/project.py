@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
+from videomanager.domain.constants import GAIN_EPSILON
 from videomanager.domain.keyframe import ClipTransform
 from videomanager.domain.geometry import image_base_size, natural_image_size
 from videomanager.domain.i18n import decimal, t, variants
@@ -161,6 +162,43 @@ def display_width(width: int | None, sar: float | None) -> int | None:
     return max(2, round(width * sar / 2) * 2)
 
 
+class OverlayType(str, Enum):
+    """O que o bloco é além de mídia comum. O valor é o que o .vmp grava."""
+
+    NONE = "none"
+    IMAGE = "image"
+    TEXT = "text"
+    FILTER = "filter"
+    TRANSITION = "transition"
+
+    # Formatado, vale o valor e não "OverlayType.TEXT": o Python 3.12 passou a
+    # formatar Enum misto pelo nome, e o tipo aparece em textos e no .vmp.
+    __str__ = str.__str__
+    __format__ = str.__format__
+
+    @property
+    def has_media_file(self) -> bool:
+        """Se o bloco aponta para um arquivo de verdade. Texto, filtro e
+        transição têm só um caminho-identificador (ver ``PSEUDO_PREFIXES``)."""
+        return self not in PSEUDO_PREFIXES
+
+
+# Prefixo do caminho dos blocos sem arquivo (texto, filtro, transição). É
+# identificador gravado no .vmp — por ele a leitura sabe que não há arquivo a
+# procurar —, então não se traduz nem muda: projetos salvos dependem dele.
+# Morava como literal na tela que cria o bloco e repetido na persistência.
+PSEUDO_PREFIXES = {OverlayType.TEXT: "Texto_", OverlayType.FILTER: "Filtro_", OverlayType.TRANSITION: "Transição_"}
+
+
+def pseudo_media(overlay: OverlayType | str, label: str, duration: float) -> MediaRef:
+    """A "mídia" de um bloco sem arquivo: caminho-identificador e duração."""
+    return MediaRef(path=Path(f"{PSEUDO_PREFIXES[overlay]}{label}"), kind=MediaKind.IMAGE, duration=duration)
+
+
+def is_pseudo_path(path: Path | str) -> bool:
+    return str(path).startswith(tuple(PSEUDO_PREFIXES.values()))
+
+
 def media_ref(local: LocalMedia) -> MediaRef:
     """Constrói a referência a partir de um arquivo já inspecionado.
 
@@ -206,6 +244,9 @@ def media_ref(local: LocalMedia) -> MediaRef:
     )
 
 
+_ANIMATED_FIELDS = {"scale": ("scale_x", "scale_y"), "rotation": ("rotation",), "opacity": ("opacity",)}
+
+
 @dataclass(frozen=True)
 class Clip:
     """Um pedaço de mídia colocado num instante da linha do tempo."""
@@ -233,11 +274,15 @@ class Clip:
     x: float = 0.5  # Centro X normalizado (0.0 a 1.0)
     y: float = 0.5  # Centro Y normalizado (0.0 a 1.0)
     scale: float = 1.0  # Fator de escala uniforme (1.0 = padrão)
-    scale_x: float = 1.0  # Escala horizontal (1.0 = padrão)
-    scale_y: float = 1.0  # Escala vertical (1.0 = padrão)
+    # Escala por eixo. Omitida, vale ``scale`` — a forma antiga, de um fator só.
+    # O padrão é ``None``, e não 1,0, porque só assim dá para distinguir "não
+    # informado" de "informado como 1": com 1,0, ``replace(clip, scale_x=1,
+    # scale_y=1)`` num bloco com escala 2 voltava a 2.
+    scale_x: float = None  # type: ignore[assignment]
+    scale_y: float = None  # type: ignore[assignment]
     rotation: float = 0.0  # Rotação em graus (0.0 a 360.0)
     # Metadados de sobreposições de adicionais
-    overlay_type: str = "none"  # "none", "image", "text", "filter"
+    overlay_type: OverlayType = OverlayType.NONE
     text_content: str = ""
     font_family: str = "Sans Serif"
     font_size: int = 36
@@ -271,8 +316,11 @@ class Clip:
 
     def __post_init__(self) -> None:
         _clip_ids.reserve(self.clip_id)
-        if self.scale != 1.0 and self.scale_x == 1.0 and self.scale_y == 1.0:
+        # Quem lê o .vmp e os testes passam o texto; o bloco guarda o tipo.
+        object.__setattr__(self, "overlay_type", OverlayType(self.overlay_type))
+        if self.scale_x is None:
             object.__setattr__(self, "scale_x", self.scale)
+        if self.scale_y is None:
             object.__setattr__(self, "scale_y", self.scale)
         object.__setattr__(self, "opacity", max(0.0, min(1.0, float(self.opacity))))
         if self.keyframes and not isinstance(self.keyframes, tuple):
@@ -303,7 +351,7 @@ class Clip:
         """
         if self.is_transition:
             return False
-        if self.overlay_type in ("image", "text", "filter"):
+        if self.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT, OverlayType.FILTER):
             return True
         return bool(self.media and self.media.has_video and not self.audio_only)
 
@@ -316,17 +364,34 @@ class Clip:
         adicional neste sentido e mesmo assim vive na trilha de vídeo (ver
         :attr:`is_overlay`).
         """
-        return self.overlay_type in ("image", "text", "filter", "transition") or self.is_image
+        return self.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT, OverlayType.FILTER, OverlayType.TRANSITION) or self.is_image
+
+    @property
+    def has_media_file(self) -> bool:
+        return self.overlay_type.has_media_file
+
+    def animates(self, prop: str) -> bool:
+        """Se os quadros-chave mudam ``prop`` ("scale", "rotation" ou "opacity").
+
+        Compara cada quadro com o valor do bloco e com o vizinho. A pergunta é
+        de quem monta o filtro (expressão no tempo ou valor fixo) e de quem
+        desenha a alça na prévia: respondida em quatro lugares, um esqueceu a
+        comparação entre vizinhos.
+        """
+        fields = _ANIMATED_FIELDS[prop]
+        frames = self.keyframes
+        return any(abs(getattr(k, f) - getattr(self, f)) > 1e-9 for k in frames for f in fields) or any(
+            abs(getattr(a, f) - getattr(b, f)) > 1e-9 for a, b in zip(frames, frames[1:]) for f in fields)
 
     @property
     def is_overlay(self) -> bool:
         """Texto e filtro: o que vive nas trilhas de Adicionais."""
-        return self.overlay_type in ("text", "filter")
+        return self.overlay_type in (OverlayType.TEXT, OverlayType.FILTER)
 
     @property
     def is_transition(self) -> bool:
         """Se este bloco representa uma transição entre dois vídeos."""
-        return self.overlay_type == "transition"
+        return self.overlay_type is OverlayType.TRANSITION
 
     @property
     def can_adjust_sound(self) -> bool:
@@ -341,7 +406,7 @@ class Clip:
     @property
     def is_image(self) -> bool:
         return (
-            self.overlay_type in ("none", "image")
+            self.overlay_type in (OverlayType.NONE, OverlayType.IMAGE)
             and self.media is not None
             and self.media.kind is MediaKind.IMAGE
         )
@@ -359,7 +424,7 @@ class Clip:
             return t("CLIP_DETACHED")
         if self.muted:
             return t("CLIP_MUTED")
-        if abs(self.gain_db) < 0.05:
+        if not self.changes_gain:
             return ""
         return f"{decimal(self.gain_db, sign=True)} dB"
 
@@ -368,6 +433,32 @@ class Clip:
         if abs(self.speed - 1.0) < 0.05:
             return ""
         return f"{decimal(self.speed)}x"
+
+    @property
+    def changes_speed(self) -> bool:
+        """Se o bloco toca noutra velocidade — a mesma resposta para imagem e som.
+
+        O vídeo aplicava velocidade a partir de 1e-9 de diferença e o áudio só a
+        partir de 0,01: 1,005 (só possível editando o .vmp, o campo anda de 0,1)
+        esticava a imagem e não o som, 0,5% de dessincronia.
+        """
+        return abs(self.speed - 1.0) > 1e-9
+
+    @property
+    def changes_gain(self) -> bool:
+        return abs(self.gain_db) >= GAIN_EPSILON
+
+    def duration_at_speed(self, speed: float) -> float:
+        """Duração que toca, a ``speed``, o mesmo trecho da mídia.
+
+        O piso de ``MIN_SEGMENT`` só vale onde a mídia tem o que mostrar: num
+        bloco de um quadro, ele esticava a leitura além do fim do arquivo.
+        """
+        target = self.duration * self.speed / max(0.1, speed)
+        if self.is_image or self.is_additional:
+            return max(MIN_SEGMENT, target)
+        available = available_duration(self.media.duration or 0.0, self.in_point, max(0.1, speed))
+        return max(min(MIN_SEGMENT, available), target)
 
     @property
     def has_keyframes(self) -> bool:
@@ -390,8 +481,8 @@ class Clip:
         return ClipTransform(
             x=self.x,
             y=self.y,
-            scale_x=getattr(self, "scale_x", self.scale),
-            scale_y=getattr(self, "scale_y", self.scale),
+            scale_x=self.scale_x,
+            scale_y=self.scale_y,
             rotation=self.rotation,
             opacity=self.opacity,
         )
@@ -472,15 +563,6 @@ class Clip:
             k for k in self.keyframes if k not in self.visible_keyframes or abs(k.time_offset - time_offset) >= tolerance
         )
         return replace(self, keyframes=filtered)
-
-    def nearest_keyframe(
-        self, time_offset: float, tolerance: float = 1e-4
-    ) -> Keyframe | None:
-        """Retorna o keyframe mais próximo dentro da tolerância, ou None."""
-        for k in self.visible_keyframes:
-            if abs(k.time_offset - time_offset) <= tolerance:
-                return k
-        return None
 
 
 @dataclass(frozen=True)
@@ -608,7 +690,7 @@ class Project:
         return min(self.width / self.text_reference_width, self.height / self.text_reference_height)
 
     def with_output_canvas(self, width: int, height: int, fps: float | None = None) -> Project:
-        has_text = any(c.overlay_type == "text" for c in self.clips)
+        has_text = any(c.overlay_type is OverlayType.TEXT for c in self.clips)
         return replace(self, width=width, height=height, fps=self.fps if fps is None else fps,
                        text_reference_width=self.text_reference_width if has_text else width,
                        text_reference_height=self.text_reference_height if has_text else height)
@@ -622,7 +704,7 @@ class Project:
         tracks = tuple(replace(t, clips=tuple(
             replace(c, scale=1.0, scale_x=c.scale_x * ratio, scale_y=c.scale_y * ratio,
                     keyframes=tuple(replace(k, scale_x=k.scale_x * ratio, scale_y=k.scale_y * ratio)
-                                    for k in c.keyframes)) if c.overlay_type == "text" else c
+                                    for k in c.keyframes)) if c.overlay_type is OverlayType.TEXT else c
             for c in t.clips)) for t in self.tracks)
         return replace(self, tracks=tracks, width=width, height=height,
                        text_reference_width=width, text_reference_height=height)
@@ -802,6 +884,47 @@ class Project:
             cut=left.end,
             duration=duration,
         )
+
+    def transition_limit(self, marker: Clip) -> float:
+        """Maior duração da transição: o que cabe nos dois lados do corte.
+
+        Uma regra só para a alça e para o campo de duração. O campo parava em
+        5 s enquanto a alça ia até a duração dos blocos, e os dois discordavam
+        sobre a mesma transição; não há teto fixo, por decisão de produto.
+        """
+        context = self.transition_context(marker)
+        if context is None:
+            return marker.duration
+        return min(context.left.duration, context.right.duration)
+
+    def with_transition(self, track_index: int, left: Clip, right: Clip, name: str, label: str,
+                        duration: float, affects_additionals: bool) -> tuple[Project, int]:
+        """Põe uma transição no corte entre ``left`` e ``right``.
+
+        Como nos editores profissionais, um ponto de edição tem no máximo uma
+        transição: inserir outra naquele corte substitui a que havia. Devolve o
+        projeto e o id do marcador.
+        """
+        duration = min(duration, left.duration, right.duration)
+        existing = next((marker for marker in self.clips if marker.is_transition
+                         and marker.transition_left_id == left.clip_id
+                         and marker.transition_right_id == right.clip_id), None)
+        if existing is not None:
+            return self.with_updated_clip(existing.clip_id, transition_name=name, duration=duration,
+                                          transition_affects_additionals=affects_additionals), existing.clip_id
+        marker = Clip(
+            media=pseudo_media(OverlayType.TRANSITION, label, duration),
+            start=max(0.0, left.end - duration / 2.0),
+            duration=duration,
+            overlay_type=OverlayType.TRANSITION,
+            transition_name=name,
+            transition_left_id=left.clip_id,
+            transition_right_id=right.clip_id,
+            transition_affects_additionals=affects_additionals,
+        )
+        # Transições pertencem à sequência de vídeo, no próprio corte: não são
+        # adicionais e podem ocupar o intervalo dos dois blocos que conectam.
+        return self.with_clip(track_index, marker), marker.clip_id
 
     def transition_contexts(self) -> tuple[TransitionContext, ...]:
         """Transições válidas, sem permitir duas no mesmo ponto de edição."""
@@ -1134,16 +1257,8 @@ class Project:
                 if edge == "inicio"
                 else 2.0 * (seconds - context.cut)
             )
-            minimum = min(
-                MIN_TRANSITION_DURATION,
-                context.left.duration,
-                context.right.duration,
-            )
-            duration = min(
-                max(minimum, requested),
-                context.left.duration,
-                context.right.duration,
-            )
+            limit = self.transition_limit(clip)
+            duration = min(max(min(MIN_TRANSITION_DURATION, limit), requested), limit)
             return self.with_updated_clip(clip_id, duration=duration)
         floor, ceiling = self.tracks[index].free_range(
             (clip.start + clip.end) / 2, ignore=clip_id
@@ -1157,7 +1272,13 @@ class Project:
                 if not (clip.is_image or clip.is_additional)
                 else floor
             )
-            value = min(max(max(floor, limit), seconds), clip.end - MIN_SEGMENT)
+            # Teto pelo mínimo de duração, mas nunca depois do começo atual: num
+            # bloco já mais curto que o mínimo (mídia de um quadro), ``end -
+            # MIN_SEGMENT`` fica antes do começo, e a alça sobrepunha o vizinho
+            # e lia antes do primeiro quadro da mídia.
+            lower = max(floor, limit)
+            upper = max(clip.end - MIN_SEGMENT, clip.start)
+            value = min(max(lower, seconds), max(upper, lower))
             return self.with_updated_clip(
                 clip_id,
                 start=value,
@@ -1497,7 +1618,7 @@ def slideshow_canvas(project: Project) -> tuple[int, int] | None:
     if any(c.media and c.media.kind is MediaKind.VIDEO for c in clips):
         return None
     photos = [c.media for c in clips if c.is_image and c.media and c.media.width and c.media.height
-              and c.overlay_type not in ('text', 'filter', 'transition')]
+              and c.has_media_file]
     if not photos:
         return None
     biggest = max(photos, key=lambda m: m.width * m.height)

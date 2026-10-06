@@ -11,16 +11,30 @@ from videomanager.application.formatting import format_bitrate
 from videomanager.application.format_labels import resolution_label
 from videomanager.domain.i18n import Text, t
 
+# Dois níveis por container. "Empacotável" = o ffmpeg põe o stream neste
+# container sem recodificar. "Seguro" = além de válido, toca na maioria dos
+# players e aparelhos. VP9 e Opus dentro de MP4 são válidos mas só empacotáveis:
+# geram arquivo legítimo que muita TV e celular não abre, e por isso avisam.
+# MKV aceita qualquer combinação e é o padrão da aplicação.
+#
+# A conversão tem a sua tabela (domain/compatibility.py), e as duas diferem de
+# propósito. O download nunca recodifica: aceita o empacotável e só avisa ao
+# sair do seguro. A conversão pode recodificar, então só copia o que é seguro.
+# Os nomes também diferem porque as fontes diferem: aqui são as famílias de
+# exibição que vêm do yt-dlp ("H.264"), lá os ids do ffprobe ("h264"). O que é
+# seguro em MP4 tem de ser o mesmo nas duas — mudou numa, muda na outra.
 _MP4_MUXABLE_VIDEO = {"H.264", "HEVC", "AV1", "VP9", "MPEG-4", "Dolby Vision"}
 
 
 _MP4_MUXABLE_AUDIO = {"AAC", "MP3", "AC-3", "E-AC-3", "ALAC", "Opus", "FLAC"}
 
 
-_MP4_SAFE_VIDEO = {"H.264", "HEVC", "AV1"}
+# MPEG-4 Part 2 é o codec original do MP4, e ALAC em MP4/M4A é o recipiente
+# padrão dele: os dois tocam onde o MP4 toca.
+_MP4_SAFE_VIDEO = {"H.264", "HEVC", "AV1", "MPEG-4"}
 
 
-_MP4_SAFE_AUDIO = {"AAC", "MP3", "AC-3", "E-AC-3"}
+_MP4_SAFE_AUDIO = {"AAC", "MP3", "AC-3", "E-AC-3", "ALAC"}
 
 
 _WEBM_MUXABLE_VIDEO = {"VP8", "VP9", "AV1"}

@@ -19,6 +19,8 @@ from videomanager.domain.media import LocalStream
 from videomanager.domain.project import IMAGE_DURATION
 from videomanager.domain.project import MAX_AUTO_FPS
 from videomanager.domain.project import Clip
+from videomanager.domain.project import OverlayType
+from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
 from videomanager.domain.project import Project
@@ -954,3 +956,96 @@ def test_escala_global_proporcional_respeita_limites_da_curva_inteira():
     item = clip(duration=4, keyframes=(Keyframe(0), Keyframe(3, scale_x=10, scale_y=5)))
     changed = item.with_edited_transform(0, {'scale_x': 2, 'scale_y': 2}, fps=30, whole_animation=True)
     assert changed.keyframes == item.keyframes
+
+
+class TestBlocoMaisCurtoQueOMinimo:
+    """Mídia de um quadro (ou bloco curto acelerado) tem menos que ``MIN_SEGMENT``.
+
+    A alça inicial usava ``clip.end - MIN_SEGMENT`` como teto, que nesse caso
+    fica antes do começo do bloco: puxar a alça sobrepunha o vizinho e lia
+    antes do primeiro quadro da mídia (``in_point`` negativo). Mudar a
+    velocidade punha o piso de ``MIN_SEGMENT`` na duração e lia além do fim.
+    """
+
+    QUADRO = 1 / 29.97
+
+    def projeto(self):
+        base = Clip(MediaRef(Path("a.mp4"), MediaKind.VIDEO, duration=5), 0.0, 5.0)
+        curto = Clip(MediaRef(Path("quadro.mp4"), MediaKind.VIDEO, duration=self.QUADRO), 5.0, self.QUADRO)
+        return Project(tracks=(Track(TrackKind.VIDEO, clips=(base, curto)),)), curto
+
+    def test_alca_inicial_nao_sobrepoe_o_vizinho_nem_le_antes_da_midia(self):
+        projeto, curto = self.projeto()
+        mexido = projeto.resized(curto.clip_id, "inicio", 4.0).find(curto.clip_id)[1]
+        assert mexido.start >= 5.0 - 1e-9
+        assert mexido.in_point >= 0.0
+        assert mexido.duration > 0
+
+    def test_velocidade_nao_estica_alem_do_que_a_midia_tem(self):
+        _projeto, curto = self.projeto()
+        duracao = curto.duration_at_speed(1.0)
+        assert duracao * 1.0 <= self.QUADRO + 1e-9
+        assert curto.duration_at_speed(0.5) == pytest.approx(2 * self.QUADRO)
+
+    def test_bloco_normal_continua_com_o_piso_de_sempre(self):
+        clip = Clip(MediaRef(Path("a.mp4"), MediaKind.VIDEO, duration=10), 0.0, 0.08)
+        from videomanager.domain.constants import MIN_SEGMENT
+        assert clip.duration_at_speed(4.0) == pytest.approx(MIN_SEGMENT)
+
+
+class TestEscalaPorEixo:
+    """``scale`` antigo não pode passar por cima de ``scale_x``/``scale_y`` explícitos.
+
+    O ``__post_init__`` copiava ``scale`` para os eixos sempre que os dois
+    valiam 1: ``replace(clip, scale_x=1, scale_y=1)`` num bloco com escala 2
+    voltava a 2, e um .vmp com ``scale=2, scale_x=1, scale_y=1`` abria com 2.
+    """
+
+    MEDIA = MediaRef(Path("a.mp4"), MediaKind.VIDEO, duration=5)
+
+    def test_voltar_os_eixos_a_um_vale(self):
+        dobrado = Clip(self.MEDIA, 0.0, 5.0, scale=2.0, scale_x=2.0, scale_y=2.0)
+        volta = replace(dobrado, scale_x=1.0, scale_y=1.0)
+        assert (volta.scale_x, volta.scale_y) == (1.0, 1.0)
+
+    def test_so_a_escala_unica_ainda_vale_para_os_dois_eixos(self):
+        clip = Clip(self.MEDIA, 0.0, 5.0, scale=1.5)
+        assert (clip.scale_x, clip.scale_y) == (1.5, 1.5)
+
+
+class TestTipoDoBloco:
+    MEDIA = MediaRef(Path("/x.png"), MediaKind.IMAGE, duration=5.0)
+
+    def test_texto_vira_tipo_e_o_tipo_se_escreve_pelo_valor(self):
+        clip = Clip(self.MEDIA, 0.0, 5.0, overlay_type="text")
+        assert clip.overlay_type is OverlayType.TEXT
+        # O Python 3.12 formata Enum misto pelo nome; o .vmp e os textos
+        # esperam o valor.
+        assert (str(clip.overlay_type), f"{clip.overlay_type}") == ("text", "text")
+
+    def test_so_imagem_e_midia_comum_apontam_para_arquivo(self):
+        com_arquivo = {kind for kind in OverlayType if Clip(self.MEDIA, 0.0, 5.0, overlay_type=kind).has_media_file}
+        assert com_arquivo == {OverlayType.NONE, OverlayType.IMAGE}
+
+    def test_tipo_desconhecido_e_recusado(self):
+        with pytest.raises(ValueError):
+            Clip(self.MEDIA, 0.0, 5.0, overlay_type="sticker")
+
+
+class TestAnimacao:
+    MEDIA = MediaRef(Path("/x.png"), MediaKind.IMAGE, duration=5.0)
+
+    def test_quadro_igual_ao_bloco_nao_anima(self):
+        clip = Clip(self.MEDIA, 0.0, 5.0, scale=1.5, rotation=10.0,
+                    keyframes=(Keyframe(0.0, scale_x=1.5, scale_y=1.5, rotation=10.0),))
+        assert not any(clip.animates(prop) for prop in ("scale", "rotation", "opacity"))
+
+    def test_cada_propriedade_responde_pela_sua(self):
+        clip = Clip(self.MEDIA, 0.0, 5.0, keyframes=(Keyframe(0.0), Keyframe(2.0, opacity=0.4)))
+        assert (clip.animates("scale"), clip.animates("rotation"), clip.animates("opacity")) == (False, False, True)
+
+    def test_vizinhos_diferentes_animam_mesmo_perto_do_bloco(self):
+        # Os dois a menos de 1e-9 do bloco, mas a 1,6e-9 um do outro: a
+        # comparação entre vizinhos é o que pega. A prévia não a fazia.
+        clip = Clip(self.MEDIA, 0.0, 5.0, keyframes=(Keyframe(0.0, scale_x=1 - 8e-10), Keyframe(1.0, scale_x=1 + 8e-10)))
+        assert clip.animates("scale")

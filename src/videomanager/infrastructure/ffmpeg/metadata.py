@@ -32,6 +32,7 @@ from videomanager.domain.metadata import TrackInfo
 from videomanager.domain.metadata import editable_tags
 from videomanager.infrastructure.ffmpeg.catalog import FFmpegCatalog
 from videomanager.infrastructure.storage.outputs import FileOutputStore
+from videomanager.infrastructure.storage.outputs import temp_prefix
 from videomanager.infrastructure.system.process import ProcessControl
 
 _IMAGE_TYPES = {"mjpeg": ("image/jpeg", "jpg"), "png": ("image/png", "png"), "webp": ("image/webp", "webp")}
@@ -262,12 +263,12 @@ def save_metadata(meta: FileMetadata, edit: MetadataEdit, tools: FFmpegTools, co
     store = FileOutputStore()
     lease = store.reserve(meta.path, meta, directory, t("OUTPUT_METADATA_SUFFIX"))
     destination = lease.path
-    descriptor, name = tempfile.mkstemp(prefix=".videomanager-", suffix=destination.suffix,
+    descriptor, name = tempfile.mkstemp(prefix=temp_prefix(), suffix=destination.suffix,
                                         dir=destination.parent)
     os.close(descriptor)
     render = Path(name)
     try:
-        with tempfile.TemporaryDirectory(prefix=".videomanager-meta-", dir=destination.parent) as folder:
+        with tempfile.TemporaryDirectory(prefix=temp_prefix("meta-"), dir=destination.parent) as folder:
             attach = None
             if meta.cover_as_attachment and edit.cover_image:
                 attach = edit.cover_image

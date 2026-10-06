@@ -247,3 +247,101 @@ def test_quadro_parado_monta_o_comando_fora_da_interface(monkeypatch):
     assert thread in montado_em
     assert threading.current_thread() not in montado_em
     assert quadros == [7]
+
+
+def test_atualizacao_do_motor_instala_so_versao_estavel(monkeypatch):
+    # Com --pre, o menu instalava build de desenvolvimento do yt-dlp em quem
+    # roda do código-fonte; a versão estável é a que o projeto valida.
+    import subprocess
+    from videomanager.infrastructure.qt.workers import engine_worker
+    comandos = []
+
+    def executar(comando, **kwargs):
+        comandos.append(comando)
+        return subprocess.CompletedProcess(comando, 1, b"", b"sem rede")
+
+    monkeypatch.setattr(engine_worker.subprocess, "run", executar)
+    engine_worker.EngineUpdateWorker("2026.01.01").run()
+    assert comandos and "yt-dlp" in comandos[0]
+    assert "--pre" not in comandos[0]
+
+
+def test_erro_inesperado_no_worker_deixa_a_pilha_no_log(monkeypatch, caplog):
+    # Antes, o except genérico transformava a exceção em texto para a fila e
+    # nada ia para o log: um defeito de código num .exe sem console não
+    # deixava rastro nenhum para diagnosticar.
+    import logging
+    from videomanager.infrastructure.qt.workers import function_worker
+
+    def quebrar():
+        raise KeyError("chave_que_nao_existe")
+
+    worker = function_worker.FunctionWorker(quebrar)
+    with caplog.at_level(logging.ERROR):
+        worker.run()
+    registro = [r for r in caplog.records if r.exc_info]
+    assert registro and registro[0].exc_info[0] is KeyError
+
+
+def test_falha_esperada_do_dominio_nao_vira_pilha_no_log(caplog):
+    # Projeto inválido, arquivo sem vídeo: é resposta, não defeito.
+    import logging
+    from videomanager.application.errors import ProjectError
+    from videomanager.infrastructure.qt.workers import function_worker
+
+    def recusar():
+        raise ProjectError("projeto inválido")
+
+    with caplog.at_level(logging.ERROR):
+        function_worker.FunctionWorker(recusar).run()
+    assert not [r for r in caplog.records if r.exc_info]
+
+
+def test_tarefa_local_que_falha_oferece_os_detalhes_do_ffmpeg(monkeypatch):
+    # A fila só mostra "Ver detalhes técnicos" quando o worker tem ``log``, e
+    # só o worker de download tinha: a falha de conversão não deixava ver nada.
+    from types import SimpleNamespace
+    from videomanager.application.errors import ConversionError
+    from videomanager.infrastructure.qt.workers import convert_worker
+
+    class Conversor:
+        def __init__(self, **kwargs):
+            self.log = ()
+
+        def run(self):
+            self.log = ("[libx264 @ 0x1] width not divisible by 2 (3x3)", "Conversion failed!")
+            raise ConversionError("falhou")
+
+        def discard_reservation(self):
+            pass
+
+    monkeypatch.setattr(convert_worker, "find_tools", lambda: TOOLS)
+    monkeypatch.setattr(convert_worker, "Converter", Conversor)
+    pedido = SimpleNamespace(media=None, target=None, destination=Path("/x.mp4"), text_assets=(), lease=None, max_bytes=None)
+    worker = convert_worker.ConvertWorker(SimpleNamespace(job_id=1, request=pedido))
+    worker.run()
+    assert "width not divisible" in worker.log[0]
+
+
+def test_texto_vira_png_no_worker_do_quadro_e_nao_na_interface(monkeypatch):
+    # Cada estado novo de um texto grande custava de 24 a 51 ms na thread da
+    # interface, a cada tecla: o PNG era feito antes de criar o worker.
+    import threading
+    from videomanager.infrastructure.qt.runtime import DesktopRuntime
+    from videomanager.infrastructure.ffmpeg import composer
+    chamadas = []
+
+    def ativos():
+        chamadas.append(threading.current_thread() is threading.main_thread())
+        return {}
+
+    monkeypatch.setattr(composer, "frame_command", lambda *a, **k: ["ffmpeg"])
+    monkeypatch.setattr(composer, "interaction_commands", lambda *a, **k: [])
+    runtime = DesktopRuntime(audio_enabled=False)
+    from videomanager.domain.project import new_project
+    quadro = runtime.frame_worker(new_project(), 0.0, (64, 36), TOOLS, 1, text_assets=ativos)
+    camadas = runtime.interaction_worker(object(), (64, 36), TOOLS, 2, text_assets=ativos)
+    assert chamadas == []
+    quadro._command()
+    camadas._commands()
+    assert len(chamadas) == 2  # só quando o comando do worker é montado

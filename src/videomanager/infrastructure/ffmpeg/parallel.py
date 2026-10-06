@@ -46,6 +46,7 @@ from pathlib import Path
 
 from videomanager.infrastructure.ffmpeg.command_assets import filter_script
 from videomanager.infrastructure.storage.outputs import FileOutputStore
+from videomanager.infrastructure.storage.outputs import temp_prefix
 from videomanager.application.ports.output import OutputLease
 
 from videomanager.application.capabilities import FFmpegTools
@@ -194,7 +195,7 @@ class ParallelExport:
         # recurso que esta aplicação já esgotou uma vez. E o destino pode estar
         # noutro disco — no Windows quase sempre está —, o que transformaria a
         # entrega final numa cópia do arquivo inteiro em vez de um rename.
-        temp = Path(tempfile.mkdtemp(prefix=".videomanager-", dir=self._destination.parent))
+        temp = Path(tempfile.mkdtemp(prefix=temp_prefix(), dir=self._destination.parent))
         try:
             return self._build(temp)
         except Exception:
@@ -290,12 +291,14 @@ class ParallelExport:
                 hardware=self._composition.hardware,
                 quality=self._composition.quality,
              text_assets=self._text_assets)
-        except ConversionError as exc:
+            with filter_script(args, destino.parent) as prepared:
+                self._render_command(index, prepared)
+        except Exception as exc:  # noqa: BLE001 - a thread do trecho não pode morrer calada
+            # Qualquer falha (não só a ``ConversionError`` de montar o comando:
+            # disco cheio ao gravar o script, por exemplo) derruba os irmãos e
+            # leva a causa; sem isto a thread morria em silêncio, os outros
+            # ``minterpolate`` iam até o fim e a tarefa só dizia "trecho ausente".
             self._fail(str(exc))
-            return
-
-        with filter_script(args, destino.parent) as prepared:
-            self._render_command(index, prepared)
 
     def _render_command(self, index: int, args: list[str]) -> None:
         _, span = self._bounds[index]
@@ -352,7 +355,7 @@ class ParallelExport:
         # falhou também sai com código diferente de zero, e relatar isso
         # esconderia a causa de verdade atrás de um erro derivado.
         if process.returncode != 0 and not self._aborted:
-            self._fail(_last_line(cauda))
+            self._fail(error_cause(cauda))
 
     def _step(self, args: list[str], what: Text, *, timeout: int = _STEP_TIMEOUT) -> None:
         """Um passo curto e sem progresso — emendar, gerar som, juntar.
@@ -436,22 +439,34 @@ class ParallelExport:
 # Palavras que marcam a linha onde o ffmpeg explica a falha. O resto da cauda é
 # estatística de encerramento, que ele despeja mesmo quando morre.
 _MARCAS_DE_ERRO = ("error", "invalid", "failed", "unable", "cannot", "not supported",
-                   "no space", "killed", "out of memory")
+                   "no space", "killed", "out of memory", "not divisible", "no such",
+                   "not found", "unknown", "could not", "incorrect", "unsupported")
+# Resumos que o ffmpeg escreve **depois** da causa, em toda falha. A última
+# linha marcada é quase sempre um deles: a conversão de um vídeo 3x3 aparecia
+# como "Conversion failed!", com a causa ("width not divisible by 2") sete
+# linhas acima.
+_RESUMOS = ("conversion failed", "error while opening encoder", "error sending frames",
+            "task finished with error", "terminating thread", "could not open encoder before eof",
+            "error opening output file", "nothing was written", "exiting normally")
+_PREFIXO = re.compile(r"^\[(?P<quem>[^\]@]+?)\s*@\s*(?:0x)?[0-9a-fA-F]+\]\s*")
 
 
-def _last_line(cauda: deque[str]) -> str | Text:
-    """A linha da cauda do stderr que explica a falha do trecho.
+def error_cause(cauda, sem_detalhe: str = "PARALLEL_NO_DETAIL") -> str | Text:
+    """A linha do stderr que explica a falha: a primeira com marca de erro que
+    não seja um dos resumos finais.
 
-    A última linha nem sempre é a causa: um trecho que morreu sem mensagem
-    final aparecia como "CPB properties: bitrate max/min/avg: 0/0/0", que não
-    diz nada a quem lê. Sem nenhuma marca de erro, vão as duas últimas linhas
-    com conteúdo — é pouco, mas é contexto de verdade.
+    Sem nenhuma marca, vão as duas últimas linhas com conteúdo — é pouco, mas
+    é contexto de verdade (um trecho que morreu sem mensagem final aparecia
+    como "CPB properties: bitrate max/min/avg: 0/0/0").
     """
-    for texto in reversed(cauda):
-        if any(marca in texto.lower() for marca in _MARCAS_DE_ERRO):
-            return texto
     uteis = [texto.strip() for texto in cauda if texto.strip()]
-    return " | ".join(uteis[-2:]) if uteis else Text("PARALLEL_NO_DETAIL")
+    marcadas = [texto for texto in uteis if any(marca in texto.lower() for marca in _MARCAS_DE_ERRO)]
+    causas = [texto for texto in marcadas if not any(r in texto.lower() for r in _RESUMOS)]
+    if causas or marcadas:
+        linha = (causas or marcadas)[0 if causas else -1]
+        return _PREFIXO.sub(lambda m: f"{m.group('quem')}: ", linha, count=1)
+    return " | ".join(uteis[-2:]) if uteis else Text(sem_detalhe)
+
 
 __all__ = [
     'FFmpegTools',

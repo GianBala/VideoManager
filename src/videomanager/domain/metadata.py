@@ -117,11 +117,3 @@ class SavedCopy:
 
 def editable_tags(meta: FileMetadata) -> tuple[tuple[str, str], ...]:
     return tuple((key, value) for key, value in meta.tags if key.lower() not in GENERATED_TAGS)
-
-
-def unchanged_edit(meta: FileMetadata) -> MetadataEdit:
-    """A edição que não muda nada: o ponto de partida da aba e do "descartar"."""
-    return MetadataEdit(
-        tags=editable_tags(meta),
-        tracks=tuple((track.index, track.title, track.language) for track in meta.tracks),
-    )

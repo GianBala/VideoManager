@@ -10,8 +10,11 @@ from __future__ import annotations
 ABOUT_TITLE = "Sobre o Video Manager"
 ABOUT_BODY = (
     "<b>Video Manager {version}</b><br><br>"
-    "Baixa vídeo e áudio de centenas de plataformas e converte arquivos locais.<br><br>"
+    "Baixa vídeo e áudio de centenas de plataformas, converte e edita arquivos locais e ajusta os metadados deles.<br><br>"
     "Usa <b>yt-dlp</b> {ytdlp} para extração e <b>ffmpeg</b> para processamento.<br><br>"
+    "Software livre sob a GPL-3.0 ou posterior. Licenças dos componentes de "
+    "terceiros (ffmpeg, Qt, Deno e outros) em THIRD_PARTY_NOTICES, no pacote.<br><br>"
+    '<a href="{releases}">Versões novas</a> · <a href="{issues}">Relatar um problema</a><br><br>'
     "Respeitar os termos de uso e os direitos autorais de cada plataforma é "
     "responsabilidade de quem usa."
 )
@@ -146,6 +149,8 @@ ADD_TO_QUEUE_TIP = "Analise um endereço antes de adicionar à fila"
 QUEUE_GROUP = "Fila"
 QUEUE_COLUMNS = ("Título", "Saída", "Situação", "Progresso", "Velocidade")
 QUEUE_EMPTY = "A fila está vazia."
+QUEUE_ETA = "faltam {eta}"
+QUEUE_FRAGMENT = "parte {index}/{count}"
 QUEUE_CANCEL = "Cancelar"
 QUEUE_RETRY = "Tentar de novo"
 QUEUE_OPEN_FOLDER = "Abrir pasta do arquivo"
@@ -154,6 +159,11 @@ QUEUE_COPY_ERROR = "Copiar mensagem de erro"
 QUEUE_SHOW_LOG = "Ver detalhes técnicos"
 QUEUE_CLEAR_FINISHED = "Limpar encerrados"
 QUEUE_CANCEL_ALL = "Cancelar todos"
+QUEUE_CANCEL_ALL_TITLE = "Cancelar todas?"
+QUEUE_CANCEL_ALL_BODY = (
+    "Há {count} tarefa(s) em andamento ou na espera. Cancelar interrompe todas e "
+    "descarta os arquivos parciais."
+)
 QUEUE_LOG_TITLE = "Detalhes técnicos — {title}"
 QUEUE_LOG_CLOSE = "Fechar"
 
@@ -510,6 +520,10 @@ EDIT_STROKE_COLOR_TITLE = "Cor do Contorno"
 EDIT_FONT_SIZE = "Tamanho:"
 EDIT_FONT_BOLD = "B"
 EDIT_FONT_ITALIC = "I"
+EDIT_FONT_BOLD_TIP = "Negrito"
+EDIT_FONT_ITALIC_TIP = "Itálico"
+EDIT_TEXT_SWATCH_TIP = "Texto na cor {color}"
+EDIT_STROKE_SWATCH_TIP = "Contorno na cor {color}"
 EDIT_INSERT_TEXT = "+ Inserir Texto"
 EDIT_UPDATE_TEXT = "✓ Salvar Alterações no Texto"
 EDIT_INSERT_NEW_TEXT = "+ Inserir como Novo Texto"
@@ -556,6 +570,8 @@ EDIT_SPEED_TIP = "Ajustar velocidade de reprodução do bloco (0,1x a 10x)"
 EDIT_SPEED_POPUP_TITLE = "Velocidade do Bloco"
 EDIT_VOLUME_POPUP_TITLE = "Volume do Bloco"
 EDIT_TRACK_MUTE = "Calar a trilha"
+# Selo de trilha calada, pintado na linha do tempo: "M" de mudo e de mute.
+EDIT_TRACK_MUTED_BADGE = "M"
 EDIT_TRACK_UNMUTE = "Voltar o som da trilha"
 EDIT_TRACK_HIDE = "Ocultar a trilha"
 EDIT_TRACK_SHOW = "Mostrar a trilha"
@@ -772,7 +788,7 @@ DIALOG_QUIT_BODY = (
     "Há {count} tarefa(s) em andamento. Sair agora cancela tudo e descarta os "
     "arquivos parciais."
 )
-DIALOG_ENGINE_TITLE = "Atualizar engine"
+DIALOG_ENGINE_TITLE = "Atualizar motor de download"
 DIALOG_ENGINE_BODY = (
     "As plataformas mudam com frequência e os extratores do yt-dlp precisam "
     "acompanhar. Atualizar agora?\n\nVersão instalada: {current}"
@@ -788,8 +804,8 @@ DIALOG_ENGINE_FAILED = "Falha ao atualizar:\n\n{error}"
 # infrastructure/qt/workers/engine_worker.py.
 DIALOG_ENGINE_PACKAGED = (
     "Esta é uma versão empacotada: o yt-dlp vem embutido e é atualizado junto "
-    "com o aplicativo. Baixe a versão mais recente do Video Manager para "
-    "receber os extratores novos."
+    "com o aplicativo. Baixe a versão mais recente do Video Manager, em "
+    "{url}, para receber os extratores novos."
 )
 
 # Leitura assíncrona da edição

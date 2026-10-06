@@ -19,6 +19,7 @@ Não há compilação cruzada: cada sistema gera o seu próprio pacote. Rode
 """
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -58,13 +59,65 @@ if os.environ.get("VM_BUNDLE_DENO", "1") != "0" and (_vendor / exe_name("deno"))
 # o pacote não resolvia os desafios do YouTube nem com um runtime disponível.
 from PyInstaller.utils.hooks import collect_data_files  # noqa: E402
 
+
+# Licenças do que vai dentro do pacote. Redistribuir o ffmpeg (GPL) e o Qt (LGPL)
+# sem os textos descumpre as próprias licenças; ver THIRD_PARTY_NOTICES.md. A
+# lista cobre as bibliotecas Python que o pacote embute: uma que falte no
+# ambiente derruba o build aqui, em vez de sair um pacote sem a licença dela.
+_PACOTES_COM_LICENCA = (
+    "yt-dlp", "yt-dlp-ejs", "platformdirs", "certifi", "requests", "urllib3",
+    "charset-normalizer", "idna", "brotli", "websockets", "mutagen", "pycryptodomex",
+)
+
+
+def _licencas() -> list[tuple[str, str]]:
+    import sysconfig
+    from importlib.metadata import distribution
+
+    datas = [
+        (str(REPO_ROOT / "LICENSE"), "licenses"),
+        (str(REPO_ROOT / "THIRD_PARTY_NOTICES.md"), "licenses"),
+        (str(REPO_ROOT / "packaging" / "licenses"), "licenses"),
+    ]
+    python = Path(sysconfig.get_path("stdlib")) / "LICENSE.txt"
+    if not python.is_file():
+        python = Path(sys.base_prefix) / "LICENSE.txt"  # Python oficial do Windows
+    datas.append((str(python), "licenses/python"))
+    for nome in _PACOTES_COM_LICENCA:
+        dist = distribution(nome)
+        textos = [f for f in dist.files or () if any(k in f.name.upper() for k in ("LICEN", "COPYING", "NOTICE"))]
+        if not textos:
+            raise SystemExit(f"{nome} não traz texto de licença nos metadados")
+        datas += [(str(dist.locate_file(f)), f"licenses/{nome}") for f in textos]
+    return datas
+
+
+def _commit() -> Path:
+    """Grava o ``git describe`` do build, que o Sobre e o log mostram.
+
+    "3.1" vale para vários commits; ``--dirty`` marca o pacote gerado com
+    alteração local (só passa pelo build com VM_ALLOW_DIRTY=1).
+    """
+    try:
+        texto = subprocess.run(["git", "describe", "--tags", "--always", "--dirty"], cwd=REPO_ROOT,
+                               capture_output=True, text=True, timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        texto = ""
+    destino = Path(workpath) / "build_commit.txt"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(texto or "desconhecido", encoding="utf-8")
+    return destino
+
+
 a = Analysis(
     [str(REPO_ROOT / "src" / "videomanager" / "__main__.py")],
     pathex=[str(REPO_ROOT / "src")],
     binaries=binaries_to_bundle,
     datas=[
         (str(REPO_ROOT / "src" / "videomanager" / "resources"), "resources"),
+        (str(_commit()), "resources"),
         *collect_data_files("yt_dlp", includes=["**/*.js"]),
+        *_licencas(),
     ],
     # Os extratores do yt-dlp são carregados dinamicamente; sem coletá-los
     # explicitamente, o pacote reconhece só uma fração dos sites.

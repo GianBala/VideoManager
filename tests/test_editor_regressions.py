@@ -11,6 +11,7 @@ from videomanager.application.errors import ProjectError
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
+from videomanager.domain.project import Project
 from videomanager.domain.project import Track
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import next_clip_id
@@ -1203,3 +1204,63 @@ def test_mapa_de_keyframes_que_falhou_e_lido_de_novo(monkeypatch, wait_until):
         assert lidos == ["um.mp4", "dois.mp4", "um.mp4"]
     finally:
         painel.shutdown()
+
+
+def test_keyframes_do_corte_rapido_vem_do_arquivo_que_sera_cortado(panel, tmp_path, monkeypatch):
+    """O bloco de referência da exportação era escolhido de três jeitos.
+
+    O do painel ignorava a visibilidade: com a trilha de baixo oculta, ele
+    pedia os keyframes de ``a.mp4`` enquanto a exportação cortava ``b.mp4``, e
+    o ``-ss`` do corte rápido saía de um mapa de outro arquivo.
+    """
+    from videomanager.domain.export_policy import reference_clip, simple_trim
+    a, b = tmp_path / 'a.mp4', tmp_path / 'b.mp4'
+    for caminho in (a, b):
+        caminho.write_bytes(b'x')
+    oculta = Track(TrackKind.VIDEO, clips=(Clip(MediaRef(a, MediaKind.VIDEO, duration=30), 0, 30),), visible=False)
+    visivel = Track(TrackKind.VIDEO, clips=(Clip(MediaRef(b, MediaKind.VIDEO, duration=30), 0, 5, in_point=7),))
+    projeto = Project(tracks=(visivel, oculta))
+    assert simple_trim(projeto)
+    assert reference_clip(projeto).media.path == b
+    pedidos = []
+    monkeypatch.setattr(panel, '_keyframes_for', lambda clip: pedidos.append(clip.media.path) or ())
+    panel.install_project(projeto, None, [], {})
+    assert panel._main_clip().media.path == b
+
+
+def test_campo_de_duracao_mostra_a_transicao_que_a_alca_esticou(panel):
+    # O campo parava em 5 s: uma transição de 12 s, esticada pela alça,
+    # aparecia como 5 s no campo, e qualquer ajuste a encurtava.
+    media = MediaRef(Path('video.mp4'), MediaKind.VIDEO, duration=40)
+    left = Clip(media, 0, 20)
+    right = Clip(media, 20, 20, in_point=20)
+    projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=(left, right)),))
+    projeto, marcador = projeto.with_transition(0, left, right, 'fade', 'Fade', 1.0, False)
+    projeto = projeto.resized(marcador, 'fim', 26.0)
+    panel.install_project(projeto, None, [], {})
+    panel._timeline.select(marcador)
+    panel._sync_extras_controls(projeto.find(marcador)[1])
+    assert panel._trans_dur.value() == pytest.approx(12.0)
+    panel._trans_dur.setValue(30.0)
+    assert panel._project.find(marcador)[1].duration == pytest.approx(20.0)
+
+
+def test_digitar_no_campo_de_tamanho_da_fonte_e_um_passo_de_desfazer(panel):
+    # valueChanged vem a cada tecla válida: digitar "100" passava por 10 e
+    # virava dois passos, e o Ctrl+Z voltava primeiro para um tamanho 10 que
+    # ninguém pediu.
+    from PySide6.QtTest import QTest
+    from videomanager.domain.project import pseudo_media
+    texto = Clip(pseudo_media('text', 'Olá', 5.0), 0.0, 5.0, overlay_type='text', text_content='Olá', font_size=48)
+    projeto = Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(texto,)),))
+    panel.install_project(projeto, None, [], {})
+    panel._timeline.select(texto.clip_id)
+    panel._sync_extras_controls(texto)
+    campo = panel._font_size_spin
+    antes = len(panel._session.history)
+    campo.lineEdit().selectAll()
+    QTest.keyClicks(campo.lineEdit(), '100')
+    assert campo.value() == 100
+    assert len(panel._session.history) == antes + 1
+    panel._undo_edit()
+    assert panel._project.find(texto.clip_id)[1].font_size == 48

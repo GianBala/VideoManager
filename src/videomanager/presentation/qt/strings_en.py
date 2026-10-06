@@ -18,8 +18,12 @@ from __future__ import annotations
 ABOUT_TITLE = "About Video Manager"
 ABOUT_BODY = (
     "<b>Video Manager {version}</b><br><br>"
-    "Downloads video and audio from hundreds of platforms and converts local files.<br><br>"
+    "Downloads video and audio from hundreds of platforms, converts and edits local files and adjusts their metadata.<br><br>"
     "Uses <b>yt-dlp</b> {ytdlp} for extraction and <b>ffmpeg</b> for processing.<br><br>"
+    "Free software under the GPL-3.0 or later. Licenses of third-party "
+    "components (ffmpeg, Qt, Deno and others) in THIRD_PARTY_NOTICES, in the "
+    "package.<br><br>"
+    '<a href="{releases}">New versions</a> · <a href="{issues}">Report a problem</a><br><br>'
     "Respecting each platform's terms of use and copyright is the user's "
     "responsibility."
 )
@@ -154,6 +158,8 @@ ADD_TO_QUEUE_TIP = "Analyze a URL before adding it to the queue"
 QUEUE_GROUP = "Queue"
 QUEUE_COLUMNS = ("Title", "Output", "Status", "Progress", "Speed")
 QUEUE_EMPTY = "The queue is empty."
+QUEUE_ETA = "{eta} left"
+QUEUE_FRAGMENT = "part {index}/{count}"
 QUEUE_CANCEL = "Cancel"
 QUEUE_RETRY = "Retry"
 QUEUE_OPEN_FOLDER = "Open Containing Folder"
@@ -162,6 +168,11 @@ QUEUE_COPY_ERROR = "Copy Error Message"
 QUEUE_SHOW_LOG = "Show Technical Details"
 QUEUE_CLEAR_FINISHED = "Clear Finished"
 QUEUE_CANCEL_ALL = "Cancel All"
+QUEUE_CANCEL_ALL_TITLE = "Cancel All?"
+QUEUE_CANCEL_ALL_BODY = (
+    "There are {count} task(s) running or waiting. Cancelling stops all of them "
+    "and discards the partial files."
+)
 QUEUE_LOG_TITLE = "Technical Details — {title}"
 QUEUE_LOG_CLOSE = "Close"
 
@@ -509,6 +520,10 @@ EDIT_STROKE_COLOR_TITLE = "Outline Color"
 EDIT_FONT_SIZE = "Size:"
 EDIT_FONT_BOLD = "B"
 EDIT_FONT_ITALIC = "I"
+EDIT_FONT_BOLD_TIP = "Bold"
+EDIT_FONT_ITALIC_TIP = "Italic"
+EDIT_TEXT_SWATCH_TIP = "Text in color {color}"
+EDIT_STROKE_SWATCH_TIP = "Outline in color {color}"
 EDIT_INSERT_TEXT = "+ Insert Text"
 EDIT_UPDATE_TEXT = "✓ Save Text Changes"
 EDIT_INSERT_NEW_TEXT = "+ Insert as New Text"
@@ -551,6 +566,7 @@ EDIT_SPEED_TIP = "Adjust the clip's playback speed (0.1x to 10x)"
 EDIT_SPEED_POPUP_TITLE = "Clip speed"
 EDIT_VOLUME_POPUP_TITLE = "Clip volume"
 EDIT_TRACK_MUTE = "Mute Track"
+EDIT_TRACK_MUTED_BADGE = "M"
 EDIT_TRACK_UNMUTE = "Unmute Track"
 EDIT_TRACK_HIDE = "Hide Track"
 EDIT_TRACK_SHOW = "Show Track"
@@ -762,7 +778,7 @@ DIALOG_QUIT_BODY = (
     "There are {count} task(s) in progress. Quitting now cancels everything and "
     "discards the partial files."
 )
-DIALOG_ENGINE_TITLE = "Update Engine"
+DIALOG_ENGINE_TITLE = "Update Download Engine"
 DIALOG_ENGINE_BODY = (
     "Platforms change often and the yt-dlp extractors need to keep up. "
     "Update now?\n\nInstalled version: {current}"
@@ -776,8 +792,8 @@ DIALOG_ENGINE_UPTODATE = "yt-dlp is already at the latest version ({version})."
 DIALOG_ENGINE_FAILED = "Update failed:\n\n{error}"
 DIALOG_ENGINE_PACKAGED = (
     "This is a packaged build: yt-dlp comes bundled and is updated together with "
-    "the application. Download the latest version of Video Manager to get the "
-    "new extractors."
+    "the application. Download the latest version of Video Manager, at {url}, "
+    "to get the new extractors."
 )
 
 # Leitura assíncrona da edição

@@ -19,11 +19,19 @@ from videomanager.domain.metadata import CoverInfo
 from videomanager.domain.metadata import FileMetadata
 from videomanager.domain.metadata import MetadataEdit
 from videomanager.domain.metadata import TrackInfo
-from videomanager.domain.metadata import unchanged_edit
+from videomanager.domain.metadata import editable_tags
 from videomanager.infrastructure.ffmpeg.metadata import metadata_args
 from videomanager.infrastructure.ffmpeg.metadata import verify_copy
 
 TOOLS = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
+
+
+def unchanged_edit(meta: FileMetadata) -> MetadataEdit:
+    """A edição que não muda nada, base das edições dos testes."""
+    return MetadataEdit(
+        tags=editable_tags(meta),
+        tracks=tuple((track.index, track.title, track.language) for track in meta.tracks),
+    )
 
 
 def _meta(nome="a.mp4", tags=(("title", "Antigo"), ("ARTIST", "Fulano")), cover=None,

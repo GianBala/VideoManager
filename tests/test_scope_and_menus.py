@@ -436,3 +436,148 @@ def test_titulo_da_janela_nao_repete_o_nome_do_aplicativo(tmp_path):
     titulo, nome = ast.literal_eval(saida.stdout.strip().splitlines()[-1])
     assert titulo == f"Video Manager {videomanager.__version__}"
     assert titulo.endswith(nome)
+
+
+def test_diagnostico_de_url_nao_grava_a_url_no_log(desktop_app, tmp_path, wait_until, caplog):
+    # O log é permanente e rotativo, e a documentação promete que ele não
+    # guarda URLs; a URL fica só no relatório que quem roda o diagnóstico pede.
+    import logging
+    from types import SimpleNamespace
+    from videomanager import app as aplicativo
+
+    url = "https://exemplo.invalido/video?assinatura=segredo"
+    janela = SimpleNamespace(
+        _media=None, _probe_worker=None, _analyze=lambda: None, close=lambda: None,
+        _url=SimpleNamespace(setText=lambda texto: None),
+        _add_button=SimpleNamespace(isEnabled=lambda: False),
+    )
+    saidas = []
+    falso = SimpleNamespace(exit=saidas.append)
+    relatorio = tmp_path / "relatorio.txt"
+    with caplog.at_level(logging.INFO):
+        aplicativo._diagnose_url(falso, janela, url, relatorio, timeout=0)
+        wait_until(lambda: saidas, timeout=5)
+    assert url in relatorio.read_text(encoding="utf-8")
+    assert "assinatura" not in caplog.text
+    assert "VM_DIAGNOSE_FAILED" in caplog.text
+
+
+def test_linha_de_partida_diz_de_que_versao_e_ambiente_veio_o_log():
+    # Um log recebido de um usuário não dizia versão, origem, ffmpeg nem sistema.
+    import PySide6
+    import yt_dlp
+    from videomanager import __version__
+    from videomanager import app as aplicativo
+    linha = aplicativo.startup_line()
+    for esperado in (__version__, PySide6.__version__, yt_dlp.version.__version__, "ffmpeg"):
+        assert esperado in linha
+
+
+def test_fechar_com_tarefa_em_andamento_pergunta_e_cancelar_mantem_tudo(qapp, monkeypatch):
+    """RN-27: sair com tarefa não encerrada pede confirmação, dizendo quantas.
+
+    Cancelar mantém a janela e a fila de pé; confirmar encerra a fila.
+    """
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.ensure_ffmpeg", lambda parent, **kw: None)
+    window = MainWindow(Settings(), editor=build_editor_service(), processing=build_processing_service(),
+                        downloads=build_download_service(), runtime=build_desktop_runtime())
+    fila = window._queue
+    encerradas = []
+
+    class _Fila:
+        jobs = [SimpleNamespace(status=SimpleNamespace(is_final=False)),
+                SimpleNamespace(status=SimpleNamespace(is_final=False)),
+                SimpleNamespace(status=SimpleNamespace(is_final=True))]
+
+        def shutdown(self):
+            encerradas.append(True)
+            fila.shutdown()
+
+        def __getattr__(self, name):
+            return getattr(fila, name)
+
+    perguntas = []
+    resposta = [QMessageBox.StandardButton.Cancel]
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.QMessageBox.question",
+                        lambda parent, title, body, *args: (perguntas.append(body), resposta[0])[1])
+    window._queue = _Fila()
+    window.show()
+    try:
+        assert window.close() is False
+        assert window.isVisible() and not encerradas
+        assert perguntas == [strings.DIALOG_QUIT_BODY.format(count=2)]
+        resposta[0] = QMessageBox.StandardButton.Yes
+        assert window.close() is True
+        assert encerradas == [True]
+    finally:
+        window._queue = fila
+        window.close()
+
+
+def test_pacote_diz_o_commit_no_log_e_no_sobre(qapp, tmp_path, monkeypatch):
+    """"3.1" vale para vários commits: o pacote diz qual (OPS-002)."""
+    import sys
+
+    from videomanager import APP_TITLE, build_commit
+    from videomanager import app as aplicativo
+
+    assert build_commit() is None, "no código-fonte não há commit gravado"
+    (tmp_path / "resources").mkdir()
+    (tmp_path / "resources" / "build_commit.txt").write_text("v3.1-12-gabc1234\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert build_commit() == "v3.1-12-gabc1234"
+    linha = aplicativo.startup_line()
+    assert linha.startswith(f"{APP_TITLE} (código-fonte v3.1-12-gabc1234) ·"), linha
+
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.ensure_ffmpeg", lambda parent, **kw: None)
+    window = MainWindow(Settings(), editor=build_editor_service(), processing=build_processing_service(),
+                        downloads=build_download_service(), runtime=build_desktop_runtime())
+    sobre = []
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.QMessageBox.about",
+                        lambda parent, title, body: sobre.append(body))
+    try:
+        window._show_about()
+        assert "Video Manager 3.1 (v3.1-12-gabc1234)" in sobre[0]
+    finally:
+        window.close()
+
+
+def test_atalho_do_linux_segue_a_copia_aberta_e_nao_fica_quebrado(tmp_path, monkeypatch):
+    """O atalho em ~/.local/share/applications aponta para a cópia aberta.
+
+    Ele apontava para onde o app rodou na primeira vez e só era regravado
+    quando o ícone mudava. Apagada a pasta de build, ou movido o AppImage, o
+    GLib descarta o atalho cujo Exec não existe, e a janela perde a logo na
+    barra de tarefas — e abrir outra cópia não consertava.
+    """
+    import sys
+
+    from videomanager import app as aplicativo
+
+    dados = tmp_path / "dados"
+    monkeypatch.setenv("XDG_DATA_HOME", str(dados))
+    atalho = dados / "applications" / "videomanager.desktop"
+
+    def exec_do_atalho() -> str:
+        return next(linha for linha in atalho.read_text(encoding="utf-8").splitlines()
+                    if linha.startswith("Exec="))
+
+    # Ícone já instalado e um atalho apontando para uma cópia que sumiu.
+    aplicativo._ensure_linux_desktop_integration()
+    atalho.write_text(atalho.read_text(encoding="utf-8").replace(
+        exec_do_atalho(), 'Exec="/tmp/build-apagado/VideoManager"'), encoding="utf-8")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", "/opt/vm/VideoManager")
+    monkeypatch.setenv("APPIMAGE", "/home/x/Apps/Video_Manager-3.1-x86_64.AppImage")
+    aplicativo._ensure_linux_desktop_integration()
+    assert exec_do_atalho() == 'Exec="/home/x/Apps/Video_Manager-3.1-x86_64.AppImage"'
+
+    # A pasta do pacote, fora do AppImage: o executável, sem o "-m" do Python.
+    monkeypatch.delenv("APPIMAGE")
+    aplicativo._ensure_linux_desktop_integration()
+    assert exec_do_atalho() == 'Exec="/opt/vm/VideoManager"'

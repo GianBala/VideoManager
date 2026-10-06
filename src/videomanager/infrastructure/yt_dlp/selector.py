@@ -25,44 +25,20 @@ from typing import Any
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.yt_dlp.extras import js_runtime_opts
 from videomanager.infrastructure.yt_dlp.formats import video_family_filter
-from videomanager.application.formatting import format_bitrate
 from videomanager.domain.formats import AudioChoice
 from videomanager.domain.formats import FormatMatrix
 from videomanager.domain.formats import MediaInfo
 from videomanager.domain.formats import VideoChoice
 from videomanager.infrastructure.storage.settings import Settings
 
-from videomanager.domain.selection import VideoRequest as VideoRequest
-from videomanager.domain.selection import AudioRequest as AudioRequest
-from videomanager.domain.selection import Request as Request
-from videomanager.domain.selection import CONTAINER_AUTO as CONTAINER_AUTO
-from videomanager.domain.selection import CONTAINERS as CONTAINERS
-from videomanager.domain.selection import AUDIO_CODECS as AUDIO_CODECS
-from videomanager.domain.selection import LOSSLESS_AUDIO as LOSSLESS_AUDIO
-from videomanager.domain.selection import AUDIO_BITRATES as AUDIO_BITRATES
-from videomanager.application.format_labels import resolution_label
+from videomanager.domain.selection import VideoRequest
+from videomanager.domain.selection import AudioRequest
+from videomanager.domain.selection import Request
+from videomanager.domain.selection import CONTAINER_AUTO
+from videomanager.domain.selection import LOSSLESS_AUDIO
 
-from videomanager.application.media.download_policy import _MP4_MUXABLE_VIDEO as _MP4_MUXABLE_VIDEO
-from videomanager.application.media.download_policy import _MP4_MUXABLE_AUDIO as _MP4_MUXABLE_AUDIO
-from videomanager.application.media.download_policy import _MP4_SAFE_VIDEO as _MP4_SAFE_VIDEO
-from videomanager.application.media.download_policy import _MP4_SAFE_AUDIO as _MP4_SAFE_AUDIO
-from videomanager.application.media.download_policy import _WEBM_MUXABLE_VIDEO as _WEBM_MUXABLE_VIDEO
-from videomanager.application.media.download_policy import _WEBM_MUXABLE_AUDIO as _WEBM_MUXABLE_AUDIO
-from videomanager.application.media.download_policy import ContainerPlan as ContainerPlan
-from videomanager.application.media.download_policy import _first_compatible_audio as _first_compatible_audio
-from videomanager.application.media.download_policy import _first_compatible_video as _first_compatible_video
-from videomanager.application.media.download_policy import plan_container as plan_container
-from videomanager.application.media.download_policy import audio_quality_warning as audio_quality_warning
-from videomanager.application.media.download_policy import describe_request as describe_request
-
-# --- compatibilidade de container -------------------------------------------
-# "Muxable" = o ffmpeg consegue empacotar o stream neste container sem
-# recodificar. "Bem suportado" = além de válido, reproduz na maioria dos
-# players e aparelhos. VP9 e Opus dentro de MP4 são válidos mas caem no primeiro
-# grupo apenas: geram arquivo legítimo que muita TV e celular não abre.
-
-
-# MKV aceita qualquer combinação, por isso é o padrão seguro da aplicação.
+from videomanager.application.media.download_policy import ContainerPlan
+from videomanager.application.media.download_policy import plan_container
 
 # Preferências de codec por container, para o modo automático. Expressas como
 # regex do yt-dlp (operador ``~=``).
@@ -359,34 +335,3 @@ def build_opts(
     if isinstance(request, AudioRequest):
         return build_audio_opts(request, media, settings, tools, dest, temp), None
     return build_video_opts(request, media, settings, tools, dest, temp)
-
-
-__all__ = [
-    'VideoRequest',
-    'AudioRequest',
-    'Request',
-    'CONTAINER_AUTO',
-    'CONTAINERS',
-    'AUDIO_CODECS',
-    'LOSSLESS_AUDIO',
-    'AUDIO_BITRATES',
-    'FFmpegTools',
-    'format_bitrate',
-    'AudioChoice',
-    'FormatMatrix',
-    'MediaInfo',
-    'VideoChoice',
-    'resolution_label',
-    '_MP4_MUXABLE_VIDEO',
-    '_MP4_MUXABLE_AUDIO',
-    '_MP4_SAFE_VIDEO',
-    '_MP4_SAFE_AUDIO',
-    '_WEBM_MUXABLE_VIDEO',
-    '_WEBM_MUXABLE_AUDIO',
-    'ContainerPlan',
-    '_first_compatible_audio',
-    '_first_compatible_video',
-    'plan_container',
-    'audio_quality_warning',
-    'describe_request',
-]

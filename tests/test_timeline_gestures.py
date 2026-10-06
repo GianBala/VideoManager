@@ -186,3 +186,27 @@ def test_velocidade_nao_se_aplica_a_adicionais(panel):
     panel.install_project(Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(texto,)),)), None, [], {})
     panel._timeline.select(texto.clip_id)
     assert not panel._speed_btn.isEnabled()
+
+
+def test_tremida_de_2_px_num_clique_nao_e_edicao(panel):
+    """Um clique não é edição (RN-19): a mão treme ao clicar.
+
+    Sem a folga de ``_DRAG_SLACK``, selecionar um bloco o empurrava os 2 px
+    da tremida e empilhava um desfazer que ninguém pediu — e o Ctrl+Z passava
+    a exigir uma dúzia de repetições para voltar uma alteração de verdade.
+    """
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=20.0, width=160, height=90, fps=10.0)
+    projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 2.0, 5.0),)),))
+    panel.install_project(projeto, None, [], {})
+    timeline = panel._timeline
+    timeline.set_view(0.0, 10.0)
+    meio = QPoint(round(timeline._x_of(4.5)), round(timeline._lane_rect(0).center().y()))
+    passos = len(panel._session.history)
+
+    _drag(timeline, meio, 2)
+    assert panel._project.tracks[0].clips[0].start == 2.0
+    assert len(panel._session.history) == passos
+
+    _drag(timeline, meio, 20)
+    assert panel._project.tracks[0].clips[0].start > 2.0
+    assert len(panel._session.history) == passos + 1

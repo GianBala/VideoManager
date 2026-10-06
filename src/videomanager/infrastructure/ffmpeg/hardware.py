@@ -404,33 +404,47 @@ def describe(
     return t("ENCODER_GPU_IN_USE", encoder=encoder.label)
 
 
-def encode_args(
-    family: str,
-    preference: str,
-    tools: FFmpegTools | None,
-    quality: str = QUALITY_BALANCED,
+def video_encoder_args(
+    encoder: str, quality: tuple[str, ...] | list[str], container: str, max_kbps: int | None = None
 ) -> list[str]:
-    """Argumentos de codificação de vídeo já resolvidos."""
-    encoder = resolve(family, preference, tools, quality=quality)
-    return ["-c:v", encoder.name, *encoder.quality]
+    """``-c:v``, qualidade, teto de bitrate e etiqueta ``hvc1``: a montagem única.
+
+    Exportação, trecho paralelo, corte e conversão montavam isto cada um à sua
+    maneira, e cada um com uma parte diferente — o corte não punha a etiqueta,
+    só a conversão punha o teto. O próximo encoder ou container entra aqui.
+    """
+    return ["-c:v", encoder, *quality, *bitrate_cap(encoder, max_kbps), *hevc_tag(encoder, container)]
 
 
-def device_args(
-    family: str,
-    preference: str,
-    tools: FFmpegTools | None,
-    quality: str = QUALITY_BALANCED,
-) -> list[str]:
-    return list(resolve(family, preference, tools, quality=quality).device)
+def bitrate_cap(encoder: str, max_kbps: int | None) -> list[str]:
+    """Teto de bitrate sobre o nível de qualidade, onde o encoder o respeita.
+
+    O x264 e o x265 limitam pelo VBV, com buffer de 1 s: com 2 s, o que ele
+    gasta além do teto no começo dobrava (medido: 0,75 s de teto a mais contra
+    0,45). O SVT-AV1 ignora o ``-maxrate`` nesse modo (19% acima) e trata o
+    ``mbr`` como alvo, não como teto: ainda reduz o crescimento, sem garantir.
+    Na placa a quantização é fixa e não há teto — quem segura ali é a recusa no
+    fim.
+    """
+    if not max_kbps:
+        return []
+    if encoder == "libsvtav1":
+        return ["-svtav1-params", f"mbr={max_kbps}"]
+    if encoder in ("libx264", "libx265"):
+        return ["-maxrate", f"{max_kbps}k", "-bufsize", f"{max_kbps}k"]
+    return []
 
 
-def filter_suffix(
-    family: str,
-    preference: str,
-    tools: FFmpegTools | None,
-    quality: str = QUALITY_BALANCED,
-) -> str:
-    return resolve(family, preference, tools, quality=quality).filter_suffix
+def hevc_tag(codec: str, container: str) -> list[str]:
+    """Etiqueta ``hvc1`` do HEVC em MP4 e MOV.
+
+    Sem ela o ffmpeg grava ``hev1``, que o QuickTime, os aparelhos Apple e o
+    app Filmes e TV do Windows não abrem. ``codec`` é o encoder, ou ``hevc``
+    para o stream copiado sem recodificar. Uma regra só: repetida, o trecho
+    paralelo em MOV saía sem a etiqueta, e a emenda copia o que o trecho tiver.
+    """
+    hevc = codec in ("hevc", "libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi")
+    return ["-tag:v", "hvc1"] if hevc and container in ("mp4", "mov") else []
 
 
 __all__ = [

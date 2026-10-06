@@ -11,6 +11,11 @@ chmod +x Video_Manager-<versão>-x86_64.AppImage
 ./Video_Manager-<versão>-x86_64.AppImage
 ```
 
+Requer **glibc 2.39 ou mais nova** (Ubuntu 24.04, Debian 13, Fedora 40 e
+posteriores): as bibliotecas embutidas são as do sistema em que o pacote é
+gerado, e a mais exigente pede `GLIBC_2.39` (medido no pacote da 3.1). Numa
+distribuição mais antiga ele não abre; ali, rode a partir do código-fonte.
+
 O AppImage já traz Python, Qt, yt-dlp e o `ffmpeg` embutidos — funciona no
 primeiro clique, sem baixar nada. Ele não se instala no menu do sistema
 sozinho; para isso existe o

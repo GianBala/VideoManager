@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from videomanager.domain.composition import Composition
+from videomanager.domain.export_policy import reference_clip
 from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.export_policy import can_interpolate
 from videomanager.domain.media import AudioTarget
@@ -56,14 +57,9 @@ class ProcessingService:
         if project.is_empty:
             raise ConversionError(Text('ERROR_PROJECT_EMPTY'))
         cache = probed or {}
-        # A trilha de vídeo inferior define a referência principal da montagem.
-        ordered = [c for t in reversed(project.video_tracks) if t.visible for c in t.sorted_clips()]
-        # Fotos agora estão nas trilhas de vídeo; o nome da saída continua vindo
-        # de um vídeo quando há algum.
-        ordered = [c for c in ordered if not c.is_image] + [c for c in ordered if c.is_image]
-        ordered += list(project.clips)
-        source = next((c.media.path for c in ordered if c.overlay_type not in ('text', 'filter', 'transition')
-                       and self.catalog.exists(c.media.path)), None)
+        reference = reference_clip(project, lambda clip: self.catalog.exists(clip.media.path))
+        source = (reference.media.path if reference is not None and reference.has_media_file
+                  and self.catalog.exists(reference.media.path) else None)
         local = cache.get(source)
         if source is not None and not isinstance(local, LocalMedia):
             try:

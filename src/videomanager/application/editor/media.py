@@ -42,7 +42,7 @@ class ReadMedia:
         if project_path is not None:
             result.project, result.missing = self.repository.load(project_path)
             refs = {c.media.path: c.media for c in result.project.clips
-                    if c.overlay_type not in ('text', 'filter', 'transition')}
+                    if c.has_media_file}
             result.references = list(refs.values())
             paths = list(refs)
         for index, path in enumerate(paths):

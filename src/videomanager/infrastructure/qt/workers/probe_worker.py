@@ -17,6 +17,7 @@ from videomanager.application.preferences import Preferences
 from videomanager.infrastructure.storage.settings import Settings
 from videomanager.infrastructure.qt.workers.signals import ProbeSignals
 from videomanager.infrastructure.qt.workers.signals import emit_safely
+from videomanager.infrastructure.qt.workers.signals import report_unexpected
 
 
 class ProbeWorker(QRunnable):
@@ -48,6 +49,7 @@ class ProbeWorker(QRunnable):
         except Exception as exc:  # noqa: BLE001
             if self._cancelled:
                 return
+            report_unexpected(exc)
             # Um extrator pode falhar de formas que não mapeamos. Melhor mostrar
             # o tipo do erro que deixar a janela num estado de "analisando" que
             # nunca termina.
