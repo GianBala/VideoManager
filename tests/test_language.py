@@ -96,7 +96,7 @@ def test_metodo_de_dono_destruido_nao_roda(pseudo):
 
 def test_bind_e_on_language_change_recusam_o_que_nao_saberiam_refazer(desktop_app):
     with pytest.raises(ValueError):
-        idioma.bind(QLabel(), "setAccessibleName", lambda: strings.EDIT_PLAY)
+        idioma.bind(QLabel(), "setWhatsThis", lambda: strings.EDIT_PLAY)
     with pytest.raises(TypeError):
         idioma.on_language_change(lambda: None)
 
