@@ -80,14 +80,14 @@ class TestCache:
         cache.put(90, ("a",), b"x" * 100, focus_index=90)
         assert cache.get(90, ("a",)) == b"x" * 100
         assert cache.get(90, ("b",)) is None
-        assert len(cache) == 0 and cache.bytes_used == 0
+        assert len(cache) == 0 and cache._bytes == 0
 
     def test_passando_do_teto_saem_os_mais_distantes_da_agulha(self) -> None:
         cache = ScrubFrameCache(30, (320, 180), 350)
         for index in (0, 10, 20, 30):
             cache.put(index, ("s",), b"x" * 100, focus_index=10)
         assert sorted(cache._frames) == [0, 10, 20]
-        assert cache.bytes_used == 300
+        assert cache._bytes == 300
 
     def test_indice_e_o_quadro_na_tela(self) -> None:
         cache = ScrubFrameCache(30, (320, 180), 1)

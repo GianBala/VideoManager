@@ -31,6 +31,7 @@ from videomanager.application.capabilities import FFmpegTools
 from videomanager.domain.export_policy import can_interpolate
 from videomanager.application.media.export_description import describe_export
 from videomanager.domain.render_cost import interpolation_bytes
+from videomanager.domain.export_policy import reference_clip
 from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.media import LocalMedia
 from videomanager.application import encoding as hwaccel
@@ -44,7 +45,6 @@ from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
 from videomanager.domain.project import Project
-from videomanager.domain.project import auto_canvas
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.domain.timing import CutMode
 from videomanager.domain.timing import TrimTarget
@@ -54,27 +54,9 @@ from videomanager.domain.timing import frame_step
 from videomanager.domain.timing import keyframe_at_or_before
 from videomanager.domain.i18n import Text
 from videomanager.presentation.qt import strings
-from videomanager.presentation.qt.panels.edit_widgets import _index_of
+from videomanager.presentation.qt.panels.edit_widgets import index_of
+from videomanager.application.editor.canvas import CANVAS_PRESETS, aspect_of, canvas_for_aspect, output_canvas
 from videomanager.presentation.qt.ports import DesktopRuntimePort
-
-# Telas oferecidas além das que o próprio material traz, no painel e aqui. São
-# os formatos que os aparelhos e os sites esperam — não uma tabela de tudo que
-# existe.
-CANVAS_PRESETS: tuple[tuple[int, int], ...] = (
-    (3840, 2160),  # 4K UHD 16:9
-    (2560, 1440),  # 2K QHD 16:9
-    (1920, 1080),  # Full HD 16:9
-    (1280, 720),   # HD 16:9
-    (854, 480),    # SD 16:9
-    (1080, 1920),  # Vertical Full HD 9:16 (TikTok / Reels / Shorts)
-    (720, 1280),   # Vertical HD 9:16
-    (1440, 1080),  # 4:3 Full HD
-    (960, 720),    # 4:3 HD
-    (640, 480),    # 4:3 SD
-    (1080, 1080),  # Quadrado 1:1
-    (720, 720),    # Quadrado 1:1
-    (2560, 1080),  # Ultrawide 21:9
-)
 
 RATE_PRESETS: tuple[float, ...] = (24.0, 25.0, 30.0, 50.0, 60.0)
 
@@ -428,7 +410,7 @@ class ExportDialog(QDialog):
         ]
         for label, val in aspect_options:
             self._aspect_box.addItem(label, val)
-        idx_a = _index_of(self._aspect_box, self._aspect_choice)
+        idx_a = index_of(self._aspect_box, self._aspect_choice)
         self._aspect_box.setCurrentIndex(max(0, idx_a))
         self._aspect_box.blockSignals(False)
 
@@ -441,7 +423,7 @@ class ExportDialog(QDialog):
         for label, val in canvas_options(self._pool, self._aspect_choice, self._canvas_choice):
             self._canvas_box.addItem(label, val)
 
-        idx_c = _index_of(self._canvas_box, self._canvas_choice)
+        idx_c = index_of(self._canvas_box, self._canvas_choice)
         self._canvas_box.setCurrentIndex(max(0, idx_c))
         self._canvas_box.blockSignals(False)
 
@@ -453,7 +435,7 @@ class ExportDialog(QDialog):
         self._container_box.clear()
         for val, label in strings.EXPORT_CONTAINERS.items():
             self._container_box.addItem(label, val)
-        idx_ct = _index_of(self._container_box, self._container_choice)
+        idx_ct = index_of(self._container_box, self._container_choice)
         self._container_box.setCurrentIndex(max(0, idx_ct))
         self._container_box.blockSignals(False)
 
@@ -465,7 +447,7 @@ class ExportDialog(QDialog):
         self._quality_box.clear()
         for label, val in _quality_presets():
             self._quality_box.addItem(label, val)
-        idx_q = _index_of(self._quality_box, self._quality_choice)
+        idx_q = index_of(self._quality_box, self._quality_choice)
         self._quality_box.setCurrentIndex(max(0, idx_q))
         self._quality_box.blockSignals(False)
 
@@ -474,7 +456,7 @@ class ExportDialog(QDialog):
         self._audio_format_box.clear()
         for val, label in strings.EXPORT_AUDIO_FORMATS.items():
             self._audio_format_box.addItem(label, val)
-        idx_af = _index_of(self._audio_format_box, self._audio_format_choice)
+        idx_af = index_of(self._audio_format_box, self._audio_format_choice)
         self._audio_format_box.setCurrentIndex(max(0, idx_af))
         self._audio_format_box.blockSignals(False)
 
@@ -488,7 +470,7 @@ class ExportDialog(QDialog):
         extra = _GIF_RATE_PRESETS if self._container_choice == "gif" else ()
         for label, val in rate_options(self._pool, self._rate_choice, extra):
             self._rate_box.addItem(label, val)
-        idx_r = _index_of(self._rate_box, self._rate_choice)
+        idx_r = index_of(self._rate_box, self._rate_choice)
         self._rate_box.setCurrentIndex(max(0, idx_r))
         self._rate_box.blockSignals(False)
 
@@ -516,7 +498,7 @@ class ExportDialog(QDialog):
             if val in allowed:
                 self._video_codec_box.addItem(label, val)
         # Tenta restaurar o codec anterior; se não couber, pega o primeiro
-        idx_vc = _index_of(self._video_codec_box, self._codec_choice)
+        idx_vc = index_of(self._video_codec_box, self._codec_choice)
         if idx_vc < 0:
             idx_vc = 0
             self._codec_choice = self._video_codec_box.itemData(0) if self._video_codec_box.count() else None
@@ -556,9 +538,7 @@ class ExportDialog(QDialog):
         return "mp4"
 
     def _effective_project(self) -> Project:
-        material = auto_canvas(self._project)
-        w, h = self._canvas_choice or (material.width, material.height)
-        fps = self._rate_choice or material.fps
+        w, h, fps = output_canvas(self._project, self._canvas_choice, self._rate_choice)
         if self._container_choice == "gif" and not self._audio_only_check.isChecked():
             if self._canvas_choice is None:
                 w, h = _gif_canvas(w, h)
@@ -570,19 +550,7 @@ class ExportDialog(QDialog):
         if self._syncing or index < 0:
             return
         self._aspect_choice = self._aspect_box.itemData(index)
-        if self._aspect_choice is None:
-            self._canvas_choice = None
-        else:
-            cur_aspect = (
-                format_aspect_ratio(*self._canvas_choice)
-                if self._canvas_choice
-                else None
-            )
-            if cur_aspect != self._aspect_choice:
-                for w, h in CANVAS_PRESETS:
-                    if format_aspect_ratio(w, h) == self._aspect_choice:
-                        self._canvas_choice = (w, h)
-                        break
+        self._canvas_choice = canvas_for_aspect(self._aspect_choice, self._canvas_choice)
         self.chosen_canvas = self._canvas_choice
         self._sync_canvas_box()
         self._update_plan()
@@ -593,10 +561,10 @@ class ExportDialog(QDialog):
         self._canvas_choice = self._canvas_box.itemData(index)
         self.chosen_canvas = self._canvas_choice
         if self._canvas_choice is not None:
-            new_aspect = format_aspect_ratio(*self._canvas_choice)
+            new_aspect = aspect_of(self._canvas_choice)
             if new_aspect != self._aspect_choice:
                 self._aspect_choice = new_aspect
-                idx_a = _index_of(self._aspect_box, self._aspect_choice)
+                idx_a = index_of(self._aspect_box, self._aspect_choice)
                 self._aspect_box.blockSignals(True)
                 self._aspect_box.setCurrentIndex(max(0, idx_a))
                 self._aspect_box.blockSignals(False)
@@ -695,25 +663,7 @@ class ExportDialog(QDialog):
         )
 
     def _main_clip(self, proj: Project) -> Clip | None:
-        # Primeiro um vídeo da trilha mais baixa; foto só na falta de vídeo.
-        for skip_images in (True, False):
-            for track in reversed(proj.video_tracks):
-                if track.visible and track.clips:
-                    for clip in track.sorted_clips():
-                        if skip_images and clip.is_image:
-                            continue
-                        if clip.overlay_type not in ("text", "filter", "transition") and clip.media and clip.media.path.is_file():
-                            return clip
-        for t in proj.tracks:
-            if t.visible:
-                for c in t.clips:
-                    if c.overlay_type not in ("text", "filter", "transition") and c.media and c.media.path.is_file():
-                        return c
-        clips = [c for t in proj.tracks if t.visible for c in t.clips if c.overlay_type not in ("text", "filter", "transition")]
-        if clips:
-            return clips[0]
-        all_visible = [c for t in proj.tracks if t.visible for c in t.clips]
-        return all_visible[0] if all_visible else None
+        return reference_clip(proj, lambda clip: clip.media.path.is_file())
 
     def _container(self, proj: Project) -> str:
         video = self._main_clip(proj)
@@ -800,8 +750,8 @@ class ExportDialog(QDialog):
             self._container_box.setCurrentIndex(self._container_box.count() - 1)
             self._video_codec_box.setCurrentIndex(self._video_codec_box.count() - 1)
         else:
-            self._container_box.setCurrentIndex(_index_of(self._container_box, self._container_choice))
-            self._video_codec_box.setCurrentIndex(_index_of(self._video_codec_box, self._codec_choice))
+            self._container_box.setCurrentIndex(index_of(self._container_box, self._container_choice))
+            self._video_codec_box.setCurrentIndex(index_of(self._video_codec_box, self._codec_choice))
         self._container_box.blockSignals(False)
         self._video_codec_box.blockSignals(False)
 

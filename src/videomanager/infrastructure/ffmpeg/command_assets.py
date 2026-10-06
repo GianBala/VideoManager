@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import tempfile
 
+from videomanager.infrastructure.storage.outputs import temp_prefix
 from videomanager.infrastructure.system.binaries import major_version
 
 # Como pedir ao ffmpeg que leia o grafo de um arquivo. A opção antiga saiu no
@@ -49,7 +50,7 @@ def filter_script(args: list[str], directory: Path | None = None):
                 continue
             if option is None:
                 option = script_option(args[0])
-            descriptor, name = tempfile.mkstemp(prefix='.videomanager-filter-', suffix='.txt', dir=directory)
+            descriptor, name = tempfile.mkstemp(prefix=temp_prefix('filter-'), suffix='.txt', dir=directory)
             path = Path(name)
             owned.append(path)
             with os.fdopen(descriptor, 'w', encoding='utf-8') as output:

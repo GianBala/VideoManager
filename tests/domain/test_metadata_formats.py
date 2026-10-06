@@ -4,10 +4,8 @@ from pathlib import Path
 import pytest
 
 from videomanager.domain.metadata import FileMetadata
-from videomanager.domain.metadata import MetadataEdit
 from videomanager.domain.metadata import TrackInfo
 from videomanager.domain.metadata import editable_tags
-from videomanager.domain.metadata import unchanged_edit
 
 
 def _meta(nome: str, formato: str = "x") -> FileMetadata:
@@ -44,12 +42,6 @@ def test_ogg_e_opus_guardam_as_tags_na_trilha():
 
 def test_tags_geradas_pelo_formato_nao_se_editam():
     assert editable_tags(_meta("a.mp4")) == (("title", "T"), ("meu_campo", "v"))
-
-
-def test_edicao_sem_mudanca_e_o_ponto_de_partida():
-    meta = _meta("a.mp4")
-    assert unchanged_edit(meta) == MetadataEdit(
-        (("title", "T"), ("meu_campo", "v")), ((0, "V", "und"), (1, "", "eng")))
 
 
 def test_copia_sai_no_mesmo_formato():

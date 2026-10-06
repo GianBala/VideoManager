@@ -28,10 +28,13 @@ som, um computador que não dá conta perde quadros e continua no tempo certo.
 
 from __future__ import annotations
 
+import logging
+
 import itertools
 import math
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QThreadPool, QTimer, Signal
@@ -82,9 +85,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from videomanager.application.media.preview import PreviewFrameInbox, PreviewResultKey, playback_clock
+from videomanager.application.media.preview import FrameContext, PreviewFrameInbox, PreviewResultKey, accept_frame, playback_clock
 from videomanager.application.media.interaction import interaction_plan
 from videomanager.application.media.scrub import ScrubFrameCache
+from videomanager.domain.export_policy import reference_clip
+from videomanager.domain.project import pseudo_media
+from videomanager.domain.project import OverlayType
 from videomanager.domain.scrub import render_signature, signature_at, signature_segments
 from videomanager.domain.project import slideshow_canvas
 from videomanager.application.capabilities import FFmpegTools
@@ -117,7 +123,8 @@ from videomanager.presentation.qt import icons
 from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.i18n import bind, on_language_change, release, retext_items, switching
 from videomanager.presentation.qt.editor_project import EditorProject
-from videomanager.presentation.qt.export_dialog import CANVAS_PRESETS, ExportDialog, canvas_options
+from videomanager.presentation.qt.export_dialog import ExportDialog, canvas_options
+from videomanager.application.editor.canvas import aspect_of, canvas_for_aspect, output_canvas
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
 from videomanager.presentation.qt.theme import palette
 from videomanager.presentation.qt.panels.timeline import AUDIO_TRACK_HEIGHT
@@ -127,7 +134,7 @@ from videomanager.presentation.qt.panels.timeline import Timeline
 from videomanager.presentation.qt.panels.timeline import image_from_frame
 from videomanager.presentation.qt.panels.timeline import pixmap_from_frame
 
-from videomanager.presentation.qt.panels.edit_widgets import _index_of as _index_of
+from videomanager.presentation.qt.panels.edit_widgets import index_of
 from videomanager.presentation.qt.panels.edit_widgets import _clip_name, _filter_label, _transition_label
 from videomanager.presentation.qt.panels.edit_widgets import _VolumePopup as _VolumePopup
 from videomanager.presentation.qt.panels.edit_widgets import _SpeedPopup as _SpeedPopup
@@ -682,6 +689,15 @@ class EditPanel(QWidget):
         self._properties_session_timer.setSingleShot(True)
         self._properties_session_timer.setInterval(400)
         self._properties_session_timer.timeout.connect(self._end_properties_session)
+        # Campo numérico da coluna de adicionais (tamanho da fonte, duração do
+        # filtro e da transição): o valueChanged vem a cada tecla, e digitar
+        # "10" virava dois passos de desfazer. Uma sessão por campo e bloco
+        # junta o que vem a menos de 400 ms.
+        self._field_session: tuple[str, int] | None = None
+        self._field_timer = QTimer(self)
+        self._field_timer.setSingleShot(True)
+        self._field_timer.setInterval(400)
+        self._field_timer.timeout.connect(self._end_field_session)
 
         self._pose_settle_timer = QTimer(self)
         self._pose_settle_timer.setSingleShot(True)
@@ -1003,6 +1019,7 @@ class EditPanel(QWidget):
         self._font_size_spin.setFixedHeight(28)
         self._font_size_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self._font_size_spin.valueChanged.connect(lambda _: self._on_text_style_changed())
+        lbl_size.setBuddy(self._font_size_spin)
         row_size.addWidget(self._font_size_spin, 1)
 
         btn_inc = QPushButton("+")
@@ -1032,6 +1049,7 @@ class EditPanel(QWidget):
         b_font.setBold(True)
         self._bold_btn.setFont(b_font)
         self._bold_btn.setFixedWidth(36)
+        bind(self._bold_btn, "setToolTip", lambda: strings.EDIT_FONT_BOLD_TIP)
         self._bold_btn.toggled.connect(lambda _: self._on_text_style_changed())
         row_style.addWidget(self._bold_btn)
 
@@ -1041,6 +1059,7 @@ class EditPanel(QWidget):
         i_font.setItalic(True)
         self._italic_btn.setFont(i_font)
         self._italic_btn.setFixedWidth(36)
+        bind(self._italic_btn, "setToolTip", lambda: strings.EDIT_FONT_ITALIC_TIP)
         self._italic_btn.toggled.connect(lambda _: self._on_text_style_changed())
         row_style.addWidget(self._italic_btn)
 
@@ -1063,6 +1082,7 @@ class EditPanel(QWidget):
             btn = QPushButton()
             btn.setFixedSize(22, 22)
             btn.setStyleSheet(f"background: {c}; border: 1px solid #444; border-radius: 3px;")
+            bind(btn, "setToolTip", lambda col=c: strings.EDIT_TEXT_SWATCH_TIP.format(color=col.upper()))
             btn.clicked.connect(lambda _, col=c: self._set_text_color(col))
             pal_row.addWidget(btn)
         pal_row.addStretch(1)
@@ -1108,6 +1128,7 @@ class EditPanel(QWidget):
             btn = QPushButton()
             btn.setFixedSize(22, 22)
             btn.setStyleSheet(f"background: {c}; border: 1px solid #444; border-radius: 3px;")
+            bind(btn, "setToolTip", lambda col=c: strings.EDIT_STROKE_SWATCH_TIP.format(color=col.upper()))
             btn.clicked.connect(lambda _, col=c: self._set_stroke_color(col))
             stroke_pal_row.addWidget(btn)
         stroke_pal_row.addStretch(1)
@@ -1215,14 +1236,14 @@ class EditPanel(QWidget):
                 self._filter_buttons[i].setChecked(fid == filter_name)
         _restyle(self._filter_buttons)
         clip = self._timeline.selected_clip
-        if not self._syncing and clip is not None and clip.overlay_type == "filter":
+        if not self._syncing and clip is not None and clip.overlay_type is OverlayType.FILTER:
             self._remember()
             self._apply(self._project.with_updated_clip(clip.clip_id, filter_name=filter_name))
 
     def _on_filter_dur_changed(self, dur: float) -> None:
         clip = self._timeline.selected_clip
-        if not self._syncing and clip is not None and clip.overlay_type == "filter":
-            self._remember()
+        if not self._syncing and clip is not None and clip.overlay_type is OverlayType.FILTER:
+            self._remember_field("filter-duration", clip.clip_id)
             self._apply(self._filter_resized(clip, dur))
 
     def _filter_resized(self, clip: Clip, duration: float) -> Project:
@@ -1242,7 +1263,7 @@ class EditPanel(QWidget):
 
     def _handle_apply_or_update_filter(self) -> None:
         clip = self._timeline.selected_clip
-        if clip is not None and clip.overlay_type == "filter":
+        if clip is not None and clip.overlay_type is OverlayType.FILTER:
             self._remember()
             project = self._filter_resized(clip, self._filter_dur.value())
             self._apply(project.with_updated_clip(clip.clip_id, filter_name=self._selected_filter_name))
@@ -1251,7 +1272,7 @@ class EditPanel(QWidget):
 
     def _on_text_input_changed(self) -> None:
         clip = self._timeline.selected_clip
-        if self._syncing or clip is None or clip.overlay_type != "text":
+        if self._syncing or clip is None or clip.overlay_type is not OverlayType.TEXT:
             return
         new_text = self._text_input.text()
         if clip.text_content == new_text:
@@ -1265,7 +1286,7 @@ class EditPanel(QWidget):
 
     def _on_text_style_changed(self) -> None:
         clip = self._timeline.selected_clip
-        if self._syncing or clip is None or clip.overlay_type != "text":
+        if self._syncing or clip is None or clip.overlay_type is not OverlayType.TEXT:
             return
         family = self._font_selector.current_family()
         size = self._font_size_spin.value()
@@ -1274,7 +1295,7 @@ class EditPanel(QWidget):
         color = self._text_color
         stroke_color = self._stroke_color
         stroke_width = self._stroke_spin.value() if self._stroke_checkbox.isChecked() else 0
-        self._remember()
+        self._remember_field("text-style", clip.clip_id)
         self._apply(
             self._project.with_updated_clip(
                 clip.clip_id,
@@ -1290,14 +1311,14 @@ class EditPanel(QWidget):
 
     def _handle_insert_or_update_text(self) -> None:
         clip = self._timeline.selected_clip
-        if clip is not None and clip.overlay_type == "text":
+        if clip is not None and clip.overlay_type is OverlayType.TEXT:
             self._update_selected_text_clip()
         else:
             self._insert_text_clip()
 
     def _update_selected_text_clip(self) -> None:
         clip = self._timeline.selected_clip
-        if clip is None or clip.overlay_type != "text":
+        if clip is None or clip.overlay_type is not OverlayType.TEXT:
             return
         text = self._text_input.text()
         family = self._font_selector.current_family()
@@ -1332,16 +1353,12 @@ class EditPanel(QWidget):
         stroke_color = self._stroke_color
         stroke_width = self._stroke_spin.value() if self._stroke_checkbox.isChecked() else 0
 
-        ref = MediaRef(
-            path=Path(f"Texto_{text[:15]}"),
-            kind=MediaKind.IMAGE,
-            duration=IMAGE_DURATION,
-        )
+        ref = pseudo_media(OverlayType.TEXT, text[:15], IMAGE_DURATION)
         clip = Clip(
             media=ref,
             start=max(0.0, self._position),
             duration=IMAGE_DURATION,
-            overlay_type="text",
+            overlay_type=OverlayType.TEXT,
             text_content=text,
             font_family=font_family,
             font_size=font_size,
@@ -1362,16 +1379,12 @@ class EditPanel(QWidget):
         label = _filter_label(fname) or fname
         duration = self._filter_dur.value()
 
-        ref = MediaRef(
-            path=Path(f"Filtro_{label}"),
-            kind=MediaKind.IMAGE,
-            duration=duration,
-        )
+        ref = pseudo_media(OverlayType.FILTER, label, duration)
         clip = Clip(
             media=ref,
             start=max(0.0, self._position),
             duration=duration,
-            overlay_type="filter",
+            overlay_type=OverlayType.FILTER,
             filter_name=fname,
         )
         self._place_clip(clip)
@@ -1403,7 +1416,9 @@ class EditPanel(QWidget):
         dur_row = QHBoxLayout()
         dur_row.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_EXTRA_DURATION))
         self._trans_dur = QDoubleSpinBox()
-        self._trans_dur.setRange(MIN_TRANSITION_DURATION, 5.0)
+        # Sem teto fixo: o limite é o da alça, o que cabe nos dois lados do
+        # corte (``Project.transition_limit``), aplicado ao mudar o valor.
+        self._trans_dur.setRange(MIN_TRANSITION_DURATION, 3600.0)
         self._trans_dur.setValue(1.0)
         self._trans_dur.setSingleStep(0.1)
         self._trans_dur.setSuffix(" s")
@@ -1444,19 +1459,19 @@ class EditPanel(QWidget):
                 self._trans_buttons[i].setChecked(tid == trans_name)
         _restyle(self._trans_buttons)
         clip = self._timeline.selected_clip
-        if not self._syncing and clip is not None and clip.overlay_type == "transition":
+        if not self._syncing and clip is not None and clip.overlay_type is OverlayType.TRANSITION:
             self._remember()
             self._apply(self._project.with_updated_clip(clip.clip_id, transition_name=trans_name))
 
     def _on_transition_dur_changed(self, dur: float) -> None:
         clip = self._timeline.selected_clip
-        if not self._syncing and clip is not None and clip.overlay_type == "transition":
+        if not self._syncing and clip is not None and clip.overlay_type is OverlayType.TRANSITION:
             dur = min(dur, self._transition_max_duration(clip))
             if abs(self._trans_dur.value() - dur) > 1e-6:
                 self._trans_dur.blockSignals(True)
                 self._trans_dur.setValue(dur)
                 self._trans_dur.blockSignals(False)
-            self._remember()
+            self._remember_field("transition-duration", clip.clip_id)
             self._apply(self._project.with_updated_clip(clip.clip_id, duration=dur))
 
     def _on_transition_affect_additionals_changed(self, checked: bool) -> None:
@@ -1472,17 +1487,11 @@ class EditPanel(QWidget):
 
     def _transition_max_duration(self, marker: Clip) -> float:
         """Maior duração que permanece contida nos dois lados do corte."""
-        context = self._project.transition_context(marker)
-        if context is None:
-            return marker.duration
-        return max(
-            MIN_TRANSITION_DURATION,
-            min(5.0, context.left.duration, context.right.duration),
-        )
+        return max(MIN_TRANSITION_DURATION, self._project.transition_limit(marker))
 
     def _handle_apply_or_update_transition(self) -> None:
         clip = self._timeline.selected_clip
-        if clip is not None and clip.overlay_type == "transition":
+        if clip is not None and clip.overlay_type is OverlayType.TRANSITION:
             self._remember()
             duration = min(self._trans_dur.value(), self._transition_max_duration(clip))
             self._apply(
@@ -1552,58 +1561,13 @@ class EditPanel(QWidget):
                 strings.EDIT_TRANSITION_NEEDS_CUT,
             )
             return
-        video_index, left, right, cut = edit
-        duration = min(duration, left.duration, right.duration)
-        start = max(0.0, cut - duration / 2.0)
-
-        ref = MediaRef(
-            path=Path(f"Transição_{label}"),
-            kind=MediaKind.IMAGE,
-            duration=duration,
-        )
-        # Como nos editores profissionais, um ponto de edição tem no máximo
-        # uma transição. Inserir outra naquele corte substitui seus ajustes.
-        existing = next(
-            (
-                marker
-                for marker in self._project.clips
-                if marker.is_transition
-                and marker.transition_left_id == left.clip_id
-                and marker.transition_right_id == right.clip_id
-            ),
-            None,
-        )
-        if existing is not None:
-            self._remember()
-            self._project = self._project.with_updated_clip(
-                existing.clip_id,
-                transition_name=tname,
-                duration=duration,
-                transition_affects_additionals=(
-                    self._trans_affect_additionals.isChecked()
-                ),
-            )
-            self._timeline.select(existing.clip_id)
-            self._after_edit()
-            return
-        clip = Clip(
-            media=ref,
-            start=start,
-            duration=duration,
-            overlay_type="transition",
-            transition_name=tname,
-            transition_left_id=left.clip_id,
-            transition_right_id=right.clip_id,
-            transition_affects_additionals=(
-                self._trans_affect_additionals.isChecked()
-            ),
-        )
-        # Transições pertencem à sequência de vídeo, no próprio corte. Elas
-        # não são overlays de Adicionais: podem ocupar o mesmo intervalo dos
-        # dois clipes que conectam.
+        video_index, left, right, _cut = edit
         self._remember()
-        self._project = self._project.with_clip(video_index, clip)
-        self._timeline.select(clip.clip_id)
+        self._project, marker_id = self._project.with_transition(
+            video_index, left, right, tname, label, duration,
+            self._trans_affect_additionals.isChecked(),
+        )
+        self._timeline.select(marker_id)
         self._after_edit()
 
     def _sync_extras_controls(self, clip: Clip | None) -> None:
@@ -1619,7 +1583,7 @@ class EditPanel(QWidget):
             if self._extras_tabs.currentWidget() is self._properties_widget:
                 return
 
-        if clip is not None and clip.overlay_type == "text":
+        if clip is not None and clip.overlay_type is OverlayType.TEXT:
             self._extras_tabs.setCurrentIndex(0)
             # O campo agora mostra o texto do bloco, que é dado. Ainda registrado
             # como texto inicial, um bloco com conteúdo igual a ele ("Título")
@@ -1648,7 +1612,7 @@ class EditPanel(QWidget):
             self._insert_new_filter_btn.setVisible(False)
             if hasattr(self, "_apply_trans_btn"):
                 self._insert_new_trans_btn.setVisible(False)
-        elif clip is not None and clip.overlay_type == "filter":
+        elif clip is not None and clip.overlay_type is OverlayType.FILTER:
             self._extras_tabs.setCurrentIndex(1)
             fname = clip.filter_name or "pb"
             self._selected_filter_name = fname
@@ -1661,7 +1625,7 @@ class EditPanel(QWidget):
             self._insert_new_text_btn.setVisible(False)
             if hasattr(self, "_apply_trans_btn"):
                 self._insert_new_trans_btn.setVisible(False)
-        elif clip is not None and clip.overlay_type == "transition":
+        elif clip is not None and clip.overlay_type is OverlayType.TRANSITION:
             self._extras_tabs.setCurrentIndex(2)
             tname = clip.transition_name or "fade"
             self._selected_trans_name = tname
@@ -1687,12 +1651,12 @@ class EditPanel(QWidget):
         # sem voltar a este método, que também mexe na aba e nos campos.
         kind = clip.overlay_type if clip is not None else None
         bind(self._insert_text_btn, "setText",
-             lambda: strings.EDIT_UPDATE_TEXT if kind == "text" else strings.EDIT_INSERT_TEXT)
+             lambda: strings.EDIT_UPDATE_TEXT if kind is OverlayType.TEXT else strings.EDIT_INSERT_TEXT)
         bind(self._apply_filter_btn, "setText",
-             lambda: strings.EDIT_UPDATE_FILTER if kind == "filter" else strings.EDIT_APPLY_FILTER)
+             lambda: strings.EDIT_UPDATE_FILTER if kind is OverlayType.FILTER else strings.EDIT_APPLY_FILTER)
         if hasattr(self, "_apply_trans_btn"):
             bind(self._apply_trans_btn, "setText",
-                 lambda: strings.EDIT_UPDATE_TRANSITION if kind == "transition" else strings.EDIT_INSERT_TRANSITION)
+                 lambda: strings.EDIT_UPDATE_TRANSITION if kind is OverlayType.TRANSITION else strings.EDIT_INSERT_TRANSITION)
 
     def _build_player(self) -> QWidget:
         box = QWidget()
@@ -2334,7 +2298,9 @@ class EditPanel(QWidget):
                     if ref and ref.path == reference.path:
                         item.setIcon(icon)
         except Exception:
-            pass
+            # Sem miniatura o acervo continua usável; o erro vai para o log, que
+            # é onde um defeito aqui deixava de aparecer.
+            logging.getLogger(__name__).exception("Falha ao montar a miniatura do acervo")
 
     @staticmethod
     def _media_tooltip(reference: MediaRef) -> str:
@@ -2641,6 +2607,17 @@ class EditPanel(QWidget):
             sizes[2] = max(200, sizes[2] - diff)
             self._top_splitter.setSizes(sizes)
 
+    def _remember_field(self, field: str, clip_id: int) -> None:
+        """Um passo de desfazer por digitação num campo, e não um por tecla."""
+        if self._field_session != (field, clip_id):
+            self._remember()
+            self._field_session = (field, clip_id)
+        self._field_timer.start()
+
+    def _end_field_session(self) -> None:
+        self._field_session = None
+        self._field_timer.stop()
+
     def _end_properties_session(self) -> None:
         self._properties_session = -1
         self._properties_session_timer.stop()
@@ -2666,6 +2643,7 @@ class EditPanel(QWidget):
         self._session.commit_edit()
 
     def _end_edit_groups(self) -> None:
+        self._end_field_session()
         self._end_typing_session()
         self._end_properties_session()
         self._end_gain_session()
@@ -3070,9 +3048,7 @@ class EditPanel(QWidget):
             if c.start >= clip.start and c.start < ceiling:
                 ceiling = c.start
 
-        source_span = clip.duration * clip.speed
-        target_duration = source_span / max(0.1, value)
-        new_duration = max(MIN_SEGMENT, target_duration)
+        new_duration = clip.duration_at_speed(value)
         if clip.start + new_duration > ceiling + 1e-9:
             # Um arrasto contínuo no spinbox dispara valueChanged a cada passo:
             # sem essa marca, cada passo rejeitado reabria o aviso modal, e
@@ -3115,8 +3091,8 @@ class EditPanel(QWidget):
             self._session.begin_edit()
             self._overlay_drag_session = clip_id
         active = self._preview._active_clip
-        sx = getattr(active, "scale_x", scale) if active else scale
-        sy = getattr(active, "scale_y", scale) if active else scale
+        sx = active.scale_x if active else scale
+        sy = active.scale_y if active else scale
         if active is not None and active.has_keyframes:
             self._project = self._project.with_updated_clip(
                 clip_id,
@@ -3199,7 +3175,7 @@ class EditPanel(QWidget):
             )
             if clip.detached:
                 text = f"{text} · {strings.EDIT_CLIP_DETACHED}"
-            if abs(clip.speed - 1.0) >= 0.01:
+            if clip.changes_speed:
                 text = f"{text} · {clip.speed:.1f}x"
             return text
 
@@ -3219,7 +3195,7 @@ class EditPanel(QWidget):
             c for t in reversed(self._project.tracks) if t.visible
             for c in sorted(t.clips, key=lambda c: (c.start, c.clip_id))
             if t.kind is not TrackKind.AUDIO and c.has_image and not c.audio_only
-            and c.overlay_type not in ("filter", "transition")
+            and c.overlay_type not in (OverlayType.FILTER, OverlayType.TRANSITION)
             and c.contains(self._preview._position)
             and c.transform_at(self._preview._position - c.start).opacity > 0
         )
@@ -3232,10 +3208,10 @@ class EditPanel(QWidget):
             c
             for t in reversed(visual_tracks)
             for c in t.clips
-            if c.overlay_type != "filter"
+            if c.overlay_type is not OverlayType.FILTER
             and not c.is_transition
             and not c.audio_only
-            and (c.overlay_type in ("image", "text") or c.is_image)
+            and (c.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT) or c.is_image)
             and c.contains(self._position)
             and not c.chromakey_enabled
         )
@@ -3256,9 +3232,7 @@ class EditPanel(QWidget):
         As duas metades são independentes: dá para fixar o tamanho e deixar a
         taxa seguir o material, ou o contrário.
         """
-        material = auto_canvas(self._project)
-        width, height = self._canvas_choice or (material.width, material.height)
-        fps = self._rate_choice or material.fps
+        width, height, fps = output_canvas(self._project, self._canvas_choice, self._rate_choice)
         if (self._project.width, self._project.height, self._project.fps) == (
             width, height, fps
         ):
@@ -3290,29 +3264,14 @@ class EditPanel(QWidget):
         if self._syncing or index < 0:
             return
         self._aspect_choice = self._aspect_box.itemData(index)
-        if self._aspect_choice is None:
-            self._canvas_choice = None
-        else:
-            cur_aspect = (
-                format_aspect_ratio(*self._canvas_choice)
-                if self._canvas_choice
-                else None
-            )
-            if cur_aspect != self._aspect_choice:
-                for w, h in CANVAS_PRESETS:
-                    if format_aspect_ratio(w, h) == self._aspect_choice:
-                        self._canvas_choice = (w, h)
-                        break
+        self._canvas_choice = canvas_for_aspect(self._aspect_choice, self._canvas_choice)
         self._after_edit()
 
     def _on_canvas_choice(self, index: int) -> None:
         if self._syncing or index < 0:
             return
         self._canvas_choice = self._canvas_box.itemData(index)
-        if self._canvas_choice is not None:
-            self._aspect_choice = format_aspect_ratio(*self._canvas_choice)
-        else:
-            self._aspect_choice = None
+        self._aspect_choice = aspect_of(self._canvas_choice)
         self._after_edit()
 
     def _refresh_canvas_controls(self) -> None:
@@ -3330,7 +3289,7 @@ class EditPanel(QWidget):
                 self._aspect_box.clear()
                 for label, data in aspect_opts:
                     self._aspect_box.addItem(label, data)
-            idx_a = _index_of(self._aspect_box, self._aspect_choice)
+            idx_a = index_of(self._aspect_box, self._aspect_choice)
             self._aspect_box.setCurrentIndex(max(0, idx_a))
 
             box = self._canvas_box
@@ -3343,7 +3302,7 @@ class EditPanel(QWidget):
                     box.addItem(label, data)
             # A escolha em vigor sempre está na lista (ver canvas_options):
             # todo caminho que muda a tela ajusta a proporção junto.
-            box.setCurrentIndex(max(0, _index_of(box, self._canvas_choice)))
+            box.setCurrentIndex(max(0, index_of(box, self._canvas_choice)))
         finally:
             self._syncing = False
 
@@ -3448,7 +3407,7 @@ class EditPanel(QWidget):
         self._interaction_token = next(self._tokens)
         plan = key[2]
         worker = self._runtime.interaction_worker(plan, key[1], tools, self._interaction_token,
-                                                  text_assets=self.editor.text_assets(self._project))
+                                                  text_assets=partial(self.editor.text_assets, self._project))
         self._interaction_worker = worker
         worker.signals.frame.connect(self._on_interaction_ready)
         worker.signals.done.connect(self._on_interaction_done)
@@ -3546,11 +3505,10 @@ class EditPanel(QWidget):
 
         worker = self._runtime.frame_worker(
             proj, self._wanted, size, tools, self._frame_token,
-            text_assets=self.editor.text_assets(proj),
+            text_assets=partial(self.editor.text_assets, proj),
         )
         worker.signals.frame.connect(self._on_frame)
-        if hasattr(worker.signals, "failed"):
-            worker.signals.failed.connect(self._on_preview_failed)
+        worker.signals.failed.connect(self._on_preview_failed)
         worker.signals.done.connect(
             lambda key=key: self._on_frame_done(key.revision, key.token)
         )
@@ -3591,55 +3549,28 @@ class EditPanel(QWidget):
             return
         if (self._overlay_drag_session >= 0 or self._pose_live) and self._preview._interaction_visible:
             return
-        current = True
-        gesture = False
-        # O fluxo do começo do loop sai no instante exato do fim, e a troca de
-        # dono só acontece no tique seguinte (até 40 ms depois). Os quadros dele
-        # entram já, senão o primeiro do começo se perdia e o último do fim
-        # ficava parado na tela.
-        loop_frame = self._playing and self._loop_token != 0 and token == self._loop_token
-        if (token == self._play_token and self._playing) or loop_frame:
-            if not loop_frame and self._loop_video_live:
-                return
-            current = getattr(self, "_playback_project", self._project) is self._project
-        else:
-            key = self._frame_key
-            if key is None:
-                if token != self._frame_token:
-                    return
-            else:
-                if (self._playing or key.token != token or key.generation != self._generation
-                        or key.size != self._preview_size()):
-                    return
-                gesture = (self._session.editing or self._overlay_drag_session >= 0
-                           or self._properties_session >= 0 or self._typing_session >= 0)
-                if key.revision != self._frame_revision and not gesture:
-                    return
-                if key.revision != self._frame_revision and self._preview._interaction_visible:
-                    # As camadas já mostram a pose nova; um quadro composto
-                    # antes dela voltaria o objeto até o definitivo chegar.
-                    return
-                if self._cache_shown_for is not None and key.seconds != self._wanted:
-                    # A tela já mostra o quadro guardado de um instante mais
-                    # novo: o exato de um ponto anterior do arrasto voltaria no
-                    # tempo.
-                    return
-                # Arrastar a agulha pede um quadro por evento, e o instante
-                # pedido já mudou quando o anterior fica pronto. Exigir
-                # ``key.seconds == self._wanted`` descartava **todos** esses
-                # quadros: a imagem só voltava quando a mão parava. O quadro
-                # entra com o próprio instante e ``current`` continua falso,
-                # então o cursor pedido e o que está na tela seguem distintos.
-                current = (token == self._frame_token
-                           and key.revision == self._frame_revision
-                           and key.seconds == self._wanted)
-                # Durante um gesto, apresentar snapshots completos em ordem
-                # evita esperar a mão parar. A indicação de atualização só
-                # desaparece quando chega a revisão final, nunca num seek antigo.
-                if (self._presented_key is not None and self._presented_key.generation == key.generation
-                        and self._presented_key.revision > key.revision):
-                    return
-                self._presented_key = key
+        verdict = accept_frame(token, FrameContext(
+            playing=self._playing,
+            play_token=self._play_token,
+            loop_token=self._loop_token,
+            loop_video_live=self._loop_video_live,
+            playback_current=getattr(self, "_playback_project", self._project) is self._project,
+            frame_key=self._frame_key,
+            frame_token=self._frame_token,
+            frame_revision=self._frame_revision,
+            generation=self._generation,
+            preview_size=self._preview_size(),
+            gesture=(self._session.editing or self._overlay_drag_session >= 0
+                     or self._properties_session >= 0 or self._typing_session >= 0),
+            interaction_visible=self._preview._interaction_visible,
+            cache_shown_for=self._cache_shown_for,
+            wanted=self._wanted,
+            presented=self._presented_key,
+        ))
+        if not verdict.show:
+            return
+        self._presented_key = verdict.presented
+        current, gesture, loop_frame = verdict.current, verdict.gesture, verdict.loop_frame
         if current:
             self._end_loading_hint()
         elif gesture:
@@ -3739,7 +3670,7 @@ class EditPanel(QWidget):
                     continue
                 if not self._strip_is_stale(clip, track.kind):
                     continue
-                if track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type == "image":
+                if track.kind is TrackKind.VIDEO or clip.is_image or clip.overlay_type is OverlayType.IMAGE:
                     self._request_thumbs(clip, tools)
                 elif clip.media is not None and clip.media.has_audio:
                     self._request_wave(clip, tools)
@@ -3763,7 +3694,7 @@ class EditPanel(QWidget):
         current = self._timeline.strip_range(clip.clip_id)
         if current is None:
             return True
-        if clip.is_image or clip.overlay_type == "image":
+        if clip.is_image or clip.overlay_type is OverlayType.IMAGE:
             return False
 
         begin, finish = self._strip_window(clip)
@@ -3779,7 +3710,7 @@ class EditPanel(QWidget):
         return (finish - begin) * 2 <= coberto
 
     def _thumb_count(self, clip: Clip) -> int:
-        if clip.is_image or clip.overlay_type == "image":
+        if clip.is_image or clip.overlay_type is OverlayType.IMAGE:
             return 1
         return max(1, min(_MAX_THUMBS, round(self._clip_pixels(clip) / FILM_CELL_WIDTH)))
 
@@ -4329,8 +4260,7 @@ class EditPanel(QWidget):
         )
         worker.signals.frame.connect(self._on_frame)
         worker.signals.primed.connect(self._on_playback_primed)
-        if hasattr(worker.signals, "failed"):
-            worker.signals.failed.connect(self._on_preview_failed)
+        worker.signals.failed.connect(self._on_preview_failed)
         worker.signals.done.connect(
             lambda token=token: self._on_playback_worker_done(token)
         )
@@ -4406,8 +4336,7 @@ class EditPanel(QWidget):
         )
         worker.signals.frame.connect(self._on_frame)
         worker.signals.primed.connect(self._on_playback_primed)
-        if hasattr(worker.signals, "failed"):
-            worker.signals.failed.connect(self._on_preview_failed)
+        worker.signals.failed.connect(self._on_preview_failed)
         worker.signals.done.connect(
             lambda token=self._play_token: self._on_playback_worker_done(token)
         )
@@ -4463,8 +4392,7 @@ class EditPanel(QWidget):
                 fps=preview_fps(self._fps), text_assets=text_assets, autostart=False,
             )
             worker.signals.frame.connect(self._on_frame)
-            if hasattr(worker.signals, "failed"):
-                worker.signals.failed.connect(self._on_preview_failed)
+            worker.signals.failed.connect(self._on_preview_failed)
             worker.signals.done.connect(lambda token=token: self._on_loop_worker_done(token))
             self._loop_worker, self._loop_token = worker, token
             self._runner.start(worker, worker.signals.done)
@@ -4659,8 +4587,8 @@ class EditPanel(QWidget):
             self._update_time_labels()
             has_overlays = any(
                 t.visible and t.kind is not TrackKind.AUDIO and any(
-                    c.overlay_type != "filter"
-                    and (c.overlay_type in ("image", "text") or c.is_image)
+                    c.overlay_type is not OverlayType.FILTER
+                    and (c.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT) or c.is_image)
                     and c.contains(visible_position)
                     and not c.chromakey_enabled
                     for c in t.clips
@@ -4785,23 +4713,8 @@ class EditPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _main_clip(self) -> Clip | None:
-        """O bloco que dá nome e formato à saída.
-
-        É o primeiro da trilha de vídeo **mais baixa** — a principal, onde fica
-        o material de base. Pegar o primeiro bloco de qualquer trilha faria uma
-        montagem inteira herdar o nome de uma foto sobreposta.
-        """
-        for track in reversed(self._project.video_tracks):
-            # Foto não dá formato à saída: numa trilha que começa com uma
-            # imagem, o nome e o container vêm do primeiro vídeo.
-            videos = [c for c in track.sorted_clips() if not c.is_image and not c.is_transition]
-            if videos:
-                return videos[0]
-        for track in reversed(self._project.video_tracks):
-            if track.clips:
-                return track.sorted_clips()[0]
-        clips = self._project.clips
-        return clips[0] if clips else None
+        """O bloco que dá nome e formato à saída (ver ``reference_clip``)."""
+        return reference_clip(self._project, lambda clip: clip.media.path.is_file())
 
     # ------------------------------------------------------------------
     # Sincronização geral

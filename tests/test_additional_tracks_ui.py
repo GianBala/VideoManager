@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -1193,7 +1194,10 @@ def test_video_track_button_positions_and_version(qapp: QApplication) -> None:
     from videomanager.domain.project import Track
     from videomanager.domain.project import TrackKind
 
-    assert videomanager.__version__ == "3.1"
+    # A versão do pacote e a do código são a mesma: lida do pyproject, e não
+    # de um literal que precisava ser lembrado a cada versão nova.
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    assert videomanager.__version__ == re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1)
 
     tl = Timeline(DARK)
     proj = Project(

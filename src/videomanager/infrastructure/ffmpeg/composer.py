@@ -40,10 +40,13 @@ from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
+from videomanager.domain.constants import CHROMA_COLOR
+from videomanager.domain.constants import GAIN_EPSILON
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import fit_size
 from videomanager.domain.project import Clip
+from videomanager.domain.project import OverlayType
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import Project
 from videomanager.domain.project import TrackKind
@@ -160,7 +163,7 @@ def _pieces(
             has_a = want_audio and clip.has_sound and not track.muted
             if not has_v and not has_a:
                 continue
-            is_overlay_filter = clip.overlay_type in ("filter", "transition")
+            is_overlay_filter = clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION)
             idx = -1 if is_overlay_filter else input_idx
             if not is_overlay_filter:
                 input_idx += 1
@@ -315,9 +318,9 @@ def _input_args(
     text_assets: dict[int, Path] | None = None,
 ) -> list[str]:
     clip = piece.clip
-    if clip.overlay_type in ("filter", "transition"):
+    if clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION):
         return []
-    if clip.overlay_type == "text":
+    if clip.overlay_type is OverlayType.TEXT:
         path = (text_assets or {}).get(clip.clip_id)
         if path is None:
             raise ConversionError(Text("COMPOSE_TEXT_ASSETS_MISSING"))
@@ -394,7 +397,9 @@ def _atempo_filters(speed: float) -> list[str]:
     while s < 0.5:
         filters.append("atempo=0.5")
         s /= 0.5
-    if abs(s - 1.0) > 0.005:
+    # O mesmo critério de ``Clip.changes_speed``: com 0,005 aqui, 1,005 cortava
+    # o trecho certo da mídia e o tocava na velocidade normal.
+    if abs(s - 1.0) > 1e-9:
         filters.append(f"atempo={s:.4f}")
     return filters
 
@@ -434,12 +439,10 @@ def _chromakey_filter(clip: Clip) -> str | None:
     if not clip.chromakey_enabled:
         return None
     raw_col = clip.chromakey_color or "#00FF00"
-    if raw_col.startswith("#"):
-        col = f"0x{raw_col[1:]}"
-    elif not raw_col.startswith("0x"):
-        col = f"0x{raw_col}"
-    else:
-        col = raw_col
+    # A leitura do .vmp já recusa outra grafia; o grafo não depende disso.
+    if not CHROMA_COLOR.fullmatch(raw_col):
+        raw_col = "#00FF00"
+    col = f"0x{raw_col[-6:]}"
     sim = max(0.001, min(1.0, clip.chromakey_similarity))
     blend = max(0.0, min(1.0, clip.chromakey_blend))
     return f"chromakey=color={col}:similarity={sim:.4f}:blend={blend:.4f}"
@@ -532,7 +535,7 @@ def _video_chain(
 ) -> str:
     """Ajusta um bloco ao formato da tela e o coloca no instante certo."""
     clip = piece.clip
-    is_overlay = clip.overlay_type in ("image", "text") or clip.is_image
+    is_overlay = clip.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT) or clip.is_image
     if is_overlay:
         steps = [f"trim=duration={_whole_frames(piece.duration, fps):.6f}"]
         if piece.offset > 0:
@@ -541,24 +544,14 @@ def _video_chain(
             steps.append("setpts=PTS-STARTPTS")
         steps.append(f"fps={fps:.6f}")
         steps.append("format=rgba")
-        sx = getattr(clip, "scale_x", clip.scale)
-        sy = getattr(clip, "scale_y", clip.scale)
+        sx = clip.scale_x
+        sy = clip.scale_y
         origin = _clip_stream_origin(piece)
-        has_anim_scale = clip.has_keyframes and (
-            any(
-                abs(k.scale_x - sx) > 1e-9 or abs(k.scale_y - sy) > 1e-9
-                for k in clip.keyframes
-            )
-            or any(
-                abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x) > 1e-9
-                or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y) > 1e-9
-                for i in range(len(clip.keyframes) - 1)
-            )
-        )
+        has_anim_scale = clip.animates("scale")
         if has_anim_scale:
             expr_sx = _keyframe_expr(clip.keyframes, "scale_x", origin, sx, time_var="t")
             expr_sy = _keyframe_expr(clip.keyframes, "scale_y", origin, sy, time_var="t")
-            if clip.overlay_type == "text":
+            if clip.overlay_type is OverlayType.TEXT:
                 steps.append(
                     f"scale=w='max(2,trunc(iw*({expr_sx})/2)*2)':h='max(2,trunc(ih*({expr_sy})/2)*2)':eval=frame"
                 )
@@ -577,10 +570,10 @@ def _video_chain(
                 steps.append(
                     f"scale=w='max(2,trunc({base_w}*({expr_sx})/2)*2)':h='max(2,trunc({base_h}*({expr_sy})/2)*2)':eval=frame"
                 )
-        elif clip.overlay_type == "text":
+        elif clip.overlay_type is OverlayType.TEXT:
             if abs(sx - 1.0) > 1e-9 or abs(sy - 1.0) > 1e-9:
                 steps.append(f"scale=w='max(2,trunc(iw*{sx:.6f}/2)*2)':h='max(2,trunc(ih*{sy:.6f}/2)*2)'")
-        elif clip.overlay_type == "image" or clip.is_image:
+        elif clip.overlay_type is OverlayType.IMAGE or clip.is_image:
             canon_w, canon_h = canonical_size or (project.width, project.height)
             canon_base_w, canon_base_h = image_base_size(
                 clip.media.width if clip.media else None,
@@ -602,20 +595,14 @@ def _video_chain(
             if ck:
                 steps.append(ck)
 
-        has_anim_rotation = clip.has_keyframes and (
-            any(abs(k.rotation - clip.rotation) > 1e-9 for k in clip.keyframes)
-            or any(
-                abs(clip.keyframes[i].rotation - clip.keyframes[i + 1].rotation) > 1e-9
-                for i in range(len(clip.keyframes) - 1)
-            )
-        )
+        has_anim_rotation = clip.animates("rotation")
         max_diag: int | None = None
         if clip.has_keyframes:
-            all_k_sx = [getattr(clip, "scale_x", clip.scale)] + [k.scale_x for k in clip.keyframes]
-            all_k_sy = [getattr(clip, "scale_y", clip.scale)] + [k.scale_y for k in clip.keyframes]
+            all_k_sx = [clip.scale_x] + [k.scale_x for k in clip.keyframes]
+            all_k_sy = [clip.scale_y] + [k.scale_y for k in clip.keyframes]
             max_k_sx = max(all_k_sx)
             max_k_sy = max(all_k_sy)
-            if clip.overlay_type == "text":
+            if clip.overlay_type is OverlayType.TEXT:
                 tw = project.width
                 th = project.height
                 max_diag = max(2, int(math.ceil(math.hypot(tw * max_k_sx, th * max_k_sy))) // 2 * 2)
@@ -657,12 +644,7 @@ def _video_chain(
                 )
 
         if clip.has_keyframes:
-            has_anim_opacity = any(
-                abs(k.opacity - clip.opacity) > 1e-9 for k in clip.keyframes
-            ) or any(
-                abs(clip.keyframes[i].opacity - clip.keyframes[i + 1].opacity) > 1e-9
-                for i in range(len(clip.keyframes) - 1)
-            )
+            has_anim_opacity = clip.animates("opacity")
             if has_anim_opacity:
                 expr_op = _keyframe_expr(
                     clip.keyframes, "opacity", origin, clip.opacity, time_var="T"
@@ -683,7 +665,7 @@ def _video_chain(
     if piece.still:
         _seek, margin = _still_seek(piece)
         steps.append(f"select='gte(t,{-margin:.6f})'")
-    if abs(clip.speed - 1.0) > 1e-9:
+    if clip.changes_speed:
         steps.append(f"trim=duration={piece.duration * clip.speed:.6f}")
         inv = 1.0 / clip.speed
         if piece.offset > 0:
@@ -697,28 +679,12 @@ def _video_chain(
         else:
             steps.append("setpts=PTS-STARTPTS")
 
-    sx = getattr(clip, "scale_x", clip.scale)
-    sy = getattr(clip, "scale_y", clip.scale)
+    sx = clip.scale_x
+    sy = clip.scale_y
     has_keyframes = clip.has_keyframes
     origin = _clip_stream_origin(piece)
-    has_anim_scale = has_keyframes and (
-        any(
-            abs(k.scale_x - sx) > 1e-9 or abs(k.scale_y - sy) > 1e-9
-            for k in clip.keyframes
-        )
-        or any(
-            abs(clip.keyframes[i].scale_x - clip.keyframes[i + 1].scale_x) > 1e-9
-            or abs(clip.keyframes[i].scale_y - clip.keyframes[i + 1].scale_y) > 1e-9
-            for i in range(len(clip.keyframes) - 1)
-        )
-    )
-    has_anim_rotation = has_keyframes and (
-        any(abs(k.rotation - clip.rotation) > 1e-9 for k in clip.keyframes)
-        or any(
-            abs(clip.keyframes[i].rotation - clip.keyframes[i + 1].rotation) > 1e-9
-            for i in range(len(clip.keyframes) - 1)
-        )
-    )
+    has_anim_scale = clip.animates("scale")
+    has_anim_rotation = clip.animates("rotation")
     has_transform = (
         standalone
         or has_keyframes
@@ -770,8 +736,8 @@ def _video_chain(
 
         max_diag: int | None = None
         if clip.has_keyframes:
-            all_k_sx = [getattr(clip, "scale_x", clip.scale)] + [k.scale_x for k in clip.keyframes]
-            all_k_sy = [getattr(clip, "scale_y", clip.scale)] + [k.scale_y for k in clip.keyframes]
+            all_k_sx = [clip.scale_x] + [k.scale_x for k in clip.keyframes]
+            all_k_sy = [clip.scale_y] + [k.scale_y for k in clip.keyframes]
             max_k_sx = max(all_k_sx)
             max_k_sy = max(all_k_sy)
             max_diag = max(2, int(math.ceil(math.hypot(base_w * max_k_sx, base_h * max_k_sy))) // 2 * 2)
@@ -800,12 +766,7 @@ def _video_chain(
                 )
 
         if clip.has_keyframes:
-            has_anim_opacity = any(
-                abs(k.opacity - clip.opacity) > 1e-9 for k in clip.keyframes
-            ) or any(
-                abs(clip.keyframes[i].opacity - clip.keyframes[i + 1].opacity) > 1e-9
-                for i in range(len(clip.keyframes) - 1)
-            )
+            has_anim_opacity = clip.animates("opacity")
             if has_anim_opacity:
                 expr_op = _keyframe_expr(
                     clip.keyframes, "opacity", origin, clip.opacity, time_var="T"
@@ -923,12 +884,12 @@ def _audio_chain(
     o fade acontecerem vários segundos depois do corte.
     """
     clip = piece.clip
-    if abs(clip.speed - 1.0) >= 0.01:
+    if clip.changes_speed:
         steps = [f"atrim=duration={piece.duration * clip.speed:.6f}", "asetpts=PTS-STARTPTS"]
         steps += _atempo_filters(clip.speed)
     else:
         steps = [f"atrim=duration={piece.duration:.6f}", "asetpts=PTS-STARTPTS"]
-    if abs(clip.gain_db) >= 0.05:
+    if clip.changes_gain:
         steps.append(f"volume={clip.gain_db:.2f}dB")
     steps.append(_AUDIO_BASE)
     steps.append(
@@ -1044,7 +1005,7 @@ def _transition_additional_pieces(
             end = min(context.end, end)
             if end - begin <= 1e-6:
                 continue
-            index = -1 if clip.overlay_type == "filter" else next_input
+            index = -1 if clip.overlay_type is OverlayType.FILTER else next_input
             if index >= 0:
                 next_input += 1
             result.append(
@@ -1195,7 +1156,7 @@ def _transition_audio_chain(side: _TransitionSide, label: str) -> str:
         "asetpts=PTS-STARTPTS",
         *_atempo_filters(side.playback_speed),
     ]
-    if abs(clip.gain_db) >= 0.05:
+    if clip.changes_gain:
         steps.append(f"volume={clip.gain_db:.2f}dB")
     steps.extend(
         (
@@ -1249,7 +1210,7 @@ def _compose_video_piece(
         enable += (
             f"*not(gte(t,{excluded_start:.6f})*lt(t,{excluded_end:.6f}))"
         )
-    if piece.clip.overlay_type == "filter":
+    if piece.clip.overlay_type is OverlayType.FILTER:
         name = piece.clip.filter_name
         if name == "pb":
             expression = f"hue=s=0:enable='{enable}'"
@@ -1274,13 +1235,13 @@ def _compose_video_piece(
     filters.append(_video_chain(piece, project, fps, interpolate, canonical_size=canonical_size)
                    .replace(f'[v{piece.index}]', video_label))
     label = f"[o{order}]"
-    is_overlay_item = piece.clip.overlay_type in ("image", "text") or piece.clip.is_image
+    is_overlay_item = piece.clip.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT) or piece.clip.is_image
     has_transform = (
         piece.clip.has_keyframes
         or abs(piece.clip.x - 0.5) > 1e-9
         or abs(piece.clip.y - 0.5) > 1e-9
-        or abs(getattr(piece.clip, "scale_x", piece.clip.scale) - 1.0) > 1e-9
-        or abs(getattr(piece.clip, "scale_y", piece.clip.scale) - 1.0) > 1e-9
+        or abs(piece.clip.scale_x - 1.0) > 1e-9
+        or abs(piece.clip.scale_y - 1.0) > 1e-9
         or abs(piece.clip.rotation) > 1e-9
         or piece.clip.chromakey_enabled
         or piece.clip.opacity < 1 - 1e-9
@@ -1419,7 +1380,7 @@ def _compose_additional_transition(filters: list[str], current: str, render: _Tr
     """Aplica a passagem na camada original do adicional, sem rebaixá-lo ao vídeo."""
     sides = [[p for p in pieces if p.track_index == track_index]
              for pieces in (render.left_additionals, render.right_additionals)]
-    effects = [p for side in sides for p in side if p.clip.overlay_type == 'filter']
+    effects = [p for side in sides for p in side if p.clip.overlay_type is OverlayType.FILTER]
     if effects:
         # Filtros recebem os pixels compostos de cada lado, inclusive o fundo.
         # As passagens espaciais compensam o movimento desse fundo abaixo.
@@ -1582,7 +1543,7 @@ def build_graph(
             continuous_source_cut
             and context.left.has_sound
             and context.right.has_sound
-            and abs(context.left.gain_db - context.right.gain_db) < 0.05
+            and abs(context.left.gain_db - context.right.gain_db) < GAIN_EPSILON
         )
         has_audio_transition = bool(
             has_audio_at_cut
@@ -1921,7 +1882,7 @@ def export_args(
         filter_text = ";".join(filters)
         args += ["-filter_complex", filter_text]
     if video_label:
-        args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality, *_hevc_tag(encoder.name, container)]
+        args += ["-map", video_label, *hwaccel.video_encoder_args(encoder.name, encoder.quality, container)]
     if graph.audio_label:
         args += ["-map", graph.audio_label, *encode_audio_args(container)]
     elif video_label:
@@ -1930,17 +1891,6 @@ def export_args(
         raise ConversionError(Text("COMPOSE_ALL_MUTED"))
     return args + tail_args(container, destination, map_metadata=False)
 
-
-def _hevc_tag(encoder: str, container: str) -> list[str]:
-    """Etiqueta ``hvc1`` do HEVC em MP4 e MOV.
-
-    Sem ela o ffmpeg grava ``hev1``, que o QuickTime, os aparelhos Apple e o
-    app Filmes e TV do Windows não abrem. Uma função só para a exportação e
-    para os trechos paralelos: com a regra repetida, o trecho paralelo em MOV
-    saía sem a etiqueta, e a emenda copia o que o trecho tiver.
-    """
-    hevc = encoder in ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi")
-    return ["-tag:v", "hvc1"] if hevc and container in ("mp4", "mov") else []
 
 
 def _limited_inputs(inputs: list[str]) -> list[str]:
@@ -2297,7 +2247,7 @@ def segment_video_args(
         video_label = "[vhw]"
     filter_text = ";".join(filters)
     args += ["-filter_complex", filter_text]
-    args += ["-map", video_label, "-c:v", encoder.name, *encoder.quality, *_hevc_tag(encoder.name, container)]
+    args += ["-map", video_label, *hwaccel.video_encoder_args(encoder.name, encoder.quality, container)]
     # ``-t`` na saída, e não ``-frames:v``: a conta que interessa é a do tempo,
     # e é ela que faz a soma dos trechos bater com a duração do projeto.
     return args + [

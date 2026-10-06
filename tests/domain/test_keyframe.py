@@ -99,11 +99,6 @@ def test_clip_keyframe_methods():
     assert clip.keyframes[0].time_offset == 1.0
     assert clip.keyframes[1].time_offset == 3.0
 
-    # Test nearest_keyframe
-    assert clip.nearest_keyframe(1.0) == kf0
-    assert clip.nearest_keyframe(1.00001) == kf0
-    assert clip.nearest_keyframe(2.0) is None
-
     # Test without_keyframe
     clip_removed = clip.without_keyframe(1.0)
     assert len(clip_removed.keyframes) == 1

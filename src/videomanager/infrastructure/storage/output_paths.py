@@ -5,6 +5,22 @@ from videomanager.application.errors import ConversionError
 from videomanager.domain.i18n import Text, t
 from videomanager.application.jobs.requests import ConversionTarget
 
+# O que o Windows não aceita num nome de arquivo. Vale para o nome que o
+# usuário digita em qualquer sistema, porque o arquivo vai para pendrive e
+# rede: no NTFS, "Parte 1: final" virava o arquivo "Parte 1" com um fluxo
+# alternativo, e CON, NUL e afins apontam para dispositivos. O nome derivado
+# da origem não passa por aqui — um arquivo do Linux pode ter ":" no nome.
+_WINDOWS_FORBIDDEN = set('<>:"|?*') | {chr(code) for code in range(32)}
+_WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)),
+                     *(f"LPT{n}" for n in range(1, 10))}
+
+
+def _portable(stem: str) -> bool:
+    return (not any(char in _WINDOWS_FORBIDDEN for char in stem)
+            and not stem.endswith((".", " "))
+            and stem.split(".", 1)[0].strip().upper() not in _WINDOWS_RESERVED)
+
+
 def output_path(
     source: Path,
     target: ConversionTarget,
@@ -35,6 +51,8 @@ def output_path(
     clean_custom = custom_stem.strip() if custom_stem else ""
     stem = clean_custom if clean_custom else f"{source.stem}{suffix}"
     if any(char in stem for char in ('/', '\\', '\0')) or stem in ('.', '..'):
+        raise ConversionError(Text("OUTPUT_BAD_NAME"))
+    if clean_custom and not _portable(clean_custom):
         raise ConversionError(Text("OUTPUT_BAD_NAME"))
     candidate = directory / f"{stem}.{target.extension}"
     if candidate.resolve() == source.resolve():

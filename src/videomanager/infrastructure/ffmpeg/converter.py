@@ -25,11 +25,13 @@ import subprocess
 import threading
 import tempfile
 from collections import deque
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
 from videomanager.infrastructure.ffmpeg.command_assets import filter_script
 from videomanager.infrastructure.storage.outputs import FileOutputStore
+from videomanager.infrastructure.storage.outputs import temp_prefix
 from videomanager.application.ports.output import OutputLease
 
 from videomanager.infrastructure.ffmpeg import hardware as hwaccel
@@ -44,6 +46,7 @@ from videomanager.domain.composition import Composition
 from videomanager.infrastructure.ffmpeg.composer import export_args
 from videomanager.infrastructure.ffmpeg.parallel import ParallelExport
 from videomanager.infrastructure.ffmpeg.parallel import plan_segments
+from videomanager.infrastructure.ffmpeg.parallel import error_cause
 from videomanager.infrastructure.ffmpeg.thumbnail import embed_thumbnail
 from videomanager.domain.timing import TrimTarget
 from videomanager.infrastructure.ffmpeg.trimmer import build_trim_args
@@ -311,25 +314,6 @@ def _mkv_extra_streams(media: LocalMedia) -> tuple[str, ...]:
     return tuple(extras)
 
 
-def _bitrate_cap(encoder: str, target: VideoTarget) -> list[str]:
-    """Teto de bitrate sobre o CRF, onde o encoder o respeita.
-
-    O x264 e o x265 limitam pelo VBV, com buffer de 1 s: com 2 s, o que ele
-    gasta além do teto no começo dobrava (medido: 0,75 s de teto a mais contra
-    0,45). O SVT-AV1 ignora o ``-maxrate`` nesse modo (19% acima) e trata o
-    ``mbr`` como alvo, não como teto: ainda reduz o crescimento, sem garantir.
-    Na placa a quantização é fixa e não há teto — quem segura ali é a recusa no
-    fim.
-    """
-    if not target.max_kbps:
-        return []
-    if encoder == "libsvtav1":
-        return ["-svtav1-params", f"mbr={target.max_kbps}"]
-    if encoder in ("libx264", "libx265"):
-        return ["-maxrate", f"{target.max_kbps}k", "-bufsize", f"{target.max_kbps}k"]
-    return []
-
-
 def build_video_args(
     media: LocalMedia, target: VideoTarget, destination: Path, tools: FFmpegTools
 ) -> list[str]:
@@ -360,7 +344,7 @@ def build_video_args(
             device_args = list(hw_enc.device)
             if hw_enc.filter_suffix:
                 filters.append(hw_enc.filter_suffix)
-            video_encoder_args = ["-c:v", hw_enc.name, *hw_enc.quality, *_bitrate_cap(hw_enc.name, target)]
+            video_encoder_args = hwaccel.video_encoder_args(hw_enc.name, hw_enc.quality, target.container, target.max_kbps)
         else:
             encoder = _VIDEO_ENCODERS.get(codec)
             if encoder is None:
@@ -369,15 +353,18 @@ def build_video_args(
                 # A tabela de cada encoder, a mesma da exportação: o mesmo CRF
                 # rende arquivos muito diferentes no x264 e no AV1, e o VP9 só
                 # trata o CRF como qualidade constante com o ``-b:v 0`` dela.
-                video_encoder_args = ["-c:v", encoder, *hwaccel.encoder_quality(encoder, target.quality),
-                                      *_bitrate_cap(encoder, target)]
+                video_encoder_args = hwaccel.video_encoder_args(
+                    encoder, hwaccel.encoder_quality(encoder, target.quality), target.container, target.max_kbps)
             else:
-                video_encoder_args = ["-c:v", encoder, "-crf", str(target.crf)]
+                quality = ["-crf", str(target.crf)]
                 if encoder in ("libx264", "libx265"):
                     # yuv420p garante reprodução em reprodutores legados e navegadores
-                    video_encoder_args += ["-pix_fmt", "yuv420p"]
+                    quality += ["-pix_fmt", "yuv420p"]
                 if encoder == "libx264":
-                    video_encoder_args += ["-preset", "medium"]
+                    quality += ["-preset", "medium"]
+                # Sem teto: ele vale sobre um nível de qualidade, e a conversão
+                # comum usa o CRF direto.
+                video_encoder_args = hwaccel.video_encoder_args(encoder, quality, target.container)
 
     args = [
         tools.ffmpeg_str,
@@ -403,11 +390,10 @@ def build_video_args(
         args += ["-vf", ",".join(filters)]
     if codec != "copy" and target.fps:
         args += ["-r", str(target.fps)]
-    if target.container in ("mp4", "mov") and (codec == "hevc" or (
-            codec == "copy" and media.video is not None and media.video.codec.lower() == "hevc")):
-        # Sem a etiqueta hvc1 o HEVC em MP4 não abre no QuickTime, em aparelhos
-        # Apple nem no app Filmes e TV do Windows; o ffmpeg grava hev1.
-        args += ["-tag:v", "hvc1"]
+    if codec == "copy" and media.video is not None:
+        # O stream copiado leva a etiqueta pela mesma regra; o codificado já a
+        # traz da montagem do encoder.
+        args += hwaccel.hevc_tag(media.video.codec.lower(), target.container)
     for kind in extras:
         args += [f"-c:{kind}", "copy"]
 
@@ -486,6 +472,7 @@ _PHASES = {
     Composition: "PHASE_EXPORTING",
 }
 
+_LOG = logging.getLogger(__name__)
 _PROGRESS_LINE = re.compile(r"^(\w+)=(.*)$")
 _TIMESTAMP = re.compile(r"^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$")
 
@@ -518,6 +505,8 @@ class Converter:
     ) -> None:
         self._text_assets = text_assets
         self._max_bytes = max_bytes
+        # Cauda do stderr da última falha do ffmpeg, para a fila mostrar.
+        self.log: tuple[str, ...] = ()
         self._media = media
         self._target = target
         self._destination = destination
@@ -612,7 +601,7 @@ class Converter:
             # publicação continua sendo uma substituição atômica.
             self._destination.parent.mkdir(parents=True, exist_ok=True)
             descriptor, name = tempfile.mkstemp(
-                prefix=".videomanager-", suffix=self._destination.suffix,
+                prefix=temp_prefix(), suffix=self._destination.suffix,
                 dir=self._destination.parent,
             )
             os.close(descriptor)
@@ -706,8 +695,11 @@ class Converter:
 
         self._postprocess.check()
         if process.returncode != 0:
-            detail = _last_error_line(stderr)
-            raise ConversionError(Text("CONVERT_FAILED", detail=detail))
+            # A cauda inteira vai para "Ver detalhes técnicos" da fila e para o
+            # log; na mensagem, só a linha que explica.
+            self.log = tuple(stderr_tail)
+            _LOG.warning("ffmpeg terminou com %s:\n%s", process.returncode, stderr)
+            raise ConversionError(Text("CONVERT_FAILED", detail=error_cause(stderr_tail, "ERROR_NO_DETAIL")))
         if not render_target.is_file() or render_target.stat().st_size == 0:
             raise ConversionError(Text("CONVERT_NO_OUTPUT"))
 
@@ -728,9 +720,3 @@ class Converter:
             pass
 
         return self._destination
-
-
-def _last_error_line(stderr: str) -> str | Text:
-    """Última linha significativa do stderr — onde o ffmpeg diz a causa."""
-    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
-    return lines[-1] if lines else Text("ERROR_NO_DETAIL")

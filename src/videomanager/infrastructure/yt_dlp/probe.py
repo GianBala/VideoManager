@@ -9,6 +9,7 @@ mostrar um traceback nem uma mensagem em inglês vinda do extrator.
 from __future__ import annotations
 
 import logging
+import sys
 import re
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from videomanager.application.errors import DrmProtectedError
 from videomanager.application.errors import NoFormatsError
 from videomanager.application.errors import ProbeError
 from videomanager.application.errors import UnsupportedUrlError
+from videomanager import RELEASES_URL
 from videomanager.domain.i18n import Text, t
 from videomanager.infrastructure.yt_dlp.extras import js_runtime_opts
 from videomanager.infrastructure.yt_dlp.formats import build_matrix
@@ -112,6 +114,8 @@ def _translate_error(exc: Exception, action: Text | None = None) -> ProbeError:
     lowered = message.lower()
 
     if isinstance(exc, UnsupportedError) or "unsupported url" in lowered:
+        if getattr(sys, "frozen", False):
+            return UnsupportedUrlError(Text("PROBE_UNSUPPORTED_PACKAGED", url=RELEASES_URL))
         return UnsupportedUrlError(Text("PROBE_UNSUPPORTED"))
 
     if "drm" in lowered:
@@ -166,7 +170,7 @@ def _as_playlist(info: dict[str, Any], url: str) -> PlaylistInfo:
         entries.append(
             PlaylistEntry(
                 url=str(entry_url),
-                title=str(entry.get("title") or f"Item {index}"),
+                title=str(entry.get("title") or t("PLAYLIST_ITEM", index=index)),
                 index=index,
                 media_id=str(entry.get("id") or ""),
                 duration=float(duration) if isinstance(duration, (int, float)) else None,

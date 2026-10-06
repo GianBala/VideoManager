@@ -96,7 +96,7 @@ def test_metodo_de_dono_destruido_nao_roda(pseudo):
 
 def test_bind_e_on_language_change_recusam_o_que_nao_saberiam_refazer(desktop_app):
     with pytest.raises(ValueError):
-        idioma.bind(QLabel(), "setAccessibleName", lambda: strings.EDIT_PLAY)
+        idioma.bind(QLabel(), "setWhatsThis", lambda: strings.EDIT_PLAY)
     with pytest.raises(TypeError):
         idioma.on_language_change(lambda: None)
 
@@ -254,6 +254,8 @@ _IGUAIS = {
     "EDIT_CANVAS_FPS", "PROP_CLIP_ID", "EDIT_SLIDESHOW", "LANGUAGE_NAMES",
     # "Tags" e "Codec" são as mesmas palavras nas duas línguas.
     "META_OPEN_TIP", "META_TAGS_GROUP", "META_TRACK_HEADERS",
+    # "M" de mudo e de mute.
+    "EDIT_TRACK_MUTED_BADGE",
 }
 
 
@@ -293,3 +295,28 @@ def test_aviso_de_url_nao_reconhecida_aponta_o_menu_do_motor(desktop_app):
     for codigo in i18n.LANGUAGES:
         idioma.apply_language(codigo)
         assert strings.MENU_TOOLS.replace("&", "") in i18n.t("PROBE_UNSUPPORTED")
+
+
+def test_no_pacote_aviso_de_url_nao_reconhecida_aponta_as_versoes_novas(desktop_app, monkeypatch):
+    # No pacote o item "Atualizar motor" nasce desligado: mandar o usuário ao
+    # menu Ferramentas o deixava diante de um item cinza, sem saber que havia
+    # versão nova nem onde buscá-la.
+    import sys
+    from yt_dlp.utils import UnsupportedError
+    from videomanager import RELEASES_URL
+    from videomanager.application.errors import error_message
+    from videomanager.infrastructure.yt_dlp.probe import _translate_error
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    for codigo in i18n.LANGUAGES:
+        idioma.apply_language(codigo)
+        texto = str(error_message(_translate_error(UnsupportedError("https://x"), "analisar")))
+        assert RELEASES_URL in texto
+        assert strings.MENU_TOOLS.replace("&", "") not in texto
+    idioma.apply_language(i18n.PORTUGUESE)
+
+
+def test_sobre_tem_os_links_de_versoes_e_de_problemas():
+    from videomanager import ISSUES_URL, RELEASES_URL
+    for catalogo in (strings,):
+        corpo = catalogo.ABOUT_BODY.format(version="x", ytdlp="y", releases=RELEASES_URL, issues=ISSUES_URL)
+        assert f'href="{RELEASES_URL}"' in corpo and f'href="{ISSUES_URL}"' in corpo

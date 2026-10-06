@@ -1,10 +1,39 @@
 """Elegibilidade de corte direto e interpolação, sem comandos do backend."""
+from collections.abc import Callable
+
 from videomanager.domain.project import Project
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.timing import Segment
-from videomanager.domain.timing import CutMode
-from videomanager.domain.timing import TrimTarget
+
+
+
+def reference_clip(project: Project, usable: Callable[[Clip], bool] = lambda clip: True) -> Clip | None:
+    """O bloco que dá nome, pasta e formato à saída — e cujo arquivo o corte
+    rápido copia, e cujos keyframes ancoram o corte.
+
+    Regra única para painel, janela de exportação e serviço. Eram três versões,
+    e a do painel ignorava a visibilidade: com a trilha de baixo oculta, os
+    keyframes vinham de um arquivo e o corte rápido cortava outro.
+
+    Ordem: o primeiro vídeo da trilha de vídeo visível mais baixa (a de base;
+    pegar o primeiro bloco de qualquer trilha faria a montagem herdar o nome de
+    uma foto sobreposta); depois foto; depois mídia de qualquer trilha visível;
+    por último qualquer bloco visível, para ainda haver nome. ``usable`` deixa
+    de fora, nas três primeiras, o que o chamador não pode usar (arquivo que
+    não existe mais).
+    """
+    visible = [track for track in project.tracks if track.visible]
+    media = [clip for track in visible for clip in track.sorted_clips()
+             if clip.has_media_file and usable(clip)]
+    base = [clip for track in reversed(project.video_tracks) if track.visible
+            for clip in track.sorted_clips() if clip in media]
+    for pool in ([c for c in base if not c.is_image], [c for c in base if c.is_image], media,
+                 [clip for track in visible for clip in track.sorted_clips()]):
+        if pool:
+            return pool[0]
+    return None
+
 
 def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     """Se o projeto é só um recorte de um arquivo, devolve os trechos dele.
@@ -24,13 +53,13 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     first = clips[0].media
     if any(clip.media.path != first.path for clip in clips):
         return None
-    if any(clip.muted or abs(clip.gain_db) >= 0.05 for clip in clips):
+    if any(clip.muted or clip.changes_gain for clip in clips):
         return None
     # Um bloco de "separar áudio" é só o som do arquivo, e copiar os dados
     # levaria a imagem junto: o que se pediu na tela deixaria de ser o que sai.
     if any(clip.audio_only or clip.detached for clip in clips):
         return None
-    if any(clip.speed != 1.0 or clip.opacity != 1.0 or clip.keyframes for clip in clips):
+    if any(clip.changes_speed or clip.opacity != 1.0 or clip.keyframes for clip in clips):
         return None
     if first.kind is MediaKind.IMAGE:
         return None
@@ -52,8 +81,8 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     if any(
         abs(clip.x - 0.5) > 1e-9
         or abs(clip.y - 0.5) > 1e-9
-        or abs(getattr(clip, "scale_x", clip.scale) - 1.0) > 1e-9
-        or abs(getattr(clip, "scale_y", clip.scale) - 1.0) > 1e-9
+        or abs(clip.scale_x - 1.0) > 1e-9
+        or abs(clip.scale_y - 1.0) > 1e-9
         or abs(clip.rotation) > 1e-9
         or clip.chromakey_enabled
         for clip in clips
@@ -79,17 +108,6 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     ):
         return None
     return tuple(Segment(clip.in_point, clip.out_point) for clip in ordered)
-
-
-def as_trim_target(
-    project: Project, container: str, mode: CutMode, anchor: float | None
-) -> TrimTarget | None:
-    segments = simple_trim(project)
-    if segments is None:
-        return None
-    return TrimTarget(
-        segments=segments, container=container, mode=mode, anchor=anchor
-    )
 
 
 def _interpolated_clips(project: Project) -> list[Clip]:

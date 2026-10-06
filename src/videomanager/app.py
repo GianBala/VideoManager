@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication
 from videomanager import APP_TITLE
 from videomanager import APP_NAME
 from videomanager import __version__
+from videomanager import build_commit
 from videomanager.domain import i18n
 from videomanager.preflight import check_or_explain, font_cache_isolation
 from videomanager.presentation.qt.i18n import apply_language
@@ -101,9 +102,13 @@ def _ensure_linux_desktop_integration() -> None:
         apps_dir = data_home / "applications"
         desktop_file = apps_dir / "videomanager.desktop"
 
+        # A cópia aberta agora: o AppImage (não o ponto de montagem, que muda a
+        # cada execução), o executável do pacote ou o Python do código-fonte.
         appimage_path = os.environ.get("APPIMAGE")
         if appimage_path:
             exec_cmd = f'"{appimage_path}"'
+        elif getattr(sys, "frozen", False):
+            exec_cmd = f'"{sys.executable}"'
         else:
             exec_cmd = f'"{sys.executable}" -m videomanager'
 
@@ -113,18 +118,27 @@ def _ensure_linux_desktop_integration() -> None:
             "Name=Video Manager\n"
             # O ambiente escolhe pelo idioma do sistema, não pelo do aplicativo:
             # o inglês é o de quem não tem tradução, e o português vem marcado.
-            "Comment=Download, edit and convert video and audio\n"
-            "Comment[pt_BR]=Baixe, edite e converta vídeo e áudio\n"
+            "Comment=Download, convert and edit video and audio, and adjust metadata\n"
+            "Comment[pt_BR]=Baixe, converta e edite vídeo e áudio, e ajuste metadados\n"
             f"Exec={exec_cmd}\n"
             "Icon=videomanager\n"
             "Terminal=false\n"
             "Categories=AudioVideo;Video;\n"
-            "Keywords=video;audio;download;convert;editor;ffmpeg;\n"
-            "Keywords[pt_BR]=vídeo;áudio;download;converter;editor;ffmpeg;\n"
+            "Keywords=video;audio;download;convert;editor;metadata;tags;yt-dlp;ffmpeg;\n"
+            "Keywords[pt_BR]=vídeo;áudio;download;converter;editor;metadados;tags;yt-dlp;ffmpeg;\n"
             "StartupWMClass=VideoManager\n"
         )
 
-        if not desktop_file.is_file() or need_update:
+        # Regravado sempre que mudar, e não só quando o ícone muda. O GLib
+        # descarta o atalho cujo Exec não existe — pasta de build apagada,
+        # AppImage movido —, e sem atalho a barra de tarefas não acha a logo
+        # da janela. Abrir outra cópia não consertava, porque o ícone já
+        # estava instalado e nada era regravado.
+        try:
+            current = desktop_file.read_text(encoding="utf-8")
+        except OSError:
+            current = None
+        if current != desktop_content:
             apps_dir.mkdir(parents=True, exist_ok=True)
             desktop_file.write_text(desktop_content, encoding="utf-8")
     except Exception:
@@ -185,8 +199,12 @@ def build_app(argv: list[str] | None = None, *, audio_enabled: bool = True) -> t
     # Antes da janela: abrir em inglês é já nascer em inglês, sem troca nenhuma.
     apply_language(settings.language)
 
+    runtime = build_desktop_runtime(audio_enabled=audio_enabled)
+    # Limpa o que uma sessão anterior que caiu deixou (temporários de download,
+    # reservas de 0 byte, renders parciais) e passa a anotar os desta.
+    runtime.start_session()
     window = MainWindow(settings, editor=build_editor_service(), processing=build_processing_service(),
-                        downloads=build_download_service(), runtime=build_desktop_runtime(audio_enabled=audio_enabled))
+                        downloads=build_download_service(), runtime=runtime)
     if not app_icon.isNull():
         window.setWindowIcon(app_icon)
     return app, window
@@ -198,7 +216,7 @@ def _smoke_check(app: QApplication, window: MainWindow) -> None:
     import tempfile
     from PySide6.QtGui import QFontDatabase
     from videomanager.bootstrap import build_text_rasterizer
-    from videomanager.domain.project import Clip, MediaKind, MediaRef, new_project
+    from videomanager.domain.project import Clip, MediaKind, MediaRef, OverlayType, new_project
     from videomanager.domain.composition import Composition
     from videomanager.infrastructure.system.binaries import find_tools
     from videomanager.infrastructure.ffmpeg.composer import frame_command
@@ -242,7 +260,7 @@ def _smoke_check(app: QApplication, window: MainWindow) -> None:
         if tools is None:
             raise RuntimeError('FFmpeg/ffprobe ausentes; provisione ou inclua no PATH.')
         clip = Clip(MediaRef(Path('Texto'), MediaKind.IMAGE), 0, 1,
-                    overlay_type='text', text_content='Video Manager', font_family='Carlito')
+                    overlay_type=OverlayType.TEXT, text_content='Video Manager', font_family='Carlito')
         project = replace(new_project().with_clip(0, clip), width=320, height=180, fps=24)
         rasterizer = build_text_rasterizer()
         assets = {clip.clip_id: rasterizer.render(clip)}
@@ -323,7 +341,11 @@ def _diagnose_url(app: QApplication, window: MainWindow, url: str, report: Path 
         text += "VM_DIAGNOSE_OK\n" if ok else "VM_DIAGNOSE_FAILED\n"
         if report is not None:
             report.write_text(text, encoding="utf-8")
-        logging.getLogger(__name__).info("Diagnóstico de URL:\n%s", text)
+        # Só o desfecho vai para o log, que é permanente e promete não guardar
+        # URLs; o relatório inteiro, com a URL, sai no --report e na saída.
+        logging.getLogger(__name__).info(
+            "Diagnóstico de URL: %s", "VM_DIAGNOSE_OK" if ok else "VM_DIAGNOSE_FAILED"
+        )
         print(text, flush=True)
         window.close()
         app.exit(0 if ok else 1)
@@ -351,6 +373,34 @@ def _argument(name: str) -> str | None:
     return None
 
 
+def startup_line() -> str:
+    """O que um log recebido de um usuário precisa dizer de onde veio."""
+    import platform
+
+    import PySide6
+    import yt_dlp
+    from PySide6.QtCore import qVersion
+    from videomanager.infrastructure.system.binaries import find_tools
+
+    tools = find_tools()
+    ffmpeg = f"{tools.ffmpeg} ({tools.source})" if tools else "ausente"
+    origem = "pacote" if getattr(sys, "frozen", False) else "código-fonte"
+    commit = build_commit()
+    if commit:
+        origem += f" {commit}"
+    return (f"{APP_TITLE} ({origem}) · Python {platform.python_version()} · "
+            f"PySide6 {PySide6.__version__} / Qt {qVersion()} · yt-dlp {yt_dlp.version.__version__} · "
+            f"ffmpeg {ffmpeg} · {platform.platform()}")
+
+
+def _qt_messages(mode, context, message) -> None:
+    """Avisos do próprio Qt também vão para o log, e continuam no terminal."""
+    from PySide6.QtCore import QtMsgType
+    print(message, file=sys.stderr)
+    if mode in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
+        logging.getLogger("videomanager.qt").warning("%s", message)
+
+
 def main() -> int:
     # Antes de tocar no Qt: se falta biblioteca do sistema, a criação do
     # QApplication aborta o processo e não sobra chance de explicar nada. A
@@ -364,6 +414,9 @@ def main() -> int:
     from videomanager.infrastructure.system.logs import configure_file_logging
 
     configure_file_logging()
+    from PySide6.QtCore import qInstallMessageHandler
+    qInstallMessageHandler(_qt_messages)
+    logging.getLogger("videomanager").info("Início: %s", startup_line())
     smoke = '--smoke-test' in sys.argv
     diagnose_url = _argument('--diagnose-url')
     headless = smoke or diagnose_url is not None

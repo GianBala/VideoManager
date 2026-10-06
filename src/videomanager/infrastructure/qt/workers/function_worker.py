@@ -2,6 +2,7 @@
 from collections.abc import Callable
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 from videomanager.infrastructure.qt.workers.signals import emit_safely
+from videomanager.infrastructure.qt.workers.signals import report_unexpected
 
 
 class FunctionSignals(QObject):
@@ -27,6 +28,7 @@ class FunctionWorker(QRunnable):
         try:
             result = self.operation()
         except Exception as exc:
+            report_unexpected(exc)
             emit_safely(self.signals.failed, exc)
         else:
             emit_safely(self.signals.finished, result)

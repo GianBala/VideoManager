@@ -12,12 +12,16 @@ validade curta, então reaproveitar uma análise de dez minutos atrás falharia 
 
 from __future__ import annotations
 
+import shutil
+import threading
+import uuid
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import yt_dlp
-from yt_dlp.utils import DownloadCancelled, DownloadError, ExtractorError
+from yt_dlp.utils import DownloadCancelled, DownloadError, ExtractorError, Popen
 
 from videomanager.application.errors import DownloadFailedError
 from videomanager.application.errors import JobCancelled
@@ -26,6 +30,8 @@ from videomanager.domain.i18n import Text, t
 from videomanager.infrastructure.yt_dlp.extras import TolerantEmbedThumbnailPP
 from videomanager.infrastructure.yt_dlp.extras import split_thumbnail_postprocessor
 from videomanager.infrastructure.yt_dlp.probe import _translate_error
+from videomanager.infrastructure.storage.outputs import FileOutputStore
+from videomanager.infrastructure.storage.outputs import temp_prefix
 
 from videomanager.application.events import Progress as Progress
 from videomanager.application.events import ProgressStage
@@ -75,6 +81,28 @@ class _JobLogger:
         self._add(t("LOG_ERROR", message=msg))
 
 
+# Os processos que o yt-dlp abre — o ffmpeg que junta, extrai áudio e
+# converte, o que baixa HLS — rodam sem gancho nenhum: cancelar durante
+# "Juntando" não fazia nada até a etapa acabar, e fechar a janela nessa fase
+# deixava o processo e o ffmpeg vivos, sem janela. Todos passam pela classe
+# ``yt_dlp.utils.Popen`` (``Popen.run`` instancia ``cls``), então registrar na
+# construção alcança cada um; quem os recebe é o ``Downloader`` da thread.
+# ``test_downloader`` falha se o yt-dlp deixar de abrir processos assim.
+_owner = threading.local()
+_popen_init = getattr(Popen.__init__, "__wrapped__", Popen.__init__)
+
+
+def _registering_init(self, *args, **kwargs) -> None:
+    _popen_init(self, *args, **kwargs)
+    downloader = getattr(_owner, "downloader", None)
+    if downloader is not None:
+        downloader._register(self)
+
+
+_registering_init.__wrapped__ = _popen_init  # recarregar o módulo não empilha registros
+Popen.__init__ = _registering_init
+
+
 def _percent(downloaded: int | None, total: int | None) -> float | None:
     if not downloaded or not total or total <= 0:
         return None
@@ -104,6 +132,8 @@ class Downloader:
         self._cancelled = False
         self._logger = _JobLogger()
         self._final_path: Path | None = None
+        self._processes: list[Popen] = []
+        self._processes_lock = threading.Lock()
 
     # -- controle ---------------------------------------------------------
 
@@ -112,9 +142,24 @@ class Downloader:
 
         O efeito é assíncrono: o download para no próximo hook de progresso,
         onde a exceção pode ser levantada de dentro do yt-dlp com segurança.
-        Interromper de fora deixaria arquivos temporários órfãos.
+        O yt-dlp **não** apaga o ``.part`` ao ser interrompido; quem limpa é o
+        worker, que apaga a pasta temporária da tarefa.
+
+        Os processos que o yt-dlp abriu (o ffmpeg do pós-processamento) não
+        passam por gancho nenhum, então são terminados aqui.
         """
         self._cancelled = True
+        with self._processes_lock:
+            processes = list(self._processes)
+        for process in processes:
+            _terminate(process)
+
+    def _register(self, process: Popen) -> None:
+        with self._processes_lock:
+            self._processes.append(process)
+        # O cancelamento pode ter chegado entre abrir o processo e registrá-lo.
+        if self._cancelled:
+            _terminate(process)
 
     @property
     def cancelled(self) -> bool:
@@ -128,7 +173,8 @@ class Downloader:
 
     def _check_cancel(self) -> None:
         if self._cancelled:
-            # Exceção reconhecida pelo yt-dlp, que então limpa os temporários.
+            # Exceção reconhecida pelo yt-dlp, que interrompe o download sem
+            # tratá-la como erro (o .part fica; ver ``cancel``).
             raise DownloadCancelled("cancelado pelo usuário")
 
     def _progress_hook(self, data: dict[str, Any]) -> None:
@@ -221,6 +267,7 @@ class Downloader:
         opts["postprocessor_hooks"] = [self._postprocessor_hook]
 
         title = url
+        _owner.downloader = self
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 if thumbnail is not None:
@@ -240,11 +287,58 @@ class Downloader:
             raise DownloadFailedError(error_message(translated)) from exc
         except OSError as exc:
             raise DownloadFailedError(Text("DOWNLOAD_WRITE_FAILED", error=str(exc))) from exc
+        finally:
+            _owner.downloader = None
 
         if self._cancelled:
             raise JobCancelled("Download cancelado.")
 
         return DownloadResult(path=self._final_path, title=title, log=self.log)
+
+def _terminate(process: Popen) -> None:
+    try:
+        if process.poll() is None:
+            process.terminate()
+    except OSError:
+        pass  # já terminou, ou não é mais deste processo
+
+
+def publish(staged: Path | None, staging: Path, destination: Path) -> Path | None:
+    """Leva o que o yt-dlp deixou em ``staging`` para ``destination``.
+
+    O yt-dlp grava na pasta da própria tarefa, e não no destino, porque lá ele
+    decide sozinho o que fazer com um nome já ocupado: o vídeo era dado por
+    "já baixado" e a tarefa entregava o **arquivo antigo** (outra qualidade,
+    mesmo container) sem aviso; o áudio extraído **apagava** o anterior. Aqui o
+    nome é reservado com ``O_EXCL``, como nas conversões: ocupado, vira
+    ``nome (2).ext``, e nada no destino é sobrescrito.
+
+    Publica tudo o que sobrou na pasta (legenda que não pôde ser embutida, por
+    exemplo), e devolve o caminho final de ``staged``.
+    """
+    store = FileOutputStore()
+    published = staged
+    for item in sorted(p for p in staging.rglob("*") if p.is_file()):
+        relative = item.relative_to(staging)
+        target = SimpleNamespace(extension=item.suffix.lstrip("."))
+        lease = store.reserve(item, target, destination / relative.parent, custom_stem=item.stem)
+        temporary = item
+        try:
+            if item.stat().st_dev != lease.device:
+                # Cache e destino em volumes diferentes: a troca atômica só
+                # existe dentro do mesmo volume, então a cópia vem antes.
+                temporary = lease.path.with_name(f"{temp_prefix()}{uuid.uuid4().hex[:8]}{item.suffix}")
+                shutil.copyfile(item, temporary)
+            store.commit(temporary, lease.path, lease=lease)
+        except BaseException:
+            if temporary != item:
+                temporary.unlink(missing_ok=True)
+            store.abort(lease.path, lease=lease)
+            raise
+        if staged is not None and item == staged:
+            published = lease.path
+    return published
+
 
 __all__ = [
     'DownloadFailedError',

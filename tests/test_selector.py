@@ -252,6 +252,19 @@ class TestPlanContainer:
         plano = plan_container(info.matrix, info.matrix.video[0], info.matrix.audio[0], "mp4")
         assert plano.warnings, "o usuário precisa ser avisado antes do download"
 
+    def test_mpeg4_e_alac_em_mp4_seguem_sem_aviso_como_na_conversao(self) -> None:
+        """A conversão copia os dois para MP4 sem avisar; o download também."""
+        info = synthetic(
+            {"format_id": "v", "vcodec": "mp4v.20.3", "acodec": "none", "height": 480, "fps": 30},
+            {"format_id": "alac", "vcodec": "none", "acodec": "alac", "abr": 900},
+            {"format_id": "aac", "vcodec": "none", "acodec": "mp4a.40.2", "abr": 128},
+        )
+        alac = next(c for c in info.matrix.audio if c.family == "ALAC")
+        plano = plan_container(info.matrix, info.matrix.video[0], alac, "mp4")
+        assert (plano.container, plano.warnings) == ("mp4", ())
+        assert plano.video is not None and plano.video.family == "MPEG-4"
+        assert plano.audio is not None and plano.audio.family == "ALAC"
+
     def test_mp4_mantem_a_resolucao_ao_trocar_de_codec(self) -> None:
         """Trocar de codec não deve rebaixar a resolução escolhida."""
         info = synthetic(

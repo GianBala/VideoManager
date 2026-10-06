@@ -8,7 +8,27 @@ por conexão enfileirada — que é exatamente o que se quer.
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QObject, Signal, SignalInstance
+
+from videomanager.application.errors import VideoManagerError
+
+_LOG = logging.getLogger("videomanager.workers")
+
+
+def report_unexpected(exc: BaseException) -> None:
+    """Registra no log, com a pilha, a exceção que não é resposta esperada.
+
+    Os workers transformam a exceção em texto para a fila ou para o diálogo, e
+    isso a tirava do alcance do ``excepthook``: um defeito de código ("Erro
+    inesperado (KeyError): 'x'") não deixava rastro nenhum no log, justamente
+    no pacote do Windows, que não tem console. As falhas previstas do domínio
+    (``VideoManagerError``: projeto inválido, arquivo sem vídeo) são resposta,
+    não defeito, e ficam fora.
+    """
+    if not isinstance(exc, VideoManagerError):
+        _LOG.error("Erro inesperado: %s", type(exc).__name__, exc_info=exc)
 
 
 def emit_safely(signal: SignalInstance, *args: object) -> None:

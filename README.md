@@ -7,7 +7,7 @@
 **Baixe, converta e edite vídeo — tudo em um só aplicativo.**<br>
 Desktop para Windows e Linux, em português e inglês, movido por [yt-dlp](https://github.com/yt-dlp/yt-dlp) e [ffmpeg](https://ffmpeg.org).
 
-[![Testes](https://github.com/GianBala/Video_Manager/actions/workflows/tests.yml/badge.svg)](https://github.com/GianBala/Video_Manager/actions/workflows/tests.yml)
+[![Testes](https://github.com/GianBala/VideoManager/actions/workflows/tests.yml/badge.svg)](https://github.com/GianBala/VideoManager/actions/workflows/tests.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![Qt / PySide6](https://img.shields.io/badge/Qt-PySide6-41CD52?logo=qt&logoColor=white)
 ![Windows e Linux](https://img.shields.io/badge/Windows%20%7C%20Linux-2b2f3a)
@@ -26,7 +26,7 @@ Desktop para Windows e Linux, em português e inglês, movido por [yt-dlp](https
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="25%" valign="top">
 
 ### ⬇️ Download
 
@@ -41,7 +41,7 @@ Cole o endereço e baixe com opções reais da fonte.
 - Centenas de plataformas via yt-dlp
 
 </td>
-<td width="33%" valign="top">
+<td width="25%" valign="top">
 
 ### 🔄 Convert
 
@@ -54,7 +54,7 @@ Converta e reprocesse mídias locais com rapidez.
 - **Placa de vídeo** (NVENC, Quick Sync, AMF, VAAPI) testada de verdade, com recuo automático para CPU
 
 </td>
-<td width="33%" valign="top">
+<td width="25%" valign="top">
 
 ### ✂️ Editar
 
@@ -67,10 +67,22 @@ Edição multipista completa, sem sair do aplicativo.
 - **Exportação versátil**: MP4, MKV, WebM, MOV ou GIF animado, e corte sem recodificar em keyframes
 
 </td>
+<td width="25%" valign="top">
+
+### 🏷️ Metadados
+
+Ajuste as informações do arquivo sem tocar na mídia.
+
+- **Tags**: título, artista, álbum, data, gênero, descrição e qualquer outro campo que o arquivo traga
+- **Trilhas**: título e idioma de cada trilha de vídeo, áudio e legenda
+- **Capa**: trocar por JPEG ou PNG, ou remover
+- **Sempre numa cópia**: o original não é alterado
+
+</td>
 </tr>
 </table>
 
-As três abas compartilham **uma fila de tarefas unificada**: baixe, converta e exporte ao mesmo tempo em segundo plano, com cancelamento, nova tentativa e histórico de erros. No editor a fila sai de cena, para o vídeo ocupar a janela.
+Download, Convert e Editar compartilham **uma fila de tarefas unificada**: baixe, converta e exporte ao mesmo tempo em segundo plano, com cancelamento, nova tentativa e histórico de erros. No editor e nos Metadados a fila sai de cena, para o trabalho ocupar a janela.
 
 <p align="center">
   <img src="docs/imagens/editor.png" alt="Aba Editar: prévia, acervo, propriedades com animação por quadros-chave e linha do tempo com quatro trilhas" width="100%">
@@ -117,7 +129,7 @@ Veja o [guia do editor](docs/guia-edicao.md) para atalhos e detalhes.
 ## Começar
 
 ```bash
-git clone https://github.com/GianBala/Video_Manager.git && cd Video_Manager
+git clone https://github.com/GianBala/VideoManager.git && cd VideoManager
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 PYTHONPATH=src .venv/bin/python -m videomanager
@@ -185,7 +197,7 @@ src/videomanager/
 └── app.py           inicialização da aplicação Qt e recursos
 ```
 
-**Confiabilidade com testes reais** — mais de 1.300 testes automatizados:
+**Confiabilidade com testes reais** — mais de 1.700 testes automatizados:
 - **Domínio e aplicação puros**: executados sem instanciar Qt, sem rede e sem tocar no disco.
 - **Interface e interação**: testes em Qt offscreen com eventos reais de clique, arrasto e atalhos.
 - **Mídia de verdade**: conferência de conversões e edições com `ffprobe`, medindo duração exata, contagem de quadros, trilhas e níveis de áudio do arquivo resultante.
