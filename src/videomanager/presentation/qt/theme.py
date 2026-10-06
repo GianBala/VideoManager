@@ -35,6 +35,9 @@ DARK = {
     "warn": "#d99b28",
     "error": "#e5534b",
     "track": "#353b47",
+    # Borda de foco do teclado: pelo menos 3:1 contra a borda sem foco e contra
+    # o preenchimento do botão primário.
+    "focus": "#ffffff",
 }
 
 LIGHT = {
@@ -51,6 +54,7 @@ LIGHT = {
     "warn": "#9a6700",
     "error": "#cf222e",
     "track": "#dfe3e9",
+    "focus": "#000000",
 }
 
 _QSS = """
@@ -215,6 +219,13 @@ QRadioButton::indicator, QCheckBox::indicator {{
 }}
 QRadioButton::indicator {{ border-radius: 8px; }}
 QCheckBox::indicator {{ border-radius: 4px; }}
+/* Foco do teclado: anel de 2 px na cor de foco, com o miolo 2 px menor — os
+   mesmos 16 px. Mudar só a cor da borda fina não chegava a 3:1 contra o
+   cinza do indicador sem foco. Fica antes de :checked, que manda no tamanho
+   do marcado. */
+QRadioButton::indicator:focus, QCheckBox::indicator:focus {{
+    width: 12px; height: 12px; border: 2px solid {focus};
+}}
 QRadioButton::indicator:checked {{
     /* Anel grosso da cor de destaque em volta do miolo escuro: é o ponto do
        botão de rádio, sem depender de imagem embutida. */
@@ -225,6 +236,7 @@ QRadioButton::indicator:checked {{
 }}
 QCheckBox::indicator:checked {{ background: {accent}; border-color: {accent}; }}
 QRadioButton::indicator:hover, QCheckBox::indicator:hover {{ border-color: {accent}; }}
+QRadioButton::indicator:checked:focus, QCheckBox::indicator:checked:focus {{ border-color: {focus}; }}
 QRadioButton:disabled, QCheckBox:disabled {{ color: {text_dim}; }}
 QRadioButton::indicator:disabled, QCheckBox::indicator:disabled {{
     border-color: {border};
@@ -287,6 +299,7 @@ QSlider::handle:horizontal:hover {{
 QSlider::handle:horizontal:disabled {{
     background: {text_dim};
 }}
+QSlider::handle:horizontal:focus {{ border: 2px solid {focus}; margin: -5px 0; }}
 
 /* Alça larga e transparente: quem separa os painéis são as bordas dos grupos, e
    uma alça de 1 px colava o título do grupo de baixo no conteúdo do de cima. */
@@ -333,6 +346,15 @@ QTabBar::tab:selected {{
     background: {surface}; border-color: {border};
     color: {accent}; font-weight: 600;
 }}
+QTabBar::tab:focus {{ border-color: {focus}; }}
+
+/* Foco do teclado nos botões: só a cor da borda muda, para a geometria não
+   pular. Antes só os campos de texto mostravam foco: medido, 1,1 a 1,6:1
+   entre o botão com e sem foco, onde a referência pede 3:1, e quem navega
+   por Tab não sabia em que botão o Enter ia cair. No fim do estilo para
+   valer sobre o :hover e os papéis. */
+QPushButton:focus, QPushButton[role="primary"]:focus, QPushButton[role="transport"]:focus,
+QPushButton[role="profile"]:focus, QPushButton[role="spin-tool"]:focus {{ border-color: {focus}; }}
 """
 
 
