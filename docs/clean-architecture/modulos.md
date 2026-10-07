@@ -153,7 +153,7 @@ de textos da camada. A tabela cobre os módulos de produção, incluindo as entr
 
 ## Recursos e diretórios de apoio
 
-- `resources/`: ícone PNG/SVG e fontes Carlito/Rapier com licença. Não contém estado do usuário.
+- `resources/`: ícone PNG/SVG e a fonte Carlito. Não contém estado do usuário.
 - `tests/`: domínio, aplicação, contratos, arquitetura e regressões de mídia/Qt; veja [testes](testes.md).
 - `packaging/`: especificação PyInstaller, provisionamento do ffmpeg e do Deno (`fetch_binaries.py`), gerador do ícone (`make_icon.py`), scripts Linux/Windows e diagnósticos do pacote (`smoke_run.sh`, `smoke_windows.ps1`).
 - `scripts/`: comparação reproduzível de desempenho (`benchmark_architecture.py`) e ensaios opt-in que a suíte não alcança (`validate_audio.py`, `validate_scrub.py`, `validate_preview_gestures.py`, `validate_editor_responsiveness.py`, `validate_language.py`); veja [testes](testes.md#medições-reproduzíveis). `capture_screenshots.py` gera as imagens do README em `docs/imagens/`.
