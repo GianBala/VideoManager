@@ -2111,32 +2111,6 @@ class _MediaListWidget(QListWidget):
             event.ignore()
 
 
-_POPULAR_FONTS = [
-    "Arial",
-    "Calibri",
-    "Comic Sans MS",
-    "Courier New",
-    "DejaVu Sans",
-    "DejaVu Sans Mono",
-    "DejaVu Serif",
-    "Georgia",
-    "Helvetica",
-    "Impact",
-    "Inter",
-    "Liberation Sans",
-    "Monospace",
-    "Rapier Zero",
-    "Rapier Zero Hollow",
-    "Roboto",
-    "Sans Serif",
-    "Serif",
-    "Times New Roman",
-    "Trebuchet MS",
-    "Ubuntu",
-    "Verdana",
-]
-
-
 class _FontSelectorWidget(QWidget):
     """Seletor de fonte expansível com lista retrátil, busca e prévia tipográfica."""
 
@@ -2176,14 +2150,11 @@ class _FontSelectorWidget(QWidget):
         self._font_list.setFixedHeight(140)
         self._font_list.setProperty("role", "picker")
 
+        # Só o que está instalado. A lista fixa que havia aqui oferecia nomes
+        # ausentes do PC (Impact, Verdana no Linux), e o texto saía em outra
+        # fonte, sem aviso, na prévia e no vídeo exportado.
         seen: set[str] = set()
         all_families: list[str] = []
-        for fam in _POPULAR_FONTS:
-            k = fam.lower()
-            if k not in seen:
-                seen.add(k)
-                all_families.append(fam)
-
         for fam in QFontDatabase.families():
             if not fam.startswith("."):
                 k = fam.lower()
