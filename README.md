@@ -62,7 +62,7 @@ Edição multipista completa, sem sair do aplicativo.
 
 - **Trilhas livres**: vídeos, fotos, áudios, textos e filtros em qualquer ordem
 - **Cortes precisos**: montagem magnética com ímã, alças de corte, divisão no cursor e separação de áudio
-- **Efeitos e transições**: Dissolve, Wipe, Slide, Fade, filtros de cor, chroma key e quadros-chave
+- **Efeitos e transições**: Dissolve, Wipe, Slide, Fade, filtros de cor, chroma key, fundo desfocado e quadros-chave
 - **Prévia fiel**: reprodução com o som da mixagem em tempo real, loop sem corte e tela cheia (`F`)
 - **Exportação versátil**: MP4, MKV, WebM, MOV ou GIF animado, e corte sem recodificar em keyframes
 
