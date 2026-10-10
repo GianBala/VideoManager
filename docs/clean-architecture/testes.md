@@ -176,6 +176,8 @@ PYTHONPATH=src .venv/bin/python scripts/validate_scrub.py --seconds 30 --size 19
 QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_preview_gestures.py
 QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_editor_responsiveness.py
 QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_language.py --modo ingles
+QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_blur_drag.py
+PYTHONPATH=src .venv/bin/python scripts/validate_blur_export.py --tela 1080 --casos mp4,gif
 ```
 
 | Script | O que mede |
@@ -185,6 +187,9 @@ QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_langu
 | `validate_preview_gestures.py` | Eventos de mouse reais na prévia: se as bordas dos pixels do objeto acompanham cada movimento. `--canonical-only` desliga as camadas para comparar no mesmo código. |
 | `validate_editor_responsiveness.py` | 30 gestos a 60 Hz: latência dos quadros parciais e finais, workers vivos, processos e encerramento. |
 | `validate_language.py` | A troca de idioma em quinze cenas: a janela trocada ao vivo contra uma que nasce no idioma, a ida e volta, pinturas durante a troca, efeitos colaterais e o tempo. `--modo pseudo` acha texto fora do catálogo, `identidade` confere a geometria da troca, `ingles` acha texto com cara de português; `--cortes` lista o texto que corta em inglês e não em português. A troca durante a reprodução se mede com `validate_playback.py --trocar-idioma`. |
+| `validate_playback.py` | Pré-carga, ritmo, velocidade da mídia e emenda do loop em duas cenas (`--cenas` escolhe outras). `reduzido`, `montagem_reduzida` e o sufixo `_fundo` medem o fundo desfocado contra uma cena gêmea de mesma geometria. `--trocar-idioma` troca a interface durante a reprodução. |
+| `validate_blur_drag.py` | Arrasto de um bloco com fundo desfocado em quatro caminhos (camadas prontas, ffmpeg por quadro, e o bloco 16:9 que só descobre a tela ao sair do lugar): quanto a imagem fica atrás da mão, se a faixa descoberta mostra o borrão e não a trilha de baixo, e o tempo até assentar depois de soltar. |
+| `validate_blur_export.py` | O custo do fundo na exportação, sem e com a opção em rodadas alternadas: tempo, pico de memória, quadros e duração do arquivo, em MP4, GIF, interpolado e em trechos paralelos × serial. Recusa os casos interpolados em 4K e sem memória livre. |
 
 Nenhum deles substitui arrastar a agulha e reproduzir no aplicativo; servem
 para comparar máquinas e versões.
