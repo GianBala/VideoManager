@@ -42,10 +42,10 @@ e Salvar como funcionam mesmo com o cursor num campo de texto; antes de gravar,
 o editor fecha os agrupamentos de desfazer em andamento, para o arquivo conter
 o que está na tela.
 
-Projetos são salvos em `.vmp` versão 3. A versão atual abre v1, v2 e v3;
-aplicativos antigos não abrem v3. Ao salvar sobre v1 ou v2, uma cópia
-`.vmp.v1.bak` ou `.vmp.v2.bak` conserva o arquivo original, com numeração se
-necessário. Guarde também as mídias externas.
+Projetos são salvos em `.vmp` versão 4. A versão atual abre v1 a v4;
+aplicativos antigos não abrem v4. Ao salvar sobre v1, v2 ou v3, uma cópia
+`.vmp.v1.bak`, `.vmp.v2.bak` ou `.vmp.v3.bak` conserva o arquivo original, com
+numeração se necessário. Guarde também as mídias externas.
 
 Ao abrir um projeto v1 ou v2, fotos que estavam em trilhas de Adicionais passam
 para trilhas de vídeo na mesma posição da pilha — a trilha inteira, se só tinha
