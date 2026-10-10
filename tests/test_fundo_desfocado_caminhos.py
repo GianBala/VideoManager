@@ -292,6 +292,25 @@ def test_opacidade_fixa_leva_o_fundo_junto(midias, tools) -> None:
     assert razao == pytest.approx(0.5, abs=0.12)
 
 
+def test_fundo_de_video_borra_a_cor_como_o_de_uma_foto_do_mesmo_quadro(tools, tmp_path: Path) -> None:
+    """Num vídeo yuv420p o ``gblur`` rodava nos planos de cor em meia resolução.
+
+    O mesmo sigma valia o dobro em pixels de tela e o fundo do vídeo saía com a
+    cor mais lavada que a da foto do mesmo quadro (medido: 6,5 a 13,4 em 255, máx. 92).
+    Sem perdas na fonte, para a diferença ser só do desfoque.
+    """
+    base = [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i",
+            "testsrc2=s=240x180:r=30:d=2"]
+    subprocess.run([*base, "-c:v", "libx264", "-crf", "0", "-pix_fmt", "yuv420p", str(tmp_path / "v.mp4")],
+                   check=True, capture_output=True)
+    subprocess.run([*base, "-frames:v", "1", str(tmp_path / "f.png")], check=True, capture_output=True)
+    video, foto = (quadro(projeto((Clip(media_ref(probe_file(tmp_path / arquivo, tools)), 0.0, 2.0,
+                                       blur_background=True),)), 0.0, tools)
+                   for arquivo in ("v.mp4", "f.png"))
+    for lateral in ((0, 0, 40, 180), (280, 0, 320, 180)):
+        assert diferenca(video, foto, TELA, lateral) < 2.0, f"fundo do vídeo difere do da foto em {lateral}"
+
+
 def test_chroma_key_ligado_deixa_a_opcao_sem_efeito(midias, tools) -> None:
     sem_clip, com_clip = par(Clip(midias["v43"], 0.0, 2.0, chromakey_enabled=True))
     assert not com_clip.shows_blur_background(*TELA)
