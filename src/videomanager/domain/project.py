@@ -41,6 +41,7 @@ from videomanager.domain.geometry import image_base_size, natural_image_size
 from videomanager.domain.i18n import decimal, t, variants
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import interpolate_keyframes
+from videomanager.domain.preview import fit_size
 from videomanager.domain.timing import source_time, available_duration, frame_index
 
 if TYPE_CHECKING:  # pragma: no cover - só para o verificador de tipos
@@ -309,6 +310,11 @@ class Clip:
     opacity: float = 1.0
     # Sequência de quadros-chave para animação de transformações
     keyframes: tuple[Keyframe, ...] = ()
+    # Camada própria e opaca de tela cheia por baixo do bloco: ele mesmo,
+    # ampliado até cobrir a tela e desfocado. Fica **antes** de ``clip_id`` para
+    # nenhuma construção posicional mudar de sentido. Cobre as trilhas de baixo
+    # na janela do bloco — por isso nasce desligada (ver ``shows_blur_background``).
+    blur_background: bool = False
     # Identidade estável, preservada por ``dataclasses.replace``: é por ela que
     # a seleção, o cache de miniaturas e o desfazer reconhecem o mesmo bloco
     # depois de qualquer alteração.
@@ -474,6 +480,37 @@ class Clip:
         """
         return (max([self.scale_x, *(k.scale_x for k in self.keyframes)]),
                 max([self.scale_y, *(k.scale_y for k in self.keyframes)]))
+
+    def shows_blur_background(self, width: int, height: int) -> bool:
+        """Se o fundo desfocado aparece **de fato** numa tela ``width``×``height``.
+
+        A opção sozinha não basta: um bloco que já preenche a tela, em pose
+        neutra, esconderia o fundo atrás da frente e o grafo pagaria uma camada
+        inteira por nada — o que também quebraria a promessa de que ligar a
+        opção onde ela não muda a imagem não muda o arquivo. Pose neutra é
+        posição central, escala ``>= 1`` e sem giro, **no bloco e em cada
+        quadro-chave**: reduzido ou deslocado deixa de preencher, mesmo na
+        proporção da tela. Opacidade não entra na conta, para o fade de um bloco
+        que preenche a tela continuar saindo como hoje.
+
+        A proporção é medida com a tela de quem pergunta, e quem monta o grafo
+        pergunta uma vez só, com a tela de exportação: pela da prévia (arredondada
+        para par) um clipe 16:9 deixaria de "preencher" só ali.
+        """
+        media = self.media
+        if (not self.blur_background or self.chromakey_enabled or self.is_overlay
+                or not self.has_image or media is None or not media.width or not media.height):
+            return False
+        fit = image_base_size if self.is_image else fit_size
+        fit_w, fit_h = fit(media.width, media.height, width, height)
+        if width - fit_w > 2 or height - fit_h > 2:
+            return True
+        return any(
+            abs(p.x - 0.5) > 1e-9 or abs(p.y - 0.5) > 1e-9
+            or p.scale_x < 1 - 1e-9 or p.scale_y < 1 - 1e-9
+            or min(p.rotation % 360, 360 - p.rotation % 360) > 1e-9
+            for p in (self, *self.keyframes)
+        )
 
     @property
     def base_transform(self) -> ClipTransform:
