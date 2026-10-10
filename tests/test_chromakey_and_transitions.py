@@ -851,3 +851,74 @@ def test_sem_teto_fixo_a_transicao_vai_ate_o_que_cabe_nos_dois_lados():
     assert projeto.transition_limit(clip) == pytest.approx(20.0)
     puxada = projeto.resized(marcador, "fim", 20.0 + 6.0)
     assert puxada.find(marcador)[1].duration == pytest.approx(12.0)
+
+
+class TestFundoDesfocadoNasPropriedades:
+    """O controle do fundo desfocado: onde aparece, o que emite e quando se cala."""
+
+    @staticmethod
+    def _bloco(kind: MediaKind = MediaKind.VIDEO, **campos) -> Clip:
+        media = MediaRef(Path("/m/arquivo"), kind, duration=5.0, width=1080, height=1920)
+        return Clip(media=media, start=0.0, duration=5.0, **campos)
+
+    def _carregado(self, clip: Clip) -> _ClipPropertiesWidget:
+        w = _ClipPropertiesWidget()
+        w.load_clip(clip, 1920, 1080)
+        return w
+
+    def test_aparece_em_video_e_em_foto(self, qapp: QApplication) -> None:
+        for clip in (self._bloco(), self._bloco(MediaKind.IMAGE)):
+            w = self._carregado(clip)
+            assert not w._blur_group.isHidden()
+            w.deleteLater()
+
+    def test_nao_aparece_onde_nao_ha_o_que_desfocar(self, qapp: QApplication) -> None:
+        sem = MediaRef(Path("Rótulo"), MediaKind.IMAGE, duration=3.0)
+        casos = [
+            Clip(media=sem, start=0.0, duration=3.0, overlay_type="text", text_content="oi"),
+            Clip(media=sem, start=0.0, duration=3.0, overlay_type="filter", filter_name="sepia"),
+            Clip(media=sem, start=0.0, duration=1.0, overlay_type="transition", transition_name="fade"),
+            self._bloco(audio_only=True),
+        ]
+        for clip in casos:
+            w = self._carregado(clip)
+            assert w._blur_group.isHidden(), clip.overlay_type
+            w.deleteLater()
+
+    def test_marcar_emite_a_mudanca_e_carregar_nao(self, qapp: QApplication) -> None:
+        clip = self._bloco(blur_background=True)
+        w = _ClipPropertiesWidget()
+        emitidos: list[tuple[int, dict]] = []
+        w.property_changed.connect(lambda i, v: emitidos.append((i, v)))
+        w.load_clip(clip, 1920, 1080)
+        assert w._chk_blur.isChecked() and not emitidos
+        w._chk_blur.setChecked(False)
+        assert emitidos == [(clip.clip_id, {"blur_background": False})]
+        w.deleteLater()
+
+    def test_fundo_verde_desliga_a_opcao_sem_apagar_a_escolha(self, qapp: QApplication) -> None:
+        w = self._carregado(self._bloco(blur_background=True))
+        w._chk_chroma.setChecked(True)
+        assert not w._chk_blur.isEnabled() and w._chk_blur.isChecked()
+        explicacao = w._lbl_blur.text()
+        w._chk_chroma.setChecked(False)
+        assert w._chk_blur.isEnabled() and w._lbl_blur.text() != explicacao
+        w.deleteLater()
+
+    def test_bloco_com_fundo_verde_nasce_com_a_opcao_desligada_e_explicada(self, qapp: QApplication) -> None:
+        w = self._carregado(self._bloco(blur_background=True, chromakey_enabled=True))
+        assert not w._chk_blur.isEnabled()
+        from videomanager.presentation.qt import strings
+        assert w._lbl_blur.text() == strings.PROP_BLUR_CHROMA
+        w.deleteLater()
+
+    def test_troca_de_idioma_leva_titulo_opcao_e_nota(self, pseudo) -> None:
+        from videomanager.domain import i18n
+        from videomanager.presentation.qt.i18n import apply_language
+        w = self._carregado(self._bloco(chromakey_enabled=True))
+        apply_language(i18n.ENGLISH)
+        for texto in (w._blur_group.title(), w._chk_blur.text(), w._lbl_blur.text()):
+            assert texto.startswith("⟦"), texto
+        w._chk_chroma.setChecked(False)
+        assert w._lbl_blur.text().startswith("⟦")
+        w.deleteLater()
