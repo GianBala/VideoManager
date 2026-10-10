@@ -1316,7 +1316,9 @@ class TestFundoDesfocado:
         assert "dar" in ramo
         assert "crop=242:136" in ramo
         assert "gblur=sigma=6.0000" in ramo
-        assert ramo.endswith("scale=1920:1080,setsar=1,tpad=stop_mode=clone:stop_duration=1.000[d0]")
+        # O fps vem antes do tpad: sem taxa conhecida o tpad não clona nada, e numa
+        # tela de taxa maior que a da fonte o último quadro do bloco ficava sem fundo.
+        assert ramo.endswith("scale=1920:1080,setsar=1,fps=30.000000,tpad=stop_mode=clone:stop_duration=1.000[d0]")
 
     def test_previa_menor_desfoca_na_mesma_tela_de_trabalho(self) -> None:
         # O desfoque não depende do tamanho da prévia: é o que faz prévia e

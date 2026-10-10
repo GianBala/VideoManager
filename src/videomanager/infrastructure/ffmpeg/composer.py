@@ -535,15 +535,21 @@ def _keyframe_expr(
     return expr
 
 
-def _blur_steps(piece: _Piece, project: Project) -> list[str]:
+def _blur_steps(piece: _Piece, project: Project, fps: float) -> list[str]:
     """Cadeia do fundo desfocado: o bloco coberto à tela, borrado e ampliado.
 
     Cobre pela forma de **exibição** (``dar``), como ``_fit_scale`` encaixa a
     frente: pela proporção armazenada, um arquivo de pixel não quadrado cobria
-    com a razão errada. Não passa por ``fps`` nem por ``minterpolate``: o
-    movimento some no desfoque, e interpolar custaria memória sem mostrar nada.
-    A opacidade vale para o conjunto — senão, num fade, a frente some e o
-    borrão fica na tela.
+    com a razão errada. Não passa pelo ``minterpolate``: o movimento some no
+    desfoque, e interpolar custaria memória sem mostrar nada. A opacidade vale
+    para o conjunto — senão, num fade, a frente some e o borrão fica na tela.
+
+    O ``fps`` entra **no fim**, onde duplicar quadro é de graça, e não por
+    fidelidade de movimento: sem ele o fluxo carrega a taxa da fonte, e numa
+    tela de taxa maior (30 fps dentro de 60) o último instante do bloco caía
+    depois do último quadro do fundo — um quadro preto nas laterais, em cada
+    emenda. Medido: o quadro 89 de 90 sem fundo. Também é ele que dá ao ``tpad``
+    seguinte a taxa de que precisa: sem taxa conhecida o filtro não clona nada.
     """
     clip = piece.clip
     short = min(_BLUR_SHORT_SIDE, project.width, project.height)
@@ -561,11 +567,11 @@ def _blur_steps(piece: _Piece, project: Project) -> list[str]:
                   "format=yuva420p"]
     elif clip.opacity < 1 - 1e-9:
         steps += ["format=rgba", f"colorchannelmixer=aa={clip.opacity:.4f}", "format=yuva420p"]
-    return steps + [f"scale={project.width}:{project.height}", "setsar=1", *_tail_hold(clip)]
+    return steps + [f"scale={project.width}:{project.height}", "setsar=1", f"fps={fps:.6f}", *_tail_hold(clip)]
 
 
 def _chain_text(
-    piece: _Piece, project: Project, steps: list[str], lead: int, blur: str | None
+    piece: _Piece, project: Project, steps: list[str], lead: int, blur: str | None, fps: float
 ) -> str:
     """Monta a cadeia do bloco; com fundo, divide o fluxo depois dos ``lead`` primeiros passos.
 
@@ -579,7 +585,7 @@ def _chain_text(
     return (
         f"{head}{','.join(steps[:lead])},split=2{key}_in]{key}_front];"
         f"{key}_front]{','.join(steps[lead:])}{tail};"
-        f"{key}_in]{','.join(_blur_steps(piece, project))}{blur}"
+        f"{key}_in]{','.join(_blur_steps(piece, project, fps))}{blur}"
     )
 
 
@@ -723,7 +729,7 @@ def _video_chain(
             steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
         steps.append("format=rgba")
         steps = _alpha_before_dynamic_scale(steps)
-        return _chain_text(piece, project, steps, lead, blur)
+        return _chain_text(piece, project, steps, lead, blur, fps)
 
     steps = []
     if piece.still:
@@ -848,7 +854,7 @@ def _video_chain(
         steps.append("setsar=1")
         steps = _alpha_before_dynamic_scale(steps)
         steps += _tail_hold(clip)
-        return _chain_text(piece, project, steps, lead, blur)
+        return _chain_text(piece, project, steps, lead, blur, fps)
 
     if _rate_first(piece, project, fps, interpolate):
         steps.append(_rate_chain(piece, fps, interpolate))
@@ -862,7 +868,7 @@ def _video_chain(
     )
     steps.append("setsar=1")
     steps += _tail_hold(clip)
-    return _chain_text(piece, project, steps, lead, blur)
+    return _chain_text(piece, project, steps, lead, blur, fps)
 
 
 # Quanto um bloco de vídeo pode segurar o último quadro quando a trilha de vídeo
