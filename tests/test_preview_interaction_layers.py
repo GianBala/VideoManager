@@ -49,6 +49,17 @@ def test_plano_estavel_durante_pose_mas_invalidado_por_contexto(tmp_path):
     assert interaction_plan(below, clip.clip_id, 1) is not None
 
 
+def test_bloco_com_fundo_desfocado_visivel_compoe_pelo_ffmpeg(tmp_path):
+    """A textura isolada não leva o fundo de tela cheia: sem este retorno ele sumia no gesto."""
+    project, clip = scene(tmp_path)  # a imagem é 16:9 e está a metade da tela: o fundo aparece
+    assert interaction_plan(project, clip.clip_id, 1) is not None
+    ligado = project.with_updated_clip(clip.clip_id, blur_background=True)
+    assert interaction_plan(ligado, clip.clip_id, 1) is None
+    # Onde o fundo não aparece (a frente cobre a tela), a opção não custa a resposta imediata.
+    cobrindo = ligado.with_updated_clip(clip.clip_id, scale=1., scale_x=1., scale_y=1.)
+    assert interaction_plan(cobrindo, clip.clip_id, 1) is not None
+
+
 @pytest.mark.ffmpeg
 @pytest.mark.parametrize('video', [False, True])
 def test_gesto_preserva_fundo_alfa_e_objeto_superior(tmp_path, video):
