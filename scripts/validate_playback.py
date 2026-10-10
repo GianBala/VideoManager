@@ -4,7 +4,12 @@
 
 Gera vídeos sintéticos e toca duas cenas — um arquivo só, e uma montagem com
 transição, foto animada e texto — sem placa de som, então o relógio é o fluxo
-de quadros. Para cada cena, a mediana das repetições de:
+de quadros. ``--cenas`` escolhe outras: ``reduzido`` e ``montagem_reduzida``
+encolhem os blocos de vídeo a 70% (a tela descoberta que a opção de fundo
+preenche), e o sufixo ``_fundo`` liga o **fundo desfocado** neles. Cada cena
+com fundo tem uma gêmea sem ele, com a mesma geometria: a diferença entre as
+duas é o custo do fundo, e não o de mover um bloco reduzido. Para cada cena,
+a mediana das repetições de:
 
 - ``pre_carga_pronta`` e ``primeiro_quadro_ms``: o play depois da busca, com o
   fluxo já preparado; ``primeiro_quadro_frio_ms``, o play logo depois da busca;
@@ -58,6 +63,8 @@ def _midia(pasta: Path, tools) -> dict[str, Path]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repeticoes", type=int, default=3)
+    parser.add_argument("--cenas", default="simples,montagem",
+                        help="simples, montagem, reduzido, montagem_reduzida, e as mesmas com o sufixo _fundo")
     parser.add_argument("--trocar-idioma", action="store_true",
                         help="troca o idioma durante cada reprodução medida (1 s e 2,5 s depois do play)")
     args = parser.parse_args()
@@ -106,10 +113,15 @@ def main() -> int:
     painel._show_frame = espiao
 
     def cena(nome: str) -> Project:
-        if nome == "simples":
-            return Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(A, 0.0, 12.0),)),), width=1920, height=1080,
-                           fps=30.0)
-        a, b = Clip(A, 0.0, 6.0), Clip(B, 6.0, 6.0, in_point=1.0)
+        fundo = nome.endswith("_fundo")
+        nome = nome.removesuffix("_fundo")
+        extra = {"scale": .7, "scale_x": .7, "scale_y": .7} if "reduzid" in nome else {}
+        if fundo:
+            extra["blur_background"] = True
+        if nome in ("simples", "reduzido"):
+            return Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(A, 0.0, 12.0, **extra),)),), width=1920,
+                           height=1080, fps=30.0)
+        a, b = Clip(A, 0.0, 6.0, **extra), Clip(B, 6.0, 6.0, in_point=1.0, **extra)
         transicao = Clip(MediaRef(Path("Transição_x"), MediaKind.IMAGE, duration=1.0), 5.5, 1.0,
                          overlay_type="transition", transition_name="dissolve",
                          transition_left_id=a.clip_id, transition_right_id=b.clip_id)
@@ -122,7 +134,10 @@ def main() -> int:
                                Track(TrackKind.VIDEO, clips=(a, transicao, b))), width=1920, height=1080, fps=30.0)
 
     resultado = {}
-    for nome in ("simples", "montagem"):
+    for nome in args.cenas.split(","):
+        if nome.endswith("_fundo") and "blur_background" not in Clip.__dataclass_fields__:
+            resultado[nome] = "indisponível nesta versão"
+            continue
         painel.install_project(cena(nome), None, [A, B, FOTO], {})
         rodar(300)
         medidas: dict[str, list] = {}
