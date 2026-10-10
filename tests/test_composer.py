@@ -14,6 +14,7 @@ o usuário vê na tela antes de exportar.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -1267,3 +1268,140 @@ def test_webm_fixa_o_formato_de_pixel() -> None:
     args = export_args(projeto(video_track(clip())), Path("/saida/a.webm"), TOOLS, container="webm")
     assert args[args.index("-c:v") + 1] == "libvpx-vp9"
     assert args[args.index("-pix_fmt") + 1] == "yuv420p"
+
+
+class TestFundoDesfocado:
+    """O fundo desfocado: uma camada própria por baixo da frente, e só onde aparece."""
+
+    VERTICAL = MediaRef(
+        path=Path("/m/vertical.mp4"), kind=MediaKind.VIDEO, duration=30.0, width=1080,
+        height=1920, fps=24.0, has_audio=True, channels=2,
+    )
+
+    def com(self, media: MediaRef = VERTICAL, **kw) -> Project:
+        return projeto(video_track(clip(media, blur_background=True, **kw)))
+
+    @staticmethod
+    def sem_opcao(project: Project) -> Project:
+        from dataclasses import replace
+        return replace(project, tracks=tuple(
+            replace(t, clips=tuple(replace(c, blur_background=False) for c in t.clips))
+            for t in project.tracks
+        ))
+
+    @staticmethod
+    def ramos(graph) -> list[str]:
+        """Os filtros um a um: o bloco com fundo devolve vários ramos numa entrada só."""
+        return ";".join(graph.filters).split(";")
+
+    @staticmethod
+    def rotulos_fecham(graph) -> None:
+        """Todo rótulo nasce e é consumido uma vez; o que sobra é a saída do grafo."""
+        from collections import Counter
+        usados = Counter(
+            r for r in re.findall(r"\[([A-Za-z0-9_]+(?::[va])?)\]", ";".join(graph.filters))
+            if not re.fullmatch(r"\d+:[va]", r)
+        )
+        saidas = {r.strip("[]") for r in (graph.video_label, graph.audio_label) if r}
+        assert {r for r, n in usados.items() if n != 2} <= saidas, usados
+
+    def test_o_fluxo_e_dividido_uma_vez_e_o_arquivo_abre_uma_vez(self) -> None:
+        grafo = build_graph(self.com())
+        assert grafo.inputs.count("-i") == 1
+        assert ";".join(grafo.filters).count("split=2") == 1
+        self.rotulos_fecham(grafo)
+
+    def test_fundo_cobre_pela_forma_de_exibicao_e_desfoca_na_tela_de_trabalho(self) -> None:
+        ramo = next(f for f in self.ramos(build_graph(self.com())) if f.startswith("[d0_in]"))
+        assert "dar" in ramo
+        assert "crop=242:136" in ramo
+        assert "gblur=sigma=6.0000" in ramo
+        assert ramo.endswith("scale=1920:1080,setsar=1,tpad=stop_mode=clone:stop_duration=1.000[d0]")
+
+    def test_previa_menor_desfoca_na_mesma_tela_de_trabalho(self) -> None:
+        # O desfoque não depende do tamanho da prévia: é o que faz prévia e
+        # exportação parecerem a mesma imagem (SSIM 0,998 contra 0,935 com fração fixa).
+        comando = " ".join(frame_command(self.com(), 1.0, (640, 360), TOOLS))
+        assert "crop=242:136" in comando and "gblur=sigma=6.0000" in comando
+        assert "scale=640:360" in comando
+
+    def test_fundo_vem_antes_da_frente_na_mesma_janela(self) -> None:
+        filtros_ = self.ramos(build_graph(self.com()))
+        fundo = next(f for f in filtros_ if "[d0]overlay" in f)
+        frente = next(f for f in filtros_ if "[v0]overlay" in f)
+        assert filtros_.index(fundo) < filtros_.index(frente)
+        assert fundo.split("enable=")[1].split("[")[0] == frente.split("enable=")[1].split("[")[0]
+        # A frente parte do que o fundo compôs, e o fundo, do que veio de baixo.
+        assert fundo.startswith("[base]") and frente.startswith("[u0]")
+
+    def test_trilha_de_cima_compoe_o_fundo_por_cima_da_de_baixo(self) -> None:
+        embaixo = clip(OUTRO, duration=10.0)
+        em_cima = clip(self.VERTICAL, duration=10.0, blur_background=True)
+        projeto_ = Project(tracks=(video_track(em_cima), video_track(embaixo)), width=1920, height=1080, fps=30.0)
+        grafo = build_graph(projeto_)
+        fundo = next(f for f in self.ramos(grafo) if "overlay=x=0:y=0" in f and "[d" in f.split("overlay")[0])
+        # O que o fundo cobre é a frente de baixo já composta.
+        assert fundo.startswith("[o0]")
+        self.rotulos_fecham(grafo)
+
+    @pytest.mark.parametrize("media", (VIDEO, OUTRO))
+    def test_bloco_que_preenche_a_tela_sai_identico(self, media: MediaRef) -> None:
+        ligado = self.com(media)
+        desligado = self.sem_opcao(ligado)
+        assert build_graph(ligado).filters == build_graph(desligado).filters
+        assert frame_command(ligado, 1.0, (852, 478), TOOLS) == frame_command(desligado, 1.0, (852, 478), TOOLS)
+        assert export_args(ligado, DEST, TOOLS) == export_args(desligado, DEST, TOOLS)
+
+    def test_foto_ganha_o_fundo(self) -> None:
+        texto = filtros(self.com(FOTO))
+        assert "gblur" in texto and "split=2" in texto
+
+    def test_o_fundo_nunca_passa_pelo_interpolador(self) -> None:
+        grafo = build_graph(
+            Project(tracks=(video_track(clip(self.VERTICAL, blur_background=True)),), width=1920, height=1080, fps=60.0),
+            interpolate=True,
+        )
+        fundo = next(f for f in self.ramos(grafo) if f.startswith("[d0_in]"))
+        frente = next(f for f in self.ramos(grafo) if f.startswith("[d0_front]"))
+        assert "minterpolate" not in fundo and "minterpolate" in frente
+
+    def test_opacidade_fixa_vale_para_o_fundo(self) -> None:
+        fundo = next(f for f in self.ramos(build_graph(self.com(opacity=0.5))) if f.startswith("[d0_in]"))
+        assert "colorchannelmixer=aa=0.5000" in fundo and "format=yuva420p" in fundo
+
+    def test_opacidade_animada_usa_a_mesma_expressao_da_frente(self) -> None:
+        from videomanager.domain.keyframe import Keyframe
+        grafo = build_graph(self.com(keyframes=(Keyframe(0.0, opacity=1.0), Keyframe(2.0, opacity=0.0))))
+        alfa = re.findall(r"a='alpha\(X,Y\)\*\((.*?)\)'", ";".join(grafo.filters))
+        assert len(alfa) == 2 and alfa[0] == alfa[1]
+
+    def test_fundo_verde_desliga_o_fundo_desfocado(self) -> None:
+        assert "gblur" not in filtros(self.com(chromakey_enabled=True))
+
+    def test_bloco_reduzido_ganha_o_fundo_mesmo_na_proporcao_da_tela(self) -> None:
+        reduzido = self.com(OUTRO, scale=0.5, scale_x=0.5, scale_y=0.5)
+        assert "gblur" in filtros(reduzido)
+
+    def test_previa_decide_pela_tela_de_exportacao(self) -> None:
+        # 852×478 não é 16:9: pela tela da prévia o clipe 16:9 pareceria não
+        # preencher e ganharia um fundo que a exportação não tem.
+        assert "gblur" not in " ".join(frame_command(self.com(OUTRO), 1.0, (852, 478), TOOLS))
+
+    def test_corte_rapido_continua_onde_o_fundo_nao_aparece(self) -> None:
+        assert simple_trim(self.com(VIDEO)) is not None
+        assert simple_trim(Project(tracks=(video_track(clip(VIDEO, blur_background=True)),),
+                                   width=1280, height=720, fps=30.0)) is None
+
+    def test_transicao_entre_dois_blocos_com_fundo_fecha_o_grafo(self) -> None:
+        esquerda = clip(self.VERTICAL, duration=4.0, blur_background=True, in_point=0.5)
+        direita = clip(self.VERTICAL, start=4.0, duration=4.0, blur_background=True, in_point=0.5)
+        marcador = Clip(
+            media=MediaRef(Path("Transição_Fade"), MediaKind.IMAGE, 0.5), start=3.75, duration=0.5,
+            overlay_type="transition", transition_name="fade",
+            transition_left_id=esquerda.clip_id, transition_right_id=direita.clip_id,
+        )
+        grafo = build_graph(projeto(video_track(esquerda, direita, marcador)))
+        texto = ";".join(grafo.filters)
+        # Os dois blocos da trilha e os dois lados da transição: quatro fundos.
+        assert texto.count("gblur") == 4 and texto.count("split=2") == 4
+        self.rotulos_fecham(grafo)
