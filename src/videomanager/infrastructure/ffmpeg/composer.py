@@ -550,6 +550,12 @@ def _blur_steps(piece: _Piece, project: Project, fps: float) -> list[str]:
     depois do último quadro do fundo — um quadro preto nas laterais, em cada
     emenda. Medido: o quadro 89 de 90 sem fundo. Também é ele que dá ao ``tpad``
     seguinte a taxa de que precisa: sem taxa conhecida o filtro não clona nada.
+
+    Os dois ``scale`` são bilineares: o resultado é um borrão de sigma 6 na tela
+    de trabalho, e o bicúbico padrão gastava CPU num detalhe que o desfoque já
+    tirou. Medido no fluxo da reprodução da montagem a 1080p (9 s de mídia): o
+    fundo custava +30% de tempo e passou a +14%; a imagem muda 43 dB de PSNR
+    (diferença máxima de 6 em 255, sem estrutura visível a 30× de contraste).
     """
     clip = piece.clip
     short = min(_BLUR_SHORT_SIDE, project.width, project.height)
@@ -557,7 +563,7 @@ def _blur_steps(piece: _Piece, project: Project, fps: float) -> list[str]:
     work_w = max(2, round(project.width * ratio / 2) * 2)
     work_h = max(2, round(project.height * ratio / 2) * 2)
     steps = [
-        f"scale=w='ceil(max({work_w},{work_h}*dar)/2)*2':h='ceil(max({work_h},{work_w}/dar)/2)*2'",
+        f"scale=w='ceil(max({work_w},{work_h}*dar)/2)*2':h='ceil(max({work_h},{work_w}/dar)/2)*2':flags=bilinear",
         f"crop={work_w}:{work_h}",
         f"gblur=sigma={_BLUR_SIGMA * short / _BLUR_SHORT_SIDE:.4f}",
     ]
@@ -567,7 +573,8 @@ def _blur_steps(piece: _Piece, project: Project, fps: float) -> list[str]:
                   "format=yuva420p"]
     elif clip.opacity < 1 - 1e-9:
         steps += ["format=rgba", f"colorchannelmixer=aa={clip.opacity:.4f}", "format=yuva420p"]
-    return steps + [f"scale={project.width}:{project.height}", "setsar=1", f"fps={fps:.6f}", *_tail_hold(clip)]
+    return steps + [f"scale={project.width}:{project.height}:flags=bilinear", "setsar=1", f"fps={fps:.6f}",
+                    *_tail_hold(clip)]
 
 
 def _chain_text(
