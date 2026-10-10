@@ -556,6 +556,18 @@ def _blur_steps(piece: _Piece, project: Project, fps: float) -> list[str]:
     tirou. Medido no fluxo da reprodução da montagem a 1080p (9 s de mídia): o
     fundo custava +30% de tempo e passou a +14%; a imagem muda 43 dB de PSNR
     (diferença máxima de 6 em 255, sem estrutura visível a 30× de contraste).
+
+    O ``gblur`` roda num formato **fixo** (``gbrp``) e o resultado volta a
+    ``yuv420p`` ainda no tamanho pequeno. Sem isso ele roda no formato que o
+    filtro seguinte negociar, e num vídeo ``yuv420p`` o desfoque dos planos de
+    cor saía na metade da resolução — o mesmo sigma valendo o dobro em pixels
+    de tela. Medido num ``testsrc2`` de vídeo contra o mesmo quadro em foto: a
+    cor do fundo divergia 6,5 a 13,4 em 255 (máximo 92). Voltar a ``yuv420p``
+    ainda no tamanho pequeno poupa o aumento até a tela e o ``overlay`` de
+    trabalharem em ``gbrp`` (3 bytes por pixel): num grafo isolado de 9 s a
+    1080p, 2,30 s contra 2,79 s (mínimo de 5). Contra o formato negociado de
+    antes, o fluxo da reprodução da montagem não mudou de forma mensurável
+    (12,08 s contra 12,15 s, mínimo de 5 repetições).
     """
     clip = piece.clip
     short = min(_BLUR_SHORT_SIDE, project.width, project.height)
@@ -565,7 +577,9 @@ def _blur_steps(piece: _Piece, project: Project, fps: float) -> list[str]:
     steps = [
         f"scale=w='ceil(max({work_w},{work_h}*dar)/2)*2':h='ceil(max({work_h},{work_w}/dar)/2)*2':flags=bilinear",
         f"crop={work_w}:{work_h}",
+        "format=gbrp",
         f"gblur=sigma={_BLUR_SIGMA * short / _BLUR_SHORT_SIDE:.4f}",
+        "format=yuv420p",
     ]
     if clip.animates("opacity"):
         expr = _keyframe_expr(clip.keyframes, "opacity", _clip_stream_origin(piece), clip.opacity, time_var="T")
