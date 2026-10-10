@@ -26,6 +26,13 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     clip = ordered[selected]
     if clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION):
         return None
+    # O objeto vira uma textura sem o fundo: o fundo é de tela cheia e segue a
+    # opacidade do bloco, então não cabe em nenhuma das três camadas. O gesto
+    # compõe pelo ffmpeg, como com um filtro acima.
+    # ponytail: arrasto menos fluido nesses blocos; renderizar o fundo na camada
+    # de baixo devolveria a resposta imediata, se alguém notar.
+    if clip.shows_blur_background(project.width, project.height):
+        return None
     if any(c.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION) for c in ordered[selected + 1:]):
         return None
 
