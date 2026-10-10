@@ -1164,6 +1164,7 @@ class _ClipPropertiesWidget(QWidget):
         retext_items(self._combo_trans_type, _transition_label)
         self._refresh_header()
         self._refresh_keyframe_controls()
+        self._lbl_blur.setText(self._blur_note())
 
     def _refresh_header(self) -> None:
         """Título, dica e espécie do bloco carregado, no idioma de agora."""
@@ -1459,6 +1460,29 @@ class _ClipPropertiesWidget(QWidget):
 
         self._layout.addWidget(self._chromakey_group)
 
+        # Grupo Fundo Desfocado
+        self._blur_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_BLUR)
+        blur_layout = QVBoxLayout(self._blur_group)
+        blur_layout.setContentsMargins(6, 8, 6, 6)
+        blur_layout.setSpacing(6)
+
+        self._chk_blur = bind(QCheckBox(), "setText", lambda: strings.PROP_BLUR_ENABLE)
+        self._chk_blur.toggled.connect(self._on_blur_toggled)
+        blur_layout.addWidget(self._chk_blur)
+
+        # Em linha própria: o texto quebra, e a altura dele não atravessa um
+        # layout horizontal. Sem ``bind``: o texto depende do estado (fundo verde
+        # ligado ou não), e quem o escreve é ``_sync_blur_controls`` — escrito por
+        # fora, o ``bind`` seria abandonado na primeira troca de idioma, que
+        # passa por ``_retranslate``.
+        self._blur_unavailable = False
+        self._lbl_blur = QLabel(self._blur_note())
+        self._lbl_blur.setWordWrap(True)
+        self._lbl_blur.setProperty("role", "dim")
+        blur_layout.addWidget(self._lbl_blur)
+
+        self._layout.addWidget(self._blur_group)
+
         # Grupo Transição (quando um clipe de transição é selecionado)
         self._transition_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_TRANSITION)
         t_layout = QVBoxLayout(self._transition_group)
@@ -1501,6 +1525,7 @@ class _ClipPropertiesWidget(QWidget):
         self._transform_group.setVisible(False)
         self._animation_group.setVisible(False)
         self._chromakey_group.setVisible(False)
+        self._blur_group.setVisible(False)
         self._transition_group.setVisible(False)
 
     def load_clip(self, clip: Clip, proj_w: int, proj_h: int, fps: float = 30.0, text_ratio: float = 1.0) -> None:
@@ -1562,7 +1587,15 @@ class _ClipPropertiesWidget(QWidget):
             self._transform_group.setVisible(can_animate)
             self._animation_group.setVisible(can_animate)
             self._chromakey_group.setVisible(can_chroma)
+            # Só mídia de arquivo com imagem: texto, filtro, transição e o bloco
+            # de "separar áudio" não têm o que desfocar.
+            can_blur = clip.has_image and clip.has_media_file
+            self._blur_group.setVisible(can_blur)
             self._transition_group.setVisible(is_trans)
+
+            if can_blur:
+                self._chk_blur.setChecked(clip.blur_background)
+                self._sync_blur_controls(clip.chromakey_enabled)
 
             if is_trans:
                 idx = self._combo_trans_type.findData(clip.transition_name or "fade")
@@ -1607,9 +1640,28 @@ class _ClipPropertiesWidget(QWidget):
 
     def _on_chroma_toggled(self, checked: bool) -> None:
         self._enable_chroma_controls(checked)
+        self._sync_blur_controls(checked)
         if self._updating or self._clip_id < 0:
             return
         self.property_changed.emit(self._clip_id, {"chromakey_enabled": checked})
+
+    def _on_blur_toggled(self, checked: bool) -> None:
+        if self._updating or self._clip_id < 0:
+            return
+        self.property_changed.emit(self._clip_id, {"blur_background": checked})
+
+    def _blur_note(self) -> str:
+        return strings.PROP_BLUR_CHROMA if self._blur_unavailable else strings.PROP_BLUR_NOTE
+
+    def _sync_blur_controls(self, chroma: bool) -> None:
+        """Com o fundo verde ligado a opção fica desligada e a tela diz o porquê.
+
+        A escolha não é apagada: o compositor a ignora enquanto o chroma key
+        estiver ligado, e ela volta quando ele sair.
+        """
+        self._blur_unavailable = chroma
+        self._chk_blur.setEnabled(not chroma)
+        self._lbl_blur.setText(self._blur_note())
 
     def _enable_chroma_controls(self, enabled: bool) -> None:
         self._btn_chroma_color.setEnabled(enabled)
