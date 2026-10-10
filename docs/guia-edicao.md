@@ -279,6 +279,16 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
 - **Fundo Verde (Chroma Key)** — remove uma cor do bloco (verde padrão, verde
   de estúdio, azul ou qualquer outra pelo seletor), com **Tolerância** e
   **Suavização**.
+- **Fundo Desfocado** — em vídeos e fotos que não preenchem a tela (um vídeo
+  vertical num projeto 16:9, por exemplo), preenche as bordas com o próprio
+  bloco ampliado e desfocado, em vez de preto. O fundo é uma camada de tela
+  cheia **por baixo** do bloco: ele cobre as trilhas de baixo durante o bloco
+  inteiro, mesmo que a frente seja reduzida ou movida, e acompanha a opacidade
+  do bloco. Por isso a opção nasce desligada. Num bloco que já preenche a tela
+  em posição, escala e rotação neutras, ela não muda nada na imagem. Fica
+  indisponível enquanto o Fundo Verde está ligado. Arrastar na prévia um bloco
+  com o fundo visível é composto pelo ffmpeg, um pouco menos fluido que o dos
+  demais.
 - **Animação / Quadros-chave** — anima posição, escala, rotação e opacidade ao
   longo do bloco:
   - **◀ ◇ ▶** vão ao quadro-chave anterior, adicionam ou removem um quadro-chave
@@ -461,7 +471,9 @@ corte rápido continua disponível —; o que difere do material volta fixo.
   ainda é um recorte de um único arquivo, na ordem e sem lacunas nem
   sobreposição entre os blocos, na tela e na taxa do próprio arquivo, sem
   volume, velocidade, opacidade, animação, posição, escala, rotação ou chroma
-  key alterados, sem mudo e sem trilha sobreposta. Qualquer um desses efeitos
+  key alterados, sem mudo e sem trilha sobreposta. O fundo desfocado só tira a
+  edição do corte rápido onde aparece, e na tela do próprio arquivo ele não
+  aparece. Qualquer um desses efeitos
   tira a edição do corte rápido, em vez de a exportação copiar os dados e
   descartá-lo sem avisar. Quando o corte rápido está valendo, exportar é
   instantâneo: os dados são copiados como estão, sem qualidade perdida, e os
