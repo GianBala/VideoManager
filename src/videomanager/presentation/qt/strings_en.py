@@ -802,7 +802,7 @@ EDIT_LOAD_CHANGED = "The edit changed while loading. Open the project again to r
 EDIT_MISSING_MEDIA = "The project was opened, but the following files were not found:\n\n{files}"
 EDIT_READ_CANCEL = "Cancel"
 
-EDIT_SAVING_PROJECT = "Saving project v3… Older projects get a .v1.bak or .v2.bak copy before the upgrade."
+EDIT_SAVING_PROJECT = "Saving project v4… Older projects get a .v1.bak, .v2.bak or .v3.bak copy before the upgrade."
 
 EDIT_TRANSITION_AFFECT_ADDITIONALS = "Affect overlay items"
 EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP = (
@@ -875,7 +875,7 @@ JOB_STATUS_LABELS = {
 EXPORT_SOURCE_CODEC = "source codec"
 EXPORT_COPY_CODEC = "Copy without re-encoding ({codec})"
 EDIT_SPEED_COLLISION = "There is no room before the next clip for this speed. Move the next clip or choose another speed."
-EDIT_PROJECT_V2_TIP = "v3 format: images on the video track, fitted to the canvas, and trimmed animations preserved. Older versions of the application can't open v3. When a v1 or v2 project is upgraded, the original is kept as .vmp.v1.bak or .vmp.v2.bak (or a numbered copy)."
+EDIT_PROJECT_V2_TIP = "v4 format: images on the video track, fitted to the canvas, trimmed animations and blurred background preserved. Older versions of the application can't open v4. When a v1, v2 or v3 project is upgraded, the original is kept as .vmp.v1.bak, .vmp.v2.bak or .vmp.v3.bak (or a numbered copy)."
 
 EDIT_ANIMATION_GLOBAL = "Edit the whole animation"
 EDIT_ANIMATION_GLOBAL_TIP = "Applies the change to every point, including the ones kept outside trimmed edges. Unchecked: edits only the current time."

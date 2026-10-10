@@ -265,7 +265,7 @@ que ainda pode emitir callbacks.
 
 ## Formato .vmp
 
-`infrastructure/storage/project_json.py` escreve JSON versão 3 e lê versões 1 a 3.
+`infrastructure/storage/project_json.py` escreve JSON versão 4 e lê versões 1 a 4.
 `projects.py` o expõe pela porta `ProjectRepository`. A versão 2 permite pontos
 de suporte assinados e grava `text_reference_width` / `text_reference_height`.
 A versão 3 põe imagens na trilha de vídeo ajustadas à tela. Ao ler v1 ou v2,
@@ -276,6 +276,7 @@ quadros-chave, arredondando para cima em seis casas — a mesma precisão com qu
 o compositor escreve a escala, para o truncamento das animações não perder
 pixels. Um v3 é reaberto sem migração. Imagens migradas deixam de entrar em
 transições com `transition_affects_additionals`.
+A versão 4 acrescenta `blur_background` ao bloco; um v3 abre com a opção desligada.
 Essas dimensões conservam a escala relativa do texto quando a resolução muda;
 `Project.for_render` deriva escalas sem modificar o documento nem seus ativos.
 

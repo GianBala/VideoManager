@@ -128,15 +128,15 @@ class TestArquivo:
         path.write_text(json.dumps(data), encoding="utf-8")
         return path
 
-    def test_abrir_v2_migra_e_salvar_grava_v3_com_copia(self, tmp_path) -> None:
-        from videomanager.infrastructure.storage.project_json import load_project, save_project
+    def test_abrir_v2_migra_e_salva_na_versao_atual_com_copia(self, tmp_path) -> None:
+        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION, load_project, save_project
         path = self._documento_v2(tmp_path)
         original = path.read_bytes()
         project, _ = load_project(path)
         assert project.tracks[0].kind is TrackKind.VIDEO
         assert project.tracks[0].clips[0].scale_x == pytest.approx(400 / 1440)
         save_project(project, path)
-        assert json.loads(path.read_text(encoding="utf-8"))["version"] == 3
+        assert json.loads(path.read_text(encoding="utf-8"))["version"] == PROJECT_VERSION
         assert (tmp_path / "antigo.vmp.v2.bak").read_bytes() == original
         again, _ = load_project(path)
         assert again.tracks[0].clips[0].scale_x == pytest.approx(400 / 1440)
