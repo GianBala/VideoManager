@@ -522,7 +522,7 @@ def test_pacote_diz_o_commit_no_log_e_no_sobre(qapp, tmp_path, monkeypatch):
     """"3.1" vale para vários commits: o pacote diz qual (OPS-002)."""
     import sys
 
-    from videomanager import APP_TITLE, build_commit
+    from videomanager import APP_TITLE, __version__, build_commit
     from videomanager import app as aplicativo
 
     assert build_commit() is None, "no código-fonte não há commit gravado"
@@ -541,7 +541,7 @@ def test_pacote_diz_o_commit_no_log_e_no_sobre(qapp, tmp_path, monkeypatch):
                         lambda parent, title, body: sobre.append(body))
     try:
         window._show_about()
-        assert "Video Manager 3.1 (v3.1-12-gabc1234)" in sobre[0]
+        assert f"Video Manager {__version__} (v3.1-12-gabc1234)" in sobre[0]
     finally:
         window.close()
 
