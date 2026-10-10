@@ -357,6 +357,33 @@ def test_bloco_com_vao_nao_deixa_o_fundo_nem_antes_nem_depois(midias, tools, tmp
     assert media_da(quadro_do_arquivo(sem, 1.0, TELA, tools), TELA, lateral) < 1.5
 
 
+@pytest.mark.parametrize("fps_da_fonte", (24, 25, 30))
+@pytest.mark.parametrize("fps_da_tela", (30.0, 60.0))
+def test_ultimo_quadro_do_bloco_ainda_tem_fundo(tools, tmp_path: Path, fps_da_fonte: int, fps_da_tela: float) -> None:
+    """Defeito medido: com a tela em 60 fps e a fonte em 30, o quadro 89 de 90 saía sem fundo.
+
+    O fluxo do fundo carregava a taxa da fonte e acabava um instante da tela
+    antes da frente; ``tpad`` sem taxa conhecida não clona nada. Em cada emenda
+    entre blocos com fundo, um quadro de laterais pretas — duração, contagem de
+    quadros e streams certos, nenhum erro.
+    """
+    pasta = tmp_path / "fontes"
+    pasta.mkdir()
+    fontes = {}
+    for nome, filtro in (("bloco", f"testsrc2=s=240x180:r={fps_da_fonte}:d=4"), ("depois", "testsrc2=s=320x180:r=30:d=4")):
+        arquivo = pasta / f"{nome}.mp4"
+        subprocess.run([tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", filtro,
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(arquivo)], check=True, capture_output=True)
+        fontes[nome] = media_ref(probe_file(arquivo, tools))
+    bloco = Clip(fontes["bloco"], 0.5, 1.0, blur_background=True)
+    saida = exportar(projeto((bloco, Clip(fontes["depois"], 2.5, 1.0)), fps=fps_da_tela), tmp_path / "saida.mp4", tools)
+    lateral = (3, 3, 37, 177)
+    # Um quarto de quadro antes do instante do quadro: o ``-ss`` entrega o primeiro com pts >= ao pedido.
+    for k in (1, 2, 3):
+        t = 1.5 - (k + 0.25) / fps_da_tela
+        assert media_da(quadro_do_arquivo(saida, t, TELA, tools), TELA, lateral) > 10, f"{k}º quadro antes do fim sem fundo"
+
+
 # (nome, fonte, tela, clip, fps do projeto)
 EXPORTADOS = [
     ("video_4x3", "v43", dict(), 30.0),
