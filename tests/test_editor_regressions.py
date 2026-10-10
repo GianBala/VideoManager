@@ -356,6 +356,20 @@ def test_propriedade_apos_undo_nao_reaproveita_sessao_anterior(panel):
     assert panel._project.find(clip.clip_id)[1].x == clip.x
 
 
+def test_fundo_desfocado_entra_no_desfazer_e_devolve_o_projeto_exato(panel):
+    media = MediaRef(Path('/m/vertical.mp4'), MediaKind.VIDEO, duration=20, width=1080, height=1920)
+    item = Clip(media, 0, 5)
+    panel.install_project(replace(panel._project, tracks=(Track(TrackKind.VIDEO, clips=(item,)),)), None, [], {})
+    original = panel._project
+    panel._on_properties_changed(item.clip_id, {'blur_background': True})
+    assert panel._project.find(item.clip_id)[1].blur_background
+    panel._undo_edit()
+    assert panel._project == original
+    assert not panel._project.find(item.clip_id)[1].blur_background
+    panel._redo_edit()
+    assert panel._project.find(item.clip_id)[1].blur_background
+
+
 def test_reordenacao_de_trilhas_produz_um_unico_undo(panel):
     original = panel._project
     panel._timeline.edit_started.emit()
