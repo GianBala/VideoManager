@@ -31,13 +31,14 @@ from videomanager.domain.project import reserve_project_ids
 
 # 3: imagens vivem na trilha de vídeo e se ajustam à tela. Ao abrir 1 ou 2, as
 # imagens das trilhas de Adicionais migram com a escala convertida.
+# 4: o bloco ganha ``blur_background`` (fundo desfocado).
 #
 # Todo campo novo no arquivo sobe esta versão. A leitura ignora chaves que não
 # conhece, então uma versão anterior que abrisse um arquivo com campo novo o
 # perderia em silêncio ao salvar — keyframes e opacity entraram assim. Com a
 # versão nova, a anterior recusa o arquivo com mensagem. O teste
-# ``test_campo_novo_no_projeto_exige_subir_a_versao`` trava as chaves da 3.
-PROJECT_VERSION = 3
+# ``test_campo_novo_no_projeto_exige_subir_a_versao`` trava as chaves da 4.
+PROJECT_VERSION = 4
 
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
@@ -159,6 +160,7 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                     "chromakey_similarity": clip.chromakey_similarity,
                     "chromakey_blend": clip.chromakey_blend,
                     "opacity": clip.opacity,
+                    "blur_background": clip.blur_background,
                     "keyframes": [
                         {
                             "time_offset": kf.time_offset,
@@ -308,6 +310,7 @@ def _validate_project(data: dict[str, object]) -> None:
                     "font_italic",
                     "chromakey_enabled",
                     "transition_affects_additionals",
+                    "blur_background",
                 ),
             )
             strings(clip, ("overlay_type", "text_content", "font_family", "text_color", "stroke_color", "filter_name", "transition_name", "chromakey_color"))
@@ -446,6 +449,7 @@ def _project_from_dict(
                 chromakey_color=str(c_data.get("chromakey_color", "#00FF00")),
                 chromakey_similarity=float(c_data.get("chromakey_similarity", 0.25)),
                 chromakey_blend=float(c_data.get("chromakey_blend", 0.10)),
+                blur_background=bool(c_data.get("blur_background", False)),
                 clip_id=c_data["clip_id"] if "clip_id" in c_data else next_clip_id(),
             )
             clips.append(clip)
