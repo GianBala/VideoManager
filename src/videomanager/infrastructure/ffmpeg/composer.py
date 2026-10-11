@@ -1076,11 +1076,26 @@ def _gain_filter(clip: Clip, origin: float) -> str | None:
     mesmo intervalo do controle, convertido de dB por ``pow`` e reavaliado a cada quadro de áudio
     (``eval=frame``, como os fades logo abaixo). ``origin`` é onde o bloco começa no relógio ``t`` do
     filtro, que o ffmpeg conta desde o início do trecho lido.
+
+    **O quadro de áudio é limitado a 480 amostras antes do ``volume``.** ``eval=frame`` reavalia a curva
+    uma vez por quadro, e o quadro é o do decodificador: sem o limite o fade saía em escada, de degrau
+    do tamanho dele. Medido numa rampa de 15 dB/s: 1,18 dB por degrau em WAV e FLAC de 4096 amostras,
+    4,38 dB em FLAC de 16384, contra 0,29 dB em AAC, MP3, Opus e Vorbis; com o limite, 0,15 dB em todos,
+    e a mesma contagem de amostras (``p=0``: o último quadro não é preenchido). São 480 **amostras**, ou
+    10 ms a 48 kHz; numa fonte de 8 kHz seriam 60 ms, ainda abaixo do que a escada tinha.
+
+    **Só quando a curva varia.** Uma curva constante não tem degrau a evitar, e o limite mexe nos quadros
+    que as fades das bordas (``eval=frame`` também) enxergam: com ele, o "declick" de uma transição cai
+    onde a granularidade de 10 ms manda, e não onde a do arquivo manda. Constante, o filtro continua
+    produzindo exatamente as amostras do volume fixo (``test_curva_constante_e_igual_ao_volume_fixo…``).
     """
     if clip.animates_gain:
         curve = _keyframe_expr(clip.keyframes, "gain_offset_db", origin, 0.0)
-        return (f"volume='pow(10,max({MIN_GAIN_DB:g},min({MAX_GAIN_DB:g},{clip.gain_db:.6f}+({curve})))/20)'"
-                ":eval=frame")
+        first = clip.keyframes[0].gain_offset_db
+        varies = any(abs(k.gain_offset_db - first) >= 1e-6 for k in clip.keyframes)
+        return ("asetnsamples=n=480:p=0," if varies else "") + (
+            f"volume='pow(10,max({MIN_GAIN_DB:g},min({MAX_GAIN_DB:g},{clip.gain_db:.6f}+({curve})))/20)'"
+            ":eval=frame")
     if clip.changes_gain:
         return f"volume={clip.gain_db:.2f}dB"
     return None

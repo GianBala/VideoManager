@@ -168,6 +168,32 @@ INSTANTES = (0.25, 1.0, 1.5, 2.0, 3.5)
 
 
 @ffmpeg
+@pytest.mark.parametrize(("formato", "codec", "extensao"), [
+    ("wav", ["-c:a", "pcm_s16le"], "wav"),
+    ("flac de quadro grande", ["-c:a", "flac", "-frame_size", "16384"], "flac"),
+])
+def test_o_fade_nao_avanca_em_degraus_do_tamanho_do_quadro_da_fonte(tools, tmp_path, formato, codec, extensao):
+    """O ``volume`` reavalia a curva uma vez por quadro de áudio, e o quadro é o do decodificador: sem limitá-lo,
+    o fade saía em escada — medido, 1,18 dB por degrau em WAV e 4,38 dB em FLAC de 16384 amostras, numa rampa de
+    15 dB/s. O nível médio de cada janela de 20 ms acompanha a curva mesmo assim (a tolerância dos outros testes
+    não vê isso); o que se confere aqui é o **degrau** entre janelas vizinhas de 4 ms."""
+    arquivo = tmp_path / f"seno.{extensao}"
+    _run(tools, "-f", "lavfi", "-i", f"sine=f=440:r={TAXA}:d={SEGUNDOS}", "-ac", "2", *codec, str(arquivo))
+    som = media_ref(probe_file(arquivo, tools))
+
+    def exporta(clip, nome):
+        projeto = Project(tracks=(Track(TrackKind.AUDIO, clips=(clip,)),), width=SIZE[0], height=SIZE[1], fps=FPS)
+        return _exporta_som(tools, projeto, tmp_path / nome)
+
+    referencia = exporta(Clip(som, 0.0, 4.0), "ref.wav")
+    teste = exporta(Clip(som, 0.0, 4.0, keyframes=_rampa()), "curva.wav")
+    assert len(teste) == len(referencia)
+    niveis = [_db(teste, referencia, 0.6 + i * 0.004, largura=0.004) for i in range(450)]   # a rampa vai de 0,5 a 2,5 s
+    degrau = max(abs(b - a) for a, b in zip(niveis, niveis[1:]))
+    assert degrau < 0.3, f"{formato}: degrau de {degrau:.2f} dB (a rampa pede ~0,06 dB por janela)"
+
+
+@ffmpeg
 def test_exportacao_segue_a_curva_de_volume(tools, fonte, tmp_path):
     clip = Clip(fonte, 0.0, 4.0, keyframes=_rampa())
     referencia = _exporta_som(tools, _projeto(Clip(fonte, 0.0, 4.0)), tmp_path / "ref.wav")
