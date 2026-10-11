@@ -3345,9 +3345,12 @@ class EditPanel(QWidget):
         self._label_auto_items()
 
     def _label_auto_items(self) -> None:
-        # O que a escolha automática produziu fica à vista mesmo sem abrir a
-        # lista: sem isso, "Automática" não diz em que tela a edição está.
-        proj_aspect = format_aspect_ratio(self._project.width, self._project.height)
+        # O que a escolha automática produziria fica à vista mesmo sem abrir a
+        # lista: sem isso, "Automática" não diz que tela é essa. Vem do material
+        # (``output_canvas`` sem escolha), e não da tela do projeto, que já traz a
+        # escolhida: com 9:16 fixada, "Automática" passava a anunciar 9:16.
+        width, height, _fps = output_canvas(self._project, None, None)
+        proj_aspect = format_aspect_ratio(width, height)
         self._aspect_box.setItemText(
             0,
             f"{strings.EDIT_CANVAS_ASPECT_AUTO}  ({proj_aspect})"
@@ -3357,9 +3360,7 @@ class EditPanel(QWidget):
         self._canvas_box.setItemText(
             0,
             f"{strings.EDIT_CANVAS_AUTO}  ("
-            + strings.EDIT_CANVAS_SIZE.format(
-                width=self._project.width, height=self._project.height
-            )
+            + strings.EDIT_CANVAS_SIZE.format(width=width, height=height)
             + ")",
         )
 
