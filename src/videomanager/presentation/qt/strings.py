@@ -485,6 +485,15 @@ EDIT_DETACH_TIP = (
     "Tira o som do bloco de vídeo e o põe numa trilha de áudio própria, na "
     "mesma posição — o vídeo fica mudo e o som passa a se mover sozinho"
 )
+EDIT_REVERSE = "Inverter"
+EDIT_REVERSE_TIP = (
+    "Toca o bloco de trás para frente, imagem e som. Marcado, escolher de novo "
+    "devolve o bloco ao sentido normal."
+)
+EDIT_REVERSE_TOO_LONG_TIP = (
+    "Longo demais para inverter: a inversão guarda na memória todos os quadros "
+    "do trecho. Divida o bloco (S) e inverta cada parte."
+)
 EDIT_COPY = "Copiar"
 EDIT_PASTE = "Colar"
 EDIT_ADD_VIDEO_TRACK = "+ Vídeo"
