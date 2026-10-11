@@ -3423,7 +3423,11 @@ class EditPanel(QWidget):
                 or self._interaction_context != self._interaction_key()):
             return
         layers = tuple(QPixmap.fromImage(QImage.fromData(data)) for data in images)
-        if len(layers) in (3, 4) and all(not p.isNull() for p in layers):
+        # A contagem é a do plano: com o fundo desfocado são quatro imagens, sem
+        # ele três. Três para um plano com fundo deixariam a faixa descoberta
+        # mostrando a trilha de baixo, sem erro; quatro para um sem, o inverso.
+        expected = 4 if self._interaction_context[2].blur else 3
+        if len(layers) == expected and all(not p.isNull() for p in layers):
             self._preview.set_interaction_layers(layers)
 
     def _begin_loading_hint(self) -> None:

@@ -345,3 +345,32 @@ def test_texto_vira_png_no_worker_do_quadro_e_nao_na_interface(monkeypatch):
     quadro._command()
     camadas._commands()
     assert len(chamadas) == 2  # só quando o comando do worker é montado
+
+
+def test_falha_ao_preparar_as_camadas_do_arrasto_nao_entrega_nada_e_fica_no_log(caplog):
+    """A composição normal continua valendo, mas o motivo de o arrasto ter voltado ao lento não pode sumir."""
+    import logging
+    import sys
+    from videomanager.infrastructure.qt.workers.preview_worker import InteractionWorker
+    entregas, fins = [], []
+    worker = InteractionWorker([[sys.executable, "-c", "raise SystemExit(3)"]], 7)
+    worker.signals.frame.connect(lambda *args: entregas.append(args))
+    worker.signals.done.connect(lambda: fins.append(True))
+    with caplog.at_level(logging.WARNING):
+        worker.run()
+    assert entregas == [] and fins == [True]
+    assert [r for r in caplog.records if "arrasto" in r.getMessage()], "a falha não ficou no log"
+
+
+def test_desistir_no_meio_da_preparacao_das_camadas_nao_vira_aviso_no_log(caplog):
+    import logging
+    from videomanager.infrastructure.qt.workers.preview_worker import InteractionWorker
+
+    def comandos():
+        worker.cancel()
+        raise OSError("o processo foi encerrado")
+
+    worker = InteractionWorker(comandos, 8)
+    with caplog.at_level(logging.WARNING):
+        worker.run()
+    assert not [r for r in caplog.records if "arrasto" in r.getMessage()]
