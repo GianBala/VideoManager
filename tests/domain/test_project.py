@@ -1070,6 +1070,11 @@ class TestFundoDesfocado:
         (HD, {"x": 0.7}),
         (HD, {"rotation": 10.0}),
         (HD, {"keyframes": (Keyframe(0.0), Keyframe(2.0, x=0.8))}),
+        # Os dois extremos estão em pose neutra, mas a curva gira pelo caminho
+        # inteiro (``_interpolate_scalar`` não toma o menor arco a partir de 359,9°).
+        (HD, {"keyframes": (Keyframe(0.0, rotation=0.0), Keyframe(2.0, rotation=360.0))}),
+        (HD, {"keyframes": (Keyframe(0.0, rotation=360.0), Keyframe(2.0, rotation=0.0))}),
+        (HD, {"keyframes": (Keyframe(0.0), Keyframe(1.0), Keyframe(2.0, rotation=720.0))}),
     ])
     def test_aparece_quando_o_bloco_nao_cobre_a_tela(self, media, kw):
         assert self._mostra(media, **kw)
@@ -1083,6 +1088,8 @@ class TestFundoDesfocado:
         # Opacidade não entra: o fade de quem preenche a tela sai como hoje.
         (HD, {"opacity": 0.5}),
         (HD, {"keyframes": (Keyframe(0.0), Keyframe(2.0, opacity=0.0))}),
+        # Sem giro entre os quadros-chave, mesmo com a rotação escrita como 360°.
+        (HD, {"keyframes": (Keyframe(0.0, rotation=360.0), Keyframe(2.0, rotation=360.0))}),
     ])
     def test_nao_aparece_quando_a_frente_cobre_a_tela(self, media, kw):
         assert not self._mostra(media, **kw)

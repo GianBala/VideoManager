@@ -330,6 +330,23 @@ def test_quadros_chave_do_neutro_ao_reduzido_acendem_o_fundo_no_meio_do_bloco(mi
         assert media_da(b, TELA, canto) > 10, "bloco já reduzido e canto preto"
 
 
+def test_giro_completo_por_quadros_chave_acende_o_fundo_no_meio_do_giro(midias, tools) -> None:
+    """Os dois extremos (0° e 360°) são neutros, mas no meio do giro a frente é um retângulo em pé.
+
+    A regra olhava só a pose de cada quadro-chave: o grafo saía sem o fundo e as
+    laterais ficavam pretas a 90°, com duração e quadros certos e nenhum erro.
+    """
+    animacao = (Keyframe(0.0, rotation=0.0), Keyframe(2.0, rotation=360.0))
+    sem_clip, com_clip = par(Clip(midias["v169"], 0.0, 2.0, keyframes=animacao))
+    assert com_clip.shows_blur_background(*TELA)
+    sem, com = projeto((sem_clip,)), projeto((com_clip,))
+    a, b = quadro(sem, 0.5, tools), quadro(com, 0.5, tools)  # 90°: o retângulo em pé ocupa x de 70 a 250
+    assert media_da(a, TELA, (3, 3, 37, 177)) < 1.5, "a lateral devia ser preta sem a opção"
+    assert media_da(b, TELA, (3, 3, 37, 177)) > 10, "a lateral ficou preta no meio do giro com a opção ligada"
+    assert diferenca(a, b, TELA, (80, 10, 240, 170)) < 1.5, "o fundo invadiu a frente"
+    assert quadro(sem, 0.0, tools) == quadro(com, 0.0, tools), "no instante neutro a frente cobre a tela e nada muda"
+
+
 def test_quadros_chave_do_reduzido_ao_neutro_apagam_o_fundo_no_fim(midias, tools) -> None:
     animacao = (Keyframe(0.0, scale_x=0.5, scale_y=0.5), Keyframe(2.0))
     sem_clip, com_clip = par(Clip(midias["v169"], 0.0, 2.0, keyframes=animacao))
