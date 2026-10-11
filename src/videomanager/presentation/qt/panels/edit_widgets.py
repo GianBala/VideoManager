@@ -1167,6 +1167,20 @@ class _ClipPropertiesWidget(QWidget):
         self._build_ui()
         on_language_change(self._retranslate)
 
+    def _fill_presets(self, *, image: bool) -> None:
+        """A lista de efeitos rápidos do bloco: os de imagem só onde há imagem.
+
+        Deslizar, girar e surgir mexem na pose; um bloco de áudio só tem o volume, e para ele sobra o
+        "remover animações". Refaz a lista só quando muda, e o sinal fica calado: quem chama já está
+        sob ``_updating``.
+        """
+        wanted = [key for key in strings.EDIT_ANIMATION_PRESETS if image or key in ("", "clear")]
+        if [self._combo_presets.itemData(i) for i in range(self._combo_presets.count())] == wanted:
+            return
+        self._combo_presets.clear()
+        for key in wanted:
+            self._combo_presets.addItem(strings.EDIT_ANIMATION_PRESETS[key], key)
+
     def _retranslate(self) -> None:
         retext_items(self._combo_easing, strings.EDIT_EASINGS.get)
         retext_items(self._combo_presets, strings.EDIT_ANIMATION_PRESETS.get)
@@ -1636,9 +1650,12 @@ class _ClipPropertiesWidget(QWidget):
             # desfocado, logo abaixo). Olhar a mídia mostrava o Fundo Verde num áudio.
             can_chroma = clip.has_image and clip.has_media_file
 
-            can_animate = clip.overlay_type not in (OverlayType.TRANSITION, OverlayType.FILTER) and (clip.has_image or clip.is_additional)
-            self._transform_group.setVisible(can_animate)
+            can_pose = clip.overlay_type not in (OverlayType.TRANSITION, OverlayType.FILTER) and (clip.has_image or clip.is_additional)
+            # Um bloco de áudio não tem pose, mas tem volume: a animação é a mesma e anima o que ele tem.
+            can_animate = can_pose or clip.can_adjust_sound
+            self._transform_group.setVisible(can_pose)
             self._animation_group.setVisible(can_animate)
+            self._fill_presets(image=can_pose)
             self._chromakey_group.setVisible(can_chroma)
             # Só mídia de arquivo com imagem: texto, filtro, transição e o bloco
             # de "separar áudio" não têm o que desfocar.
@@ -1688,7 +1705,7 @@ class _ClipPropertiesWidget(QWidget):
             self._last_y = clip.y
             self._last_rot = clip.rotation
 
-            if can_animate:
+            if can_pose:
                 px = round(clip.x * self._proj_w)
                 py = round(clip.y * self._proj_h)
                 self._spin_x.setValue(px)
@@ -1700,6 +1717,7 @@ class _ClipPropertiesWidget(QWidget):
                 op_pct = int(round(clip.opacity * 100))
                 self._slider_opacity.setValue(op_pct)
                 self._spin_opacity.setValue(op_pct)
+            if can_animate:
                 self._refresh_keyframe_controls()
 
         finally:
@@ -1711,10 +1729,22 @@ class _ClipPropertiesWidget(QWidget):
         self.speed_changed.emit(self._clip_id, value)
 
     def _on_gain_changed(self, value: float) -> None:
+        """O volume digitado vale no instante do cursor: um ponto da curva num bloco animado.
+
+        Sem quadros-chave é o volume do bloco, como o 🔊 da barra. Com eles, o valor é o que se **ouve** ali
+        e o ponto guarda a diferença para o volume do bloco (ver ``Clip.with_edited_gain``).
+        """
         if self._updating or self._clip_id < 0 or self._clip is None:
             return
-        self._clip = replace(self._clip, gain_db=value)
-        self.property_changed.emit(self._clip_id, {"gain_db": value})
+        offset = self._playhead_pos - self._clip.start
+        updated = self._clip.with_edited_gain(offset, value, fps=self._fps,
+                                              whole_animation=self._whole_animation.isChecked())
+        changes: dict = {"gain_db": updated.gain_db}
+        if updated.keyframes != self._clip.keyframes:
+            changes["keyframes"] = updated.keyframes
+        self._clip = updated
+        self.property_changed.emit(self._clip_id, changes)
+        self._refresh_keyframe_controls()
 
     def _on_chroma_toggled(self, checked: bool) -> None:
         self._enable_chroma_controls(checked)
@@ -1886,6 +1916,8 @@ class _ClipPropertiesWidget(QWidget):
             self._last_x = cur_t.x
             self._last_y = cur_t.y
             self._last_rot = cur_t.rotation
+            # O volume ouvido no cursor: o do bloco, mais a curva dos quadros-chave.
+            self._spin_gain.setValue(self._clip.gain_at(t_offset))
         finally:
             self._updating = was_updating
 
