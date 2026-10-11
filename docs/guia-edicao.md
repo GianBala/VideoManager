@@ -42,9 +42,9 @@ e Salvar como funcionam mesmo com o cursor num campo de texto; antes de gravar,
 o editor fecha os agrupamentos de desfazer em andamento, para o arquivo conter
 o que está na tela.
 
-Projetos são salvos em `.vmp` versão 5. A versão atual abre v1 a v5;
-aplicativos antigos não abrem v5. Ao salvar sobre v1 a v4, uma cópia
-`.vmp.v1.bak` a `.vmp.v4.bak` conserva o arquivo original, com numeração se
+Projetos são salvos em `.vmp` versão 6. A versão atual abre v1 a v6;
+aplicativos antigos não abrem v6. Ao salvar sobre v1 a v5, uma cópia
+`.vmp.v1.bak` a `.vmp.v5.bak` conserva o arquivo original, com numeração se
 necessário. Guarde também as mídias externas.
 
 Ao abrir um projeto v1 ou v2, fotos que estavam em trilhas de Adicionais passam
@@ -295,8 +295,9 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
   em posição, escala e rotação neutras, ela não muda nada na imagem. Numa
   imagem com transparência, a parte transparente entra no fundo como preto. Fica
   indisponível enquanto o Fundo Verde está ligado.
-- **Animação / Quadros-chave** — anima posição, escala, rotação e opacidade ao
-  longo do bloco:
+- **Animação / Quadros-chave** — anima posição, escala, rotação, opacidade e
+  **volume** ao longo do bloco (a **velocidade** não entra: ela muda a duração do
+  bloco, e uma curva dela mudaria o tamanho da trilha a cada ponto):
   - **◀ ◇ ▶** vão ao quadro-chave anterior, adicionam ou removem um quadro-chave
     no cursor e vão ao próximo. Cada quadro-chave é um losango na parte de
     baixo do bloco, na linha do tempo — amarelo, ou azul quando o cursor está
@@ -314,11 +315,23 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
     in-out*) ou Degrau (*hold*). Em cada trecho vale a curva do quadro-chave de
     chegada; o Degrau em qualquer das duas pontas mantém o valor até o ponto
     seguinte.
+  - **Volume animado.** O campo **Volume** da aba mostra o que se ouve no cursor.
+    Num bloco sem quadros-chave ele é o volume do bloco, como o 🔊 da barra; num
+    bloco animado, digitar ali cria ou atualiza o ponto do instante atual — um
+    fade-in, por exemplo, é um ponto em −60 dB no começo e outro em 0 dB um
+    pouco depois. O ponto guarda a diferença para o volume do bloco (o que o 🔊
+    ajusta continua valendo para o bloco todo, e a curva anda em cima dele), e a
+    interpolação é em dB, limitada a −60/+12 dB como o controle. **Editar toda a
+    animação** desloca o volume do bloco inteiro e deixa os pontos onde estão. Um
+    bloco de **áudio** só tem esta animação (sem transformação nem efeitos de
+    imagem); no vídeo com som, o mesmo ponto guarda a pose e o volume daquele
+    instante.
   - **Efeito Rápido** troca os quadros-chave do bloco por uma entrada pronta,
     que dura até 0,6 s a partir do começo do bloco (menos, se ele for mais
     curto): deslizar de baixo, de cima, da direita ou da esquerda, surgir com
-    fade, surgir com zoom ou girar e entrar. **Remover Animações** apaga todos
-    os quadros-chave.
+    fade, surgir com zoom ou girar e entrar — e leva junto a curva de volume, se
+    houver; num bloco de áudio só **Remover Animações** está disponível. **Remover
+    Animações** apaga todos os quadros-chave, também os de volume.
 
   A rotação segue o caminho angular mais curto entre dois pontos. Dividir ou
   aparar um bloco preserva a curva: o trecho que sobra continua avaliando a
@@ -326,7 +339,8 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
 
 O que a prévia mostra e o que o arquivo exportado contém coincide também para
 animação: o compositor traduz os quadros-chave em expressões que o ffmpeg avalia
-a cada quadro (escala, rotação, posição e opacidade).
+a cada quadro (escala, rotação, posição e opacidade) e, para o som, o filtro `volume`
+com o ganho em dB calculado no tempo.
 
 ### Texto
 
@@ -399,7 +413,7 @@ O conteúdo muda conforme o alvo sob o cursor:
 - **Separar áudio** — só quando o bloco tem áudio embutido ainda não
   separado; cria um bloco de áudio independente na trilha de som, e o volume
   do bloco original passa a não fazer mais efeito (o som agora vive no bloco
-  novo)
+  novo, que leva também a curva de volume; o vídeo fica só com a animação da imagem)
 - **Bloco mudo** / **Voltar o som do bloco**
 
 **Sobre um espaço vazio, com algo copiado antes:**
