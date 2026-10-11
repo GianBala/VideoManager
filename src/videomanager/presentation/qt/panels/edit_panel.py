@@ -3185,10 +3185,18 @@ class EditPanel(QWidget):
             self._on_edit_cancelled()
 
     def _show_clip_numbers(self, clip: Clip | None) -> None:
-        """Volume e velocidade do bloco nos botões da barra, com o separador decimal do idioma (por ``bind``)."""
-        gain, speed = (clip.gain_db, clip.speed) if clip is not None else (0.0, 1.0)
-        bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(gain, sign=True)} dB")
-        bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(speed)}x")
+        """Volume e velocidade do bloco nos botões da barra, com o separador decimal do idioma (por ``bind``).
+
+        O sinal de "+" é do volume de um bloco: sem bloco o texto é "0,0 dB", que é mais estreito, e o
+        ``_clip_label`` ao lado ocupa o que sobra.
+        """
+        if clip is not None:
+            gain, speed = clip.gain_db, clip.speed
+            bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(gain, sign=True)} dB")
+            bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(speed)}x")
+        else:
+            bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(0.0)} dB")
+            bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(1.0)}x")
 
     def _refresh_clip_fields(self) -> None:
         clip = self._timeline.selected_clip
