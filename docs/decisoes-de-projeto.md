@@ -137,6 +137,59 @@ mensagem (ver o [formato .vmp](clean-architecture/editor.md#formato-vmp)).
 Mais detalhes em [Prévia, áudio e texto](clean-architecture/previa.md) e em
 [Conversão e exportação](clean-architecture/processamento.md).
 
+## O bloco invertido
+
+**Uma marca no bloco, não um arquivo novo** (`Clip.reversed`). O bloco continua
+cobrindo o trecho `in_point`–`out_point` da mídia e a edição o percorre ao
+contrário: o começo do bloco é o `out_point`. Inverter e desinverter são
+instantâneos e desfazíveis, e nenhuma mídia derivada fica na pasta do usuário.
+O preço é que **tudo que mexe numa ponta precisa saber o sentido**: aparar o
+começo de um invertido tira do topo do trecho (o `in_point` fica), aparar o fim
+tira da base e o `in_point` sobe; dividir dá o ponto novo à primeira metade da
+edição; esticar para no começo ou no fim da mídia conforme o sentido
+(`Project._head_reach` e `_tail_reach`). `Clip.source_time` já devolve o tempo
+certo nos dois sentidos, e `head_point`/`tail_point` dizem onde o bloco começa e
+termina **na edição**, que é o que a transição usa.
+
+**O quadro que a exportação mostra, não o "mais perto" do tempo espelhado.** A
+exportação lê o trecho, vira a lista de quadros e a coloca no relógio da edição
+desde o começo do bloco. O quadro parado da prévia repete essa conta
+(`_reversed_still_seek`): o `k`-ésimo quadro do relógio é o `k`-ésimo contado do
+fim do trecho. Espelhar o instante e procurar o quadro mais perto errava por um
+quadro nas bordas dos quadros da edição. O quadro parado também **não usa
+`reverse`**: lê o quadro certo de frente, sem guardar nada. Medido contra a
+exportação, 0 de diferença nos instantes testados, inclusive no primeiro e no
+último quadro.
+
+**O `reverse` guarda todos os quadros do trecho, e por isso há um teto.** Medido
+(1080p, 30 q/s): 422 MB para 3 s, 700 MB para 6 s, 1203 MB para 12 s. Ao
+contrário do `minterpolate`, o custo cresce com a duração. O teto é de 2 GiB por
+bloco pela conta do pior caso (3 bytes por pixel, para 10 bits), o que dá ~11 s
+em 1080p a 30 q/s. Três defesas: o menu não oferece a inversão acima dele
+(`Clip.can_reverse`, com o motivo na dica); as alças de um bloco invertido não
+o ultrapassam (`Clip.reverse_limit`); e `composer.check_reversal` recusa a
+exportação, com o número, de um projeto que ainda assim o passe — arquivo
+editado à mão, mídia que mudou. **A prévia não recusa**: ela monta o comando na
+thread da interface, onde uma exceção não tem quem a mostre. Dividir o trecho em
+vários processos para vencer o teto ficou de fora: exigiria renderizar pedaços
+intermediários, como a exportação paralela, e o uso comum — cortar e inverter
+trechos curtos — não precisa.
+
+**Lado invertido de uma transição lê um quadro antes.** A janela da transição
+começa no meio de um quadro, e a regra do `-ss` descarta o quadro que a
+atravessa na ponta de **entrada**. Lida para baixo, a ponta que abre a transição
+é a de cima, e ali o mesmo quadro entrava: o cross-fade repetia um quadro no
+começo. `_transition_side` recua a leitura quase um quadro (`_FRAME_EDGE` mantém
+a regra certa quando a janela cai na grade) e o som descarta a sobra
+(`atrim=start`). Medido contra o mesmo projeto montado com um arquivo invertido
+de verdade: antes, 12 de 90 quadros divergiam; depois, nenhum, nos três
+arranjos (os dois invertidos, só o da esquerda, só o da direita).
+
+**No arquivo**, o `.vmp` versão 5 grava `reversed`. Um v4 abre com o bloco no
+sentido normal e ganha a cópia `.v4.bak` ao ser salvo; a versão anterior recusa
+o v5 com mensagem. Imagem, texto, filtro e transição nunca ficam invertidos,
+mesmo num arquivo editado à mão.
+
 ## Fixtures reais em vez de suposições
 
 O que sustenta a promessa de funcionar em plataformas diversas são **fixtures

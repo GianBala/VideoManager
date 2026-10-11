@@ -210,6 +210,10 @@ compartilhado preserva as mesmas regras de montagem entre prévia e saída.
   e camadas simultâneas.
 - Cada peça traduz tempo da edição para tempo da origem, incluindo velocidade.
 - Mixagem usa `amix` com `normalize=0`, preservando o ganho solicitado.
+- Um bloco invertido lê o trecho de baixo para cima (`seek` é o menor instante), corta com
+  `trim` e vira com `reverse`/`areverse` antes do `setpts`; o quadro parado da prévia não vira
+  nada, lê de frente o quadro espelhado (ver
+  [Decisões de projeto](../decisoes-de-projeto.md#o-bloco-invertido)).
 - Transformações, filtros, transições, chroma key e recursos de texto entram
   no grafo sem depender de widgets.
 - Ajuste comum de fps não implica interpolação de movimento. `minterpolate`
