@@ -429,3 +429,32 @@ def test_fundo_desfocado_ligado_pela_aba_entrega_a_quarta_camada_a_previa(pose_p
     worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('red'), _png('#00000000'), _png('blue')))
     worker.signals.done.emit()
     assert len(panel._preview._interaction_layers) == 4
+
+
+def test_camadas_do_gesto_so_valem_com_a_contagem_do_plano(pose_panel):
+    """Com fundo são quatro imagens; sem, três. Outra contagem não é do plano e não se instala.
+
+    Três imagens para um plano com fundo deixariam a faixa descoberta mostrando
+    a trilha de baixo (o defeito que a quarta imagem resolve), sem erro nenhum.
+    """
+    panel, calls, item, deliver = pose_panel
+    panel._properties_widget._chk_blur.click()
+    while panel._frame_busy:
+        deliver(calls.frames[-1])
+    com_fundo = calls.interaction[-1]
+    assert com_fundo.args[0].blur
+    com_fundo.signals.frame.emit(com_fundo.args[3], (_png('lime'), _png('red'), _png('#00000000')))
+    assert panel._preview._interaction_layers is None, 'três imagens para um plano com fundo foram instaladas'
+    com_fundo.signals.frame.emit(com_fundo.args[3], (_png('lime'), _png('red'), _png('#00000000'), _png('blue')))
+    assert len(panel._preview._interaction_layers) == 4, 'a recusa anterior não pode travar a entrega certa'
+    com_fundo.signals.done.emit()
+
+    panel._properties_widget._chk_blur.click()
+    while panel._frame_busy:
+        deliver(calls.frames[-1])
+    sem_fundo = calls.interaction[-1]
+    assert not sem_fundo.args[0].blur and sem_fundo is not com_fundo
+    sem_fundo.signals.frame.emit(sem_fundo.args[3], (_png('lime'), _png('red'), _png('#00000000'), _png('blue')))
+    assert panel._preview._interaction_layers is None, 'quatro imagens para um plano sem fundo foram instaladas'
+    sem_fundo.signals.frame.emit(sem_fundo.args[3], (_png('lime'), _png('red'), _png('#00000000')))
+    assert len(panel._preview._interaction_layers) == 3
