@@ -1588,8 +1588,10 @@ class _ClipPropertiesWidget(QWidget):
             self._aspect_ratio = max(0.001, cur_w / max(1.0, float(cur_h)))
 
             is_trans = clip.overlay_type is OverlayType.TRANSITION
-            has_image_media = bool(clip.media and (clip.media.has_video or clip.is_image))
-            can_chroma = has_image_media and clip.has_media_file
+            # A espécie é do bloco, não da mídia: o bloco de "separar áudio" vem de um
+            # arquivo com imagem e mesmo assim não tem nenhuma (a mesma regra do fundo
+            # desfocado, logo abaixo). Olhar a mídia mostrava o Fundo Verde num áudio.
+            can_chroma = clip.has_image and clip.has_media_file
 
             can_animate = clip.overlay_type not in (OverlayType.TRANSITION, OverlayType.FILTER) and (clip.has_image or clip.is_additional)
             self._transform_group.setVisible(can_animate)
