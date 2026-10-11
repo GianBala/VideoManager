@@ -192,6 +192,17 @@ def test_velocidade_da_aba_recusada_por_colidir_avisa_uma_vez_e_o_campo_volta(pa
     assert aba._spin_speed.value() == pytest.approx(1.0), "o campo mostra a velocidade que valeu"
 
 
+def test_velocidade_da_aba_vale_para_o_bloco_da_aba_e_nao_para_o_selecionado(panel):
+    """``_on_speed`` age sobre o bloco **selecionado**; o pedido da aba traz o id do bloco que ela mostrava."""
+    primeiro, segundo = Clip(_video(), 0.0, 5.0), Clip(_video(), 5.0, 5.0)
+    aba = _abre_propriedades(panel, primeiro, segundo)
+    panel._timeline.select(segundo.clip_id)
+    aba.speed_changed.emit(primeiro.clip_id, 2.0)
+    assert panel._project.find(primeiro.clip_id)[1].speed == pytest.approx(2.0)
+    assert panel._project.find(segundo.clip_id)[1].speed == 1.0
+    assert panel._timeline.selected == primeiro.clip_id, "a seleção acompanha o bloco que mudou"
+
+
 def _cabe_na_coluna(panel) -> bool:
     """Sem rolar para o lado e com as abas à vista (o mesmo critério de tests/test_editor_regressions.py)."""
     barra = panel._extras_tabs.tabBar()
