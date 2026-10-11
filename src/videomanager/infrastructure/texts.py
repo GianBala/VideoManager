@@ -118,6 +118,12 @@ register({
         "Todos os blocos estão mudos ou vazios: não há o que exportar.",
         "Every clip is muted or empty: there's nothing to export.",
     ),
+    "COMPOSE_REVERSE_TOO_LONG": (
+        "O bloco \"{name}\" é longo demais para ser invertido: inverter guarda os quadros do "
+        "trecho na memória ({needed}, e o teto é {limit}). Divida o bloco em partes menores.",
+        "The clip \"{name}\" is too long to reverse: reversing keeps the section's frames in "
+        "memory ({needed}, and the limit is {limit}). Split the clip into shorter parts.",
+    ),
     "COMPOSE_SEGMENT_NO_IMAGE": ("O trecho não tem imagem para exportar.", "The segment has no image to export."),
     "PARALLEL_SEGMENT_FAILED": (
         "O ffmpeg falhou ao interpolar um dos trechos: {detail}",

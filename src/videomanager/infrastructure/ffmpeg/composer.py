@@ -40,6 +40,7 @@ from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
+from videomanager.application.formatting import format_size
 from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.constants import GAIN_EPSILON
 from videomanager.domain.i18n import Text
@@ -59,6 +60,7 @@ from videomanager.domain.timing import last_frame_time
 from videomanager.infrastructure.ffmpeg.trimmer import tail_args
 from videomanager.domain.geometry import image_base_size
 from videomanager.domain.render_cost import interpolation_bytes
+from videomanager.domain.reversal import MAX_REVERSE_BYTES
 
 # Formato interno do áudio. Fixá-lo antes da mixagem evita o erro mais comum de
 # ``amix``: entradas com taxas ou layouts diferentes, que ele recusa.
@@ -85,6 +87,11 @@ _AUDIO_DECLICK = 0.012
 # Duração mínima do fundo. Um projeto vazio ainda precisa de um quadro para
 # mostrar, senão o ffmpeg sai sem escrever nada e a prévia fica sem explicação.
 _MIN_CANVAS = 0.04
+
+# Folga que impede um quadro exatamente sobre a borda de uma janela de ler de
+# ser tomado pelo lado errado dela (ver :func:`_transition_side`). Bem abaixo de
+# qualquer quadro real e bem acima do ruído de ponto flutuante.
+_FRAME_EDGE = 1e-3
 
 # Sobra clonada no fim de um bloco interpolado (ver :func:`_rate_chain`). Meio
 # segundo cobre com folga os poucos quadros que o filtro não consegue produzir,
@@ -118,6 +125,31 @@ class _Piece:
     # Instante real em que o último quadro do arquivo começa, lido dele mesmo
     # (ver ``lastframe``). Só vem preenchido quando a agulha cai nesse quadro.
     tail_start: float | None = None
+    # Lido de trás para frente: ``seek`` é o **menor** instante lido, e depois de
+    # ``trim`` o ``reverse``/``areverse`` vira o trecho. Os quadros parados da
+    # prévia não usam isto (ver ``_pieces``): leem um quadro só, já no lugar.
+    flip: bool = False
+    # Tempo de edição entre o começo do bloco e o começo deste trecho. Só o bloco
+    # invertido o usa: nele ``seek`` deixa de dizer quanto do bloco já passou.
+    elapsed: float = 0.0
+
+
+def _reversed_still_seek(clip: Clip, moment: float) -> float:
+    """Instante do quadro que a exportação mostra em ``moment`` num bloco invertido.
+
+    A exportação lê o trecho em ordem, vira a lista de quadros e a coloca no
+    relógio da edição a partir do começo do bloco. O quadro ``k`` desse relógio
+    é, portanto, o ``k``-ésimo contado do **fim** do trecho — e é essa a conta
+    que o quadro parado repete, em vez de achar o quadro "mais perto" do tempo
+    espelhado, que erra por um quadro nas bordas de cada quadro da edição.
+    Devolve o meio do quadro de origem, para a grade do arquivo não desempatar.
+    """
+    fps = clip.media.fps
+    first = math.ceil(clip.in_point * fps - 1e-6)
+    last = math.ceil(clip.out_point * fps - 1e-6) - 1
+    shown = math.floor(max(0.0, moment - clip.start) * clip.speed * fps + 1e-6)
+    index = max(first, last - shown)
+    return (index + 0.5) / fps
 
 
 def _pieces(
@@ -173,6 +205,23 @@ def _pieces(
             has_a = want_audio and clip.has_sound and not track.muted
             if not has_v and not has_a:
                 continue
+            is_still = (still and clip.media is not None and clip.media.kind is MediaKind.VIDEO
+                        and bool(clip.media.fps))
+            seek = clip.source_time(begin)
+            flip = False
+            if clip.reversed:
+                if is_still and end is not None:
+                    # Um quadro só: lê-se o quadro espelhado de frente para trás,
+                    # sem ``reverse`` e sem guardar nada. O trecho encolhe até o
+                    # último instante da janela, que é o que a tela mostra; se o
+                    # bloco já acabou antes dele, não há o que desenhar.
+                    begin = max(begin, end - 1.0 / project.fps)
+                    if finish - begin <= 0:
+                        continue
+                    seek = _reversed_still_seek(clip, begin)
+                else:
+                    seek = clip.source_time(finish)
+                    flip = True
             is_overlay_filter = clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION)
             idx = -1 if is_overlay_filter else input_idx
             if not is_overlay_filter:
@@ -181,14 +230,15 @@ def _pieces(
                 _Piece(
                     clip=clip,
                     index=idx,
-                    seek=clip.source_time(begin),
+                    seek=seek,
                     offset=begin - at,
                     duration=finish - begin,
                     track_index=track_index,
                     track_muted=track.muted,
-                    still=(still and clip.media is not None and clip.media.kind is MediaKind.VIDEO
-                           and bool(clip.media.fps)),
-                    tail_start=(tails or {}).get(clip.clip_id) if still else None,
+                    still=is_still,
+                    tail_start=((tails or {}).get(clip.clip_id) if is_still and not clip.reversed else None),
+                    flip=flip,
+                    elapsed=begin - clip.start,
                 )
             )
     return pieces
@@ -213,7 +263,7 @@ def _tail_clips(project: Project, at: float) -> list[Clip]:
         for clip in track.clips:
             media = clip.media
             if (not clip.contains(at) or media is None or media.kind is not MediaKind.VIDEO
-                    or not media.fps or not media.duration):
+                    or not media.fps or not media.duration or clip.reversed):
                 continue
             last = frame_time(max(0, frame_index(media.duration, media.fps) - 1), media.fps)
             if clip.source_time(at) >= last - 1e-9:
@@ -461,6 +511,9 @@ def _chromakey_filter(clip: Clip) -> str | None:
 def _clip_stream_origin(piece: _Piece) -> float:
     """Calcula a origem temporal do clipe no fluxo (PTS=0), considerando o seek."""
     clip = piece.clip
+    if clip.reversed:
+        # Lendo para baixo, ``seek`` deixou de medir o quanto do bloco já passou.
+        return piece.offset - piece.elapsed
     speed = max(0.001, clip.speed)
     elapsed = max(0.0, (piece.seek - clip.in_point) / speed)
     return piece.offset - elapsed
@@ -774,6 +827,8 @@ def _video_chain(
         steps.append(f"select='gte(t,{-margin:.6f})'")
     if clip.changes_speed:
         steps.append(f"trim=duration={piece.duration * clip.speed:.6f}")
+        if piece.flip:
+            steps.append("reverse")
         inv = 1.0 / clip.speed
         if piece.offset > 0:
             steps.append(f"setpts={inv:.6f}*(PTS-STARTPTS)+{piece.offset:.6f}/TB")
@@ -781,6 +836,12 @@ def _video_chain(
             steps.append(f"setpts={inv:.6f}*(PTS-STARTPTS)")
     else:
         steps.append(f"trim=duration={piece.duration:.6f}")
+        if piece.flip:
+            # Logo depois do ``trim`` e antes do ``setpts``: o ``reverse`` devolve
+            # os instantes originais em ordem crescente, e é o ``setpts`` que os
+            # leva ao relógio da edição. Também antes da divisão do fundo
+            # desfocado (``lead``), para frente e fundo saírem do mesmo fluxo.
+            steps.append("reverse")
         if piece.offset > 0:
             steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
         else:
@@ -994,9 +1055,13 @@ def _audio_chain(
     clip = piece.clip
     if clip.changes_speed:
         steps = [f"atrim=duration={piece.duration * clip.speed:.6f}", "asetpts=PTS-STARTPTS"]
+        if piece.flip:
+            steps.append("areverse")
         steps += _atempo_filters(clip.speed)
     else:
         steps = [f"atrim=duration={piece.duration:.6f}", "asetpts=PTS-STARTPTS"]
+        if piece.flip:
+            steps.append("areverse")
     if clip.changes_gain:
         steps.append(f"volume={clip.gain_db:.2f}dB")
     steps.append(_AUDIO_BASE)
@@ -1051,6 +1116,11 @@ class _TransitionSide:
     postpad: float
     duration: float
     playback_speed: float
+    # O bloco é invertido: o trecho é lido para cima e virado (ver ``_Piece.flip``).
+    flip: bool = False
+    # Quanto **antes** do começo do trecho a leitura começa (ver
+    # :func:`_transition_side`). O som descarta essa sobra, a imagem a usa.
+    lead: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -1135,7 +1205,11 @@ def _is_continuous_source_cut(context: TransitionContext) -> bool:
     return bool(
         context.left.media.path == context.right.media.path
         and context.left.media.kind is context.right.media.kind
-        and abs(context.left.out_point - context.right.in_point) <= 1e-4
+        # Onde um termina e o outro começa, lidos no sentido de cada um: dois
+        # blocos invertidos de uma mesma divisão se emendam pela base do
+        # primeiro, e um invertido nunca emenda com um que não é.
+        and context.left.reversed == context.right.reversed
+        and abs(context.left.tail_point - context.right.head_point) <= 1e-4
         and abs(context.left.speed - context.right.speed) <= 1e-6
     )
 
@@ -1161,15 +1235,35 @@ def _transition_side(
     if clip.media.duration is not None:
         actual_end = min(actual_end, clip.media.duration)
     actual_end = max(actual_start, actual_end)
+    prepad = max(0.0, (actual_start - wanted_start) / playback_speed)
+    postpad = max(0.0, (wanted_end - actual_end) / playback_speed)
+    lead = 0.0
+    if clip.reversed:
+        # O que falta antes do começo da mídia fica, depois de virar o trecho,
+        # no **fim** do que a edição mostra — e o que falta depois do fim da
+        # mídia, no começo.
+        prepad, postpad = postpad, prepad
+        # A janela de uma transição começa no meio de um quadro, e a regra de
+        # quem entra nela é a do ``-ss``: descarta o quadro que a atravessa no
+        # começo. Lida para baixo, a ponta que abre a transição é a de cima, e
+        # ali o mesmo quadro entrava: o lado invertido repetia um quadro no
+        # começo do cross-fade. Recuar a leitura quase um quadro espelha a regra
+        # (medido contra o mesmo projeto montado com o arquivo invertido de
+        # verdade: 12 de 90 quadros divergiam, nenhum depois). O "quase" é o
+        # que mantém a regra certa quando a janela cai exatamente na grade.
+        if clip.media.fps:
+            lead = min(actual_start, 1.0 / clip.media.fps - _FRAME_EDGE)
     return _TransitionSide(
         clip=clip,
         index=index,
-        seek=actual_start,
+        seek=actual_start - lead,
+        lead=lead,
         source_duration=max(0.001, actual_end - actual_start),
-        prepad=max(0.0, (actual_start - wanted_start) / playback_speed),
-        postpad=max(0.0, (wanted_end - actual_end) / playback_speed),
+        prepad=prepad,
+        postpad=postpad,
         duration=duration,
         playback_speed=playback_speed,
+        flip=clip.reversed,
     )
 
 
@@ -1182,11 +1276,14 @@ def _has_audio_handles(context: TransitionContext) -> bool:
     lados. Sem elas, o áudio normal recebe fades curtos até/depois do corte.
     """
     half = context.duration / 2.0
-    left_media_end = context.left.media.duration
-    if left_media_end is None:
+    left, right = context.left, context.right
+    if left.media.duration is None or (right.reversed and right.media.duration is None):
         return False
-    left_handle = max(0.0, (left_media_end - context.left.out_point) / context.left.speed)
-    right_handle = max(0.0, context.right.in_point / context.right.speed)
+    # Material que sobra além da ponta, no sentido em que cada bloco toca.
+    left_handle = max(0.0, (left.tail_point if left.reversed else left.media.duration - left.tail_point)
+                      / left.speed)
+    right_handle = max(0.0, ((right.media.duration - right.head_point) if right.reversed else right.head_point)
+                       / right.speed)
     return left_handle + 1e-6 >= half and right_handle + 1e-6 >= half
 
 
@@ -1209,6 +1306,7 @@ def _transition_video_chain(
     clip = side.clip
     steps = [
         f"trim=duration={side.source_duration:.6f}",
+        *(["reverse"] if side.flip else []),
         f"setpts=(PTS-STARTPTS)/{side.playback_speed:.6f}",
         # ``tpad`` só consegue converter segundos em quadros quando estes já
         # têm duração. Alguns MP4 entregam ``duration=0`` no fim do arquivo;
@@ -1239,8 +1337,12 @@ def _transition_video_chain(
 
     # Decodificação/alças são específicas da transição; transformação e alfa
     # usam a mesma composição de uma camada normal, no relógio da timeline.
-    elapsed = (side.seek - clip.in_point) / side.playback_speed - side.prepad
-    local_clip = replace(clip, start=0, duration=side.duration, in_point=0, speed=1,
+    if clip.reversed:
+        top = side.seek + side.lead + side.source_duration
+        elapsed = (clip.out_point - top) / side.playback_speed - side.prepad
+    else:
+        elapsed = (side.seek - clip.in_point) / side.playback_speed - side.prepad
+    local_clip = replace(clip, start=0, duration=side.duration, in_point=0, speed=1, reversed=False,
                          keyframes=tuple(replace(k, time_offset=k.time_offset-elapsed) for k in clip.keyframes))
     decoded = f"{label[:-1]}_decoded]"
     base = f"{label[:-1]}_base]"
@@ -1260,8 +1362,12 @@ def _transition_video_chain(
 def _transition_audio_chain(side: _TransitionSide, label: str) -> str:
     clip = side.clip
     steps = [
-        f"atrim=duration={side.source_duration:.6f}",
+        # O som lê desde o mesmo ``-ss`` da imagem: a sobra de leitura dela é
+        # descartada aqui, para a janela do som continuar a que foi pedida.
+        f"atrim=start={side.lead:.6f}:duration={side.source_duration:.6f}" if side.lead > 0
+        else f"atrim=duration={side.source_duration:.6f}",
         "asetpts=PTS-STARTPTS",
+        *(["areverse"] if side.flip else []),
         *_atempo_filters(side.playback_speed),
     ]
     if clip.changes_gain:
@@ -1604,6 +1710,26 @@ def _blur_where_visible(project: Project, size: tuple[int, int]) -> Project:
     ))
 
 
+def check_reversal(project: Project) -> None:
+    """Recusa a exportação em que um bloco invertido passa do teto de memória.
+
+    O menu e as alças já impedem que um bloco chegue lá, mas o projeto pode vir
+    de um arquivo editado à mão ou de uma mídia que mudou de tamanho — e o
+    ``reverse`` não tem controle de memória: ou recusa aqui, com o número, ou
+    esgota a máquina no meio da exportação. A prévia não passa por aqui de
+    propósito: ela monta o comando na thread da interface, onde uma exceção
+    não tem quem a mostre.
+    """
+    for clip in project.clips:
+        if clip.reversed and clip.reverse_cost > MAX_REVERSE_BYTES:
+            raise ConversionError(Text(
+                "COMPOSE_REVERSE_TOO_LONG",
+                name=clip.media.name,
+                needed=Text.of(format_size, clip.reverse_cost),
+                limit=Text.of(format_size, MAX_REVERSE_BYTES),
+            ))
+
+
 def build_graph(
     project: Project,
     *,
@@ -1697,13 +1823,13 @@ def build_graph(
         left = _transition_side(
             context.left,
             next_input,
-            context.left.out_point,
+            context.left.tail_point,
             context.duration,
         )
         right = _transition_side(
             context.right,
             next_input + 1,
-            context.right.in_point,
+            context.right.head_point,
             context.duration,
         )
         inputs += _transition_input_args(left, fps)
@@ -1965,6 +2091,8 @@ def export_args(
     project = project.for_export()
     if project.is_empty:
         raise ConversionError(Text("COMPOSE_NOTHING"))
+    if not audio_only:
+        check_reversal(project)
 
     if audio_only:
         graph = build_graph(project, want_video=False, want_audio=True, text_assets=text_assets)
@@ -2369,6 +2497,7 @@ def segment_video_args(
     arbitrários produz salto ou estalo na junção, porque o quadro de áudio não
     termina onde o corte cai; o som sai num passe só, que é barato.
     """
+    check_reversal(project)
     graph = build_graph(
         project, at=at, span=span + _SEGMENT_TAIL, want_audio=False, interpolate=True
     , text_assets=text_assets)
