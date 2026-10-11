@@ -10,15 +10,21 @@ quadro parado da prévia é o mesmo que a exportação mostra no mesmo instante.
 import array
 import math
 import subprocess
+import time
 from dataclasses import replace
 
 import pytest
 
 from videomanager.application.errors import ConversionError
+from videomanager.domain.composition import Composition
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip, Project, Track, TrackKind, media_ref
 from videomanager.infrastructure.ffmpeg import composer
+from videomanager.infrastructure.ffmpeg.command_assets import filter_script
 from videomanager.infrastructure.ffmpeg.converter import probe_file
+from videomanager.infrastructure.ffmpeg.parallel import ParallelExport, reversal_bounds
+from videomanager.infrastructure.ffmpeg.preview import FramePump
+from videomanager.infrastructure.ffmpeg.stages import open_process
 from videomanager.infrastructure.system.binaries import find_tools, subprocess_kwargs
 
 pytestmark = pytest.mark.ffmpeg
@@ -78,15 +84,32 @@ def _amostras(tools, path):
     return saida
 
 
+def _canal_esquerdo(tools, path):
+    dados = _run(tools, "-i", str(path), "-vn", "-ac", "2", "-ar", "48000", "-f", "s16le", "-")
+    saida = array.array("h")
+    saida.frombytes(dados[: len(dados) // 4 * 4])
+    return saida[0::2]
+
+
 def _erro_relativo(a, b):
     n = min(len(a), len(b))
     diferenca = math.sqrt(sum((a[i] - b[i]) ** 2 for i in range(n)) / n)
     return diferenca / (math.sqrt(sum(v * v for v in b[:n]) / n) or 1.0)
 
 
+def _lidos(tools, comando, tamanho):
+    """Todos os bytes que um comando (ou uma sequência de comandos) entrega."""
+    with filter_script(comando) as pronto:
+        processo = open_process(pronto, **subprocess_kwargs())
+        dados = processo.stdout.read(-1)
+        processo.wait(timeout=60)
+    assert processo.returncode == 0
+    return dados
+
+
 def _quadros_da_reproducao(tools, projeto, instante):
     comando = composer.playback_command(projeto, instante, SIZE, tools, fps=FPS)
-    dados = subprocess.run(comando, check=True, timeout=180, **subprocess_kwargs()).stdout
+    dados = _lidos(tools, comando, SIZE)
     tam = SIZE[0] * SIZE[1] * 3
     return [sum(0.299 * dados[i + j] + 0.587 * dados[i + j + 1] + 0.114 * dados[i + j + 2]
                 for j in range(0, tam, 3)) / (tam / 3) for i in range(0, len(dados) - tam + 1, tam)]
@@ -127,13 +150,21 @@ def test_velocidade_dobrada_toca_o_trecho_inteiro_ao_contrario(tools, fonte, tmp
     dict(duration=2.0, in_point=1.0),
 ], ids=["inteiro", "trecho"])
 def test_som_invertido_amostra_a_amostra(tools, fonte, tmp_path, campos):
-    normal = _amostras(tools, _exporta(tools, _projeto(Clip(fonte, 0.0, **campos)), tmp_path / "n.wav",
-                                       container="wav", audio_only=True, audio_codec="wav"))
+    """O som invertido é o trecho exato da fonte, de trás para frente.
+
+    A referência é a decodificação da própria fonte, e não a exportação normal: o
+    bloco normal que começa no meio do arquivo perde cerca de 1000 amostras no
+    começo (o primeiro quadro do AAC sai sem o vizinho de sobreposição), e o
+    invertido lê mais cedo para não carregar esse defeito (``_PREROLL``).
+    """
     invertido = _amostras(tools, _exporta(tools, _projeto(Clip(fonte, 0.0, reversed=True, **campos)),
                                           tmp_path / "i.wav", container="wav", audio_only=True, audio_codec="wav"))
-    assert len(invertido) == len(normal) > 40_000
-    assert _erro_relativo(invertido, normal[::-1]) < 1e-4
-    assert _erro_relativo(invertido, normal) > 0.5  # e não é o som normal
+    exata = _amostras(tools, fonte.path)
+    inicio = round(campos.get("in_point", 0.0) * 48_000)
+    trecho = exata[inicio:inicio + round(campos["duration"] * 48_000)]
+    assert len(invertido) == len(trecho) > 40_000
+    assert _erro_relativo(invertido, trecho[::-1]) < 1e-4  # sobra só o arredondamento do descendente para mono
+    assert _erro_relativo(invertido, trecho) > 0.5  # e não é o som normal
 
 
 def test_volume_do_bloco_vale_no_som_invertido(tools, fonte, tmp_path):
@@ -299,38 +330,160 @@ def test_trechos_paralelos_da_interpolacao_emendam_o_invertido_igual_ao_serial(t
 
 
 # ---------------------------------------------------------------------------
-# Teto de memória
+# Janelas: o que limita a memória do bloco invertido
 # ---------------------------------------------------------------------------
+
+# Orçamento que o quadro de 64×64 não alcançaria sozinho: com ele a fonte de
+# 4 s é lida em janelas de 1,6 s, e é o caminho das janelas que se exercita.
+_ORCAMENTO_PEQUENO = 600_000
+
+
+@pytest.fixture
+def previa_em_janelas(monkeypatch):
+    """A prévia lê em janelas de 1 s; a exportação de referência segue num processo só."""
+    monkeypatch.setattr(composer, "PREVIEW_WINDOW_SECONDS", 1.0)
+
+
+@pytest.fixture
+def agulha_em_janelas(monkeypatch):
+    monkeypatch.setattr(composer, "MAX_REVERSE_BYTES", _ORCAMENTO_PEQUENO)
 
 
 def _grande(fonte):
-    """Um bloco de 4K invertido de dois minutos: muito além do teto."""
+    """Um bloco de 4K invertido de dois minutos: muito além do que um processo aguenta."""
     return replace(fonte, width=3840, height=2160, fps=30.0, duration=600.0)
 
 
-def test_exportacao_recusa_bloco_invertido_acima_do_teto(tools, fonte, tmp_path):
-    projeto = _projeto(Clip(_grande(fonte), 0.0, 120.0, reversed=True))
-    with pytest.raises(ConversionError) as erro:
-        composer.export_args(projeto, tmp_path / "x.mp4", tools)
-    assert "invert" in str(erro.value).lower() or "reverse" in str(erro.value).lower()
+def test_bloco_grande_e_dividido_em_janelas_e_nao_recusado(tools, fonte):
+    """Era o defeito: um vídeo de 1080p com mais de ~11 s ficava sem poder ser invertido."""
+    composicao = Composition(_projeto(Clip(_grande(fonte), 0.0, 120.0, reversed=True)), "mp4")
+    janelas = reversal_bounds(composicao)
+    assert len(janelas) > 40
+    assert sum(duracao for _, duracao in janelas) == pytest.approx(120.0)
+    assert all(abs(a - b[0] - b[1]) < 1e-6 for (_, _), a, b in zip(janelas, [j[0] for j in janelas[1:]], janelas))
 
 
-def test_recusa_vale_tambem_para_o_gif_e_para_os_trechos_paralelos(tools, fonte, tmp_path):
+def test_um_processo_so_recusa_o_que_precisaria_de_janelas(tools, fonte, tmp_path):
     projeto = _projeto(Clip(_grande(fonte), 0.0, 120.0, reversed=True))
     with pytest.raises(ConversionError):
         composer.export_args(projeto, tmp_path / "x.gif", tools, container="gif")
     with pytest.raises(ConversionError):
-        composer.segment_video_args(projeto, 0.0, 10.0, tmp_path / "t.mp4", tools)
+        composer.export_args(projeto, tmp_path / "x.mp4", tools)
 
 
-def test_previa_nao_levanta_para_o_mesmo_projeto(tools, fonte):
-    """A prévia monta o comando na thread da interface, onde uma exceção não tem quem a mostre."""
+def test_exportacao_so_de_som_nao_se_divide(tools, fonte, tmp_path):
     projeto = _projeto(Clip(_grande(fonte), 0.0, 120.0, reversed=True))
-    composer.frame_command(projeto, 1.0, SIZE, tools)
-    composer.playback_command(projeto, 1.0, SIZE, tools, fps=FPS)
-
-
-def test_exportacao_so_de_som_nao_tem_teto(tools, fonte, tmp_path):
-    projeto = _projeto(Clip(_grande(fonte), 0.0, 120.0, reversed=True))
+    composicao = Composition(projeto, "wav", audio_only=True, audio_codec="wav")
+    assert reversal_bounds(composicao) == ()
     assert composer.export_args(projeto, tmp_path / "x.wav", tools, container="wav", audio_only=True,
                                 audio_codec="wav")
+
+
+def test_edicao_sem_bloco_invertido_nao_se_divide(tools, fonte):
+    assert reversal_bounds(Composition(_projeto(Clip(fonte, 0.0, 4.0)), "mp4")) == ()
+
+
+def _exporta_em_janelas(tools, projeto, destino):
+    composicao = Composition(projeto, "mp4")
+    janelas = reversal_bounds(composicao)
+    assert len(janelas) > 1
+    ParallelExport(composicao, destino, tools, len(janelas), bounds=janelas, workers=1).run()
+    return destino, len(janelas)
+
+
+@pytest.mark.parametrize("campos", [dict(duration=4.0), dict(duration=2.5, in_point=0.7)],
+                         ids=["inteiro", "trecho"])
+def test_exportacao_em_janelas_igual_a_de_um_processo_so(tools, fonte, tmp_path, monkeypatch, campos):
+    projeto = _projeto(Clip(fonte, 0.0, reversed=True, **campos))
+    um_so = _brilhos(tools, _exporta(tools, projeto, tmp_path / "um.mp4"))
+    som_um_so = _amostras(tools, _exporta(tools, projeto, tmp_path / "um.wav", container="wav", audio_only=True,
+                                          audio_codec="wav"))
+    monkeypatch.setattr(composer, "MAX_REVERSE_BYTES", _ORCAMENTO_PEQUENO)
+    janelas, quantas = _exporta_em_janelas(tools, projeto, tmp_path / "janelas.mp4")
+    assert quantas >= 2
+    em_janelas = _brilhos(tools, janelas)
+    assert len(em_janelas) == len(um_so)
+    assert max(abs(a - b) for a, b in zip(em_janelas, um_so)) < 2.0
+    # O som sai num passe só: a duração e o conteúdo são os do caminho serial.
+    assert abs(len(_amostras(tools, janelas)) - len(som_um_so)) < 2_500
+
+
+def test_exportacao_em_janelas_com_bloco_normal_antes_e_invertido_por_cima(tools, fonte, tmp_path, monkeypatch):
+    base = Clip(fonte, 0.0, 4.0)
+    por_cima = Clip(fonte, 1.0, 2.5, in_point=0.5, reversed=True, opacity=0.6)
+    projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=(por_cima,)), Track(TrackKind.VIDEO, clips=(base,))),
+                      width=SIZE[0], height=SIZE[1], fps=FPS)
+    um_so = _brilhos(tools, _exporta(tools, projeto, tmp_path / "um.mp4"))
+    monkeypatch.setattr(composer, "MAX_REVERSE_BYTES", _ORCAMENTO_PEQUENO)
+    janelas, quantas = _exporta_em_janelas(tools, projeto, tmp_path / "janelas.mp4")
+    em_janelas = _brilhos(tools, janelas)
+    assert quantas >= 2 and len(em_janelas) == len(um_so)
+    assert max(abs(a - b) for a, b in zip(em_janelas, um_so)) < 3.0
+
+
+@pytest.mark.parametrize("instante", [0.0, 1.3, 2.51])
+def test_reproducao_em_janelas_acompanha_a_exportacao(tools, fonte, tmp_path, previa_em_janelas, instante):
+    projeto = _projeto(Clip(fonte, 0.0, 4.0, reversed=True))
+    comando = composer.playback_command(projeto, instante, SIZE, tools, fps=FPS)
+    assert hasattr(comando, "commands") and len(comando.commands) >= 2  # é uma sequência de janelas
+    quadros = _quadros_da_reproducao(tools, projeto, instante)
+    exportado = _brilhos(tools, _exporta(tools, projeto, tmp_path / "e.mp4"))
+    esperado = exportado[round(instante * FPS):]
+    assert abs(len(quadros) - len(esperado)) <= 1
+    assert max(abs(a - b) for a, b in zip(quadros, esperado)) < 2.5
+
+
+def test_reproducao_em_janelas_chega_ao_fim_no_ritmo_e_sem_pausa_nas_emendas(tools, fonte, previa_em_janelas):
+    """A janela seguinte abre antes de a atual acabar: a reprodução não percebe a emenda."""
+    projeto = _projeto(Clip(fonte, 0.0, 3.0, reversed=True))
+    comando = composer.playback_command(projeto, 0.0, SIZE, tools, fps=FPS)
+    assert len(comando.commands) == 3
+    instantes, quadros = [], []
+    inicio = time.perf_counter()
+    for quadro in FramePump(comando, 0.0, SIZE, fps=FPS).frames():
+        instantes.append(time.perf_counter())
+        quadros.append(quadro)
+    assert len(quadros) == 90
+    assert max(b - a for a, b in zip(instantes, instantes[1:])) < 0.35
+    assert instantes[-1] - inicio == pytest.approx(3.0, abs=0.7)
+    assert [round(q.seconds * FPS) for q in quadros] == list(range(90))
+
+
+def test_som_da_previa_em_janelas_e_o_do_passe_unico_sem_estalo_nas_emendas(tools, fonte, tmp_path, previa_em_janelas):
+    projeto = _projeto(Clip(fonte, 0.0, 4.0, reversed=True))
+    comando = composer.audio_command(projeto, 0.0, tools)
+    assert hasattr(comando, "commands") and len(comando.commands) >= 3
+    pcm = array.array("h")
+    pcm.frombytes(_lidos(tools, comando, None))
+    esquerdo = pcm[0::2]
+    referencia = _canal_esquerdo(tools, _exporta(tools, projeto, tmp_path / "r.wav", container="wav",
+                                                 audio_only=True, audio_codec="wav"))
+    assert len(esquerdo) == len(referencia) == 4 * 48_000
+    assert _erro_relativo(esquerdo, referencia) < 1e-4
+
+
+def test_som_da_previa_ate_um_instante_tem_a_duracao_pedida(tools, fonte, previa_em_janelas):
+    projeto = _projeto(Clip(fonte, 0.0, 4.0, reversed=True))
+    comando = composer.audio_command(projeto, 0.5, tools, until=3.5)
+    assert len(_lidos(tools, comando, None)) == round(3.0 * 48_000) * 2 * 2
+
+
+def test_cache_da_agulha_pede_so_a_primeira_janela(tools, fonte, agulha_em_janelas):
+    """O que sobra continua sem quadro, e o painel volta a pedir."""
+    projeto = _projeto(Clip(fonte, 0.0, 4.0, reversed=True))
+    comando = composer.scrub_command(projeto, 0.0, 4.0, SIZE, tools, fps=FPS)
+    quadros = comando[comando.index("-frames:v") + 1]
+    assert int(quadros) == 48  # 1,6 s a 30 q/s, e não os 120 pedidos
+
+
+def test_cache_da_agulha_sem_bloco_invertido_pede_o_trecho_todo(tools, fonte, agulha_em_janelas):
+    projeto = _projeto(Clip(fonte, 0.0, 4.0))
+    comando = composer.scrub_command(projeto, 0.0, 4.0, SIZE, tools, fps=FPS)
+    assert int(comando[comando.index("-frames:v") + 1]) == 120
+
+
+def test_quadro_parado_nao_depende_do_tamanho_do_bloco(tools, fonte):
+    """O quadro parado lê um quadro de frente, sem ``reverse``: bloco de qualquer tamanho."""
+    projeto = _projeto(Clip(_grande(fonte), 0.0, 120.0, reversed=True))
+    comando = composer.frame_command(projeto, 1.0, SIZE, tools)
+    assert "reverse" not in " ".join(comando)

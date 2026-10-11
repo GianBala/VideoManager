@@ -43,7 +43,7 @@ from videomanager.domain.i18n import decimal, t, variants
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import interpolate_keyframes
 from videomanager.domain.preview import fit_size
-from videomanager.domain.reversal import MAX_REVERSE_BYTES, reverse_bytes, reverse_seconds_limit
+from videomanager.domain.reversal import MAX_REVERSE_SPAN, reverse_rate
 from videomanager.domain.timing import source_time, available_duration, frame_index
 
 if TYPE_CHECKING:  # pragma: no cover - só para o verificador de tipos
@@ -464,33 +464,40 @@ class Clip:
         )
 
     @property
-    def reverse_cost(self) -> int:
-        """Memória que inverter a imagem deste bloco pede (ver ``domain.reversal``).
+    def reverse_rate(self) -> float:
+        """Bytes que a imagem invertida deste bloco guarda por segundo de edição.
 
-        Só a imagem pesa: o som invertido ocupa uma fração dela. Um bloco sem
-        imagem custa zero.
+        Zero num bloco sem imagem (o som invertido pesa uma fração dela) e
+        infinito quando o arquivo não informa o tamanho do quadro — e com ele a
+        conta de janela de ``render_cost.reverse_cuts``.
         """
         if not self.is_reversible or not self.has_image:
-            return 0
+            return 0.0
         media = self.media
-        return reverse_bytes(media.width, media.height, media.fps, self.duration * self.speed)
+        return reverse_rate(media.width, media.height, media.fps, self.speed)
 
     @property
     def reverse_limit(self) -> float:
-        """Maior duração que o bloco invertido pode ter na edição (``inf`` sem imagem)."""
-        if not self.is_reversible or not self.has_image:
+        """Maior duração que um bloco invertido pode ter na edição (``inf`` se não inverte).
+
+        O vídeo não tem teto: a exportação e a prévia o leem em janelas. O som
+        sai num passe só e tem o seu (``MAX_REVERSE_SPAN``).
+        """
+        if not self.is_reversible:
             return float("inf")
-        media = self.media
-        return reverse_seconds_limit(media.width, media.height, media.fps) / self.speed
+        return MAX_REVERSE_SPAN / self.speed
 
     @property
     def can_reverse(self) -> bool:
-        """Se o menu pode oferecer a inversão: tem o que inverter e o trecho cabe.
+        """Se o menu pode oferecer a inversão: tem o que inverter e dá para planejar.
 
         Já invertido, desfazer é sempre possível — mesmo que o bloco tenha
-        crescido além do teto depois de invertido.
+        crescido além do limite, ou que a mídia tenha mudado, depois de invertido.
         """
-        return self.is_reversible and (self.reversed or self.reverse_cost <= MAX_REVERSE_BYTES)
+        return self.is_reversible and (
+            self.reversed
+            or (self.reverse_rate != float("inf") and self.duration <= self.reverse_limit + 1e-9)
+        )
 
     @property
     def gain_label(self) -> str:

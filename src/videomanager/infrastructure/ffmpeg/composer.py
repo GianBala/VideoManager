@@ -40,11 +40,11 @@ from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
-from videomanager.application.formatting import format_size
 from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.constants import GAIN_EPSILON
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
+from videomanager.domain.preview import BYTES_PER_PIXEL
 from videomanager.domain.preview import fit_size
 from videomanager.domain.project import Clip
 from videomanager.domain.project import OverlayType
@@ -60,7 +60,9 @@ from videomanager.domain.timing import last_frame_time
 from videomanager.infrastructure.ffmpeg.trimmer import tail_args
 from videomanager.domain.geometry import image_base_size
 from videomanager.domain.render_cost import interpolation_bytes
-from videomanager.domain.reversal import MAX_REVERSE_BYTES
+from videomanager.domain.render_cost import reverse_cuts
+from videomanager.domain.reversal import MAX_REVERSE_BYTES, PREVIEW_WINDOW_SECONDS
+from videomanager.infrastructure.ffmpeg.stages import Stages
 
 # Formato interno do áudio. Fixá-lo antes da mixagem evita o erro mais comum de
 # ``amix``: entradas com taxas ou layouts diferentes, que ele recusa.
@@ -92,6 +94,16 @@ _MIN_CANVAS = 0.04
 # ser tomado pelo lado errado dela (ver :func:`_transition_side`). Bem abaixo de
 # qualquer quadro real e bem acima do ruído de ponto flutuante.
 _FRAME_EDGE = 1e-3
+
+# Quanto antes do trecho o ffmpeg começa a ler um bloco invertido. Depois de um
+# ``-ss`` o primeiro quadro de áudio sai sem o vizinho de que o codec precisa
+# (a sobreposição do AAC, o ``bit reservoir`` do MP3, a pré-carga do Opus): as
+# primeiras ~1000 amostras saem atenuadas. Medido: 995 a 1001 amostras erradas
+# em cada emenda de janela. No começo de um bloco normal isso mal se ouve; num
+# invertido o começo da leitura é o **fim** do que toca, e cada janela abre uma
+# emenda no meio do som. Ler mais cedo e descartar a sobra tira o defeito do
+# trecho; um quarto de segundo cobre os codecs comuns com folga.
+_PREROLL = 0.25
 
 # Sobra clonada no fim de um bloco interpolado (ver :func:`_rate_chain`). Meio
 # segundo cobre com folga os poucos quadros que o filtro não consegue produzir,
@@ -132,6 +144,9 @@ class _Piece:
     # Tempo de edição entre o começo do bloco e o começo deste trecho. Só o bloco
     # invertido o usa: nele ``seek`` deixa de dizer quanto do bloco já passou.
     elapsed: float = 0.0
+    # Quanto antes do trecho a leitura começa (ver ``_PREROLL``): ``trim`` e
+    # ``atrim`` descartam essa sobra.
+    lead: float = 0.0
 
 
 def _reversed_still_seek(clip: Clip, moment: float) -> float:
@@ -209,6 +224,7 @@ def _pieces(
                         and bool(clip.media.fps))
             seek = clip.source_time(begin)
             flip = False
+            lead = 0.0
             if clip.reversed:
                 if is_still and end is not None:
                     # Um quadro só: lê-se o quadro espelhado de frente para trás,
@@ -222,6 +238,8 @@ def _pieces(
                 else:
                     seek = clip.source_time(finish)
                     flip = True
+                    lead = min(seek, _PREROLL)
+                    seek -= lead
             is_overlay_filter = clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION)
             idx = -1 if is_overlay_filter else input_idx
             if not is_overlay_filter:
@@ -239,6 +257,7 @@ def _pieces(
                     tail_start=((tails or {}).get(clip.clip_id) if is_still and not clip.reversed else None),
                     flip=flip,
                     elapsed=begin - clip.start,
+                    lead=lead,
                 )
             )
     return pieces
@@ -402,6 +421,12 @@ def _input_args(
     if piece.still:
         seek, _margin = _still_seek(piece)
         return ["-noaccurate_seek", "-ss", f"{seek:.6f}", "-i", str(clip.media.path)]
+    if piece.flip and piece.seek <= 0:
+        # Um ``-ss 0`` não é "não buscar": o ffmpeg busca o começo e entrega as
+        # primeiras 576 amostras do AAC zeradas (medido: 0 contra 95, 910,
+        # 1786… da leitura simples). Num bloco invertido o começo da leitura é o
+        # fim do que toca. Os blocos normais seguem como sempre.
+        return ["-i", str(clip.media.path)]
     return ["-ss", f"{piece.seek:.6f}", "-i", str(clip.media.path)]
 
 
@@ -825,8 +850,9 @@ def _video_chain(
     if piece.still:
         _seek, margin = _still_seek(piece)
         steps.append(f"select='gte(t,{-margin:.6f})'")
+    cut = f"start={piece.lead:.6f}:" if piece.lead > 0 else ""
     if clip.changes_speed:
-        steps.append(f"trim=duration={piece.duration * clip.speed:.6f}")
+        steps.append(f"trim={cut}duration={piece.duration * clip.speed:.6f}")
         if piece.flip:
             steps.append("reverse")
         inv = 1.0 / clip.speed
@@ -835,7 +861,7 @@ def _video_chain(
         else:
             steps.append(f"setpts={inv:.6f}*(PTS-STARTPTS)")
     else:
-        steps.append(f"trim=duration={piece.duration:.6f}")
+        steps.append(f"trim={cut}duration={piece.duration:.6f}")
         if piece.flip:
             # Logo depois do ``trim`` e antes do ``setpts``: o ``reverse`` devolve
             # os instantes originais em ordem crescente, e é o ``setpts`` que os
@@ -1053,13 +1079,14 @@ def _audio_chain(
     o fade acontecerem vários segundos depois do corte.
     """
     clip = piece.clip
+    cut = f"start={piece.lead:.6f}:" if piece.lead > 0 else ""
     if clip.changes_speed:
-        steps = [f"atrim=duration={piece.duration * clip.speed:.6f}", "asetpts=PTS-STARTPTS"]
+        steps = [f"atrim={cut}duration={piece.duration * clip.speed:.6f}", "asetpts=PTS-STARTPTS"]
         if piece.flip:
             steps.append("areverse")
         steps += _atempo_filters(clip.speed)
     else:
-        steps = [f"atrim=duration={piece.duration:.6f}", "asetpts=PTS-STARTPTS"]
+        steps = [f"atrim={cut}duration={piece.duration:.6f}", "asetpts=PTS-STARTPTS"]
         if piece.flip:
             steps.append("areverse")
     if clip.changes_gain:
@@ -1710,24 +1737,27 @@ def _blur_where_visible(project: Project, size: tuple[int, int]) -> Project:
     ))
 
 
-def check_reversal(project: Project) -> None:
-    """Recusa a exportação em que um bloco invertido passa do teto de memória.
+def reversal_cuts_for_export(project: Project, duration: float) -> tuple[float, ...]:
+    """Cortes em que a exportação precisa ser dividida por causa de blocos invertidos.
 
-    O menu e as alças já impedem que um bloco chegue lá, mas o projeto pode vir
-    de um arquivo editado à mão ou de uma mídia que mudou de tamanho — e o
-    ``reverse`` não tem controle de memória: ou recusa aqui, com o número, ou
-    esgota a máquina no meio da exportação. A prévia não passa por aqui de
-    propósito: ela monta o comando na thread da interface, onde uma exceção
-    não tem quem a mostre.
+    Vazio é "um processo só dá conta". O som não entra: sai num passe só e pesa
+    pouco (ver ``domain.reversal``).
     """
-    for clip in project.clips:
-        if clip.reversed and clip.reverse_cost > MAX_REVERSE_BYTES:
-            raise ConversionError(Text(
-                "COMPOSE_REVERSE_TOO_LONG",
-                name=clip.media.name,
-                needed=Text.of(format_size, clip.reverse_cost),
-                limit=Text.of(format_size, MAX_REVERSE_BYTES),
-            ))
+    return reverse_cuts(project, 0.0, duration, media="video", budget=MAX_REVERSE_BYTES)
+
+
+def check_reversal(project: Project) -> None:
+    """Recusa o que um processo só não consegue exportar: bloco invertido grande demais.
+
+    A exportação em vídeo divide o bloco em janelas, cada uma num processo (ver
+    ``parallel.reversal_bounds``), e só chega aqui quando não há divisão. O que
+    não divide — o GIF, que monta uma paleta sobre o fluxo inteiro — recusa, com
+    o nome do bloco, em vez de esgotar a memória no meio da exportação.
+    """
+    if not reversal_cuts_for_export(project, project.export_duration):
+        return
+    nome = next((c.media.name for c in project.clips if c.reversed and c.has_image), "")
+    raise ConversionError(Text("COMPOSE_REVERSE_TOO_LONG", name=nome))
 
 
 def build_graph(
@@ -2291,6 +2321,12 @@ def scrub_command(
     o instante ``at + k / fps``.
     """
     width, height = size
+    # Um bloco invertido guarda os quadros do trecho que o comando lê: o trecho
+    # encolhe até a primeira janela que cabe na memória (ver ``domain.reversal``).
+    # Quem pediu volta a pedir o resto, porque o que falta continua sem quadro.
+    cuts = reverse_cuts(project, at, at + span, media="video", budget=MAX_REVERSE_BYTES, fps=float(fps))
+    if cuts:
+        span = cuts[0] - at
     count = max(1, int(round(span * fps)))
     preview_project = _preview_project(project, size)
     graph = build_graph(
@@ -2320,14 +2356,49 @@ def playback_command(
     *,
     fps: float,
     text_assets: dict[int, Path] | None = None,
+) -> list[str] | Stages:
+    """Comando que produz o fluxo de quadros da reprodução, a partir de ``at``.
+
+    Com bloco invertido, o fluxo é lido em janelas curtas, **uma por processo**
+    (``Stages``): o ``reverse`` só entrega o primeiro quadro depois de ler a
+    janela inteira e guarda todos os quadros dela, então a janela curta é o que
+    faz a reprodução começar logo e a memória ficar limitada. Cada janela dura um
+    número inteiro de quadros, e a reprodução enxerga um fluxo só.
+    """
+    cuts = reverse_cuts(project, at, project.export_duration, media="video", window=PREVIEW_WINDOW_SECONDS,
+                        budget=MAX_REVERSE_BYTES // 2, fps=float(fps))
+    if not cuts:
+        return _playback_stage(project, at, None, size, tools, fps=fps, text_assets=text_assets)
+    edges = (at, *cuts)
+    commands, sizes = [], []
+    for index, begin in enumerate(edges):
+        last = index == len(edges) - 1
+        span = None if last else edges[index + 1] - begin
+        frames = None if last else int(round(span * fps))
+        commands.append(tuple(_playback_stage(project, begin, span, size, tools, fps=fps,
+                                              text_assets=text_assets, frames=frames)))
+        sizes.append(None if last else frames * size[0] * size[1] * BYTES_PER_PIXEL)
+    return Stages(tuple(commands), tuple(sizes))
+
+
+def _playback_stage(
+    project: Project,
+    at: float,
+    span: float | None,
+    size: tuple[int, int],
+    tools: FFmpegTools,
+    *,
+    fps: float,
+    text_assets: dict[int, Path] | None,
+    frames: int | None = None,
 ) -> list[str]:
-    """Comando que produz o fluxo de quadros da reprodução, a partir de ``at``."""
+    """Um comando de reprodução: de ``at`` até o fim da edição ou por ``span``."""
     width, height = size
     preview_project = _preview_project(project, size)
     graph = build_graph(
         preview_project,
         at=at,
-        span=None,
+        span=span,
         fps=float(fps),
         want_audio=False,
         text_assets=text_assets,
@@ -2346,11 +2417,15 @@ def playback_command(
         filters.append(f"{graph.video_label}scale={width}:{height}[out]")
         args += ["-filter_complex", ";".join(filters), "-map", "[out]"]
     else:
-        remaining = max(_MIN_CANVAS, project.duration - at)
+        remaining = max(_MIN_CANVAS, project.duration - at) if span is None else span
         args += [
             "-f", "lavfi",
             "-i", f"color=c=black:s={width}x{height}:r={fps}:d={remaining:.3f}",
         ]
+    if frames is not None:
+        # A janela entrega exatamente os quadros dela: um a mais ou a menos
+        # deslocaria o resto do fluxo em relação ao som.
+        args += ["-frames:v", str(frames)]
     return args + ["-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
 
 
@@ -2363,7 +2438,7 @@ def audio_command(
     channels: int = CHANNELS,
     text_assets: dict[int, Path] | None = None,
     until: float | None = None,
-) -> list[str] | None:
+) -> list[str] | Stages | None:
     """Comando que produz a mixagem em PCM, a partir de ``at``.
 
     ``None`` quando não há som a tocar — o que a interface usa para não abrir
@@ -2372,14 +2447,44 @@ def audio_command(
     ``until`` completa com silêncio e corta a mixagem exatamente no fim do loop
     da prévia: o trecho seguinte é emendado quando este acaba, e um som que
     terminasse antes do fim da edição faria a volta ao começo chegar cedo.
+
+    Com som invertido o fluxo é lido em janelas curtas, uma por processo
+    (``Stages``): o ``areverse`` só começa a entregar depois de ler tudo o que
+    vem pela frente, e um bloco de minutos faria a reprodução esperar segundos
+    pelo primeiro som. Cada janela entrega exatamente a duração dela, com
+    silêncio onde não há som, para as emendas caírem no instante certo.
     """
     graph = build_graph(project, at=at, span=None, want_video=False, text_assets=text_assets)
     if not graph.audio_label:
         return None
+    end = until if until is not None and until > at else None
+    cuts = reverse_cuts(project, at, end if end is not None else project.export_duration, media="audio",
+                        window=PREVIEW_WINDOW_SECONDS)
+    if not cuts:
+        return _pcm_command(tools, graph, at, None, end, sample_rate, channels)
+    edges = (at, *cuts)
+    commands, sizes = [], []
+    for index, begin in enumerate(edges):
+        last = index == len(edges) - 1
+        span = None if last else edges[index + 1] - begin
+        stage = build_graph(project, at=begin, span=span, want_video=False, text_assets=text_assets)
+        if stage.audio_label:
+            commands.append(tuple(_pcm_command(tools, stage, begin, span, end if last else None,
+                                               sample_rate, channels)))
+        else:
+            commands.append(tuple(_silence_command(tools, span, end, begin, sample_rate, channels)))
+        sizes.append(None if last else int(round(span * sample_rate)) * channels * 2)
+    return Stages(tuple(commands), tuple(sizes))
+
+
+def _pcm_command(tools: FFmpegTools, graph: Graph, at: float, span: float | None, until: float | None,
+                 sample_rate: int, channels: int) -> list[str]:
+    """A mixagem do grafo em PCM, completada e cortada em ``span`` ou em ``until``."""
     filters = list(graph.filters)
     label = graph.audio_label
-    if until is not None and until > at:
-        filters.append(f"{label}apad,atrim=end={until - at:.6f}[loopmix]")
+    length = span if span is not None else (until - at if until is not None else None)
+    if length is not None:
+        filters.append(f"{label}apad,atrim=end={length:.6f}[loopmix]")
         label = "[loopmix]"
     return [
         tools.ffmpeg_str,
@@ -2393,6 +2498,19 @@ def audio_command(
         "-acodec", "pcm_s16le",
         "-ar", str(sample_rate),
         "-ac", str(channels),
+        "pipe:1",
+    ]
+
+
+def _silence_command(tools: FFmpegTools, span: float | None, until: float | None, at: float,
+                     sample_rate: int, channels: int) -> list[str]:
+    """Silêncio com a duração de uma janela em que nenhum som toca."""
+    length = span if span is not None else (until - at if until is not None else 0.0)
+    return [
+        tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error",
+        "-f", "lavfi", "-i", f"anullsrc=r={sample_rate}:cl={'mono' if channels == 1 else 'stereo'}",
+        "-t", f"{max(length, 0.0):.6f}",
+        "-f", "s16le", "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", str(channels),
         "pipe:1",
     ]
 
@@ -2485,6 +2603,7 @@ def segment_video_args(
     hardware: str = hwaccel.SOFTWARE,
     quality: str = hwaccel.DEFAULT_QUALITY,
     text_assets: dict[int, Path] | None = None,
+    interpolate: bool = True,
 ) -> list[str]:
     """Um trecho da composição, **só vídeo**, para ser concatenado depois.
 
@@ -2497,10 +2616,11 @@ def segment_video_args(
     arbitrários produz salto ou estalo na junção, porque o quadro de áudio não
     termina onde o corte cai; o som sai num passe só, que é barato.
     """
-    check_reversal(project)
+    # A sobra existe para o ``minterpolate``; sem interpolação não há quadro
+    # seguinte a esperar, e a janela de um bloco invertido não deve crescer.
     graph = build_graph(
-        project, at=at, span=span + _SEGMENT_TAIL, want_audio=False, interpolate=True
-    , text_assets=text_assets)
+        project, at=at, span=span + (_SEGMENT_TAIL if interpolate else 0.0), want_audio=False,
+        interpolate=interpolate, text_assets=text_assets)
     if not graph.video_label:
         raise ConversionError(Text("COMPOSE_SEGMENT_NO_IMAGE"))
     codec_family = family or hwaccel.family_for(container)
