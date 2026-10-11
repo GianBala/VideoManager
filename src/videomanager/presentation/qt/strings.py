@@ -491,8 +491,9 @@ EDIT_REVERSE_TIP = (
     "devolve o bloco ao sentido normal."
 )
 EDIT_REVERSE_TOO_LONG_TIP = (
-    "Longo demais para inverter: a inversão guarda na memória todos os quadros "
-    "do trecho. Divida o bloco (S) e inverta cada parte."
+    "Não dá para inverter este bloco: o limite é de meia hora de mídia por "
+    "bloco, e o vídeo precisa informar o tamanho do quadro. Divida o bloco (S) "
+    "e inverta cada parte."
 )
 EDIT_COPY = "Copiar"
 EDIT_PASTE = "Colar"

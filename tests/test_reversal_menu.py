@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from videomanager.bootstrap import build_desktop_runtime, build_editor_service, build_processing_service
 from videomanager.domain.project import Clip, MediaKind, MediaRef, OverlayType, Project, Track, TrackKind
+from videomanager.domain.reversal import MAX_REVERSE_SPAN
 from videomanager.infrastructure.storage.settings import Settings
 from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
@@ -89,21 +90,31 @@ def test_inverte_o_bloco_clicado_e_nao_o_selecionado(panel):
     assert panel._project.find(b.clip_id)[1].reversed
 
 
-def test_bloco_longo_demais_aparece_desabilitado_com_o_motivo(panel):
-    longo = Clip(_video(width=1920, height=1080), 0.0, 60.0)
+def test_video_longo_oferece_inverter(panel):
+    """Era o defeito: um vídeo de 1080p com mais de ~11 s ficava com o item desabilitado."""
+    longo = Clip(_video(width=1920, height=1080, duration=600.0), 0.0, 120.0)
     projeto = _instala(panel, (TrackKind.VIDEO, [longo]))
     acao = _acao(panel, projeto, longo)
+    assert acao is not None and acao.isEnabled()
+    acao.trigger()
+    assert panel._project.find(longo.clip_id)[1].reversed
+
+
+def test_bloco_acima_de_meia_hora_aparece_desabilitado_com_o_motivo(panel):
+    enorme = Clip(_video(duration=7200.0), 0.0, MAX_REVERSE_SPAN + 60.0)
+    projeto = _instala(panel, (TrackKind.VIDEO, [enorme]))
+    acao = _acao(panel, projeto, enorme)
     assert acao is not None and not acao.isEnabled()
     assert acao.toolTip() == strings.EDIT_REVERSE_TOO_LONG_TIP
     acao.trigger()  # desabilitada não dispara, e mesmo disparada não inverte
-    panel._toggle_reverse(longo.clip_id)
-    assert not panel._project.find(longo.clip_id)[1].reversed
+    panel._toggle_reverse(enorme.clip_id)
+    assert not panel._project.find(enorme.clip_id)[1].reversed
 
 
 def test_bloco_ja_invertido_sempre_pode_voltar_ao_normal(panel):
-    longo = Clip(_video(width=1920, height=1080), 0.0, 60.0, reversed=True)
-    projeto = _instala(panel, (TrackKind.VIDEO, [longo]))
-    acao = _acao(panel, projeto, longo)
+    enorme = Clip(_video(duration=7200.0), 0.0, MAX_REVERSE_SPAN + 60.0, reversed=True)
+    projeto = _instala(panel, (TrackKind.VIDEO, [enorme]))
+    acao = _acao(panel, projeto, enorme)
     assert acao.isEnabled() and acao.isChecked()
     acao.trigger()
-    assert not panel._project.find(longo.clip_id)[1].reversed
+    assert not panel._project.find(enorme.clip_id)[1].reversed
