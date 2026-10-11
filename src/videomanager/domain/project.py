@@ -58,6 +58,10 @@ IMAGE_DURATION = 5.0
 MIN_GAIN_DB = -60.0
 MAX_GAIN_DB = 12.0
 
+
+def _clamp_gain(value: float) -> float:
+    return max(MIN_GAIN_DB, min(MAX_GAIN_DB, value))
+
 # Tela de uma edição que ainda não tem imagem nenhuma.
 DEFAULT_WIDTH = 1920
 DEFAULT_HEIGHT = 1080
@@ -551,6 +555,38 @@ class Clip:
         return bool(self.keyframes)
 
     @property
+    def animates_gain(self) -> bool:
+        """Se os quadros-chave mexem no **volume** (``gain_offset_db`` fora do neutro em algum ponto)."""
+        return any(abs(k.gain_offset_db) >= GAIN_EPSILON for k in self.keyframes)
+
+    @property
+    def has_pose_keyframes(self) -> bool:
+        """Se os quadros-chave mexem na **imagem**, e não só no volume.
+
+        O compositor escolhe o caminho do vídeo por esta pergunta, e não por ``has_keyframes``: um fade
+        de som num vídeo tiraria a imagem do caminho barato (``scale`` + ``pad``) para o das
+        transformações (``scale`` e ``overlay`` com ``eval=frame``), mudando o comando e a velocidade da
+        composição sem que a imagem tivesse mudado. Sem curva de volume é o que sempre foi: existir
+        quadro-chave basta.
+        """
+        if not self.animates_gain:
+            return bool(self.keyframes)
+        fields = ("x", "y", "scale_x", "scale_y", "rotation", "opacity")
+        frames = self.keyframes
+        return any(abs(getattr(k, f) - getattr(self, f)) > 1e-9 for k in frames for f in fields) or any(
+            abs(getattr(a, f) - getattr(b, f)) > 1e-9 for a, b in zip(frames, frames[1:]) for f in fields)
+
+    def gain_at(self, time_offset: float) -> float:
+        """O volume que se ouve no instante: o do bloco, mais a curva dos quadros-chave.
+
+        Sem curva é o ``gain_db`` cru, sem limite (é o valor que o arquivo traz); com curva, a soma
+        fica dentro dos limites do controle.
+        """
+        if not self.animates_gain:
+            return self.gain_db
+        return _clamp_gain(self.gain_db + self.transform_at(time_offset).gain_offset_db)
+
+    @property
     def peak_scale(self) -> tuple[float, float]:
         """A maior escala que o bloco atinge em cada eixo, parado ou animado.
 
@@ -668,9 +704,27 @@ class Clip:
             nearest = self.keyframe_in_frame(offset, fps)
             point = Keyframe.from_pose(nearest.time_offset if nearest else offset, target,
                                        nearest.easing if nearest else "linear")
+            if nearest is not None:
+                # O ponto reaproveitado fica no instante dele, e a curva ali pode diferir do volume
+                # interpolado em ``offset`` (meio quadro de distância): mexer na posição não muda volume.
+                point = replace(point, gain_offset_db=nearest.gain_offset_db)
             updated = self.with_keyframe(point)
         pose = updated.transform_at(offset)
         return replace(updated, scale=(pose.scale_x + pose.scale_y) / 2, **{k: getattr(pose, k) for k in names})
+
+    def with_edited_gain(self, offset: float, value: float, *, fps: float, whole_animation: bool = False) -> Clip:
+        """Edita o volume ouvido em ``offset``: o do bloco, ou um ponto da curva, ou a curva inteira.
+
+        Sem quadros-chave, ou com "Editar toda a animação", muda o ``gain_db`` do bloco (a curva, se
+        houver, sobe ou desce inteira). Num bloco animado, grava no quadro-chave do quadro atual — criando-o
+        com a pose de agora — o volume **relativo** ao do bloco, que é o que o ponto guarda.
+        """
+        value = _clamp_gain(value)
+        offset = max(0.0, min(self.duration, offset))
+        if not self.keyframes or whole_animation:
+            return replace(self, gain_db=_clamp_gain(self.gain_db + value - self.gain_at(offset)))
+        point = self.keyframe_in_frame(offset, fps) or Keyframe.from_pose(offset, self.transform_at(offset))
+        return self.with_keyframe(replace(point, gain_offset_db=value - self.gain_db))
 
     def keyframe_in_frame(self, offset: float, fps: float) -> Keyframe | None:
         """O quadro-chave que cai no mesmo quadro de vídeo que ``offset`` — o mais perto dele, se houver."""
@@ -1552,7 +1606,14 @@ class Project:
         if not clip.can_detach_audio:
             return self
 
-        project = self.with_updated_clip(clip_id, detached=True, muted=False)
+        # O volume é do som: a curva vai para o bloco novo e sai do vídeo, que fica só com a pose (e sem
+        # quadros-chave se a animação era só de volume).
+        sound = (tuple(Keyframe(k.time_offset, gain_offset_db=k.gain_offset_db, easing=k.easing)
+                       for k in clip.keyframes) if clip.animates_gain else ())
+        image = (tuple(replace(k, gain_offset_db=0.0) for k in clip.keyframes)
+                 if clip.animates_gain and clip.has_pose_keyframes else
+                 () if clip.animates_gain else clip.keyframes)
+        project = self.with_updated_clip(clip_id, detached=True, muted=False, keyframes=image)
         target = project._free_audio_track(clip.start, clip.duration)
         if target is None:
             project = project.with_track(TrackKind.AUDIO)
@@ -1568,6 +1629,7 @@ class Project:
             audio_only=True,
             # O som segue a imagem de onde saiu: separar não desfaz a inversão.
             reversed=clip.reversed,
+            keyframes=sound,
         )
         return project.with_clip(target, detached)
 

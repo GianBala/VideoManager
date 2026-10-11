@@ -1,8 +1,8 @@
 """Modelos e regras de interpolação para quadros-chave (keyframes).
 
 Permite animar propriedades de transformação (posição, escala, rotação e
-opacidade) ao longo do tempo relativo de um clipe, preservando o modelo
-imutável do domínio sem dependências de frameworks ou subprocessos.
+opacidade) e o volume ao longo do tempo relativo de um clipe, preservando o
+modelo imutável do domínio sem dependências de frameworks ou subprocessos.
 """
 
 from __future__ import annotations
@@ -29,6 +29,9 @@ class ClipTransform:
     scale_y: float = 1.0
     rotation: float = 0.0
     opacity: float = 1.0
+    # Volume em dB **relativo** ao do bloco (``Clip.gain_db``): com 0 a curva não mexe, então todo
+    # quadro-chave antigo segue neutro, e o 🔊 da barra continua sendo o volume do bloco inteiro.
+    gain_offset_db: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,8 @@ class Keyframe:
     rotation: float = 0.0
     opacity: float = 1.0
     easing: str = "linear"
+    # Depois do ``easing`` para nenhuma construção posicional mudar de sentido (ver ``ClipTransform``).
+    gain_offset_db: float = 0.0
 
     def __post_init__(self) -> None:
         if self.easing not in SUPPORTED_EASINGS:
@@ -68,6 +73,7 @@ class Keyframe:
             scale_y=self.scale_y,
             rotation=self.rotation,
             opacity=self.opacity,
+            gain_offset_db=self.gain_offset_db,
         )
 
 
@@ -175,6 +181,9 @@ def interpolate_keyframes(
                         _interpolate_scalar(k0.opacity, k1.opacity, factor),
                     ),
                 ),
+                # Em dB, como a automação de volume dos editores de referência: a passagem soa
+                # uniforme, o que não acontece interpolando a amplitude.
+                gain_offset_db=_interpolate_scalar(k0.gain_offset_db, k1.gain_offset_db, factor),
             )
 
     return sorted_kfs[-1].transform
