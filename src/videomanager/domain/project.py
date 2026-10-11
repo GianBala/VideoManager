@@ -37,6 +37,7 @@ from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.constants import GAIN_EPSILON
 from videomanager.domain.keyframe import ClipTransform
+from videomanager.domain.keyframe import FULL_TURN
 from videomanager.domain.geometry import image_base_size, natural_image_size
 from videomanager.domain.i18n import decimal, t, variants
 from videomanager.domain.keyframe import Keyframe
@@ -501,8 +502,11 @@ class Clip:
         opção onde ela não muda a imagem não muda o arquivo. Pose neutra é
         posição central, escala ``>= 1`` e sem giro, **no bloco e em cada
         quadro-chave**: reduzido ou deslocado deixa de preencher, mesmo na
-        proporção da tela. Opacidade não entra na conta, para o fade de um bloco
-        que preenche a tela continuar saindo como hoje.
+        proporção da tela. Entre dois quadros-chave a curva pode sair da pose
+        neutra sem que os extremos saiam — só a rotação, e só num giro de uma
+        volta inteira (0° a 360°), que passa por todos os ângulos. Opacidade não
+        entra na conta, para o fade de um bloco que preenche a tela continuar
+        saindo como hoje.
 
         A proporção é medida com a tela de quem pergunta, e quem monta o grafo
         pergunta uma vez só, com a tela de exportação: pela da prévia (arredondada
@@ -515,12 +519,13 @@ class Clip:
         fit_w, fit_h = fit(media.width, media.height, width, height)
         if width - fit_w > 2 or height - fit_h > 2:
             return True
+        poses = sorted(self.keyframes, key=lambda k: k.time_offset)
         return any(
             abs(p.x - 0.5) > 1e-9 or abs(p.y - 0.5) > 1e-9
             or p.scale_x < 1 - 1e-9 or p.scale_y < 1 - 1e-9
             or min(p.rotation % 360, 360 - p.rotation % 360) > 1e-9
-            for p in (self, *self.keyframes)
-        )
+            for p in (self, *poses)
+        ) or any(abs(b.rotation - a.rotation) >= FULL_TURN for a, b in zip(poses, poses[1:]))
 
     @property
     def base_transform(self) -> ClipTransform:

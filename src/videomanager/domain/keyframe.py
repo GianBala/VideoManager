@@ -97,10 +97,17 @@ def resolve_segment_easing(start_easing: str, end_easing: str) -> str:
     return start_easing
 
 
+# Entre dois quadros-chave, a rotação toma o menor arco — a não ser que a
+# diferença seja de uma volta inteira ou mais, que é um giro de propósito e vale
+# pelo caminho todo. Quem pergunta "a rotação passa por uma pose não neutra?"
+# (a regra do fundo desfocado) precisa do mesmo limiar, senão as duas discordam.
+FULL_TURN = 359.9
+
+
 def _interpolate_scalar(
     v0: float, v1: float, factor: float, is_angle: bool = False
 ) -> float:
-    if not is_angle or abs(v1 - v0) >= 359.9:
+    if not is_angle or abs(v1 - v0) >= FULL_TURN:
         return v0 + (v1 - v0) * factor
     # Menor caminho angular para interpolação de rotação (-180 a +180)
     diff = (v1 - v0) % 360.0
