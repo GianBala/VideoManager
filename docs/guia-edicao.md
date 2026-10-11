@@ -310,6 +310,13 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
     atualizando o quadro-chave dali. Marque **Editar toda a animação** para
     aplicar o ajuste à curva inteira, inclusive aos pontos que sustentam a
     curva depois de um corte.
+  - Um bloco que só tem **volume** animado (um fade de som, sem nenhuma pose
+    diferente da do bloco) conta como **sem animação de imagem**: mover,
+    escalar, girar ou mudar a opacidade, pela aba ou arrastando na prévia, vale
+    para o bloco inteiro, e os pontos de volume andam junto. Com o cursor
+    **sobre** um ponto (o ◇ aceso), a edição é do ponto e passa a animar a
+    imagem — é assim que se começa a animar a imagem de um bloco que já tem
+    fade de som.
   - **Interpolação** escolhe a curva do quadro-chave selecionado: Linear, Suave
     ao Entrar (*ease in*), Suave ao Sair (*ease out*), Suave Completo (*ease
     in-out*) ou Degrau (*hold*). Em cada trecho vale a curva do quadro-chave de
