@@ -66,7 +66,7 @@ def _projeto(*clips, fps=FPS):
 
 
 def _exporta(tools, projeto, destino, **opcoes):
-    subprocess.run(composer.export_args(projeto, destino, tools, **opcoes), check=True, 
+    subprocess.run(composer.export_args(projeto, destino, tools, **opcoes), check=True,
                    timeout=180, **subprocess_kwargs())
     return destino
 
