@@ -258,6 +258,17 @@ interpolado, e mexer na posição de um ponto preserva o volume dele — montar 
 volume de quem só movia a imagem. A trilha separada evitaria isso, mas custaria um segundo caminho em todas as
 operações e uma ◇ ambígua.
 
+**Fade de som não anima a imagem.** Com os dois no mesmo quadro-chave, um bloco que só tem curva de volume
+deixaria de ser "sem quadros-chave" e o primeiro gesto na imagem criaria um ponto de pose: o bloco, em vez de se
+mover, ia e voltava (x: 0,5 → 0,8 → 0,5). `Clip.has_pose_keyframes` já separava os dois para o compositor; a edição
+(`with_edited_transform`, que a aba e o arrasto na prévia usam) passa a perguntar o mesmo: sem pose animada, a
+edição fora de um ponto vale para o bloco inteiro e os pontos de volume andam junto (a pose deles é a do bloco).
+**Sobre um ponto (◇ aceso) a edição continua sendo dele**, e começa a animar a imagem — sem essa saída, um bloco com
+fade de som nunca poderia ter imagem animada, porque o Efeito Rápido troca a curva de volume. O que ficou: o ◇ aceso
+é o alvo da edição, e quem acabou de digitar um volume com o cursor sobre o ponto novo e arrasta a imagem ali cria
+animação (visível: o ◇ está aceso, e há um losango na linha do tempo). Medido contra a versão anterior em 3000
+edições aleatórias, só mudou o caso descrito.
+
 **A velocidade não anima.** Ela muda a duração do bloco; uma curva dela mudaria o tamanho da trilha a cada
 ponto. Mudar a velocidade continua reescalando o tempo dos pontos, e a curva de volume acompanha o conteúdo.
 

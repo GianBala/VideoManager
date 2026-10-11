@@ -95,7 +95,8 @@ opacidade é limitada a 0–1 na construção.
 - O volume anda na mesma curva: `Clip.gain_at(offset)` é `gain_db` mais a curva, limitado a −60/+12 dB (sem curva,
   o `gain_db` cru), `Clip.with_edited_gain` edita o ponto do instante (ou o volume do bloco, sem quadros-chave
   ou com `whole_animation`), `animates_gain` diz se há curva e `has_pose_keyframes` separa os quadros que mexem na
-  **imagem** dos que só mexem no volume — é por ele que o compositor escolhe o caminho do vídeo. Separar áudio leva
+  **imagem** dos que só mexem no volume — é por ele que o compositor escolhe o caminho do vídeo e que
+  `with_edited_transform` decide se a edição da pose é do bloco inteiro (só volume, cursor fora de um ponto) ou do ponto. Separar áudio leva
   a curva para o bloco de som. Ver [o volume animado](../decisoes-de-projeto.md#o-volume-animado).
 - `create_preset_keyframes` gera os presets de entrada (deslizar, fade, zoom e
   giro) a partir da transformação-alvo e de uma duração; a apresentação a limita
