@@ -2541,6 +2541,13 @@ class EditPanel(QWidget):
             )
             self._act(menu, f"{strings.EDIT_DELETE}  (Del)", self._delete_selected)
             menu.addSeparator()
+            if clip.is_reversible:
+                self._act(
+                    menu, strings.EDIT_REVERSE,
+                    lambda: self._toggle_reverse(clip.clip_id),
+                    enabled=clip.can_reverse, checked=clip.reversed,
+                    tip=strings.EDIT_REVERSE_TIP if clip.can_reverse else strings.EDIT_REVERSE_TOO_LONG_TIP,
+                )
             if clip.has_image and clip.media.has_audio and clip.media.kind is MediaKind.VIDEO:
                 self._act(
                     menu, strings.EDIT_DETACH, self._detach_audio,
@@ -2732,9 +2739,13 @@ class EditPanel(QWidget):
         *,
         enabled: bool = True,
         tip: str = "",
+        checked: bool | None = None,
     ) -> None:
         action = menu.addAction(text)
         action.setEnabled(enabled)
+        if checked is not None:
+            action.setCheckable(True)
+            action.setChecked(checked)
         if tip:
             action.setToolTip(tip)
         action.triggered.connect(slot)
@@ -2910,6 +2921,18 @@ class EditPanel(QWidget):
                 and clip.end - self._position >= MIN_SEGMENT
             )
         return self._position - clip.start >= MIN_SEGMENT
+
+    def _toggle_reverse(self, clip_id: int) -> None:
+        """Inverte o bloco clicado, ou o devolve ao sentido normal.
+
+        Pelo identificador do menu, e não pela seleção: o botão direito pode
+        cair num bloco que não é o selecionado.
+        """
+        found = self._project.find(clip_id)
+        if found is None or not found[1].can_reverse:
+            return
+        self._remember()
+        self._apply(self._project.with_updated_clip(clip_id, reversed=not found[1].reversed))
 
     def _detach_audio(self) -> None:
         clip = self._timeline.selected_clip
@@ -3692,7 +3715,8 @@ class EditPanel(QWidget):
         finish = min(clip.end, end)
         if finish <= begin:
             return clip.in_point, clip.out_point
-        return clip.source_time(begin), clip.source_time(finish)
+        # Invertido, o começo da vista é o topo do trecho: a janela sai ao contrário.
+        return tuple(sorted((clip.source_time(begin), clip.source_time(finish))))
 
     def _strip_is_stale(self, clip: Clip, kind: TrackKind) -> bool:
         current = self._timeline.strip_range(clip.clip_id)
@@ -4025,9 +4049,12 @@ class EditPanel(QWidget):
         clip = self._keyframe_clip()
         if clip is None:
             return
-        times = tuple(timeline_time(t, clip.start, clip.in_point, clip.speed)
-                      for t in self._keyframes_for(clip)
-                      if clip.in_point <= t < clip.out_point)
+        # Invertido, a mídia corre para baixo na edição: o tempo cresce ao
+        # contrário do da origem, e a lista precisa voltar a ficar em ordem.
+        head, speed = (clip.out_point, -clip.speed) if clip.reversed else (clip.in_point, clip.speed)
+        times = tuple(sorted(timeline_time(t, clip.start, head, speed)
+                             for t in self._keyframes_for(clip)
+                             if clip.in_point <= t < clip.out_point))
         if direction < 0:
             target = keyframe_at_or_before(
                 times, self._position - frame_step(self._fps)
