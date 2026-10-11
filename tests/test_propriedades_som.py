@@ -225,3 +225,144 @@ def test_titulos_dos_grupos_novos_trocam_de_idioma(desktop_app, pseudo):
     finally:
         idioma.apply_language(i18n.PORTUGUESE)
         widget.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# Animação do volume: o mesmo painel de quadros-chave, agora também para o som
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("nome", "transformacao", "animacao"), [
+    ("video_com_som", True, True),
+    ("video_sem_som", True, True),
+    ("video_com_audio_separado", True, True),     # a pose anima; o volume dele está desligado
+    ("audio_separado", False, True),               # só o volume
+    ("audio_puro", False, True),
+    ("imagem", True, True),
+    ("texto", True, True),
+    ("filtro", False, False),
+    ("transicao", False, False),
+])
+def test_animacao_aparece_onde_ha_o_que_animar(nome, transformacao, animacao):
+    widget = _carregado(nome)
+    assert (not widget._transform_group.isHidden()) is transformacao, nome
+    assert (not widget._animation_group.isHidden()) is animacao, nome
+    widget.deleteLater()
+
+
+def _presets(widget) -> list:
+    return [widget._combo_presets.itemData(i) for i in range(widget._combo_presets.count())]
+
+
+def test_bloco_de_audio_so_oferece_remover_animacoes(desktop_app):
+    """Os efeitos rápidos são de imagem (deslizar, girar, surgir): num bloco sem imagem sobra o de remover."""
+    audio, video = _carregado("audio_puro"), _carregado("video_com_som")
+    assert _presets(audio) == ["", "clear"]
+    assert _presets(video) == list(strings.EDIT_ANIMATION_PRESETS)
+    # O mesmo widget serve a qualquer bloco: a lista acompanha o bloco que está carregado.
+    video.load_clip(BLOCOS["audio_puro"](), 1920, 1080)
+    assert _presets(video) == ["", "clear"]
+    video.load_clip(BLOCOS["video_com_som"](), 1920, 1080)
+    assert _presets(video) == list(strings.EDIT_ANIMATION_PRESETS)
+    audio.deleteLater(); video.deleteLater()
+
+
+def _no_instante(nome: str, segundos: float):
+    widget = _ClipPropertiesWidget()
+    widget.load_clip(BLOCOS[nome](), 1920, 1080)
+    widget.set_playhead_position(segundos)
+    return widget
+
+
+def test_volume_animado_pela_aba_em_um_bloco_de_audio():
+    widget = _no_instante("audio_puro", 0.0)
+    emitidos = []
+    widget.property_changed.connect(lambda i, v: emitidos.append(v))
+    widget._btn_kf_toggle.click()                       # ◇ no começo: a curva nasce neutra
+    assert len(widget._clip.keyframes) == 1 and widget._clip.gain_at(0.0) == 0.0
+    widget.set_playhead_position(2.0)
+    widget._spin_gain.setValue(-12.0)                    # no instante 2,0 s: -12 dB
+    clip = widget._clip
+    assert len(clip.keyframes) == 2 and clip.gain_db == 0.0, "o volume do bloco não mexe: é um ponto da curva"
+    assert clip.gain_at(0.0) == pytest.approx(0.0) and clip.gain_at(2.0) == pytest.approx(-12.0)
+    assert emitidos[-1]["keyframes"] == clip.keyframes and emitidos[-1]["gain_db"] == 0.0
+    widget.set_playhead_position(1.0)
+    assert widget._spin_gain.value() == pytest.approx(-6.0), "o campo acompanha o cursor pela curva"
+    widget.deleteLater()
+
+
+def test_sem_quadros_chave_o_campo_volume_continua_sendo_o_do_bloco():
+    widget = _no_instante("video_com_som", 1.0)
+    emitidos = []
+    widget.property_changed.connect(lambda i, v: emitidos.append(v))
+    widget._spin_gain.setValue(-6.0)
+    assert emitidos == [{"gain_db": -6.0}] and widget._clip.keyframes == ()
+    widget.deleteLater()
+
+
+def test_mexer_na_posicao_de_um_ponto_nao_apaga_o_volume_dele():
+    widget = _no_instante("video_com_som", 0.0)
+    widget._btn_kf_toggle.click()
+    widget.set_playhead_position(2.0)
+    widget._spin_gain.setValue(-12.0)
+    widget._spin_x.setValue(round(0.9 * 1920))
+    assert widget._clip.gain_at(2.0) == pytest.approx(-12.0)
+    assert any(k.x == pytest.approx(0.9) and k.gain_offset_db == pytest.approx(-12.0) for k in widget._clip.keyframes)
+    widget.deleteLater()
+
+
+def test_editar_toda_a_animacao_desloca_o_volume_do_bloco_e_deixa_os_pontos():
+    widget = _no_instante("audio_puro", 0.0)
+    widget._btn_kf_toggle.click()
+    widget.set_playhead_position(2.0)
+    widget._spin_gain.setValue(-12.0)
+    pontos = widget._clip.keyframes
+    widget._whole_animation.setChecked(True)
+    widget.set_playhead_position(2.0)
+    widget._spin_gain.setValue(-6.0)                     # a curva toda sobe 6 dB
+    assert widget._clip.keyframes == pontos
+    assert widget._clip.gain_db == pytest.approx(6.0) and widget._clip.gain_at(2.0) == pytest.approx(-6.0)
+    widget.deleteLater()
+
+
+def test_remover_animacoes_apaga_a_curva_de_volume():
+    widget = _no_instante("audio_puro", 0.0)
+    widget._btn_kf_toggle.click()
+    widget.set_playhead_position(2.0)
+    widget._spin_gain.setValue(-12.0)
+    widget._combo_presets.setCurrentIndex(_presets(widget).index("clear"))
+    assert widget._clip.keyframes == () and widget._clip.gain_at(2.0) == 0.0
+    widget.deleteLater()
+
+
+def test_volume_da_aba_com_a_curva_chega_ao_projeto_e_desfaz_passo_a_passo(panel):
+    clip = Clip(_video(), 0.0, 5.0)
+    aba = _abre_propriedades(panel, clip)
+    aba._btn_kf_toggle.click()
+    panel._seek_to(2.0)
+    aba._spin_gain.setValue(-12.0)
+    no_projeto = panel._project.find(clip.clip_id)[1]
+    assert len(no_projeto.keyframes) == 2
+    assert no_projeto.gain_at(2.0) == pytest.approx(-12.0) and no_projeto.gain_at(0.0) == pytest.approx(0.0)
+    # Mover o cursor fecha o agrupamento do desfazer (como em qualquer edição da aba): o ◇ e o ajuste de
+    # volume são dois passos, e cada Ctrl+Z desfaz um.
+    panel._end_edit_groups()
+    panel._undo_edit()
+    depois_de_um = panel._project.find(clip.clip_id)[1]
+    assert len(depois_de_um.keyframes) == 1 and depois_de_um.gain_at(2.0) == pytest.approx(0.0)
+    panel._undo_edit()
+    assert panel._project.find(clip.clip_id)[1].keyframes == ()
+
+
+def test_lista_de_efeitos_do_audio_acompanha_a_troca_de_idioma(desktop_app, pseudo):
+    from videomanager.domain import i18n
+    from videomanager.presentation.qt import i18n as idioma
+
+    widget = _carregado("audio_puro")
+    try:
+        idioma.apply_language(i18n.ENGLISH)
+        assert _presets(widget) == ["", "clear"]
+        assert all(widget._combo_presets.itemText(i).startswith("⟦") for i in range(widget._combo_presets.count()))
+    finally:
+        idioma.apply_language(i18n.PORTUGUESE)
+        widget.deleteLater()
