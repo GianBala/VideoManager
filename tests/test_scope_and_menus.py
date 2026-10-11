@@ -411,6 +411,37 @@ def test_atalhos_de_projeto_funcionam_com_o_foco_no_editor(qapp: QApplication, m
         window.close()
 
 
+def test_janela_abre_sem_foco_visivel_e_o_tab_ainda_alcanca_a_barra_de_abas(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sem foco inicial, o Qt escolhe o primeiro da ordem de Tab — a barra de
+    abas — ao ativar a janela, e a aba Download abria com a borda de foco, como
+    se alguém tivesse apertado Tab. Mede-se na ativação, que é onde a escolha
+    acontece; o registro de foco antes dela não prova nada. A barra de abas
+    continua alcançável pelo teclado: o primeiro Tab chega nela."""
+    import warnings
+
+    from PySide6.QtTest import QTest
+
+    monkeypatch.setattr("videomanager.presentation.qt.main_window.ensure_ffmpeg", lambda parent, **kw: None)
+    window = MainWindow(Settings(), editor=build_editor_service(), processing=build_processing_service(),
+                        downloads=build_download_service(), runtime=build_desktop_runtime(audio_enabled=False))
+    try:
+        window.show()
+        qapp.processEvents()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            qapp.setActiveWindow(window)  # o caminho que o Qt segue ao ativar a janela
+        qapp.processEvents()
+        assert qapp.activeWindow() is window
+        assert qapp.focusWidget() is window.centralWidget()
+        assert not window._tabs.tabBar().hasFocus()
+        QTest.keyClick(qapp.focusWidget(), Qt.Key.Key_Tab)
+        qapp.processEvents()
+        assert window._tabs.tabBar().hasFocus()
+    finally:
+        window._edit.shutdown()
+        window.close()
+
+
 def test_titulo_da_janela_nao_repete_o_nome_do_aplicativo(tmp_path):
     """O Qt acrescenta o nome de exibição a todo título que não termina com
     ele: com "Video Manager" como nome, a janela aparecia como "Video Manager
