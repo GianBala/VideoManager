@@ -869,6 +869,8 @@ PROP_CLIP_ID = "ID #{id} · {kind}"
 # Espécie do bloco, pelo tipo de sobreposição gravado no projeto.
 PROP_KINDS = {"none": "Mídia", "image": "Imagem", "text": "Texto", "filter": "Filtro", "transition": "Transição"}
 PROP_TRANSFORM = "Transformação"
+PROP_SPEED = "Velocidade"
+PROP_VOLUME = "Volume"
 PROP_POS_X = "Posição X:"
 PROP_POS_Y = "Posição Y:"
 PROP_WIDTH = "Largura:"

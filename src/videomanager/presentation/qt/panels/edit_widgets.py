@@ -1123,6 +1123,7 @@ class _ClipPropertiesWidget(QWidget):
     """Aba de propriedades do clipe com visualização e edição numérica precisa."""
 
     property_changed = Signal(int, dict)  # clip_id, dict de alterações
+    speed_changed = Signal(int, float)  # clip_id, velocidade pedida (o painel aplica e pode recusar)
     seek_requested = Signal(float)  # timestamp para navegação do cursor
     animation_scope_changed = Signal(bool)
     close_requested = Signal()
@@ -1333,6 +1334,46 @@ class _ClipPropertiesWidget(QWidget):
 
         self._layout.addWidget(self._transform_group)
 
+        # Grupos Velocidade e Volume: os mesmos ajustes dos botões ⚡ e 🔊 da barra, à vista
+        # também aqui — num bloco de áudio a aba abria vazia. A velocidade fica **fora** do grupo de
+        # Animação de propósito: ela muda a duração do bloco, e uma curva de velocidade mudaria o
+        # tamanho da trilha ao longo do próprio arrasto.
+        self._speed_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_SPEED)
+        speed_layout = QVBoxLayout(self._speed_group)
+        speed_layout.setContentsMargins(6, 8, 6, 6)
+        speed_layout.setSpacing(6)
+        self._spin_speed = QDoubleSpinBox()
+        self._spin_speed.setRange(0.1, 10.0)
+        self._spin_speed.setSingleStep(0.1)
+        self._spin_speed.setDecimals(1)
+        self._spin_speed.setSuffix("x")
+        # Sem rastrear a digitação: o painel recusa a velocidade que passa por cima do vizinho, e
+        # checar a cada tecla (de "1" a "15") avisaria por um valor que ainda estava sendo digitado.
+        self._spin_speed.setKeyboardTracking(False)
+        bind(self._spin_speed, "setToolTip", lambda: strings.EDIT_SPEED_TIP)
+        self._spin_speed.valueChanged.connect(self._on_speed_changed)
+        speed_layout.addWidget(self._spin_speed)
+        self._layout.addWidget(self._speed_group)
+
+        self._volume_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_VOLUME)
+        volume_layout = QVBoxLayout(self._volume_group)
+        volume_layout.setContentsMargins(6, 8, 6, 6)
+        volume_layout.setSpacing(6)
+        self._spin_gain = QDoubleSpinBox()
+        self._spin_gain.setRange(MIN_GAIN_DB, MAX_GAIN_DB)
+        self._spin_gain.setSingleStep(0.5)
+        self._spin_gain.setDecimals(1)
+        self._spin_gain.setSuffix(" dB")
+        bind(self._spin_gain, "setToolTip", lambda: strings.EDIT_GAIN_TIP)
+        self._spin_gain.valueChanged.connect(self._on_gain_changed)
+        volume_layout.addWidget(self._spin_gain)
+        # Em linha própria: o texto quebra, e a altura dele não atravessa um layout horizontal.
+        self._lbl_gain_detached = bind(QLabel(), "setText", lambda: strings.EDIT_GAIN_DETACHED)
+        self._lbl_gain_detached.setWordWrap(True)
+        self._lbl_gain_detached.setProperty("role", "dim")
+        volume_layout.addWidget(self._lbl_gain_detached)
+        self._layout.addWidget(self._volume_group)
+
         # Grupo Animação / Quadros-chave
         self._animation_group = bind(QGroupBox(), "setTitle", lambda: strings.EDIT_KEYFRAME_TITLE)
         anim_layout = QVBoxLayout(self._animation_group)
@@ -1531,6 +1572,8 @@ class _ClipPropertiesWidget(QWidget):
         self._clip = None
         self._refresh_header()
         self._transform_group.setVisible(False)
+        self._speed_group.setVisible(False)
+        self._volume_group.setVisible(False)
         self._animation_group.setVisible(False)
         self._chromakey_group.setVisible(False)
         self._blur_group.setVisible(False)
@@ -1603,6 +1646,20 @@ class _ClipPropertiesWidget(QWidget):
             self._blur_group.setVisible(can_blur)
             self._transition_group.setVisible(is_trans)
 
+            # O mesmo critério dos botões ⚡ e 🔊 da barra (``edit_panel._refresh_controls``): velocidade
+            # onde há relógio de mídia; volume onde há som — e, no bloco cujo áudio foi separado, à vista
+            # e desligado com o motivo, porque o som agora é do outro bloco.
+            has_speed = clip.media is not None and not clip.is_additional
+            has_sound = clip.can_adjust_sound or clip.detached
+            self._speed_group.setVisible(has_speed)
+            self._volume_group.setVisible(has_sound)
+            if has_speed:
+                self._spin_speed.setValue(clip.speed)
+            if has_sound:
+                self._spin_gain.setEnabled(clip.can_adjust_sound)
+                self._lbl_gain_detached.setVisible(clip.detached)
+                self._spin_gain.setValue(clip.gain_db)
+
             if can_blur:
                 self._chk_blur.setChecked(clip.blur_background)
                 self._sync_blur_controls(clip.chromakey_enabled)
@@ -1647,6 +1704,17 @@ class _ClipPropertiesWidget(QWidget):
 
         finally:
             self._updating = False
+
+    def _on_speed_changed(self, value: float) -> None:
+        if self._updating or self._clip_id < 0:
+            return
+        self.speed_changed.emit(self._clip_id, value)
+
+    def _on_gain_changed(self, value: float) -> None:
+        if self._updating or self._clip_id < 0 or self._clip is None:
+            return
+        self._clip = replace(self._clip, gain_db=value)
+        self.property_changed.emit(self._clip_id, {"gain_db": value})
 
     def _on_chroma_toggled(self, checked: bool) -> None:
         self._enable_chroma_controls(checked)
