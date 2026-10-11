@@ -379,6 +379,23 @@ def test_volume_da_aba_com_a_curva_chega_ao_projeto_e_desfaz_passo_a_passo(panel
     assert panel._project.find(clip.clip_id)[1].keyframes == ()
 
 
+def test_efeito_rapido_de_imagem_troca_os_quadros_chave_e_leva_a_curva_de_volume():
+    """Decisão registrada em ``decisoes-de-projeto.md``: o efeito troca os quadros-chave do bloco, e a curva de
+    volume vai junto (os pontos do efeito são neutros no volume). O teste existe para a decisão não mudar sem
+    ninguém notar: preservar a curva, ou apagá-la em mais casos, é uma escolha, não um efeito colateral."""
+    curva = (Keyframe(0.0, gain_offset_db=-30.0), Keyframe(2.0, gain_offset_db=0.0))
+    widget = _ClipPropertiesWidget()
+    widget.load_clip(Clip(_video(), 0.0, 5.0, keyframes=curva), 1920, 1080)
+    emitidos = []
+    widget.property_changed.connect(lambda i, v: emitidos.append(v))
+    assert widget._clip.animates_gain
+    widget._combo_presets.setCurrentIndex(_presets(widget).index("fade_in"))
+    assert not widget._clip.animates_gain and widget._clip.has_pose_keyframes
+    assert emitidos[-1]["keyframes"] == widget._clip.keyframes
+    assert all(k.gain_offset_db == 0.0 for k in widget._clip.keyframes)
+    widget.deleteLater()
+
+
 def test_lista_de_efeitos_do_audio_acompanha_a_troca_de_idioma(desktop_app, pseudo):
     from videomanager.domain import i18n
     from videomanager.presentation.qt import i18n as idioma
