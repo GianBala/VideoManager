@@ -46,6 +46,8 @@ from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import BYTES_PER_PIXEL
 from videomanager.domain.preview import fit_size
+from videomanager.domain.project import MAX_GAIN_DB
+from videomanager.domain.project import MIN_GAIN_DB
 from videomanager.domain.project import Clip
 from videomanager.domain.project import OverlayType
 from videomanager.domain.project import MediaKind
@@ -782,7 +784,7 @@ def _video_chain(
 
         has_anim_rotation = clip.animates("rotation")
         max_diag: int | None = None
-        if clip.has_keyframes:
+        if clip.has_pose_keyframes:
             all_k_sx = [clip.scale_x] + [k.scale_x for k in clip.keyframes]
             all_k_sy = [clip.scale_y] + [k.scale_y for k in clip.keyframes]
             max_k_sx = max(all_k_sx)
@@ -828,7 +830,7 @@ def _video_chain(
                     f"rotate={rad:.4f}:ow='2*ceil(rotw({rad:.4f})/2)':oh='2*ceil(roth({rad:.4f})/2)':c=black@0"
                 )
 
-        if clip.has_keyframes:
+        if clip.has_pose_keyframes:
             has_anim_opacity = clip.animates("opacity")
             if has_anim_opacity:
                 expr_op = _keyframe_expr(
@@ -876,7 +878,7 @@ def _video_chain(
 
     sx = clip.scale_x
     sy = clip.scale_y
-    has_keyframes = clip.has_keyframes
+    has_keyframes = clip.has_pose_keyframes
     origin = _clip_stream_origin(piece)
     has_anim_scale = clip.animates("scale")
     has_anim_rotation = clip.animates("rotation")
@@ -930,7 +932,7 @@ def _video_chain(
                 steps.append(ck)
 
         max_diag: int | None = None
-        if clip.has_keyframes:
+        if clip.has_pose_keyframes:
             all_k_sx = [clip.scale_x] + [k.scale_x for k in clip.keyframes]
             all_k_sy = [clip.scale_y] + [k.scale_y for k in clip.keyframes]
             max_k_sx = max(all_k_sx)
@@ -960,7 +962,7 @@ def _video_chain(
                     f"rotate={rad:.4f}:ow='2*ceil(rotw({rad:.4f})/2)':oh='2*ceil(roth({rad:.4f})/2)':c=black@0"
                 )
 
-        if clip.has_keyframes:
+        if clip.has_pose_keyframes:
             has_anim_opacity = clip.animates("opacity")
             if has_anim_opacity:
                 expr_op = _keyframe_expr(
@@ -1066,6 +1068,24 @@ def _fit_scale(width: int, height: int) -> str:
     return f"scale=w='trunc({largest}/2)*2':h='trunc({tallest}/2)*2'"
 
 
+def _gain_filter(clip: Clip, origin: float) -> str | None:
+    """O filtro de volume do bloco: o valor fixo de sempre, ou a curva dos quadros-chave no tempo.
+
+    Sem curva o texto é exatamente o de antes (``volume=-6.00dB``), então o comando de todo projeto
+    sem volume animado sai igual. Com curva, o volume ouvido é o do bloco mais a curva, limitado ao
+    mesmo intervalo do controle, convertido de dB por ``pow`` e reavaliado a cada quadro de áudio
+    (``eval=frame``, como os fades logo abaixo). ``origin`` é onde o bloco começa no relógio ``t`` do
+    filtro, que o ffmpeg conta desde o início do trecho lido.
+    """
+    if clip.animates_gain:
+        curve = _keyframe_expr(clip.keyframes, "gain_offset_db", origin, 0.0)
+        return (f"volume='pow(10,max({MIN_GAIN_DB:g},min({MAX_GAIN_DB:g},{clip.gain_db:.6f}+({curve})))/20)'"
+                ":eval=frame")
+    if clip.changes_gain:
+        return f"volume={clip.gain_db:.2f}dB"
+    return None
+
+
 def _audio_chain(
     piece: _Piece,
     muted_ranges: tuple[tuple[float, float], ...] = (),
@@ -1089,8 +1109,11 @@ def _audio_chain(
         steps = [f"atrim={cut}duration={piece.duration:.6f}", "asetpts=PTS-STARTPTS"]
         if piece.flip:
             steps.append("areverse")
-    if clip.changes_gain:
-        steps.append(f"volume={clip.gain_db:.2f}dB")
+    # O trecho lido começa ``piece.elapsed`` depois do começo do bloco (uma janela, a prévia a partir do
+    # meio): a curva, medida desde o começo do bloco, desloca-se por isso.
+    gain = _gain_filter(clip, -piece.elapsed)
+    if gain:
+        steps.append(gain)
     steps.append(_AUDIO_BASE)
     steps.append(
         _MONO_TO_STEREO if clip.media.channels == 1 else _TO_STEREO
@@ -1419,8 +1442,11 @@ def _transition_audio_chain(side: _TransitionSide, label: str) -> str:
         *(["areverse"] if side.flip else []),
         *_atempo_filters(side.playback_speed),
     ]
-    if clip.changes_gain:
-        steps.append(f"volume={clip.gain_db:.2f}dB")
+    # O ``volume`` vem antes do ``adelay`` da alça: ali o relógio começa na primeira amostra de verdade,
+    # que é onde o lado começa a ler o bloco.
+    gain = _gain_filter(clip, -_side_elapsed(side))
+    if gain:
+        steps.append(gain)
     steps.extend(
         (
             _AUDIO_BASE,
@@ -1503,7 +1529,7 @@ def _compose_video_piece(
     label = f"[o{order}]"
     is_overlay_item = piece.clip.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT) or piece.clip.is_image
     has_transform = (
-        piece.clip.has_keyframes
+        piece.clip.has_pose_keyframes
         or abs(piece.clip.x - 0.5) > 1e-9
         or abs(piece.clip.y - 0.5) > 1e-9
         or abs(piece.clip.scale_x - 1.0) > 1e-9
@@ -1512,7 +1538,7 @@ def _compose_video_piece(
         or piece.clip.chromakey_enabled
         or piece.clip.opacity < 1 - 1e-9
     )
-    if piece.clip.has_keyframes:
+    if piece.clip.has_pose_keyframes:
         origin = _clip_stream_origin(piece)
         expr_x = _keyframe_expr(piece.clip.keyframes, "x", origin, piece.clip.x)
         expr_y = _keyframe_expr(piece.clip.keyframes, "y", origin, piece.clip.y)
@@ -1863,7 +1889,7 @@ def build_graph(
             continuous_source_cut
             and context.left.has_sound
             and context.right.has_sound
-            and abs(context.left.gain_db - context.right.gain_db) < GAIN_EPSILON
+            and abs(context.left.gain_at(context.left.duration) - context.right.gain_at(0.0)) < GAIN_EPSILON
         )
         has_audio_transition = bool(
             has_audio_at_cut
