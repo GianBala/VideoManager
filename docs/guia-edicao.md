@@ -356,13 +356,18 @@ selo `⏪ invertido` aparece no título do bloco.
   quadros-chave correm no relógio da edição, e a transição de um bloco invertido
   usa o material além da ponta dele, na ordem em que o bloco toca.
 - **Separar áudio** leva a inversão junto; o som continua casado com a imagem.
-- **Limite de tamanho.** Para virar o trecho, o ffmpeg guarda na memória todos
-  os quadros dele (medido: ~2,9 MB por quadro em 1080p). Por isso um bloco
-  invertido tem teto de memória de 2 GiB pela conta do pior caso — cerca de
-  11 s em 1080p a 30 q/s, 26 s em 720p, 3 s em 4K. Acima disso a opção aparece
-  desabilitada, dizendo o motivo; divida o bloco (`S`) e inverta cada parte. As
-  alças de um bloco já invertido param no teto, e a exportação recusa, com o
-  número, um bloco que o passe. Blocos só de som não têm teto.
+- **Tamanho.** Um bloco invertido pode ter qualquer duração, até meia hora de
+  mídia (`Clip.reverse_limit`); acima disso o item aparece desabilitado, com o
+  motivo na dica, e as alças de um bloco já invertido param nesse limite. Para
+  virar o trecho, o ffmpeg guarda todos os quadros dele na memória, então o
+  aplicativo o lê em **janelas curtas, uma por processo**: na prévia o fluxo
+  segue contínuo, porque a janela seguinte já está pronta quando a atual
+  acaba; na exportação cada janela vira um arquivo e as janelas se emendam sem
+  recodificar, uma de cada vez. Um bloco de 60 s em 1080p exporta com o maior
+  processo em 1,8 GB (um bloco normal já usa 1,3) e toca com 0,4 GB. Pode haver
+  alguns segundos a mais de exportação, pelas janelas. O GIF não se divide em
+  janelas e recusa, com o nome do bloco, um invertido que não caiba num processo
+  só; exporte em MP4, MKV, WebM ou MOV.
 - **Não há corte rápido.** Copiar os pacotes não vira o trecho do avesso: uma
   edição com bloco invertido sempre é composta e recodificada.
 

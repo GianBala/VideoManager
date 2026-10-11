@@ -161,19 +161,56 @@ quadro nas bordas dos quadros da edição. O quadro parado também **não usa
 exportação, 0 de diferença nos instantes testados, inclusive no primeiro e no
 último quadro.
 
-**O `reverse` guarda todos os quadros do trecho, e por isso há um teto.** Medido
-(1080p, 30 q/s): 422 MB para 3 s, 700 MB para 6 s, 1203 MB para 12 s. Ao
-contrário do `minterpolate`, o custo cresce com a duração. O teto é de 2 GiB por
-bloco pela conta do pior caso (3 bytes por pixel, para 10 bits), o que dá ~11 s
-em 1080p a 30 q/s. Três defesas: o menu não oferece a inversão acima dele
-(`Clip.can_reverse`, com o motivo na dica); as alças de um bloco invertido não
-o ultrapassam (`Clip.reverse_limit`); e `composer.check_reversal` recusa a
-exportação, com o número, de um projeto que ainda assim o passe — arquivo
-editado à mão, mídia que mudou. **A prévia não recusa**: ela monta o comando na
-thread da interface, onde uma exceção não tem quem a mostre. Dividir o trecho em
-vários processos para vencer o teto ficou de fora: exigiria renderizar pedaços
-intermediários, como a exportação paralela, e o uso comum — cortar e inverter
-trechos curtos — não precisa.
+**O `reverse` guarda todos os quadros do trecho, então o bloco é lido em janelas,
+uma por processo.** Medido (1080p, 30 q/s): 422 MB para 3 s, 700 MB para 6 s,
+1203 MB para 12 s — 87 MB por segundo. Ao contrário do `minterpolate`, o custo
+cresce com a duração, e **não dá para limitar dentro de um processo**: cortar o
+bloco em pedaços no mesmo grafo não ajuda, porque o ffmpeg abre todos e cada
+`reverse` lê o pedaço inteiro logo no começo (cinco pedaços de 4 s gastaram
+3,8 GB, mais que um bloco de 20 s; `concat` e o filtro `movie` deram no mesmo, e
+com 30 pedaços o kernel matou o processo). Só limita uma janela por processo, em
+sequência. A primeira versão desta funcionalidade recusava o bloco acima de
+~11 s, e foi o primeiro vídeo importado que a derrubou: era uma funcionalidade
+que só servia para clipes de efeito.
+
+`render_cost.reverse_cuts` decide onde cortar. Cada janela cabe em
+`MAX_REVERSE_BYTES` (1 GiB, pela conta do pior caso de 3 bytes por pixel) **com
+todos os blocos invertidos que a cruzam somados**, porque os `reverse` de blocos
+simultâneos vivem juntos; o corte cai na grade de quadros (uma janela que
+termina no meio de um quadro faria a seguinte repetir ou perder um) e pula, em
+vez de repetir, o trecho em que nada invertido toca. Dois consumidores:
+
+- **Exportação.** `parallel.reversal_bounds` entrega as janelas ao
+  `ParallelExport`, com uma vaga só: cada janela é um arquivo de vídeo, as
+  janelas se emendam copiando os dados, e o som, que pesa 384 KB por segundo,
+  sai num passe só. É o mesmo caminho da interpolação paralela, o que dispensou
+  uma segunda máquina de trechos. Medido em 60 s de 1080p: 17 s, 1800 quadros,
+  pico de 1,8 GB no maior processo (1,3 GB sem inversão nenhuma, que é o que o
+  codificador e o grafo já pesam). O GIF monta uma paleta sobre o fluxo inteiro e
+  não se divide: `composer.check_reversal` o recusa, com o nome do bloco.
+- **Reprodução, som e cache da agulha.** A janela da prévia é de 8 s, e menor
+  que isso quando a memória manda (metade do orçamento, porque duas janelas
+  vivem juntas): o `reverse` só entrega o primeiro quadro depois de ler a janela
+  inteira, então janela curta é reprodução que começa logo. `Stages`
+  (`infrastructure/ffmpeg/stages.py`) faz vários comandos parecerem **um fluxo
+  só** para quem lê quadros ou PCM, e abre a janela seguinte quando a atual passa
+  da metade — não antes, para uma prévia pausada, com o primeiro quadro já
+  lido, não ter duas janelas na memória. O painel não sabe de nada: `FramePump`
+  e `AudioPreview` só trocaram `Popen` por `open_process`. O cache da agulha
+  pede só a primeira janela, e o painel volta a pedir o que falta. Medido, 60 s
+  de 1080p invertido: 0,17 s até o primeiro quadro, maior intervalo entre
+  quadros de 34 ms atravessando 21 emendas e 389 MB no maior processo.
+
+**Ler mais cedo e não passar `-ss 0` num bloco invertido.** Depois de um `-ss` o
+primeiro quadro de áudio do AAC sai sem o vizinho de que precisa: cerca de 1000
+amostras atenuadas (medido: 995 a 1001 antes de cada emenda de janela). Num bloco
+normal isso fica no começo do bloco; num invertido a leitura começa no **fim** do
+que toca, e cada janela abria um estalo no meio do som. `_PREROLL` (0,25 s) lê
+mais cedo e `trim`/`atrim` descartam a sobra: 0 amostra errada nas emendas, som
+das janelas idêntico ao de um passe só. E um `-ss 0` **não** é "não buscar": o
+ffmpeg entrega as primeiras 576 amostras zeradas, então a leitura que começa em
+zero vai sem `-ss`. O bloco normal tem os dois defeitos e não foi tocado
+(diferença não pedida, e o retrato de comandos tem de continuar idêntico).
 
 **Lado invertido de uma transição lê um quadro antes.** A janela da transição
 começa no meio de um quadro, e a regra do `-ss` descarta o quadro que a
