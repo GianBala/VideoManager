@@ -673,6 +673,14 @@ class Clip:
         target = replace(current, **{k: v for k, v in changes.items() if k in names})
         if not self.keyframes:
             return replace(self, scale=(target.scale_x + target.scale_y) / 2, **{k: getattr(target, k) for k in names})
+        if not whole_animation and not self.has_pose_keyframes and self.keyframe_in_frame(offset, fps) is None:
+            # Só há curva de volume e o cursor não está num ponto: a imagem não é animada, e a edição vale para o
+            # bloco inteiro, com os pontos de volume andando junto (a pose deles é a do bloco). Contando o ponto de
+            # volume como animação, o gesto criava um ponto de pose e a imagem ia e voltava. Sobre um ponto (◇ aceso)
+            # a edição segue sendo dele — é o único gesto que começa a animar a imagem de um bloco com fade de som.
+            pose = {k: getattr(target, k) for k in names}
+            return replace(self, scale=(target.scale_x + target.scale_y) / 2, **pose,
+                           keyframes=tuple(replace(k, **pose) for k in self.keyframes))
         if whole_animation:
             dx, dy = target.x - current.x, target.y - current.y
             rotation = target.rotation - current.rotation

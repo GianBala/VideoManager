@@ -311,6 +311,20 @@ def test_mexer_na_posicao_de_um_ponto_nao_apaga_o_volume_dele():
     widget.deleteLater()
 
 
+def test_mover_pela_aba_o_bloco_que_so_tem_curva_de_volume_move_o_bloco_e_nao_anima_a_imagem():
+    widget = _no_instante("video_com_som", 0.0)
+    widget._btn_kf_toggle.click()                       # ◇ em 0 s
+    widget.set_playhead_position(2.0)
+    widget._spin_gain.setValue(-12.0)                   # ponto de volume em 2 s: a curva existe, a imagem não anima
+    widget.set_playhead_position(1.0)                   # cursor fora dos pontos
+    widget._spin_x.setValue(round(0.8 * 1920))
+    clip = widget._clip
+    assert clip.x == pytest.approx(0.8) and not clip.has_pose_keyframes
+    assert all(k.x == pytest.approx(0.8) for k in clip.keyframes), "os pontos de volume andam junto com o bloco"
+    assert clip.gain_at(2.0) == pytest.approx(-12.0)
+    widget.deleteLater()
+
+
 def test_editar_toda_a_animacao_desloca_o_volume_do_bloco_e_deixa_os_pontos():
     widget = _no_instante("audio_puro", 0.0)
     widget._btn_kf_toggle.click()
