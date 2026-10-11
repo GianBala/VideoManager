@@ -139,15 +139,57 @@ class TestEditarAPoseNaoApagaOVolume:
         assert (primeiro.x, primeiro.gain_offset_db) == (pytest.approx(0.9), pytest.approx(-30.0))
 
     def test_pose_criada_no_meio_da_rampa_captura_o_volume_interpolado_e_nao_zero(self):
-        editado = _rampa().with_edited_transform(1.0, {"x": 0.9}, fps=FPS)
+        # Com a imagem **já animada**: o ponto novo nasce da pose de agora e leva o volume que a curva tem ali.
+        # (Num bloco que só tem a rampa de volume a edição não cria ponto: ver ``TestImagemNaoAnimadaPeloVolume``.)
+        animado = _bloco(keyframes=(Keyframe(0.0, x=0.2, gain_offset_db=-30.0), Keyframe(2.0, x=0.8)))
+        editado = animado.with_edited_transform(1.0, {"x": 0.9}, fps=FPS)
         meio = next(k for k in editado.keyframes if k.time_offset == pytest.approx(1.0))
-        assert meio.gain_offset_db == pytest.approx(-15.0)
+        assert meio.x == pytest.approx(0.9) and meio.gain_offset_db == pytest.approx(-15.0)
         assert editado.gain_at(1.0) == pytest.approx(-15.0), "a rampa continua a mesma"
 
     def test_editar_a_animacao_inteira_nao_mexe_no_volume(self):
         misto = _bloco(keyframes=(Keyframe(0.0, x=0.2, gain_offset_db=-30.0), Keyframe(2.0, x=0.8)))
         editado = misto.with_edited_transform(1.0, {"x": 0.7}, fps=FPS, whole_animation=True)
         assert [k.gain_offset_db for k in editado.keyframes] == [-30.0, 0.0]
+
+
+class TestImagemNaoAnimadaPeloVolume:
+    """Um bloco que só tem curva de volume não é imagem animada: mover, escalar, girar ou mudar a opacidade vale
+    para o bloco inteiro, como num bloco sem quadro-chave, e os pontos de volume andam junto. Contando o ponto de
+    volume como animação, o gesto criava um ponto de pose e a imagem ia e voltava (x: 0,5 → 0,8 → 0,5)."""
+
+    @pytest.mark.parametrize("mudanca", [{"x": 0.8}, {"y": 0.3}, {"scale_x": 1.5, "scale_y": 1.5}, {"rotation": 30.0},
+                                         {"opacity": 0.5}])
+    def test_editar_a_pose_fora_de_um_ponto_vale_para_o_bloco_inteiro(self, mudanca):
+        antes = _rampa()
+        editado = antes.with_edited_transform(1.0, mudanca, fps=FPS)
+        assert not editado.has_pose_keyframes
+        for campo, valor in mudanca.items():
+            assert getattr(editado, campo) == pytest.approx(valor)
+            assert all(getattr(k, campo) == pytest.approx(valor) for k in editado.keyframes), campo
+        assert [(k.time_offset, k.gain_offset_db, k.easing) for k in editado.keyframes] == [
+            (k.time_offset, k.gain_offset_db, k.easing) for k in antes.keyframes], "os pontos de volume ficam como estavam"
+        for instante in (0.0, 0.7, 1.0, 2.0, 5.0):
+            assert editado.gain_at(instante) == pytest.approx(antes.gain_at(instante))
+
+    def test_editar_a_animacao_inteira_tambem_vale_para_o_bloco_inteiro(self):
+        editado = _rampa().with_edited_transform(1.0, {"x": 0.7}, fps=FPS, whole_animation=True)
+        assert editado.x == pytest.approx(0.7) and not editado.has_pose_keyframes
+        assert all(k.x == pytest.approx(0.7) for k in editado.keyframes)
+
+    def test_com_o_cursor_sobre_um_ponto_a_edicao_e_do_ponto_e_a_imagem_passa_a_animar(self):
+        """O ◇ aceso é o alvo da edição: é o gesto de começar a animar a imagem de um bloco que tem curva de volume
+        (sem ele só o "Efeito Rápido" o faria, e este apaga o volume)."""
+        editado = _rampa().with_edited_transform(2.0, {"x": 0.9}, fps=FPS)
+        assert editado.has_pose_keyframes
+        assert [k.x for k in editado.keyframes] == [pytest.approx(0.5), pytest.approx(0.9)]
+        assert editado.gain_at(1.0) == pytest.approx(-15.0)
+
+    def test_quadro_chave_neutro_de_projeto_antigo_segue_como_animacao(self):
+        # Sem curva de volume é o que sempre foi: existir quadro-chave basta (ver ``has_pose_keyframes``).
+        antigo = _bloco(keyframes=(Keyframe(0.0), Keyframe(2.0)))
+        editado = antigo.with_edited_transform(1.0, {"x": 0.9}, fps=FPS)
+        assert any(k.time_offset == pytest.approx(1.0) and k.x == pytest.approx(0.9) for k in editado.keyframes)
 
 
 def _projeto(clip: Clip) -> Project:
