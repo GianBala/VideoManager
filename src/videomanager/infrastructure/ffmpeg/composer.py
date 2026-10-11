@@ -1335,6 +1335,20 @@ def _transition_input_args(side: _TransitionSide, fps: float) -> list[str]:
     return ["-ss", f"{side.seek:.6f}", "-i", str(side.clip.media.path)]
 
 
+def _side_elapsed(side: _TransitionSide) -> float:
+    """Quanto do bloco, na edição, já passou quando este lado da transição começa a ler.
+
+    É o que desloca a origem do relógio dos quadros-chave (imagem e, no som, o volume) para o
+    relógio do próprio lado, que nasce no início da janela e não no do bloco. Não conta o
+    ``prepad``: a imagem o recebe na cadeia dela, e o som, depois do ``volume``, no ``adelay``.
+    """
+    clip = side.clip
+    if clip.reversed:
+        top = side.seek + side.lead + side.source_duration
+        return (clip.out_point - top) / side.playback_speed
+    return (side.seek - clip.in_point) / side.playback_speed
+
+
 def _transition_video_chain(
     side: _TransitionSide,
     project: Project,
@@ -1376,11 +1390,7 @@ def _transition_video_chain(
 
     # Decodificação/alças são específicas da transição; transformação e alfa
     # usam a mesma composição de uma camada normal, no relógio da timeline.
-    if clip.reversed:
-        top = side.seek + side.lead + side.source_duration
-        elapsed = (clip.out_point - top) / side.playback_speed - side.prepad
-    else:
-        elapsed = (side.seek - clip.in_point) / side.playback_speed - side.prepad
+    elapsed = _side_elapsed(side) - side.prepad
     local_clip = replace(clip, start=0, duration=side.duration, in_point=0, speed=1, reversed=False,
                          keyframes=tuple(replace(k, time_offset=k.time_offset-elapsed) for k in clip.keyframes))
     decoded = f"{label[:-1]}_decoded]"
