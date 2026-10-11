@@ -81,6 +81,62 @@ percebe um quadro repetido —, com a imagem se corrigindo contra ele.
 Mais detalhes em [Conversão e exportação](clean-architecture/processamento.md#um-compositor-para-todos-os-consumidores)
 e em [Prévia, áudio e texto](clean-architecture/previa.md).
 
+## O fundo desfocado do bloco
+
+**Uma camada própria, opaca e de tela cheia por baixo do bloco**
+(`Clip.blur_background`): o próprio bloco, ampliado até cobrir a tela e
+desfocado, no lugar do preto das laterais. Fica por baixo da frente e por cima
+das trilhas de baixo, **só na janela de tempo do bloco** — por isso cobre o que
+estiver embaixo, e a opção nasce desligada. Acompanha a opacidade do bloco
+(senão, num fade, a frente sumiria e o borrão ficaria na tela). O chroma key a
+desliga, porque o borrão apareceria onde a cor foi removida, sem apagar a
+escolha.
+
+**Uma regra só decide se o fundo aparece** (`Clip.shows_blur_background`), e ela
+é perguntada **uma vez** por grafo, com a tela de exportação
+(`_blur_where_visible`). Um bloco que já preenche a tela em pose neutra — no
+bloco, em cada quadro-chave e entre eles (um giro de 0° a 360° não é neutro) —
+não ganha o ramo, e o arquivo sai byte a byte igual ao de antes. Perguntar pela
+tela da prévia, arredondada para par, faria um clipe 16:9 deixar de "preencher"
+só ali, e prévia e exportação discordariam. Prévia, exportação, transições e
+arrasto leem a mesma resposta.
+
+**O desfoque nasce pequeno.** O bloco é coberto à tela de trabalho (lado menor
+136, sigma 6), borrado ali e só então ampliado: é uma mancha de cor, e desfocar
+4K inteiro custa o que não se vê. Medido numa exportação de 5 s: com o `gblur`
+em tamanho cheio ela leva 2,44 s a 1080p e 8,47 s a 4K; na tela de trabalho,
+1,36 s e 4,69 s, com SSIM 0,998 contra o desfoque cheio. O lado menor fixo faz prévia e arquivo saírem do mesmo desenho
+(com fração fixa ou sigma em pixels a prévia pequena divergia: SSIM 0,935 e
+0,781). As duas ampliações são bilineares: o bicúbico gastava CPU num detalhe
+que o desfoque já tirou.
+
+O `gblur` roda num formato fixo e volta a `yuv420p` ainda pequeno. Sem isso ele
+borrava os planos de cor de um vídeo na metade da resolução, e o fundo do vídeo
+saía mais lavado que o da foto do mesmo quadro (6,5 a 13,4 de 255). Esse formato
+não tem alfa, e a conversão o descartava: numa imagem com transparência o fundo
+nascia da cor escondida sob o alfa, que depende de como o arquivo foi exportado.
+O alfa é composto sobre preto antes da conversão; para fonte sem alfa nada muda.
+
+**O fundo não passa pelo `minterpolate`** (o movimento some no desfoque, e
+interpolar custaria memória sem mostrar nada) e leva o `fps` da tela no **fim**
+do ramo: sem ele o último instante do bloco, numa tela de taxa maior que a da
+fonte, caía depois do último quadro do fundo — um quadro preto nas laterais em
+cada emenda, com duração e contagem de quadros certas (medido: o quadro 89 de 90).
+
+**No arrasto, o fundo é a quarta imagem do worker** (`interaction_commands`):
+ele cobre a tela e não depende da pose, então uma imagem serve o gesto todo, e
+o Qt a pinta entre o que está por baixo e a textura, com a opacidade ao vivo e
+só onde o quadro final a mostraria. Sem ela cada movimento caía num ffmpeg e a
+imagem ficava 30,5 px atrás da mão; com ela o erro é o do gesto sem fundo (0,5
+px).
+
+**No arquivo**, o `.vmp` versão 4 grava `blur_background`. Um v3 abre com a
+opção desligada e ganha a cópia `.v3.bak` ao ser salvo; a 3.1 recusa o v4 com
+mensagem (ver o [formato .vmp](clean-architecture/editor.md#formato-vmp)).
+
+Mais detalhes em [Prévia, áudio e texto](clean-architecture/previa.md) e em
+[Conversão e exportação](clean-architecture/processamento.md).
+
 ## Fixtures reais em vez de suposições
 
 O que sustenta a promessa de funcionar em plataformas diversas são **fixtures
