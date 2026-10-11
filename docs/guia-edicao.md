@@ -365,9 +365,12 @@ selo `⏪ invertido` aparece no título do bloco.
   acaba; na exportação cada janela vira um arquivo e as janelas se emendam sem
   recodificar, uma de cada vez. Um bloco de 60 s em 1080p exporta com o maior
   processo em 1,8 GB (um bloco normal já usa 1,3) e toca com 0,4 GB. Pode haver
-  alguns segundos a mais de exportação, pelas janelas. O GIF não se divide em
-  janelas e recusa, com o nome do bloco, um invertido que não caiba num processo
-  só; exporte em MP4, MKV, WebM ou MOV.
+  alguns segundos a mais de exportação, pelas janelas. Com **Interpolar
+  movimento** ligado, um invertido que precise de janelas as interpola uma de
+  cada vez: a exportação não se divide em trechos paralelos nesse caso, e leva o
+  tempo da interpolação sem essa divisão. O GIF não se divide em janelas e
+  recusa, com o nome do bloco que mais pesa, um invertido que não caiba num
+  processo só; exporte em MP4, MKV, WebM ou MOV.
 - **Não há corte rápido.** Copiar os pacotes não vira o trecho do avesso: uma
   edição com bloco invertido sempre é composta e recodificada.
 

@@ -159,7 +159,10 @@ fim do trecho. Espelhar o instante e procurar o quadro mais perto errava por um
 quadro nas bordas dos quadros da edição. O quadro parado também **não usa
 `reverse`**: lê o quadro certo de frente, sem guardar nada. Medido contra a
 exportação, 0 de diferença nos instantes testados, inclusive no primeiro e no
-último quadro.
+último quadro — com fonte e projeto na mesma taxa. Com taxas diferentes
+(medido em 24→30 e 60→30 q/s) o quadro parado pode ficar a um quadro de origem
+da exportação, o mesmo desvio que o bloco normal já tem: o filtro `fps` da
+exportação arredonda de outro jeito que a grade da fonte.
 
 **O `reverse` guarda todos os quadros do trecho, então o bloco é lido em janelas,
 uma por processo.** Medido (1080p, 30 q/s): 422 MB para 3 s, 700 MB para 6 s,
@@ -187,7 +190,18 @@ vez de repetir, o trecho em que nada invertido toca. Dois consumidores:
   uma segunda máquina de trechos. Medido em 60 s de 1080p: 17 s, 1800 quadros,
   pico de 1,8 GB no maior processo (1,3 GB sem inversão nenhuma, que é o que o
   codificador e o grafo já pesam). O GIF monta uma paleta sobre o fluxo inteiro e
-  não se divide: `composer.check_reversal` o recusa, com o nome do bloco.
+  não se divide: `composer.check_reversal` o recusa, com o nome do bloco que
+  mais pesa (o primeiro invertido mandava dividir o bloco errado).
+
+  **Limite conhecido: interpolação + janelas.** `Converter.run` entrega as
+  janelas ao `ParallelExport` com uma vaga e **não consulta** `plan_segments`;
+  com **Interpolar movimento** ligado, cada janela interpola sozinha (o
+  `minterpolate` usa um núcleo só), então a divisão da interpolação em trechos
+  paralelos — 17× o tempo normal contra 45× sem dividir — não vale para quem
+  inverte um bloco grande. Escolha por ora, não medida nesta combinação: abrir as
+  janelas em paralelo somaria a memória do `reverse` à do `minterpolate` (1,6 GB
+  a 1080p), a conta que já derrubou a máquina uma vez. Antes de combinar, medir
+  o pico com os dois juntos.
 - **Reprodução, som e cache da agulha.** A janela da prévia é de 8 s, e menor
   que isso quando a memória manda (metade do orçamento, porque duas janelas
   vivem juntas): o `reverse` só entrega o primeiro quadro depois de ler a janela
