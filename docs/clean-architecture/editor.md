@@ -281,10 +281,12 @@ Essas dimensões conservam a escala relativa do texto quando a resolução muda;
 `Project.for_render` deriva escalas sem modificar o documento nem seus ativos.
 
 Ao substituir um documento de versão anterior, o repositório cria uma cópia dos
-bytes originais em `.vmp.v1.bak` ou `.vmp.v2.bak`, numerada se já existir, antes
-de escrever v3. Binários antigos não abrem a versão nova. Reverter o aplicativo
-exige usar a cópia; não se deve reduzir a versão no JSON, porque a escala das
-imagens e os pontos que preservam a animação já estão no formato novo.
+bytes originais em `.vmp.v1.bak`, `.vmp.v2.bak` ou `.vmp.v3.bak`, numerada se
+já existir, antes de escrever v4. Binários antigos não abrem a versão nova.
+Reverter o aplicativo exige usar a cópia; não se deve reduzir a versão no JSON,
+porque a escala das imagens, os pontos que preservam a animação e o fundo
+desfocado já estão no formato novo (uma versão anterior ignoraria o campo e o
+perderia ao salvar).
 
 O projeto referencia mídias externas. Caminhos relativos são resolvidos em
 relação ao arquivo de projeto; mover só o `.vmp` não move os vídeos.
