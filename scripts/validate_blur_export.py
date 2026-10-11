@@ -3,6 +3,8 @@
     PYTHONPATH=src python scripts/validate_blur_export.py [--tela 1080|2160] [--segundos 5] [--repeticoes 3]
                                                          [--casos mp4,mp4_interpolado,gif,serial,paralelo,fluxo]
 
+Só roda no Linux: o pico de memória vem de ``os.wait4`` e ``/proc/meminfo``.
+
 Cada caso exporta o **mesmo** bloco 4:3 numa tela 16:9 — com laterais, então o
 fundo aparece — sem e com a opção, em rodadas alternadas (a ordem fixa
 favorece quem roda segundo, com o disco e a memória já quentes). Cada
@@ -128,12 +130,20 @@ def main() -> int:
     args = parser.parse_args()
     if args.filho:
         return _filho(args)
+    if not hasattr(os, "wait4"):
+        print("Este roteiro mede o pico de memória com os.wait4 e /proc/meminfo, que só existem no Linux.",
+              file=sys.stderr)
+        return 2
+    # As fontes sintéticas de 1080p (centenas de MB em 4K) não podem sobrar em /tmp a cada execução.
+    with tempfile.TemporaryDirectory(prefix="vm-export-fundo-") as pasta:
+        return _medir(args, Path(pasta))
 
+
+def _medir(args: argparse.Namespace, pasta: Path) -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
     from videomanager.infrastructure.system.binaries import find_tools, subprocess_kwargs
     tools = find_tools()
     casos = [c for c in args.casos.split(",") if c]
-    pasta = Path(tempfile.mkdtemp(prefix="vm-export-fundo-"))
     altura = args.tela
     largura = altura * 16 // 9
     fonte_w = altura * 4 // 3
