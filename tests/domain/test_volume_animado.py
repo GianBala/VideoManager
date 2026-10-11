@@ -138,6 +138,15 @@ class TestEditarAPoseNaoApagaOVolume:
         primeiro = editado.keyframes[0]
         assert (primeiro.x, primeiro.gain_offset_db) == (pytest.approx(0.9), pytest.approx(-30.0))
 
+    def test_ponto_reaproveitado_a_meio_quadro_de_distancia_mantem_o_volume_dele(self):
+        """Dentro do mesmo quadro de vídeo, a edição cai no ponto mais perto, que fica no instante dele: o volume
+        interpolado em ``offset`` (−29,94 dB) não é o do ponto (−30), e o ponto não pode trocá-lo."""
+        animado = _bloco(keyframes=(Keyframe(0.0, x=0.2, gain_offset_db=-30.0), Keyframe(2.0, x=0.8)))
+        editado = animado.with_edited_transform(0.004, {"x": 0.9}, fps=FPS)
+        assert len(editado.keyframes) == 2
+        primeiro = editado.keyframes[0]
+        assert (primeiro.time_offset, primeiro.x, primeiro.gain_offset_db) == (0.0, pytest.approx(0.9), -30.0)
+
     def test_pose_criada_no_meio_da_rampa_captura_o_volume_interpolado_e_nao_zero(self):
         # Com a imagem **já animada**: o ponto novo nasce da pose de agora e leva o volume que a curva tem ali.
         # (Num bloco que só tem a rampa de volume a edição não cria ponto: ver ``TestImagemNaoAnimadaPeloVolume``.)
