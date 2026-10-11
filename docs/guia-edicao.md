@@ -42,10 +42,10 @@ e Salvar como funcionam mesmo com o cursor num campo de texto; antes de gravar,
 o editor fecha os agrupamentos de desfazer em andamento, para o arquivo conter
 o que está na tela.
 
-Projetos são salvos em `.vmp` versão 4. A versão atual abre v1 a v4;
-aplicativos antigos não abrem v4. Ao salvar sobre v1, v2 ou v3, uma cópia
-`.vmp.v1.bak`, `.vmp.v2.bak` ou `.vmp.v3.bak` conserva o arquivo original, com
-numeração se necessário. Guarde também as mídias externas.
+Projetos são salvos em `.vmp` versão 5. A versão atual abre v1 a v5;
+aplicativos antigos não abrem v5. Ao salvar sobre v1 a v4, uma cópia
+`.vmp.v1.bak` a `.vmp.v4.bak` conserva o arquivo original, com numeração se
+necessário. Guarde também as mídias externas.
 
 Ao abrir um projeto v1 ou v2, fotos que estavam em trilhas de Adicionais passam
 para trilhas de vídeo na mesma posição da pilha — a trilha inteira, se só tinha
@@ -341,6 +341,31 @@ nova duração passaria por cima do bloco seguinte, a velocidade é recusada com
 áudio separado de um vídeo acelerado acompanha a mesma velocidade. Fotos,
 textos, filtros e transições não têm velocidade.
 
+### Inverter um bloco
+
+**Inverter**, no botão direito de um bloco de vídeo ou de áudio, toca o bloco
+de trás para frente — imagem e som. Não gera arquivo: o bloco continua cobrindo
+o mesmo trecho da mídia e só muda o sentido em que a edição o percorre, então
+inverter e desinverter são instantâneos e entram no histórico de desfazer. Um
+selo `⏪ invertido` aparece no título do bloco.
+
+- **Dividir, aparar e esticar** valem como num bloco normal, mas lembre que o
+  começo do bloco é o fim do trecho: apagar à esquerda tira o final da mídia, e
+  esticar o começo vai buscar mais mídia depois do trecho.
+- **Velocidade, volume, quadros-chave e transições** funcionam como antes: os
+  quadros-chave correm no relógio da edição, e a transição de um bloco invertido
+  usa o material além da ponta dele, na ordem em que o bloco toca.
+- **Separar áudio** leva a inversão junto; o som continua casado com a imagem.
+- **Limite de tamanho.** Para virar o trecho, o ffmpeg guarda na memória todos
+  os quadros dele (medido: ~2,9 MB por quadro em 1080p). Por isso um bloco
+  invertido tem teto de memória de 2 GiB pela conta do pior caso — cerca de
+  11 s em 1080p a 30 q/s, 26 s em 720p, 3 s em 4K. Acima disso a opção aparece
+  desabilitada, dizendo o motivo; divida o bloco (`S`) e inverta cada parte. As
+  alças de um bloco já invertido param no teto, e a exportação recusa, com o
+  número, um bloco que o passe. Blocos só de som não têm teto.
+- **Não há corte rápido.** Copiar os pacotes não vira o trecho do avesso: uma
+  edição com bloco invertido sempre é composta e recodificada.
+
 ### Menu de contexto (botão direito)
 
 O conteúdo muda conforme o alvo sob o cursor:
@@ -354,6 +379,8 @@ O conteúdo muda conforme o alvo sob o cursor:
 - Copiar (`Ctrl+C`)
 - Excluir bloco (`Del`)
 - *separador*
+- **Inverter** — só em blocos de vídeo ou de áudio; marcado, escolher de novo
+  devolve o bloco ao sentido normal (ver [Inverter um bloco](#inverter-um-bloco))
 - **Separar áudio** — só quando o bloco tem áudio embutido ainda não
   separado; cria um bloco de áudio independente na trilha de som, e o volume
   do bloco original passa a não fazer mais efeito (o som agora vive no bloco
