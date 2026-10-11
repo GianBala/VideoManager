@@ -824,7 +824,7 @@ EDIT_LOAD_CHANGED = "A edição mudou durante a leitura. Abra o projeto novament
 EDIT_MISSING_MEDIA = "O projeto foi aberto, mas os seguintes arquivos não foram encontrados:\n\n{files}"
 EDIT_READ_CANCEL = "Cancelar"
 
-EDIT_SAVING_PROJECT = "Salvando projeto v5… Projetos anteriores recebem cópia .v1.bak a .v4.bak antes da atualização."
+EDIT_SAVING_PROJECT = "Salvando projeto v6… Projetos anteriores recebem cópia .v1.bak a .v5.bak antes da atualização."
 
 EDIT_TRANSITION_AFFECT_ADDITIONALS = "Afetar itens adicionais"
 EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP = (
@@ -905,7 +905,7 @@ JOB_STATUS_LABELS = {
 EXPORT_SOURCE_CODEC = "codec da origem"
 EXPORT_COPY_CODEC = "Copiar sem recodificar ({codec})"
 EDIT_SPEED_COLLISION = "Não há espaço antes do próximo clipe para essa velocidade. Mova o próximo clipe ou escolha outra velocidade."
-EDIT_PROJECT_V2_TIP = "Formato v5: imagens na trilha de vídeo, ajustadas à tela, animações recortadas, fundo desfocado e blocos invertidos preservados. Versões antigas do aplicativo não abrem v5. Ao atualizar um projeto v1 a v4, o original fica em .vmp.v1.bak a .vmp.v4.bak (ou cópia numerada)."
+EDIT_PROJECT_V2_TIP = "Formato v6: imagens na trilha de vídeo, ajustadas à tela, animações recortadas, fundo desfocado, blocos invertidos e volume animado preservados. Versões antigas do aplicativo não abrem v6. Ao atualizar um projeto v1 a v5, o original fica em .vmp.v1.bak a .vmp.v5.bak (ou cópia numerada)."
 
 EDIT_ANIMATION_GLOBAL = "Editar toda a animação"
 EDIT_ANIMATION_GLOBAL_TIP = "Aplica o ajuste a todos os pontos, inclusive suportes de cortes. Desmarcado: edita somente o instante atual."
