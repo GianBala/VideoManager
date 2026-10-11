@@ -486,6 +486,15 @@ EDIT_DETACH_TIP = (
     "Takes the sound out of the video clip and puts it on its own audio track, "
     "at the same position — the video goes silent and the sound moves on its own"
 )
+EDIT_REVERSE = "Reverse"
+EDIT_REVERSE_TIP = (
+    "Plays the clip backwards, picture and sound. When checked, choosing it "
+    "again puts the clip back to normal."
+)
+EDIT_REVERSE_TOO_LONG_TIP = (
+    "Too long to reverse: reversing keeps every frame of the section in "
+    "memory. Split the clip (S) and reverse each part."
+)
 EDIT_COPY = "Copy"
 EDIT_PASTE = "Paste"
 EDIT_ADD_VIDEO_TRACK = "+ Video"
