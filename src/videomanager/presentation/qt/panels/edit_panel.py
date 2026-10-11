@@ -968,6 +968,7 @@ class EditPanel(QWidget):
         self._properties_widget = _ClipPropertiesWidget()
         self.destroyed.connect(self._properties_widget.deleteLater)
         self._properties_widget.property_changed.connect(self._on_properties_changed)
+        self._properties_widget.speed_changed.connect(self._on_properties_speed)
         self._properties_widget.animation_scope_changed.connect(
             lambda enabled: setattr(self._preview, "_whole_animation", enabled))
         self._properties_widget.close_requested.connect(self._close_properties_tab)
@@ -2628,6 +2629,8 @@ class EditPanel(QWidget):
     def _end_properties_session(self) -> None:
         self._properties_session = -1
         self._properties_session_timer.stop()
+        # A velocidade digitada na aba agrupa o desfazer pela mesma pausa dos outros campos.
+        self._end_speed_session()
         self._settle_pose()
 
     def _settle_pose(self) -> None:
@@ -2687,6 +2690,9 @@ class EditPanel(QWidget):
         if not found_after:
             return
         track_idx, updated_clip = found_after
+        if "gain_db" in changes:
+            # Só os botões da barra: recarregar a aba aqui reescreveria o campo no meio da digitação.
+            self._show_clip_numbers(updated_clip)
 
         self._sync_canvas()
 
@@ -3099,6 +3105,22 @@ class EditPanel(QWidget):
         self._refresh_clip_fields()
         self._refresh_controls()
 
+    def _on_properties_speed(self, clip_id: int, value: float) -> None:
+        """Velocidade digitada na aba Propriedades: a mesma regra do botão ⚡ da barra.
+
+        ``_on_speed`` age sobre o bloco **selecionado**, e a aba pode estar mostrando outro; por isso a
+        seleção vem primeiro. A colisão com o vizinho recusa a velocidade e avisa uma vez só.
+        """
+        if self._timeline.selected != clip_id:
+            self._timeline.select(clip_id)
+        self._on_speed(value)
+        self._properties_session_timer.start()
+        found = self._project.find(clip_id)
+        if found is not None and abs(found[1].speed - value) >= 0.01:
+            # Recusada: o campo volta à velocidade que valeu, em vez de ficar com um número que não será tocado.
+            self._properties_widget.load_clip(found[1], self._project.width, self._project.height,
+                                              fps=self._project.fps, text_ratio=self._project.text_ratio)
+
     def _end_speed_session(self) -> None:
         self._speed_session = -1
         self._speed_warned = False
@@ -3162,18 +3184,17 @@ class EditPanel(QWidget):
         if self._overlay_drag_session == clip_id:
             self._on_edit_cancelled()
 
+    def _show_clip_numbers(self, clip: Clip | None) -> None:
+        """Volume e velocidade do bloco nos botões da barra, com o separador decimal do idioma (por ``bind``)."""
+        gain, speed = (clip.gain_db, clip.speed) if clip is not None else (0.0, 1.0)
+        bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(gain, sign=True)} dB")
+        bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(speed)}x")
+
     def _refresh_clip_fields(self) -> None:
         clip = self._timeline.selected_clip
         self._syncing = True
         try:
-            # Por bind: os números levam o separador decimal do idioma.
-            if clip is not None:
-                gain, speed = clip.gain_db, clip.speed
-                bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(gain, sign=True)} dB")
-                bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(speed)}x")
-            else:
-                bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(0.0)} dB")
-                bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(1.0)}x")
+            self._show_clip_numbers(clip)
             self._sync_extras_controls(clip)
         finally:
             self._syncing = False
