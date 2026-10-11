@@ -568,6 +568,20 @@ def _blur_steps(piece: _Piece, project: Project, fps: float) -> list[str]:
     1080p, 2,30 s contra 2,79 s (mínimo de 5). Contra o formato negociado de
     antes, o fluxo da reprodução da montagem não mudou de forma mensurável
     (12,08 s contra 12,15 s, mínimo de 5 repetições).
+
+    O ``gbrp`` também **não tem alfa**, e a conversão de ``rgba`` o descartava
+    sem compô-lo: numa imagem com transparência o fundo nascia da cor que o
+    arquivo guarda sob o alfa (branca, preta ou outra, conforme o editor de
+    imagem), opaca e cobrindo a trilha de baixo. ``premultiply=inplace=1``
+    compõe a imagem sobre preto antes da conversão: o que era transparente vira
+    preto, e para uma fonte sem alfa (alfa 255) nada muda. Tudo no tamanho
+    pequeno, então o custo some. A conversão vai para ``gbrap`` (planar, com
+    alfa) e não para ``rgba`` (empacotado) de propósito: para fonte sem alfa o
+    ``scale`` anterior converte direto para o mesmo formato planar de antes e o
+    fundo sai **byte a byte igual** (144 de 144 quadros de fontes de 720p a 4000×3000,
+    vídeo 8 e 10 bits, foto, pixel não quadrado); via ``rgba`` a conversão
+    acontecia noutra etapa do ``swscale`` e 158 de 216 quadros mudavam, até 20 em
+    255.
     """
     clip = piece.clip
     short = min(_BLUR_SHORT_SIDE, project.width, project.height)
@@ -577,6 +591,8 @@ def _blur_steps(piece: _Piece, project: Project, fps: float) -> list[str]:
     steps = [
         f"scale=w='ceil(max({work_w},{work_h}*dar)/2)*2':h='ceil(max({work_h},{work_w}/dar)/2)*2':flags=bilinear",
         f"crop={work_w}:{work_h}",
+        "format=gbrap",
+        "premultiply=inplace=1",
         "format=gbrp",
         f"gblur=sigma={_BLUR_SIGMA * short / _BLUR_SHORT_SIDE:.4f}",
         "format=yuv420p",

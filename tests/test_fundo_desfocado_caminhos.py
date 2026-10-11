@@ -311,6 +311,44 @@ def test_fundo_de_video_borra_a_cor_como_o_de_uma_foto_do_mesmo_quadro(tools, tm
         assert diferenca(video, foto, TELA, lateral) < 2.0, f"fundo do vídeo difere do da foto em {lateral}"
 
 
+def _png_com_alfa(pasta: Path, nome: str, escondido: int, tools) -> MediaRef:
+    """240×180: círculo vermelho opaco no meio; fora dele alfa 0 com o RGB ``escondido`` (0 ou 255).
+
+    É o que um logo ou uma figurinha com transparência traz: a cor sob o alfa
+    depende de como o editor de imagem exportou o arquivo, e não do que se vê.
+    """
+    dentro = "lt(hypot(X-120,Y-90),40)"
+    arquivo = pasta / f"{nome}.png"
+    subprocess.run([tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    f"color=c=white:s=240x180,format=rgba,geq=r='if({dentro},255,{escondido})':"
+                    f"g='if({dentro},0,{escondido})':b='if({dentro},0,{escondido})':a='if({dentro},255,0)'",
+                    "-frames:v", "1", str(arquivo)], check=True, capture_output=True)
+    return media_ref(probe_file(arquivo, tools))
+
+
+def test_imagem_com_alfa_ganha_o_fundo_sobre_preto_e_nao_sobre_a_cor_escondida(midias, tools, tmp_path: Path) -> None:
+    """O ``gblur`` roda em ``gbrp``, que não tem alfa: a conversão guardava o RGB sob a transparência.
+
+    Dois PNGs que se veem iguais (círculo vermelho sobre transparência) saíam
+    com fundos diferentes — branco ou preto, conforme a cor escondida — e o
+    fundo, opaco, cobria a trilha de baixo com ela. Medido: laterais a 253 de
+    255 com a cor escondida branca, contra 0 com a preta.
+    """
+    chao = Clip(midias["verde"], 0.0, 2.0)
+    quadros = {}
+    for escondido in (0, 255):
+        media = _png_com_alfa(tmp_path, f"logo{escondido}", escondido, tools)
+        quadros[escondido] = quadro(projeto((Clip(media, 0.0, 2.0, blur_background=True),), (chao,)), 1.0, tools)
+    lateral, dentro_da_frente, circulo = (3, 3, 37, 177), (50, 10, 80, 40), (150, 80, 170, 100)
+    for escondido, dados in quadros.items():
+        assert media_da(dados, TELA, lateral) < 25, f"a lateral ficou clara com a cor escondida {escondido}"
+        assert media_da(dados, TELA, lateral, canais=(1,)) < 25, "o verde da trilha de baixo continua à mostra"
+        assert media_da(dados, TELA, dentro_da_frente) < 25, "a área transparente da frente mostra a cor escondida"
+        assert media_da(dados, TELA, circulo, canais=(0,)) > 200, "o círculo opaco da frente sumiu"
+    # A cor escondida não pode aparecer no resultado: os dois quadros saem iguais.
+    assert diferenca(quadros[0], quadros[255], TELA, (0, 0, *TELA)) < 1.5
+
+
 def test_chroma_key_ligado_deixa_a_opcao_sem_efeito(midias, tools) -> None:
     sem_clip, com_clip = par(Clip(midias["v43"], 0.0, 2.0, chromakey_enabled=True))
     assert not com_clip.shows_blur_background(*TELA)
