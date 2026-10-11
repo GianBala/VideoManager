@@ -1148,6 +1148,9 @@ class _TransitionSide:
     # Quanto **antes** do começo do trecho a leitura começa (ver
     # :func:`_transition_side`). O som descarta essa sobra, a imagem a usa.
     lead: float = 0.0
+    # Quanto o recuo da leitura **não pôde** recuar, por faltar mídia antes de zero:
+    # a imagem encurta o trecho lido por esse tanto (o som não).
+    image_cut: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -1265,6 +1268,7 @@ def _transition_side(
     prepad = max(0.0, (actual_start - wanted_start) / playback_speed)
     postpad = max(0.0, (wanted_end - actual_end) / playback_speed)
     lead = 0.0
+    image_cut = 0.0
     if clip.reversed:
         # O que falta antes do começo da mídia fica, depois de virar o trecho,
         # no **fim** do que a edição mostra — e o que falta depois do fim da
@@ -1279,12 +1283,20 @@ def _transition_side(
         # verdade: 12 de 90 quadros divergiam, nenhum depois). O "quase" é o
         # que mantém a regra certa quando a janela cai exatamente na grade.
         if clip.media.fps:
-            lead = min(actual_start, 1.0 / clip.media.fps - _FRAME_EDGE)
+            nominal = 1.0 / clip.media.fps - _FRAME_EDGE
+            lead = min(actual_start, nominal)
+            # Com a janela começando em zero (inverter o arquivo inteiro e pôr uma
+            # transição depois) não há mídia antes para recuar a leitura, e o quadro
+            # da ponta de cima entrava: um quadro a mais que o mesmo projeto montado
+            # com o arquivo invertido (4 a 5 de 90 quadros, até 3 de brilho). O que
+            # faltou do recuo sai do topo do trecho de imagem, que dá o mesmo corte.
+            image_cut = nominal - lead
     return _TransitionSide(
         clip=clip,
         index=index,
         seek=actual_start - lead,
         lead=lead,
+        image_cut=image_cut,
         source_duration=max(0.001, actual_end - actual_start),
         prepad=prepad,
         postpad=postpad,
@@ -1332,7 +1344,7 @@ def _transition_video_chain(
     """Produz uma fonte de tela inteira com duração exata para o ``xfade``."""
     clip = side.clip
     steps = [
-        f"trim=duration={side.source_duration:.6f}",
+        f"trim=duration={max(0.001, side.source_duration - side.image_cut):.6f}",
         *(["reverse"] if side.flip else []),
         f"setpts=(PTS-STARTPTS)/{side.playback_speed:.6f}",
         # ``tpad`` só consegue converter segundos em quadros quando estes já
