@@ -13,7 +13,7 @@ import pytest
 
 from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.project import Clip, MediaKind, MediaRef, OverlayType, Project, Track, TrackKind
-from videomanager.domain.reversal import MAX_REVERSE_BYTES, reverse_bytes
+from videomanager.domain.reversal import MAX_REVERSE_SPAN, reverse_rate
 
 
 def _media(duration=20.0, width=1280, height=720, fps=30.0, kind=MediaKind.VIDEO, audio=True):
@@ -98,19 +98,19 @@ class TestAlcas:
         assert novo.out_point <= 20.0 + 1e-9
         assert novo.out_point == pytest.approx(15.0 + 5.0)  # 5 s a mais no topo
 
-    def test_bloco_invertido_nao_estica_alem_do_teto_de_memoria(self):
-        clip = Clip(_media(duration=600.0, width=1920, height=1080), start=0.0, duration=8.0, in_point=100.0,
-                    reversed=True)
-        novo = _bloco(_projeto(clip).resized(clip.clip_id, "fim", 300.0))
-        assert novo.reverse_cost <= MAX_REVERSE_BYTES
-        assert novo.duration == pytest.approx(clip.reverse_limit)
+    def test_bloco_invertido_estica_sem_teto_de_memoria_e_para_no_teto_de_sanidade(self):
+        """O vídeo é lido em janelas: o que limita a alça é a mídia e o teto de meia hora."""
+        longa = _media(duration=7200.0, width=1920, height=1080)
+        clip = Clip(longa, start=0.0, duration=8.0, in_point=4000.0, reversed=True)
+        novo = _bloco(_projeto(clip).resized(clip.clip_id, "fim", 3000.0))
+        assert novo.duration == pytest.approx(MAX_REVERSE_SPAN)
+        assert novo.duration > 60.0  # bem além do que um processo só aguentaria
 
     def test_bloco_ja_acima_do_teto_pode_encolher_mas_nao_crescer(self):
-        grande = Clip(_media(duration=600.0, width=1920, height=1080), start=0.0, duration=30.0, in_point=100.0,
-                      reversed=True)
+        grande = Clip(_media(duration=7200.0), start=0.0, duration=2000.0, in_point=4000.0, reversed=True)
         projeto = _projeto(grande)
-        assert _bloco(projeto.resized(grande.clip_id, "fim", 40.0)).duration == pytest.approx(30.0)
-        assert _bloco(projeto.resized(grande.clip_id, "fim", 20.0)).duration == pytest.approx(20.0)
+        assert _bloco(projeto.resized(grande.clip_id, "fim", 2500.0)).duration == pytest.approx(2000.0)
+        assert _bloco(projeto.resized(grande.clip_id, "fim", 1500.0)).duration == pytest.approx(1500.0)
 
 
 class TestSepararAudio:
@@ -137,23 +137,33 @@ class TestQuemPodeSerInvertido:
         imagem = Clip(_media(kind=MediaKind.IMAGE, duration=None), 0.0, 5.0, reversed=True)
         assert imagem.reversed is False
 
-    def test_bloco_longo_demais_nao_se_oferece_mas_o_invertido_sempre_desfaz(self):
-        longo = Clip(_media(width=1920, height=1080), 0.0, 60.0)
-        assert longo.reverse_cost > MAX_REVERSE_BYTES
+    def test_video_longo_pode_ser_invertido(self):
+        """Era o defeito: um vídeo de 1080p com mais de ~11 s ficava com o item desabilitado."""
+        assert Clip(_media(width=1920, height=1080, duration=600.0), 0.0, 120.0).can_reverse
+
+    def test_acima_de_meia_hora_nao_se_oferece_mas_o_invertido_sempre_desfaz(self):
+        longo = Clip(_media(duration=7200.0), 0.0, MAX_REVERSE_SPAN + 60.0)
         assert not longo.can_reverse
         assert replace(longo, reversed=True).can_reverse
 
+    def test_o_limite_vale_na_mídia_percorrida_e_nao_na_edição(self):
+        # 20 min de edição a 2× percorrem 40 min de mídia.
+        assert not Clip(_media(duration=7200.0), 0.0, 1200.0, speed=2.0).can_reverse
+        assert Clip(_media(duration=7200.0), 0.0, 1200.0, speed=1.0).can_reverse
+
     def test_som_sozinho_nao_pesa(self):
-        audio = Clip(_media(kind=MediaKind.AUDIO, width=None, height=None, fps=None), 0.0, 3600.0)
-        assert audio.reverse_cost == 0 and audio.can_reverse
+        audio = Clip(_media(kind=MediaKind.AUDIO, width=None, height=None, fps=None), 0.0, 1500.0)
+        assert audio.reverse_rate == 0 and audio.can_reverse
 
-    def test_tamanho_desconhecido_recusa(self):
-        assert reverse_bytes(None, None, None, 1.0) > MAX_REVERSE_BYTES
+    def test_tamanho_do_quadro_desconhecido_nao_se_oferece(self):
+        sem_tamanho = Clip(_media(width=None, height=None), 0.0, 5.0)
+        assert sem_tamanho.reverse_rate == float("inf") and not sem_tamanho.can_reverse
 
-    def test_o_custo_acompanha_o_trecho_da_midia_e_nao_a_velocidade(self):
-        normal = Clip(_media(), 0.0, 10.0, in_point=0.0)
-        dobro = Clip(_media(), 0.0, 5.0, in_point=0.0, speed=2.0)
-        assert normal.reverse_cost == dobro.reverse_cost
+    def test_a_taxa_acompanha_a_midia_percorrida_por_segundo_de_edicao(self):
+        normal = Clip(_media(), 0.0, 10.0)
+        dobro = Clip(_media(), 0.0, 5.0, speed=2.0)
+        assert dobro.reverse_rate == pytest.approx(2 * normal.reverse_rate)
+        assert reverse_rate(1280, 720, 30.0) == normal.reverse_rate
 
 
 def test_copiar_os_dados_nao_inverte():
