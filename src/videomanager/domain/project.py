@@ -665,16 +665,18 @@ class Clip:
                                    scale_y=k.scale_y * factors["scale_y"]) for k in self.keyframes)
             updated = replace(self, keyframes=points)
         else:
-            frame = frame_index(self.start + offset, fps)
-            nearest = min((k for k in self.visible_keyframes
-                           if frame_index(self.start + k.time_offset, fps) == frame),
-                          key=lambda k: abs(k.time_offset - offset), default=None)
-            point = Keyframe(nearest.time_offset if nearest else offset,
-                             **{k: getattr(target, k) for k in names},
-                             easing=nearest.easing if nearest else "linear")
+            nearest = self.keyframe_in_frame(offset, fps)
+            point = Keyframe.from_pose(nearest.time_offset if nearest else offset, target,
+                                       nearest.easing if nearest else "linear")
             updated = self.with_keyframe(point)
         pose = updated.transform_at(offset)
         return replace(updated, scale=(pose.scale_x + pose.scale_y) / 2, **{k: getattr(pose, k) for k in names})
+
+    def keyframe_in_frame(self, offset: float, fps: float) -> Keyframe | None:
+        """O quadro-chave que cai no mesmo quadro de vídeo que ``offset`` — o mais perto dele, se houver."""
+        frame = frame_index(self.start + offset, fps)
+        return min((k for k in self.visible_keyframes if frame_index(self.start + k.time_offset, fps) == frame),
+                   key=lambda k: abs(k.time_offset - offset), default=None)
 
     def with_keyframe(self, keyframe: Keyframe) -> Clip:
         """Adiciona ou atualiza um keyframe mantendo a lista ordenada por time_offset."""
