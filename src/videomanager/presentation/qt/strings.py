@@ -492,8 +492,8 @@ EDIT_REVERSE_TIP = (
 )
 EDIT_REVERSE_TOO_LONG_TIP = (
     "Não dá para inverter este bloco: o limite é de meia hora de mídia por "
-    "bloco, e o vídeo precisa informar o tamanho do quadro. Divida o bloco (S) "
-    "e inverta cada parte."
+    "bloco, e o vídeo precisa informar o tamanho do quadro. Se o bloco passa de "
+    "meia hora, divida-o (S) e inverta cada parte."
 )
 EDIT_COPY = "Copiar"
 EDIT_PASTE = "Colar"

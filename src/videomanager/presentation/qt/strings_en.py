@@ -493,8 +493,8 @@ EDIT_REVERSE_TIP = (
 )
 EDIT_REVERSE_TOO_LONG_TIP = (
     "This clip can't be reversed: the limit is half an hour of media per clip, "
-    "and the video has to report its frame size. Split the clip (S) and "
-    "reverse each part."
+    "and the video has to report its frame size. If the clip is over half an "
+    "hour, split it (S) and reverse each part."
 )
 EDIT_COPY = "Copy"
 EDIT_PASTE = "Paste"
