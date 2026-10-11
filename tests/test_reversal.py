@@ -487,3 +487,57 @@ def test_quadro_parado_nao_depende_do_tamanho_do_bloco(tools, fonte):
     projeto = _projeto(Clip(_grande(fonte), 0.0, 120.0, reversed=True))
     comando = composer.frame_command(projeto, 1.0, SIZE, tools)
     assert "reverse" not in " ".join(comando)
+
+
+# ---------------------------------------------------------------------------
+# Bordas: sem sobra de mídia na emenda, e animação nas janelas
+# ---------------------------------------------------------------------------
+
+
+def _arranjos_sem_sobra(fonte, invertida):
+    """Para cada arranjo, os blocos do app e os do oráculo (onde a mídia já vem invertida de verdade)."""
+    normal = Clip(fonte, 0.0, 1.5, in_point=0.5)
+    return {
+        # A direita invertida começa no FIM da mídia (out_point = duração): não há mídia antes da ponta dela.
+        "direita_sem_sobra": ((normal, Clip(fonte, 1.5, 1.5, in_point=SECONDS - 1.5, reversed=True)),
+                              (normal, Clip(invertida, 1.5, 1.5, in_point=0.0))),
+    }
+
+
+@pytest.mark.parametrize("nome", ["direita_sem_sobra"])
+def test_transicao_com_invertido_sem_sobra_de_midia_igual_ao_arquivo_invertido(tools, fonte, fonte_invertida, tmp_path,
+                                                                              nome):
+    """Falta mídia na ponta do bloco invertido: o lado dele segura o quadro do fim, e não o do começo."""
+    (esquerda, direita), (esquerda_fisica, direita_fisica) = _arranjos_sem_sobra(fonte, fonte_invertida)[nome]
+
+    def com_transicao(a, b):
+        projeto, _ = _projeto(a, b).with_transition(0, a, b, "fade", "Transição_fade", 0.5, False)
+        return projeto
+
+    obtido = _brilhos(tools, _exporta(tools, com_transicao(esquerda, direita), tmp_path / "a.mp4"))
+    oraculo = _brilhos(tools, _exporta(tools, com_transicao(esquerda_fisica, direita_fisica), tmp_path / "b.mp4"))
+    assert len(obtido) == len(oraculo) == 90
+    assert max(abs(x - y) for x, y in zip(obtido, oraculo)) < 0.5
+
+
+@pytest.mark.parametrize("campos", [dict(duration=4.0), dict(duration=2.5, in_point=0.7)],
+                         ids=["inteiro", "trecho"])
+def test_quadros_chave_do_invertido_em_janelas_igual_a_um_processo_so(tools, fonte, tmp_path, monkeypatch, campos):
+    """A janela que começa no meio do bloco tem de achar o ponto da animação onde o bloco está.
+
+    O relógio da animação é o da edição desde o começo do bloco; só a primeira janela começa lá. As outras
+    sabem quanto do bloco já passou por ``_Piece.elapsed`` — e sem ele o trecho inteiro, de um processo só,
+    continuava certo.
+    """
+    animacao = (Keyframe(0.0, opacity=1.0), Keyframe(campos["duration"], opacity=0.3))
+    projeto = _projeto(Clip(fonte, 0.0, reversed=True, keyframes=animacao, **campos))
+    um_so = _brilhos(tools, _exporta(tools, projeto, tmp_path / "um.mp4"))
+    sem_animacao = _brilhos(tools, _exporta(tools, _projeto(Clip(fonte, 0.0, reversed=True, **campos)),
+                                            tmp_path / "sem.mp4"))
+    # A opacidade cai de 1 a 0,3 sobre o preto: em média ~0,65 do brilho. Sem isto a igualdade abaixo não provaria nada.
+    assert 0.55 < sum(um_so) / sum(sem_animacao) < 0.8
+    monkeypatch.setattr(composer, "MAX_REVERSE_BYTES", _ORCAMENTO_PEQUENO)
+    janelas, quantas = _exporta_em_janelas(tools, projeto, tmp_path / "janelas.mp4")
+    em_janelas = _brilhos(tools, janelas)
+    assert quantas >= 2 and len(em_janelas) == len(um_so)
+    assert max(abs(a - b) for a, b in zip(em_janelas, um_so)) < 2.0
