@@ -538,11 +538,19 @@ class ExportDialog(QDialog):
         return "mp4"
 
     def _effective_project(self) -> Project:
-        w, h, fps = output_canvas(self._project, self._canvas_choice, self._rate_choice)
+        return self._output_project(self._canvas_choice, self._rate_choice)
+
+    def _output_project(self, canvas: tuple[int, int] | None, rate: float | None) -> Project:
+        """O projeto na tela e na taxa de saída para uma escolha — ``None`` é a automática.
+
+        Separada de ``_effective_project`` para os itens "Automática" poderem perguntar o que
+        a escolha automática produz **sem** a escolha em vigor (``_update_plan``).
+        """
+        w, h, fps = output_canvas(self._project, canvas, rate)
         if self._container_choice == "gif" and not self._audio_only_check.isChecked():
-            if self._canvas_choice is None:
+            if canvas is None:
                 w, h = _gif_canvas(w, h)
-            if self._rate_choice is None:
+            if rate is None:
                 fps = min(fps, _GIF_MAX_RATE)
         return self._project.with_output_canvas(w, h, fps)
 
@@ -696,9 +704,13 @@ class ExportDialog(QDialog):
             self._fast.setToolTip(strings.EDIT_MODE_TIP if can_fast else strings.EDIT_FAST_UNAVAILABLE)
         self._interpolate.setToolTip(strings.EDIT_INTERPOLATE_TIP if can_interp else strings.EDIT_INTERPOLATE_OFF)
 
-        # Atualiza o texto do item "Automática" em proporção, tela e taxa
+        # Atualiza o texto do item "Automática" em proporção, tela e taxa. Com o que a escolha
+        # automática produz, e não com o projeto efetivo: este já traz a tela e a taxa
+        # escolhidas, e "Automática" passava a anunciar a escolha (60 q/s, 9:16...) até ser
+        # ela mesma a selecionada.
+        auto = self._output_project(None, None)
         if self._aspect_box.count() > 0 and self._aspect_box.itemData(0) is None:
-            proj_aspect = format_aspect_ratio(proj.width, proj.height)
+            proj_aspect = format_aspect_ratio(auto.width, auto.height)
             self._aspect_box.setItemText(
                 0,
                 f"{strings.EXPORT_ASPECT_AUTO}  ({proj_aspect})"
@@ -709,13 +721,13 @@ class ExportDialog(QDialog):
             self._canvas_box.setItemText(
                 0,
                 f"{strings.EDIT_CANVAS_AUTO}  ("
-                + strings.EDIT_CANVAS_SIZE.format(width=proj.width, height=proj.height)
+                + strings.EDIT_CANVAS_SIZE.format(width=auto.width, height=auto.height)
                 + ")",
             )
         self._rate_box.setItemText(
             0,
             f"{strings.EDIT_CANVAS_RATE_AUTO}  ("
-            + strings.EDIT_CANVAS_FPS.format(fps=format_rate(proj.fps))
+            + strings.EDIT_CANVAS_FPS.format(fps=format_rate(auto.fps))
             + ")",
         )
 
