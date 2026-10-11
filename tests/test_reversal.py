@@ -497,14 +497,32 @@ def test_quadro_parado_nao_depende_do_tamanho_do_bloco(tools, fonte):
 def _arranjos_sem_sobra(fonte, invertida):
     """Para cada arranjo, os blocos do app e os do oráculo (onde a mídia já vem invertida de verdade)."""
     normal = Clip(fonte, 0.0, 1.5, in_point=0.5)
+    direita = Clip(fonte, 1.5, 1.5, in_point=2.0)
     return {
         # A direita invertida começa no FIM da mídia (out_point = duração): não há mídia antes da ponta dela.
         "direita_sem_sobra": ((normal, Clip(fonte, 1.5, 1.5, in_point=SECONDS - 1.5, reversed=True)),
                               (normal, Clip(invertida, 1.5, 1.5, in_point=0.0))),
+        # A esquerda invertida termina no COMEÇO da mídia (in_point = 0): não há mídia depois da ponta dela.
+        # É o caso de inverter o arquivo inteiro e pôr uma transição depois.
+        "esquerda_sem_sobra": ((Clip(fonte, 0.0, 1.5, in_point=0.0, reversed=True), direita),
+                               (Clip(invertida, 0.0, 1.5, in_point=SECONDS - 1.5), direita)),
+        # Sobra meio quadro antes de a mídia acabar (os pontos precisam estar na grade de 30 q/s, ou o
+        # oráculo espelhado cai em quadros diferentes já fora da transição): o recuo da leitura é cortado
+        # só em parte, e este caso já saía certo — fica como guarda do meio-termo.
+        "esquerda_quase_sem_sobra": ((Clip(fonte, 0.0, 1.5, in_point=8 / 30, reversed=True), direita),
+                                     (Clip(invertida, 0.0, 1.5, in_point=SECONDS - 1.5 - 8 / 30), direita)),
+        # Falta um quadro inteiro: a janela é cortada em zero e o recuo some.
+        "esquerda_sem_um_quadro": ((Clip(fonte, 0.0, 1.5, in_point=7 / 30, reversed=True), direita),
+                                   (Clip(invertida, 0.0, 1.5, in_point=SECONDS - 1.5 - 7 / 30), direita)),
+        "ambos_sem_sobra": ((Clip(fonte, 0.0, 1.5, in_point=0.0, reversed=True),
+                             Clip(fonte, 1.5, 1.5, in_point=SECONDS - 1.5, reversed=True)),
+                            (Clip(invertida, 0.0, 1.5, in_point=SECONDS - 1.5),
+                             Clip(invertida, 1.5, 1.5, in_point=0.0))),
     }
 
 
-@pytest.mark.parametrize("nome", ["direita_sem_sobra"])
+@pytest.mark.parametrize("nome", ["direita_sem_sobra", "esquerda_sem_sobra", "esquerda_quase_sem_sobra",
+                                  "esquerda_sem_um_quadro", "ambos_sem_sobra"])
 def test_transicao_com_invertido_sem_sobra_de_midia_igual_ao_arquivo_invertido(tools, fonte, fonte_invertida, tmp_path,
                                                                               nome):
     """Falta mídia na ponta do bloco invertido: o lado dele segura o quadro do fim, e não o do começo."""
