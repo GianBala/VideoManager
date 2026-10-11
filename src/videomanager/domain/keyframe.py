@@ -7,7 +7,7 @@ imutável do domínio sem dependências de frameworks ou subprocessos.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Sequence
 
 SUPPORTED_EASINGS = (
@@ -49,6 +49,15 @@ class Keyframe:
             object.__setattr__(self, "easing", "linear")
         clamped_opacity = max(0.0, min(1.0, float(self.opacity)))
         object.__setattr__(self, "opacity", clamped_opacity)
+
+    @classmethod
+    def from_pose(cls, time_offset: float, pose: ClipTransform, easing: str = "linear") -> Keyframe:
+        """O quadro-chave de uma pose: **todo** campo dela vira campo do quadro.
+
+        Montar o quadro campo a campo esquece o campo que alguém acrescentar depois à pose; por
+        aqui, ele já viaja junto.
+        """
+        return cls(time_offset, **asdict(pose), easing=easing)
 
     @property
     def transform(self) -> ClipTransform:

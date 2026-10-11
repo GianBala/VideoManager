@@ -53,7 +53,7 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager.domain.geometry import image_base_size
-from videomanager.domain.timing import frame_index, last_frame_time
+from videomanager.domain.timing import last_frame_time
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 
 from videomanager.domain.preview import fit_size
@@ -1813,10 +1813,7 @@ class _ClipPropertiesWidget(QWidget):
     def _keyframe_in_frame(self, offset: float) -> Keyframe | None:
         if self._clip is None:
             return None
-        frame = frame_index(self._clip.start + offset, self._fps)
-        candidates = [k for k in self._clip.visible_keyframes
-                      if frame_index(self._clip.start + k.time_offset, self._fps) == frame]
-        return min(candidates, key=lambda k: abs(k.time_offset - offset), default=None)
+        return self._clip.keyframe_in_frame(offset, self._fps)
 
     def _refresh_keyframe_controls(self, *, refresh_static: bool = False) -> None:
         if self._clip is None or not hasattr(self, "_animation_group"):
@@ -1948,16 +1945,7 @@ class _ClipPropertiesWidget(QWidget):
         else:
             cur_t = self._clip.transform_at(t_offset)
             easing = self._combo_easing.currentData() or "linear"
-            new_kf = Keyframe(
-                time_offset=t_offset,
-                x=cur_t.x,
-                y=cur_t.y,
-                scale_x=cur_t.scale_x,
-                scale_y=cur_t.scale_y,
-                rotation=cur_t.rotation,
-                opacity=cur_t.opacity,
-                easing=easing,
-            )
+            new_kf = Keyframe.from_pose(t_offset, cur_t, easing)
             updated_clip = self._clip.with_keyframe(new_kf)
             self._clip = updated_clip
             self.property_changed.emit(self._clip_id, {"keyframes": updated_clip.keyframes})
