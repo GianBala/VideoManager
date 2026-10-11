@@ -1278,3 +1278,19 @@ def test_digitar_no_campo_de_tamanho_da_fonte_e_um_passo_de_desfazer(panel):
     assert len(panel._session.history) == antes + 1
     panel._undo_edit()
     assert panel._project.find(texto.clip_id)[1].font_size == 48
+
+
+def test_automatica_do_painel_diz_a_tela_do_material_e_nao_a_escolhida(panel):
+    # Os itens "Automática" eram escritos com a tela do projeto, que já traz a escolha
+    # do usuário: com 9:16 escolhida, "Automática" passava a dizer 9:16 e 1080 × 1920.
+    from videomanager.presentation.qt import strings
+
+    video = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, width=1280, height=720, fps=24.0, duration=2)
+    panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0, 2),)),)), None, [video], {})
+    antes = (panel._aspect_box.itemText(0), panel._canvas_box.itemText(0))
+    assert "16:9" in antes[0] and strings.EDIT_CANVAS_SIZE.format(width=1280, height=720) in antes[1]
+
+    panel._canvas_choice, panel._aspect_choice = (1080, 1920), '9:16'
+    panel._after_edit()
+    assert (panel._project.width, panel._project.height) == (1080, 1920)   # a edição está na tela escolhida
+    assert (panel._aspect_box.itemText(0), panel._canvas_box.itemText(0)) == antes   # e o automático não mudou
