@@ -115,6 +115,16 @@ class TestEditarOVolume:
         assert editado.gain_at(1.0) == pytest.approx(-5.0)           # a curva toda sobe 10 dB
         assert editado.gain_at(2.0) == pytest.approx(10.0)
 
+    def test_toda_a_animacao_com_a_curva_saturada_entrega_o_valor_pedido(self):
+        """A soma ``gain_db + curva`` passa de +12 ou de −60 dB e é limitada ao ouvir; deslocar pelo valor já
+        limitado deixava o ponto saturado onde estava (pediu 5 dB, ouvia 12) e ainda mexia no bloco todo."""
+        teto = _bloco(gain_db=10.0, keyframes=(Keyframe(0.0), Keyframe(2.0, gain_offset_db=10.0)))   # soma crua 20
+        assert teto.gain_at(2.0) == MAX_GAIN_DB
+        assert teto.with_edited_gain(2.0, 5.0, fps=FPS, whole_animation=True).gain_at(2.0) == pytest.approx(5.0)
+        piso = _bloco(gain_db=-50.0, keyframes=(Keyframe(0.0), Keyframe(2.0, gain_offset_db=-30.0)))  # soma crua −80
+        assert piso.gain_at(2.0) == MIN_GAIN_DB
+        assert piso.with_edited_gain(2.0, -40.0, fps=FPS, whole_animation=True).gain_at(2.0) == pytest.approx(-40.0)
+
     def test_o_valor_pedido_e_limitado_ao_controle(self):
         assert _bloco().with_edited_gain(0.0, 99.0, fps=FPS).gain_db == MAX_GAIN_DB
         assert _bloco().with_edited_gain(0.0, -99.0, fps=FPS).gain_db == MIN_GAIN_DB

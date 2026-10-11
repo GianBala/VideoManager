@@ -722,7 +722,9 @@ class Clip:
         value = _clamp_gain(value)
         offset = max(0.0, min(self.duration, offset))
         if not self.keyframes or whole_animation:
-            return replace(self, gain_db=_clamp_gain(self.gain_db + value - self.gain_at(offset)))
+            # Pela curva **crua** (``transform_at``), e não por ``gain_at``: este já vem limitado a −60/+12, e com a
+            # soma saturada o deslocamento saía menor que o pedido — o ponto continuava no limite e o bloco todo mudava.
+            return replace(self, gain_db=_clamp_gain(value - self.transform_at(offset).gain_offset_db))
         point = self.keyframe_in_frame(offset, fps) or Keyframe.from_pose(offset, self.transform_at(offset))
         return self.with_keyframe(replace(point, gain_offset_db=value - self.gain_db))
 
