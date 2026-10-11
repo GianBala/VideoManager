@@ -304,6 +304,10 @@ varia vira um número literal, sem expressão.
   o tamanho que devia variar. O preset `zoom_in`, que anima escala e opacidade
   juntas, saía do arquivo com a imagem no tamanho do primeiro quadro-chave,
   enquanto a prévia — que monta um grafo por quadro — mostrava o movimento certo.
+- **Volume:** `composer._gain_filter` monta `volume='pow(10,max(-60,min(12,G+(curva)))/20)':eval=frame` com a mesma
+  `_keyframe_expr` (propriedade `gain_offset_db`); sem curva o filtro é o fixo de sempre. A origem do relógio é
+  `-piece.elapsed` no trecho e `-_side_elapsed(side)` no lado de uma transição, e a imagem escolhe o caminho por
+  `has_pose_keyframes` para um fade de som não mudar a montagem do vídeo.
 - **Posição:** expressões nas coordenadas do `overlay`
   (`x='round((expr)*W-w/2)'`), arredondadas como o Qt arredonda a geometria das
   alças (`_image_overlay_geometry`). `tests/test_preview_overlay_alignment.py`

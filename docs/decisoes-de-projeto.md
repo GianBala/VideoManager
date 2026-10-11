@@ -241,6 +241,53 @@ sentido normal e ganha a cópia `.v4.bak` ao ser salvo; a versão anterior recus
 o v5 com mensagem. Imagem, texto, filtro e transição nunca ficam invertidos,
 mesmo num arquivo editado à mão.
 
+## O volume animado
+
+**A curva é do quadro-chave e é relativa** (`Keyframe.gain_offset_db`, em dB). O volume ouvido num instante é
+`Clip.gain_db` mais a curva, limitado a −60/+12 dB (`Clip.gain_at`). Relativa, e não absoluta como a
+opacidade, por três razões: com 0 a curva não mexe, então todo quadro-chave antigo continua neutro sem migrar
+valor nenhum; o 🔊 da barra continua sendo o volume do bloco inteiro, e não um ponto de animação; e um preset
+ou um quadro criado sem pensar em som nunca muda o volume. Por isso o campo se chama `gain_offset_db`, e não
+`gain_db`: o mesmo nome convidaria a tratá-lo como absoluto, como o `opacity` do quadro.
+
+**Os mesmos quadros-chave, não uma trilha de volume à parte.** É o "mesmo painel e mecanismo" que se pediu, e
+dividir, aparar, mudar a velocidade, colar e desfazer funcionam sem código novo, porque todas já tratam
+`Clip.keyframes`. A consequência é que um ponto de volume também fixa a pose daquele instante (se a imagem é
+animada, a curva da pose passa por ele); `Keyframe.from_pose` faz o quadro nascer da pose **com** o volume
+interpolado, e mexer na posição de um ponto preserva o volume dele — montar o quadro campo a campo zerava o
+volume de quem só movia a imagem. A trilha separada evitaria isso, mas custaria um segundo caminho em todas as
+operações e uma ◇ ambígua.
+
+**A velocidade não anima.** Ela muda a duração do bloco; uma curva dela mudaria o tamanho da trilha a cada
+ponto. Mudar a velocidade continua reescalando o tempo dos pontos, e a curva de volume acompanha o conteúdo.
+
+**No compositor** (`composer._gain_filter`): sem curva o filtro é o de sempre (`volume=-6.00dB`, comando
+idêntico); com curva, `volume='pow(10,max(-60,min(12,G+(CURVA)))/20)':eval=frame`, com a curva montada por
+`_keyframe_expr` (a mesma da imagem) e reavaliada a cada quadro de áudio, como os fades. O relógio `t` do
+filtro conta desde o começo do trecho lido, então a origem é `-piece.elapsed` (uma janela de bloco invertido, a
+prévia a partir do meio) e, na transição, `-_side_elapsed(side)` — antes do `adelay` da alça, que vem depois. A
+**interpolação é em dB**, como a automação de volume dos editores de referência: em amplitude a passagem soa
+desigual. O mesmo grafo serve à prévia sonora e à exportação.
+
+**A imagem decide o caminho por `Clip.has_pose_keyframes`, não por `has_keyframes`.** O compositor escolhe entre
+o caminho barato (`scale` + `pad`) e o das transformações (`scale` e `overlay` com `eval=frame`) pela presença
+de quadros-chave; um fade de som num vídeo o tiraria do caminho barato sem que a imagem mudasse. Sem curva de
+volume `has_pose_keyframes == has_keyframes`, e o comando de todo projeto antigo sai igual (medido: 9600
+comparações em projetos aleatórios, 0 diferenças). O corte contínuo (duas metades da mesma mídia que seguem sem
+transição de som) compara o volume **ouvido** nos dois lados, e não só o `gain_db`.
+
+**Separar áudio leva a curva** para o bloco de som e a tira do vídeo, que fica só com a pose (e sem
+quadros-chave se a animação era só de volume): o som sai do bloco de vídeo, e o volume com ele.
+
+**No arquivo**, o `.vmp` versão 6 grava `gain_offset_db` em cada quadro-chave. Um v5 abre com a curva zerada e
+ganha a cópia `.v5.bak` ao ser salvo; a versão anterior recusa o v6 com mensagem. Sem subir a versão, ela abriria
+o arquivo, ignoraria a chave e apagaria a curva ao salvar.
+
+**Efeito Rápido troca a curva de volume junto** com a pose (como o guia já dizia, "troca os quadros-chave"):
+preservar a curva seria parcial e mais complexo. Num bloco de áudio só "remover animações" faz sentido, e a
+lista filtra o resto. **Fica de fora, por ora:** arrastar losangos na linha do tempo e um selo no bloco que
+indique a curva (`gain_label` mostra só o volume do bloco).
+
 ## Fixtures reais em vez de suposições
 
 O que sustenta a promessa de funcionar em plataformas diversas são **fixtures
