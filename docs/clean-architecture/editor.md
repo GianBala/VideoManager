@@ -265,7 +265,7 @@ que ainda pode emitir callbacks.
 
 ## Formato .vmp
 
-`infrastructure/storage/project_json.py` escreve JSON versão 4 e lê versões 1 a 4.
+`infrastructure/storage/project_json.py` escreve JSON versão 5 e lê versões 1 a 5.
 `projects.py` o expõe pela porta `ProjectRepository`. A versão 2 permite pontos
 de suporte assinados e grava `text_reference_width` / `text_reference_height`.
 A versão 3 põe imagens na trilha de vídeo ajustadas à tela. Ao ler v1 ou v2,
@@ -277,15 +277,18 @@ o compositor escreve a escala, para o truncamento das animações não perder
 pixels. Um v3 é reaberto sem migração. Imagens migradas deixam de entrar em
 transições com `transition_affects_additionals`.
 A versão 4 acrescenta `blur_background` ao bloco; um v3 abre com a opção desligada.
+A versão 5 acrescenta `reversed` (o bloco toca de trás para frente); um v4 abre com
+o bloco no sentido normal. O trecho (`in_point`, `duration`, `speed`) não muda de
+significado: só o sentido em que a edição o percorre.
 Essas dimensões conservam a escala relativa do texto quando a resolução muda;
 `Project.for_render` deriva escalas sem modificar o documento nem seus ativos.
 
 Ao substituir um documento de versão anterior, o repositório cria uma cópia dos
-bytes originais em `.vmp.v1.bak`, `.vmp.v2.bak` ou `.vmp.v3.bak`, numerada se
-já existir, antes de escrever v4. Binários antigos não abrem a versão nova.
+bytes originais em `.vmp.v1.bak` a `.vmp.v4.bak`, numerada se
+já existir, antes de escrever v5. Binários antigos não abrem a versão nova.
 Reverter o aplicativo exige usar a cópia; não se deve reduzir a versão no JSON,
-porque a escala das imagens, os pontos que preservam a animação e o fundo
-desfocado já estão no formato novo (uma versão anterior ignoraria o campo e o
+porque a escala das imagens, os pontos que preservam a animação, o fundo
+desfocado e a inversão dos blocos já estão no formato novo (uma versão anterior ignoraria o campo e o
 perderia ao salvar).
 
 O projeto referencia mídias externas. Caminhos relativos são resolvidos em

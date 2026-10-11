@@ -59,10 +59,13 @@ usam o programa de verdade, porque o defeito só existe na execução.
 | --- | --- |
 | `tests/domain/test_keyframe.py` | Curvas, interpolação, menor caminho angular, presets, divisão/aparo preservando a curva e edição por instante × animação inteira. |
 | `tests/domain/test_project.py` | Tela automática (o maior vídeo e a maior taxa mandam; foto não), transições ligadas ao corte por identidade, mover/trocar/aparar/dividir blocos, separar áudio, trilhas, soltura de mídia e aritmética temporal. |
+| `tests/domain/test_reversed_clip.py` | Bloco invertido sem ffmpeg: tempo da origem, divisão sem perder nem repetir, alças que tiram do topo ou da base, teto de memória e quem pode ser invertido. |
 | `tests/domain/test_export_safety.py` | O corte rápido não pode descartar velocidade, opacidade, quadros-chave nem lacunas. |
 | `tests/application/test_editor.py` | Histórico, transações de gesto (`begin_edit`/`commit_edit`/`cancel_edit`), respostas atrasadas. |
 | `tests/application/test_formatting.py` | Nome da proporção de aspecto. |
-| `tests/test_project_io.py` | Persistência real: ida e volta, quadros-chave, versão não suportada, caminhos relativos a partir da pasta do documento, cópia `.v1.bak` exata sem sobrescrever e pontos de suporte negativos. |
+| `tests/test_project_io.py` | Persistência real: ida e volta, quadros-chave, versão não suportada, caminhos relativos a partir da pasta do documento, cópia `.v1.bak` exata sem sobrescrever, pontos de suporte negativos e a inversão do bloco no v5. |
+| `tests/test_reversal.py` | Bloco invertido medido na saída do ffmpeg: exportação espelho da normal (quadros e amostras), quadro parado e reprodução iguais à exportação, divisão, quadros-chave, transições contra o mesmo projeto montado com um arquivo invertido de verdade e o teto de memória. |
+| `tests/test_reversal_menu.py` | O "Inverter" do botão direito: quem o recebe, marca, desfazer e o bloco clicado (não o selecionado). |
 | `tests/test_images_in_video_tracks.py` | Fotos na trilha de vídeo, ajuste à tela, migração v1/v2 → v3 com a mesma aparência (comparada ao ffmpeg). |
 | `tests/test_track_order.py`, `tests/test_timeline_ruler.py` | Ordem livre das trilhas; régua e agulha fixas com as trilhas rolando por baixo. |
 | `tests/test_media_drop.py` | Importar só leva ao acervo; arrasto com eventos de mouse reais até a trilha, bloco fantasma, trilha nova, um passo de desfazer. |
