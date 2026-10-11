@@ -276,6 +276,13 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
   podem ser feitos direto na prévia, arrastando o objeto e suas alças —
   inclusive a de rotação, acima da caixa de seleção. Um objeto arrastado ou
   digitado aparece na hora; o quadro completo do compositor chega logo depois.
+- **Velocidade** e **Volume** — os mesmos ajustes dos botões **⚡** e **🔊** da barra, também aqui:
+  são o que a aba mostra num bloco de **áudio** (que não tem transformação nem Fundo Verde) e
+  aparecem também em vídeo com áudio. Fotos, textos, filtros e transições não têm velocidade nem
+  volume; um vídeo sem som não tem volume. Num vídeo cujo áudio já foi separado, o volume fica à
+  vista e desligado, com a explicação: o som agora é do outro bloco. A velocidade segue a regra
+  da barra, inclusive a recusa com **um** aviso quando a nova duração passaria por cima do
+  vizinho.
 - **Fundo Verde (Chroma Key)** — remove uma cor do bloco (verde padrão, verde
   de estúdio, azul ou qualquer outra pelo seletor), com **Tolerância** e
   **Suavização**.
@@ -333,7 +340,7 @@ posição relativos do texto, incluindo contorno e animação.
 ### Velocidade e volume do bloco
 
 Os botões **🔊 dB** e **⚡ velocidade**, na barra da linha do tempo, abrem um
-painel curto para o bloco selecionado. A velocidade vai de 0,1× a 10×, com
+painel curto para o bloco selecionado (os mesmos valores estão na aba [Propriedades](#propriedades-e-animação)). A velocidade vai de 0,1× a 10×, com
 atalhos (0,5×, 1×, 1,5×, 2×, 4×); o bloco encurta ou alonga na trilha, e a
 animação por quadros-chave encurta ou alonga junto. Se a
 nova duração passaria por cima do bloco seguinte, a velocidade é recusada com
