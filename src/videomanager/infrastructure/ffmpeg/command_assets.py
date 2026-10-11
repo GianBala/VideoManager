@@ -1,9 +1,10 @@
 """Artefatos temporários exclusivos de uma execução de comando."""
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 import os
 import tempfile
 
+from videomanager.infrastructure.ffmpeg.stages import Stages
 from videomanager.infrastructure.storage.outputs import temp_prefix
 from videomanager.infrastructure.system.binaries import major_version
 
@@ -39,8 +40,17 @@ def script_option(ffmpeg: str) -> str:
 
 
 @contextmanager
-def filter_script(args: list[str], directory: Path | None = None):
-    """Externaliza grafos longos; o arquivo vive até o processo consumidor sair."""
+def filter_script(args: list[str] | Stages, directory: Path | None = None):
+    """Externaliza grafos longos; o arquivo vive até o processo consumidor sair.
+
+    Com vários comandos em sequência (``Stages``), cada um tem o seu arquivo, e
+    todos vivem até o fim do conjunto: a janela seguinte é aberta enquanto a
+    atual ainda toca.
+    """
+    if isinstance(args, Stages):
+        with ExitStack() as stack:
+            yield args.map(lambda command: stack.enter_context(filter_script(command, directory)))
+        return
     owned = []
     prepared = list(args)
     option = None

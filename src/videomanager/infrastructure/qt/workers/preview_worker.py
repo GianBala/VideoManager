@@ -26,6 +26,7 @@ from videomanager.application.media.preview import PreviewFrameInbox
 from dataclasses import replace
 
 from videomanager.infrastructure.ffmpeg.preview import FramePump
+from videomanager.infrastructure.ffmpeg.stages import Stages
 from videomanager.infrastructure.ffmpeg.preview import jpeg_frames
 from videomanager.infrastructure.system.binaries import lower_priority
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
@@ -340,7 +341,7 @@ class PlaybackWorker(QRunnable):
 
     def __init__(
         self,
-        command: list[str],
+        command: list[str] | Stages,
         start: float,
         size: tuple[int, int],
         token: int,

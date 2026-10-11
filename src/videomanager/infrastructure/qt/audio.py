@@ -37,6 +37,7 @@ import threading
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
+from videomanager.infrastructure.ffmpeg.stages import Stages, open_process
 from videomanager.infrastructure.ffmpeg.composer import CHANNELS
 from videomanager.infrastructure.ffmpeg.composer import SAMPLE_RATE
 
@@ -190,7 +191,7 @@ class AudioPreview(QObject):
 
     # ------------------------------------------------------------------
 
-    def start(self, command: list[str], at: float, *, pcm_format: tuple[int, int] | None = None) -> bool:
+    def start(self, command: list[str] | Stages, at: float, *, pcm_format: tuple[int, int] | None = None) -> bool:
         """Começa a tocar a mixagem produzida por ``command``, situada em ``at``."""
         self.stop()
         if not self.available:
@@ -210,7 +211,7 @@ class AudioPreview(QObject):
         try:
             kwargs = subprocess_kwargs()
             kwargs["stderr"] = subprocess.DEVNULL
-            process = subprocess.Popen(command, **kwargs)
+            process = open_process(command, **kwargs)
         except OSError:
             return False
 
@@ -324,7 +325,7 @@ class AudioPreview(QObject):
             self._written += written
             self._pending = self._pending[written:] or None
 
-    def queue_next(self, command: list[str], at: float) -> bool:
+    def queue_next(self, command: list[str] | Stages, at: float) -> bool:
         """Prepara o trecho que toca **logo depois** do atual, sem pausa.
 
         É o loop da prévia: o som do começo da edição já vai sendo lido
@@ -337,7 +338,7 @@ class AudioPreview(QObject):
         try:
             kwargs = subprocess_kwargs()
             kwargs["stderr"] = subprocess.DEVNULL
-            process = subprocess.Popen(command, **kwargs)
+            process = open_process(command, **kwargs)
         except OSError:
             return False
         chunks: queue.Queue[bytes | None] = queue.Queue(_QUEUE_CHUNKS)
