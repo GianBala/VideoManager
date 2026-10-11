@@ -43,6 +43,7 @@ from videomanager.domain.i18n import decimal, t, variants
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import interpolate_keyframes
 from videomanager.domain.preview import fit_size
+from videomanager.domain.reversal import MAX_REVERSE_BYTES, reverse_bytes, reverse_seconds_limit
 from videomanager.domain.timing import source_time, available_duration, frame_index
 
 if TYPE_CHECKING:  # pragma: no cover - só para o verificador de tipos
@@ -316,6 +317,13 @@ class Clip:
     # nenhuma construção posicional mudar de sentido. Cobre as trilhas de baixo
     # na janela do bloco — por isso nasce desligada (ver ``shows_blur_background``).
     blur_background: bool = False
+    # O bloco toca de trás para frente. Ele continua cobrindo o mesmo trecho da
+    # mídia, de ``in_point`` a ``out_point``; o que muda é o sentido em que a
+    # edição o percorre: o começo do bloco é o ``out_point``. Marca no bloco, e
+    # não um arquivo novo, para inverter e desinverter serem instantâneos e
+    # desfazíveis. Fica **antes** de ``clip_id`` para nenhuma construção
+    # posicional mudar de sentido.
+    reversed: bool = False
     # Identidade estável, preservada por ``dataclasses.replace``: é por ela que
     # a seleção, o cache de miniaturas e o desfazer reconhecem o mesmo bloco
     # depois de qualquer alteração.
@@ -330,6 +338,10 @@ class Clip:
         if self.scale_y is None:
             object.__setattr__(self, "scale_y", self.scale)
         object.__setattr__(self, "opacity", max(0.0, min(1.0, float(self.opacity))))
+        # Imagem, texto, filtro e transição não têm trecho de mídia para tocar ao
+        # contrário; um .vmp editado à mão não pode inverter o que não tem sentido.
+        if self.reversed and (self.is_additional or self.media is None):
+            object.__setattr__(self, "reversed", False)
         if self.keyframes and not isinstance(self.keyframes, tuple):
             object.__setattr__(
                 self,
@@ -422,8 +434,63 @@ class Clip:
         return self.start <= seconds < self.end
 
     def source_time(self, seconds: float) -> float:
-        """Instante dentro do arquivo que corresponde a um instante da edição."""
+        """Instante dentro do arquivo que corresponde a um instante da edição.
+
+        Invertido, o começo do bloco é o fim do trecho e o tempo corre para
+        baixo: é a mesma conta com a origem em ``out_point`` e a velocidade
+        negada.
+        """
+        if self.reversed:
+            return source_time(max(seconds, self.start), self.start, self.out_point, -self.speed)
         return source_time(max(seconds, self.start), self.start, self.in_point, self.speed)
+
+    @property
+    def head_point(self) -> float:
+        """Instante da mídia onde o bloco **começa** na edição."""
+        return self.out_point if self.reversed else self.in_point
+
+    @property
+    def tail_point(self) -> float:
+        """Instante da mídia onde o bloco **termina** na edição."""
+        return self.in_point if self.reversed else self.out_point
+
+    @property
+    def is_reversible(self) -> bool:
+        """Se o bloco toca um trecho de vídeo ou de áudio que possa ser invertido."""
+        return bool(
+            self.media is not None
+            and not self.is_additional
+            and self.media.kind in (MediaKind.VIDEO, MediaKind.AUDIO)
+        )
+
+    @property
+    def reverse_cost(self) -> int:
+        """Memória que inverter a imagem deste bloco pede (ver ``domain.reversal``).
+
+        Só a imagem pesa: o som invertido ocupa uma fração dela. Um bloco sem
+        imagem custa zero.
+        """
+        if not self.is_reversible or not self.has_image:
+            return 0
+        media = self.media
+        return reverse_bytes(media.width, media.height, media.fps, self.duration * self.speed)
+
+    @property
+    def reverse_limit(self) -> float:
+        """Maior duração que o bloco invertido pode ter na edição (``inf`` sem imagem)."""
+        if not self.is_reversible or not self.has_image:
+            return float("inf")
+        media = self.media
+        return reverse_seconds_limit(media.width, media.height, media.fps) / self.speed
+
+    @property
+    def can_reverse(self) -> bool:
+        """Se o menu pode oferecer a inversão: tem o que inverter e o trecho cabe.
+
+        Já invertido, desfazer é sempre possível — mesmo que o bloco tenha
+        crescido além do teto depois de invertido.
+        """
+        return self.is_reversible and (self.reversed or self.reverse_cost <= MAX_REVERSE_BYTES)
 
     @property
     def gain_label(self) -> str:
@@ -434,6 +501,10 @@ class Clip:
         if not self.changes_gain:
             return ""
         return f"{decimal(self.gain_db, sign=True)} dB"
+
+    @property
+    def reverse_label(self) -> str:
+        return t("CLIP_REVERSED") if self.reversed else ""
 
     @property
     def speed_label(self) -> str:
@@ -1112,7 +1183,7 @@ class Project:
         updated_project = self._replace_track(index, replace(track, clips=clips))
         if clip.is_transition:
             updated_project = updated_project._sync_transition_markers(clip_id)
-        elif {"start", "duration", "in_point", "speed"}.intersection(changes):
+        elif {"start", "duration", "in_point", "speed", "reversed"}.intersection(changes):
             updated_project = updated_project._sync_transition_markers(clip_id)
         return updated_project
 
@@ -1320,7 +1391,7 @@ class Project:
             # Uma imagem não tem começo de arquivo para respeitar; um vídeo não
             # pode ser puxado para antes do primeiro quadro que ele tem.
             limit = (
-                clip.start - clip.in_point / clip.speed
+                clip.start - self._head_reach(clip)
                 if not (clip.is_image or clip.is_additional)
                 else floor
             )
@@ -1329,25 +1400,56 @@ class Project:
             # MIN_SEGMENT`` fica antes do começo, e a alça sobrepunha o vizinho
             # e lia antes do primeiro quadro da mídia.
             lower = max(floor, limit)
+            if clip.reversed:
+                # Esticar um bloco já invertido não pode passar do teto de
+                # memória (ver ``domain.reversal``); encolher é sempre livre.
+                lower = max(lower, clip.end - max(clip.reverse_limit, clip.duration))
             upper = max(clip.end - MIN_SEGMENT, clip.start)
             value = min(max(lower, seconds), max(upper, lower))
             return self.with_updated_clip(
                 clip_id,
                 start=value,
                 duration=clip.end - value,
-                in_point=0.0 if clip.is_additional else source_time(value, clip.start, clip.in_point, clip.speed),
+                # Invertido, o começo da edição é o topo do trecho: encurtá-lo
+                # tira do topo e o ``in_point`` fica onde está.
+                in_point=0.0 if clip.is_additional else clip.in_point if clip.reversed
+                else source_time(value, clip.start, clip.in_point, clip.speed),
                 keyframes=tuple(replace(k, time_offset=k.time_offset - (value-clip.start)) for k in clip.keyframes),
             )
 
         available = (
             float("inf")
             if (clip.is_image or clip.is_additional)
-            else available_duration(clip.media.duration or 0.0, clip.in_point, clip.speed)
+            else self._tail_reach(clip)
         )
+        if clip.reversed:
+            available = min(available, max(clip.reverse_limit, clip.duration))
         value = min(
             max(seconds, clip.start + MIN_SEGMENT), min(ceiling, clip.start + available)
         )
+        if clip.reversed:
+            # O fim da edição é a base do trecho: esticá-lo desce o ``in_point``.
+            # O ``max`` guarda o zero contra o resto de ponto flutuante, que o
+            # .vmp recusaria como entrada negativa.
+            return self.with_updated_clip(
+                clip_id, duration=value - clip.start,
+                in_point=max(0.0, clip.out_point - (value - clip.start) * clip.speed),
+            )
         return self.with_updated_clip(clip_id, duration=value - clip.start)
+
+    @staticmethod
+    def _head_reach(clip: Clip) -> float:
+        """Quanto a ponta inicial pode recuar na edição antes de acabar a mídia."""
+        if clip.reversed:
+            return max(0.0, (clip.media.duration or 0.0) - clip.out_point) / clip.speed
+        return clip.in_point / clip.speed
+
+    @staticmethod
+    def _tail_reach(clip: Clip) -> float:
+        """Quanto a ponta final pode avançar na edição antes de acabar a mídia."""
+        if clip.reversed:
+            return clip.out_point / clip.speed
+        return available_duration(clip.media.duration or 0.0, clip.in_point, clip.speed)
 
     def split(self, clip_id: int, seconds: float) -> Project:
         """Divide o bloco no instante dado, como a tesoura da barra."""
@@ -1371,12 +1473,18 @@ class Project:
             replace(k, time_offset=k.time_offset - split_offset)
             for k in clip.keyframes
         )
-        left = replace(clip, duration=split_offset, keyframes=left_kfs)
+        # Invertido, a primeira metade da edição é o topo do trecho: é ela que
+        # ganha o ponto novo, e a segunda fica com a base.
+        left = replace(
+            clip, duration=split_offset, keyframes=left_kfs,
+            in_point=clip.source_time(seconds) if clip.reversed else clip.in_point,
+        )
         right = replace(
             clip,
             start=seconds,
             duration=clip.end - seconds,
-            in_point=0.0 if clip.is_additional else clip.source_time(seconds),
+            in_point=(0.0 if clip.is_additional
+                      else clip.in_point if clip.reversed else clip.source_time(seconds)),
             clip_id=next_clip_id(),
             keyframes=right_kfs,
         )
@@ -1449,6 +1557,8 @@ class Project:
             muted=clip.muted,
             speed=clip.speed,
             audio_only=True,
+            # O som segue a imagem de onde saiu: separar não desfaz a inversão.
+            reversed=clip.reversed,
         )
         return project.with_clip(target, detached)
 
