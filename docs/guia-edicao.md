@@ -285,10 +285,9 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
   cheia **por baixo** do bloco: ele cobre as trilhas de baixo durante o bloco
   inteiro, mesmo que a frente seja reduzida ou movida, e acompanha a opacidade
   do bloco. Por isso a opção nasce desligada. Num bloco que já preenche a tela
-  em posição, escala e rotação neutras, ela não muda nada na imagem. Fica
-  indisponível enquanto o Fundo Verde está ligado. Arrastar na prévia um bloco
-  com o fundo visível é composto pelo ffmpeg, um pouco menos fluido que o dos
-  demais.
+  em posição, escala e rotação neutras, ela não muda nada na imagem. Numa
+  imagem com transparência, a parte transparente entra no fundo como preto. Fica
+  indisponível enquanto o Fundo Verde está ligado.
 - **Animação / Quadros-chave** — anima posição, escala, rotação e opacidade ao
   longo do bloco:
   - **◀ ◇ ▶** vão ao quadro-chave anterior, adicionam ou removem um quadro-chave

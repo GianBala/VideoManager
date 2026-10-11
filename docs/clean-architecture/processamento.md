@@ -216,6 +216,14 @@ compartilhado preserva as mesmas regras de montagem entre prévia e saída.
   só entra quando solicitado e elegível.
 - Quadros-chave viram expressões avaliadas pelo ffmpeg a cada quadro (ver
   [Animação no grafo](#animação-no-grafo)).
+- O fundo desfocado de um bloco é um ramo `split` do mesmo fluxo, que não abre o
+  arquivo de novo: o bloco coberto à tela, borrado numa tela de trabalho pequena
+  e ampliado, por baixo da frente e só na janela dela (as decisões estão em
+  [Decisões de projeto](../decisoes-de-projeto.md#o-fundo-desfocado-do-bloco)).
+  Custa: a 1080p, uma exportação de 5 s leva +23% de tempo e +45 MB de pico em
+  MP4 e +48% e +13 MB em GIF; o fluxo da reprodução de uma montagem com dois
+  blocos leva de +7% a +18% de tempo (varia de sessão para sessão) e cerca de
+  +320 MB de pico (1473 para 1789 MB). Medido com `scripts/validate_blur_export.py`.
 
 Os consumidores do mesmo grafo são: `export_args` (arquivo; `gif_args` para GIF),
 `frame_command` (quadro parado, com `still=True`), `scrub_command` (trecho de
