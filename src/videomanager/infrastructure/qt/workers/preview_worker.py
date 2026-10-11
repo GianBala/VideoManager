@@ -9,6 +9,7 @@ pedidos deixa de interessar antes de terminar. Daí cada worker carregar um
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import threading
 from collections.abc import Callable
@@ -34,6 +35,8 @@ from videomanager.infrastructure.ffmpeg.preview import render_waveform
 from videomanager.infrastructure.ffmpeg.trimmer import keyframe_times
 from videomanager.infrastructure.qt.workers.signals import PreviewSignals
 from videomanager.infrastructure.qt.workers.signals import emit_safely
+
+_LOG = logging.getLogger(__name__)
 
 
 class _Interruption:
@@ -436,9 +439,13 @@ class InteractionWorker(QRunnable):
                 self._guard.release()
             if not self._guard.cancelled:
                 emit_safely(self.signals.frame, self._token, tuple(images))
-        except (VideoManagerError, OSError, subprocess.SubprocessError):
-            # A composição normal continua disponível se a preparação falhar.
-            pass
+        except (VideoManagerError, OSError, subprocess.SubprocessError) as exc:
+            # A composição normal continua disponível se a preparação falhar, e
+            # nenhuma das imagens é entregue (todas saem juntas ou nenhuma). O
+            # motivo fica no log: sem ele o arrasto volta ao caminho lento sem
+            # explicação. Desistir no meio (matar o processo) não é falha.
+            if not self._guard.cancelled:
+                _LOG.warning("Camadas do arrasto não preparadas (%s): %s", type(exc).__name__, exc)
         finally:
             self._guard.release()
             emit_safely(self.signals.done)
