@@ -113,6 +113,16 @@ vezes as dimensões da prévia. O fim do gesto pede o quadro canônico completo.
 Seleção, instante, geração, tamanho e alterações de conteúdo invalidam o plano;
 um callback antigo não pode instalar camadas em outro contexto.
 
+Com o fundo desfocado ligado no bloco (`Clip.has_blur_background`), o worker
+prepara uma **quarta** imagem: o fundo de tela cheia, que não depende da pose.
+O Qt a pinta entre o que está por baixo e a textura, com a opacidade ao vivo, e
+só quando `Clip.shows_blur_background` vale para a pose **de agora** — a mesma
+regra do quadro final, o que importa num bloco 16:9 que parado cobre a tela e
+ao encolher passa a descobri-la. Sem essa imagem o gesto caía num ffmpeg por
+movimento (45–100 ms por quadro, piso de ~40 ms mesmo a 160×90) e a imagem
+ficava 30,5 px atrás da mão (mediana; p95 42,5); com ela o erro é o do gesto sem fundo
+(0,5 px, `scripts/validate_blur_drag.py`).
+
 A aba Propriedades usa as mesmas camadas quando só a pose muda (posição,
 tamanho, rotação, opacidade e seus quadros-chave): cada tecla redesenha o objeto
 na hora e o quadro canônico é pedido 200 ms depois da última

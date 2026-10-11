@@ -11,6 +11,9 @@ class InteractionPlan:
     source: Project
     clip_id: int
     seconds: float
+    # Se o gesto precisa da imagem do fundo desfocado como quarta camada. É a
+    # opção ligada, e não "aparece agora": a pose muda durante o arrasto.
+    blur: bool = False
 
 
 def interaction_plan(project: Project, clip_id: int, seconds: float) -> InteractionPlan | None:
@@ -26,13 +29,6 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     clip = ordered[selected]
     if clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION):
         return None
-    # O objeto vira uma textura sem o fundo: o fundo é de tela cheia e segue a
-    # opacidade do bloco, então não cabe em nenhuma das três camadas. O gesto
-    # compõe pelo ffmpeg, como com um filtro acima.
-    # ponytail: arrasto menos fluido nesses blocos; renderizar o fundo na camada
-    # de baixo devolveria a resposta imediata, se alguém notar.
-    if clip.shows_blur_background(project.width, project.height):
-        return None
     if any(c.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION) for c in ordered[selected + 1:]):
         return None
 
@@ -46,4 +42,4 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     source = subset([clip]).with_updated_clip(clip_id, x=.5, y=.5, scale=1.,
                     scale_x=1., scale_y=1., rotation=0., opacity=1., keyframes=())
     return InteractionPlan(subset(ordered[:selected]), subset(ordered[selected + 1:]),
-                           source, clip_id, seconds)
+                           source, clip_id, seconds, blur=clip.has_blur_background)

@@ -49,15 +49,101 @@ def test_plano_estavel_durante_pose_mas_invalidado_por_contexto(tmp_path):
     assert interaction_plan(below, clip.clip_id, 1) is not None
 
 
-def test_bloco_com_fundo_desfocado_visivel_compoe_pelo_ffmpeg(tmp_path):
-    """A textura isolada não leva o fundo de tela cheia: sem este retorno ele sumia no gesto."""
-    project, clip = scene(tmp_path)  # a imagem é 16:9 e está a metade da tela: o fundo aparece
-    assert interaction_plan(project, clip.clip_id, 1) is not None
+def test_bloco_com_fundo_desfocado_pede_a_imagem_do_fundo_no_gesto(tmp_path):
+    """O fundo é de tela cheia e segue a opacidade: não cabe nas três camadas, tem a sua."""
+    project, clip = scene(tmp_path)
+    assert not interaction_plan(project, clip.clip_id, 1).blur
     ligado = project.with_updated_clip(clip.clip_id, blur_background=True)
-    assert interaction_plan(ligado, clip.clip_id, 1) is None
-    # Onde o fundo não aparece (a frente cobre a tela), a opção não custa a resposta imediata.
+    assert interaction_plan(ligado, clip.clip_id, 1).blur
+    # Cobrindo a tela parado, o fundo não aparece, mas o gesto pode descobri-la: a imagem tem de estar pronta.
     cobrindo = ligado.with_updated_clip(clip.clip_id, scale=1., scale_x=1., scale_y=1.)
-    assert interaction_plan(cobrindo, clip.clip_id, 1) is not None
+    assert interaction_plan(cobrindo, clip.clip_id, 1).blur
+    # Sem efeito (chroma key), nada a preparar.
+    chroma = ligado.with_updated_clip(clip.clip_id, chromakey_enabled=True, chromakey_color='#ff0000')
+    assert not interaction_plan(chroma, clip.clip_id, 1).blur
+    # Ligar a opção troca o plano, senão as camadas prontas de antes seriam reaproveitadas sem o fundo.
+    assert interaction_plan(project, clip.clip_id, 1) != interaction_plan(ligado, clip.clip_id, 1)
+
+
+def _camadas_do_arrasto(project, clip, size, tools):
+    plan = interaction_plan(project, clip.clip_id, 1)
+    return tuple(QPixmap.fromImage(QImage.fromData(_run(c, 30, strict=True)))
+                 for c in interaction_commands(plan, size, tools))
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize('video', [False, True])
+@pytest.mark.parametrize('pose', [dict(x=.7), dict(x=.7, opacity=.6), dict(x=.7, rotation=15., opacity=.6)],
+                         ids=['movido', 'movido_e_translucido', 'movido_girado_e_translucido'])
+def test_gesto_com_fundo_desfocado_acompanha_o_quadro_final(tmp_path, video, pose):
+    """As quatro camadas pintadas pelo Qt batem com o quadro que o ffmpeg comporia na pose do gesto.
+
+    O fundo desfocado de um vídeo yuv420p já divergiu da foto do mesmo quadro (ver
+    ``test_fundo_desfocado_caminhos``); medido, a diferença aqui é de até 3 em 255.
+    """
+    from PySide6.QtGui import QColor
+    tools = find_tools()
+    if tools is None:
+        pytest.skip('FFmpeg indisponível')
+    fonte = tmp_path / ('fonte.mp4' if video else 'fonte.png')
+    saida = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p'] if video else ['-frames:v', '1']
+    subprocess.run([tools.ffmpeg_str, '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=160x90:r=30:d=5',
+                    *saida, str(fonte)], check=True, timeout=30, **subprocess_kwargs())
+    media = (MediaRef(fonte, MediaKind.VIDEO, width=160, height=90, duration=5) if video
+             else MediaRef(fonte, MediaKind.IMAGE, width=160, height=90))
+    chao = Clip(picture(tmp_path / 'verde.png', QColor('lime')), 0, 5)
+    bloco = Clip(media, 0, 5, scale_x=.5, scale_y=.5, blur_background=True)
+    project = Project(tracks=(Track(TrackKind.VIDEO, clips=(bloco,)), Track(TrackKind.VIDEO, clips=(chao,))),
+                      width=320, height=180)
+    size = (640, 360)
+    camadas = _camadas_do_arrasto(project, bloco, size, tools)
+    assert len(camadas) == 4 and all(not p.isNull() for p in camadas)
+    preview = _Preview()
+    preview.resize(*size)
+    preview.set_frame_pixmap(QPixmap.fromImage(QImage.fromData(
+        _run(frame_command(project, 1, size, tools, png=True), 30, strict=True))))
+    preview.set_active_clip(bloco, project.width, project.height)
+    preview.set_position(1)
+    preview.set_interaction_layers(camadas)
+    preview.set_active_clip(replace(bloco, **pose), project.width, project.height)
+    assert preview.begin_interaction()
+    atual = preview.grab().toImage()
+    esperado = QImage.fromData(_run(frame_command(project.with_updated_clip(bloco.clip_id, **pose), 1, size, tools,
+                                                  png=True), 30, strict=True))
+    # À esquerda da frente (que está em x=.7): só fundo desfocado sobre a trilha de baixo, longe das alças.
+    for x in range(20, 240, 40):
+        for y in range(20, 350, 40):
+            a, b = atual.pixelColor(x, y), esperado.pixelColor(x, y)
+            assert max(abs(a.red() - b.red()), abs(a.green() - b.green()), abs(a.blue() - b.blue())) <= 4, \
+                (video, pose, x, y, a.getRgb(), b.getRgb())
+
+
+def test_camada_do_fundo_so_e_pintada_onde_o_quadro_final_a_mostraria():
+    """A pose de agora decide, como em ``Clip.shows_blur_background``: com a opção sem efeito, o fundo fica de fora."""
+    from PySide6.QtGui import QColor
+
+    def solida(cor):
+        imagem = QPixmap(640, 360)
+        imagem.fill(QColor(cor))
+        return imagem
+
+    media = MediaRef(Path('video.mp4'), MediaKind.VIDEO, width=640, height=360, duration=5)
+    camadas = (solida('black'), solida('#00000000'), solida('#00000000'), solida('white'))
+    brancos = {}
+    for nome, extra in (('ligado', {}), ('chroma', dict(chromakey_enabled=True))):
+        preview = _Preview()
+        preview.resize(640, 360)
+        preview.set_frame_pixmap(solida('black'))
+        # Parado cobre a tela; o gesto o leva para a direita e a esquerda fica descoberta.
+        parado = Clip(media, 0, 5, blur_background=True, **extra)
+        preview.set_active_clip(parado, 640, 360)
+        preview.set_position(1)
+        preview.set_interaction_layers(camadas)
+        preview.set_active_clip(replace(parado, x=.8), 640, 360)
+        assert preview.begin_interaction()
+        brancos[nome] = preview.grab().toImage().pixelColor(30, 180).red()
+    assert brancos['ligado'] > 200, 'o fundo devia aparecer na faixa descoberta'
+    assert brancos['chroma'] < 50, 'com chroma key a opção não tem efeito e o fundo não pode ser pintado'
 
 
 @pytest.mark.ffmpeg
@@ -327,3 +413,19 @@ def test_propriedade_fora_da_pose_continua_composta_pelo_ffmpeg(pose_panel):
     assert panel._project.find(item.clip_id)[1].chromakey_enabled
     assert len(calls.frames) == before + 1
     assert not panel._preview._interaction_visible
+
+
+def test_fundo_desfocado_ligado_pela_aba_entrega_a_quarta_camada_a_previa(pose_panel):
+    """Ligar a opção refaz as camadas do gesto, e a imagem do fundo chega à prévia."""
+    panel, calls, item, deliver = pose_panel
+    antes = len(calls.interaction)
+    panel._properties_widget._chk_blur.click()
+    assert panel._project.find(item.clip_id)[1].blur_background
+    while panel._frame_busy:
+        deliver(calls.frames[-1])
+    assert len(calls.interaction) == antes + 1, 'ligar o fundo não refez as camadas do gesto'
+    worker = calls.interaction[-1]
+    assert worker.args[0].blur
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('red'), _png('#00000000'), _png('blue')))
+    worker.signals.done.emit()
+    assert len(panel._preview._interaction_layers) == 4
