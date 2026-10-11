@@ -1017,12 +1017,20 @@ class _Preview(QLabel):
         if has_active and self._interaction_visible and self._interaction_layers:
             geom = self._clip_geometry(clip)
             if geom:
-                background, texture, foreground = self._interaction_layers
+                background, texture, foreground, *fundo = self._interaction_layers
                 transform = clip.transform_at(max(0., self._position - clip.start))
                 cx, cy, w, h = geom
                 painter.save()
                 painter.setClipRect(target, Qt.ClipOperation.IntersectClip)
                 painter.drawPixmap(target, background)
+                # O fundo é decidido pela pose **de agora**, como no quadro final: um
+                # bloco 16:9 não o mostra parado, mas ao encolher no arrasto passa a
+                # mostrar. A opacidade também é a ao vivo, a mesma da textura.
+                if fundo and clip.shows_blur_background(self._proj_w, self._proj_h):
+                    painter.save()
+                    painter.setOpacity(transform.opacity)
+                    painter.drawPixmap(target, fundo[0])
+                    painter.restore()
                 painter.save()
                 painter.setOpacity(transform.opacity)
                 painter.translate(cx, cy)

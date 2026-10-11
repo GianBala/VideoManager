@@ -481,6 +481,17 @@ class Clip:
         return (max([self.scale_x, *(k.scale_x for k in self.keyframes)]),
                 max([self.scale_y, *(k.scale_y for k in self.keyframes)]))
 
+    @property
+    def has_blur_background(self) -> bool:
+        """Se a opção está ligada **e** vale para este bloco, em qualquer pose.
+
+        É o que decide se o arrasto prepara a imagem do fundo; se ela é pintada
+        agora, quem responde é ``shows_blur_background``, com a pose do momento.
+        """
+        media = self.media
+        return bool(self.blur_background and not self.chromakey_enabled and not self.is_overlay
+                    and self.has_image and media is not None and media.width and media.height)
+
     def shows_blur_background(self, width: int, height: int) -> bool:
         """Se o fundo desfocado aparece **de fato** numa tela ``width``×``height``.
 
@@ -497,10 +508,9 @@ class Clip:
         pergunta uma vez só, com a tela de exportação: pela da prévia (arredondada
         para par) um clipe 16:9 deixaria de "preencher" só ali.
         """
-        media = self.media
-        if (not self.blur_background or self.chromakey_enabled or self.is_overlay
-                or not self.has_image or media is None or not media.width or not media.height):
+        if not self.has_blur_background:
             return False
+        media = self.media
         fit = image_base_size if self.is_image else fit_size
         fit_w, fit_h = fit(media.width, media.height, width, height)
         if width - fit_w > 2 or height - fit_h > 2:
