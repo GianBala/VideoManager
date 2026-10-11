@@ -119,10 +119,12 @@ register({
         "Every clip is muted or empty: there's nothing to export.",
     ),
     "COMPOSE_REVERSE_TOO_LONG": (
-        "O bloco \"{name}\" é longo demais para ser invertido: inverter guarda os quadros do "
-        "trecho na memória ({needed}, e o teto é {limit}). Divida o bloco em partes menores.",
-        "The clip \"{name}\" is too long to reverse: reversing keeps the section's frames in "
-        "memory ({needed}, and the limit is {limit}). Split the clip into shorter parts.",
+        "O bloco \"{name}\" é longo demais para ser invertido neste formato: inverter guarda "
+        "na memória os quadros do trecho, e o GIF não divide a exportação em partes. Exporte em "
+        "MP4, MKV, WebM ou MOV, ou divida o bloco.",
+        "The clip \"{name}\" is too long to reverse in this format: reversing keeps the section's "
+        "frames in memory, and GIF can't split the export into parts. Export as MP4, MKV, WebM or "
+        "MOV, or split the clip.",
     ),
     "COMPOSE_SEGMENT_NO_IMAGE": ("O trecho não tem imagem para exportar.", "The segment has no image to export."),
     "PARALLEL_SEGMENT_FAILED": (

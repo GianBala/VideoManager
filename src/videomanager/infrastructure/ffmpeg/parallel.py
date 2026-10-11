@@ -35,6 +35,7 @@ memória, e foi essa memória que já derrubou esta máquina uma vez.
 from __future__ import annotations
 
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -57,6 +58,7 @@ from videomanager.infrastructure.ffmpeg.composer import concat_args
 from videomanager.infrastructure.ffmpeg.composer import interpolation_segments
 from videomanager.infrastructure.ffmpeg.composer import mux_args
 from videomanager.infrastructure.ffmpeg.composer import segment_bounds
+from videomanager.infrastructure.ffmpeg.composer import reversal_cuts_for_export
 from videomanager.infrastructure.ffmpeg.composer import segment_video_args
 from videomanager.application.events import Progress
 from videomanager.application.errors import ConversionError
@@ -83,6 +85,27 @@ def plan_segments(composition: Composition) -> int:
         available=available_bytes(),
         cores=os.cpu_count() or 1,
     )
+
+def reversal_bounds(composition: Composition) -> tuple[tuple[float, float], ...]:
+    """Janelas ``(começo, duração)`` em que a exportação se divide por causa de blocos invertidos.
+
+    O ``reverse`` guarda todos os quadros do trecho que lê, e não há como limitar
+    isso dentro de um processo (ver ``domain.reversal``): cada janela é um
+    processo, em sequência, e a emenda copia os dados — o mesmo caminho da
+    interpolação paralela, com uma vaga só para a memória ficar limitada. Vazio
+    é "um processo dá conta". O GIF e a exportação só de som não passam por aqui:
+    o primeiro monta uma paleta sobre o fluxo inteiro (e recusa, ver
+    ``composer.check_reversal``), e o segundo sai num passe só.
+    """
+    if composition.audio_only or composition.container == "gif":
+        return ()
+    duration = composition.output_duration
+    cuts = reversal_cuts_for_export(composition.project, duration)
+    if not cuts:
+        return ()
+    edges = (0.0, *cuts, duration)
+    return tuple((begin, end - begin) for begin, end in zip(edges, edges[1:]))
+
 
 # Quanto do progresso cabe aos trechos. O que vem depois — emendar e juntar o som
 # — copia dados e leva um piscar de olhos perto da interpolação; reservar uma
@@ -119,6 +142,8 @@ class ParallelExport:
         on_progress: Callable[[Progress], None] | None = None,
         text_assets: dict[int, Path] | None = None,
         lease: OutputLease | None = None,
+        bounds: tuple[tuple[float, float], ...] | None = None,
+        workers: int | None = None,
     ) -> None:
         self._text_assets = text_assets
         self._composition = composition
@@ -129,7 +154,12 @@ class ParallelExport:
         # A duração da **saída**, a mesma do caminho serial. A da edição inteira
         # conta blocos que não saem no arquivo (um áudio mudo depois do fim do
         # vídeo) e deixava o paralelo mais longo que o serial, com tela preta.
-        self._bounds = segment_bounds(composition.output_duration, segments)
+        self._bounds = bounds or segment_bounds(composition.output_duration, segments)
+        # Quantos trechos correm ao mesmo tempo. Na interpolação, todos — cada um
+        # usa o seu núcleo —; no bloco invertido, um por vez, porque é a memória
+        # de cada janela que está sendo limitada.
+        self._workers = max(1, workers or len(self._bounds))
+        self._phase = _PHASE if composition.interpolate else "PHASE_EXPORTING"
         self._on_progress = on_progress
         # Duas bandeiras, e não uma: ``_cancelled`` é a desistência do usuário e
         # ``_aborted`` é "pare tudo", que também vale quando um trecho falha.
@@ -207,10 +237,19 @@ class ParallelExport:
     def _build(self, temp: Path) -> Path:
         partes = [temp / f"trecho{i:03d}.{self._composition.container}" for i in
                   range(len(self._bounds))]
-        threads = [
-            threading.Thread(target=self._render, args=(i, parte), daemon=True)
-            for i, parte in enumerate(partes)
-        ]
+        pendentes: queue.SimpleQueue[int] = queue.SimpleQueue()
+        for i in range(len(partes)):
+            pendentes.put(i)
+
+        def correr() -> None:
+            while True:
+                try:
+                    i = pendentes.get_nowait()
+                except queue.Empty:
+                    return
+                self._render(i, partes[i])
+
+        threads = [threading.Thread(target=correr, daemon=True) for _ in range(min(self._workers, len(partes)))]
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -290,6 +329,7 @@ class ParallelExport:
                 family=self._composition.family,
                 hardware=self._composition.hardware,
                 quality=self._composition.quality,
+                interpolate=self._composition.interpolate,
              text_assets=self._text_assets)
             with filter_script(args, destino.parent) as prepared:
                 self._render_command(index, prepared)
@@ -416,7 +456,7 @@ class ParallelExport:
         percent = min(100.0, seconds * 100.0 * share / duracao) if duracao else None
         self._on_progress(
             Progress(
-                phase=Text(_PHASE),
+                phase=Text(self._phase),
                 percent=percent,
                 downloaded_bytes=None,
                 indeterminate=percent is None,

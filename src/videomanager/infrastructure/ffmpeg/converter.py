@@ -45,7 +45,7 @@ from videomanager.infrastructure.system.process import ProcessControl, terminate
 from videomanager.domain.composition import Composition
 from videomanager.infrastructure.ffmpeg.composer import export_args
 from videomanager.infrastructure.ffmpeg.parallel import ParallelExport
-from videomanager.infrastructure.ffmpeg.parallel import plan_segments
+from videomanager.infrastructure.ffmpeg.parallel import plan_segments, reversal_bounds
 from videomanager.infrastructure.ffmpeg.parallel import error_cause
 from videomanager.infrastructure.ffmpeg.thumbnail import embed_thumbnail
 from videomanager.domain.timing import TrimTarget
@@ -535,7 +535,7 @@ class Converter:
         """Devolve somente a reserva ainda pertencente à tentativa."""
         self._outputs.abort(self._destination, lease=self._lease)
 
-    def _run_parallel(self, composition: Composition, segments: int) -> Path:
+    def _run_parallel(self, composition: Composition, segments: int, *, bounds=None, workers=None) -> Path:
         """Entrega a exportação ao caminho de trechos paralelos.
 
         A referência é guardada porque o cancelamento chega por
@@ -547,7 +547,7 @@ class Converter:
             self._tools,
             segments,
             on_progress=self._on_progress,
-         text_assets=self._text_assets, lease=self._lease)
+         text_assets=self._text_assets, lease=self._lease, bounds=bounds, workers=workers)
         with self._lock:
             self._parallel = export
         try:
@@ -593,6 +593,10 @@ class Converter:
         try:
             self._postprocess.check()
             if isinstance(self._target, Composition):
+                # Bloco invertido grande: uma janela por processo, em sequência.
+                bounds = reversal_bounds(self._target)
+                if bounds:
+                    return self._run_parallel(self._target, len(bounds), bounds=bounds, workers=1)
                 segments = plan_segments(self._target)
                 if segments > 1:
                     return self._run_parallel(self._target, segments)
