@@ -247,7 +247,8 @@ mesmo num arquivo editado à mão.
 `Clip.gain_db` mais a curva, limitado a −60/+12 dB (`Clip.gain_at`). Relativa, e não absoluta como a
 opacidade, por três razões: com 0 a curva não mexe, então todo quadro-chave antigo continua neutro sem migrar
 valor nenhum; o 🔊 da barra continua sendo o volume do bloco inteiro, e não um ponto de animação; e um preset
-ou um quadro criado sem pensar em som nunca muda o volume. Por isso o campo se chama `gain_offset_db`, e não
+ou um quadro criado sem pensar em som nunca **cria** volume (os pontos do preset são neutros; ele **troca** a curva
+do bloco, como o fim desta seção registra). Por isso o campo se chama `gain_offset_db`, e não
 `gain_db`: o mesmo nome convidaria a tratá-lo como absoluto, como o `opacity` do quadro.
 
 **Os mesmos quadros-chave, não uma trilha de volume à parte.** É o "mesmo painel e mecanismo" que se pediu, e
