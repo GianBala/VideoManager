@@ -14,13 +14,14 @@ pixel, a cada passo do gesto:
   e **nunca** o verde da trilha de baixo; com ela desligada, o verde;
 - ``assenta_ms``: do último movimento até a prévia mostrar a pose final.
 
-Cada variante é um caminho diferente do arrasto:
+Cada variante é uma situação diferente do arrasto:
 
 - ``sem_fundo_pequeno``: camadas prontas (a textura se move na hora);
-- ``fundo_visivel``: o fundo já aparece parado, então o gesto compõe pelo ffmpeg;
+- ``fundo_visivel``: o fundo já aparece parado; vai como quarta camada, pintada
+  pelo Qt com a opacidade ao vivo (antes o gesto compunha cada passo pelo ffmpeg);
 - ``fundo_16x9_neutro``: o bloco preenche a tela parado e o fundo só aparece
-  quando ele sai do lugar — a regra que decide o caminho olha a pose de
-  **antes** do gesto;
+  quando ele sai do lugar — por isso a imagem do fundo é preparada sempre que a
+  opção vale para o bloco, e não só quando ele aparece na pose de **antes** do gesto;
 - ``sem_fundo_16x9_neutro``: o mesmo bloco sem a opção, para separar o custo do
   fundo do custo de mover um bloco que descobre a tela.
 

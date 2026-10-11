@@ -410,7 +410,10 @@ __all__ = [
 
 
 class InteractionWorker(QRunnable):
-    """Prepara três imagens uma vez; os movimentos seguintes não abrem processos."""
+    """Prepara as imagens do gesto uma vez (três, ou quatro com o fundo desfocado).
+
+    Os movimentos seguintes não abrem processos.
+    """
     def __init__(self, commands, token):
         super().__init__()
         self._commands, self._token = commands, token

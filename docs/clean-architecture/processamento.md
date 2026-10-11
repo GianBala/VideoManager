@@ -220,7 +220,7 @@ compartilhado preserva as mesmas regras de montagem entre prévia e saída.
 Os consumidores do mesmo grafo são: `export_args` (arquivo; `gif_args` para GIF),
 `frame_command` (quadro parado, com `still=True`), `scrub_command` (trecho de
 até 20 s em MJPEG para o cache da agulha), `interaction_commands` (fundo, objeto
-e frente para o arrasto na prévia), `playback_command` (fluxo de reprodução) e
+e frente para o arrasto na prévia, mais o fundo desfocado quando ligado), `playback_command` (fluxo de reprodução) e
 `audio_command` (PCM, com `until` para a emenda do loop). Veja
 [prévia](previa.md) para o ciclo de cada um.
 

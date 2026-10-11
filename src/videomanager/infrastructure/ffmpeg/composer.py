@@ -2441,7 +2441,11 @@ def mux_args(
 
 
 def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[str], ...]:
-    """Fundo e frente canônicos; textura isolada sem recortar pixels da cena."""
+    """Fundo e frente canônicos; textura isolada sem recortar pixels da cena.
+
+    Com o fundo desfocado ligado no bloco, uma quarta imagem: o fundo de tela
+    cheia dele, pintado entre ``background`` e a textura.
+    """
     background = frame_command(plan.background, plan.seconds, size, tools, text_assets=text_assets, png=True)
     foreground = frame_command(plan.foreground, plan.seconds, size, tools, text_assets=text_assets,
                                transparent=True, png=True)
@@ -2458,4 +2462,15 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
                *_limited_inputs(_input_args(piece, source.fps, text_assets=text_assets)),
                '-filter_complex', graph, '-map', '[texture]',
                '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgba', 'pipe:1']
-    return background, texture, foreground
+    if not plan.blur:
+        return background, texture, foreground
+    # O fundo não depende da pose (cobre a tela inteira e a opacidade é aplicada
+    # ao pintar), então uma imagem só serve o gesto todo. A frente vai para o
+    # ``nullsink`` porque a cadeia do bloco só existe com as duas saídas ligadas.
+    graph = _video_chain(piece, source, source.fps, canonical_size=(plan.source.width, plan.source.height),
+                         standalone=True, blur="[blur]") + f";[v{piece.index}]nullsink"
+    blur = [tools.ffmpeg_str, '-nostdin', '-hide_banner', '-v', 'error',
+            *_limited_inputs(_input_args(piece, source.fps, text_assets=text_assets)),
+            '-filter_complex', graph, '-map', '[blur]',
+            '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgb24', 'pipe:1']
+    return background, texture, foreground, blur
