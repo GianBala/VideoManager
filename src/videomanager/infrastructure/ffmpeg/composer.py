@@ -1753,11 +1753,15 @@ def check_reversal(project: Project) -> None:
     ``parallel.reversal_bounds``), e só chega aqui quando não há divisão. O que
     não divide — o GIF, que monta uma paleta sobre o fluxo inteiro — recusa, com
     o nome do bloco, em vez de esgotar a memória no meio da exportação.
+
+    O nome é o do bloco que mais memória pede (``reverse_rate`` × duração), e não
+    o do primeiro invertido: com um bloco de 3 s antes de um de 5 min, a mensagem
+    mandava dividir o curto.
     """
     if not reversal_cuts_for_export(project, project.export_duration):
         return
-    nome = next((c.media.name for c in project.clips if c.reversed and c.has_image), "")
-    raise ConversionError(Text("COMPOSE_REVERSE_TOO_LONG", name=nome))
+    maior = max((c for c in project.clips if c.reversed and c.has_image), key=lambda c: c.reverse_rate * c.duration)
+    raise ConversionError(Text("COMPOSE_REVERSE_TOO_LONG", name=maior.media.name))
 
 
 def build_graph(

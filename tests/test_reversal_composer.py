@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from videomanager.application.capabilities import FFmpegTools
+from videomanager.application.errors import ConversionError
 from videomanager.domain.composition import Composition
 from videomanager.domain.project import Clip, MediaKind, MediaRef, Project, Track, TrackKind
 from videomanager.infrastructure.ffmpeg import composer, parallel
@@ -101,3 +102,25 @@ class TestJanelaHerdaAInterpolacao:
             ParallelExport(composicao, tmp_path / "x.mp4", TOOLS, 1, bounds=((0.0, 3.0),), workers=1)._render(
                 0, tmp_path / "trecho.mp4")
         assert pedidos == [False, True]
+
+
+class TestRecusaDoGif:
+    """O GIF não se divide em janelas e recusa o que não cabe num processo só."""
+
+    @staticmethod
+    def _hd(nome, duration):
+        return MediaRef(Path(f"/m/{nome}"), MediaKind.VIDEO, duration=duration, width=1920, height=1080, fps=30.0,
+                        has_audio=False, channels=2)
+
+    def test_a_mensagem_cita_o_bloco_que_estoura_e_nao_o_primeiro_invertido(self):
+        curto = Clip(self._hd("curto.mp4", 10.0), 0.0, 3.0, reversed=True)       # cabe folgado numa janela
+        longo = Clip(self._hd("longo.mp4", 600.0), 3.0, 300.0, reversed=True)    # é ele que precisa de janelas
+        projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=(curto, longo)),), width=1920, height=1080, fps=30.0)
+        with pytest.raises(ConversionError, match="longo.mp4") as recusa:
+            composer.check_reversal(projeto)
+        assert "curto.mp4" not in str(recusa.value)
+
+    def test_o_gif_de_um_invertido_pequeno_segue_sem_recusa(self):
+        curto = Clip(self._hd("curto.mp4", 10.0), 0.0, 3.0, reversed=True)
+        composer.check_reversal(Project(tracks=(Track(TrackKind.VIDEO, clips=(curto,)),), width=1920, height=1080,
+                                        fps=30.0))
