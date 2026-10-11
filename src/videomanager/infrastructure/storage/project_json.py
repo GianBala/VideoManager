@@ -33,13 +33,14 @@ from videomanager.domain.project import reserve_project_ids
 # imagens das trilhas de Adicionais migram com a escala convertida.
 # 4: o bloco ganha ``blur_background`` (fundo desfocado).
 # 5: o bloco ganha ``reversed`` (toca de trás para frente).
+# 6: o quadro-chave ganha ``gain_offset_db`` (a curva de volume, relativa ao do bloco).
 #
 # Todo campo novo no arquivo sobe esta versão. A leitura ignora chaves que não
 # conhece, então uma versão anterior que abrisse um arquivo com campo novo o
 # perderia em silêncio ao salvar — keyframes e opacity entraram assim. Com a
 # versão nova, a anterior recusa o arquivo com mensagem. O teste
-# ``test_campo_novo_no_projeto_exige_subir_a_versao`` trava as chaves da 5.
-PROJECT_VERSION = 5
+# ``test_campo_novo_no_projeto_exige_subir_a_versao`` trava as chaves da 6.
+PROJECT_VERSION = 6
 
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
@@ -173,6 +174,7 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                             "rotation": kf.rotation,
                             "opacity": kf.opacity,
                             "easing": kf.easing,
+                            "gain_offset_db": kf.gain_offset_db,
                         }
                         for kf in clip.keyframes
                     ],
@@ -293,7 +295,7 @@ def _validate_project(data: dict[str, object]) -> None:
                     if not isinstance(kf, dict):
                         fail(Text("PROJECT_FIELD_KEYFRAME"))
                     number(kf, "time_offset", minimum=0 if data.get("version", 1) == 1 else None)
-                    for kf_num in ("x", "y", "rotation"):
+                    for kf_num in ("x", "y", "rotation", "gain_offset_db"):
                         number(kf, kf_num)
                     for kf_pos in ("scale_x", "scale_y"):
                         number(kf, kf_pos, positive=True)
@@ -410,6 +412,7 @@ def _project_from_dict(
                                 rotation=float(kf_d.get("rotation", 0.0)),
                                 opacity=float(kf_d.get("opacity", 1.0)),
                                 easing=str(kf_d.get("easing", "linear")),
+                                gain_offset_db=float(kf_d.get("gain_offset_db", 0.0)),
                             )
                         )
 
