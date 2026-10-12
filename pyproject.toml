@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pyflakes>=3.0", "pytest-xdist>=3.5"]
+dev = ["pytest>=8.0", "pyflakes>=3.0"]
 
 [project.gui-scripts]
 videomanager = "videomanager.__main__:main"
