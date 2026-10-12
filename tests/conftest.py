@@ -171,3 +171,46 @@ def wait_until(desktop_app):
             time.sleep(0.005)
         assert predicate(), "a operação assíncrona não terminou dentro do prazo"
     return wait
+
+
+def fatiar(itens: list, indice: int, total: int) -> tuple[list, list]:
+    """Parte ``indice`` (de 1 a ``total``) da suíte, e o que ficou de fora.
+
+    A divisão é por **posição na lista ordenada pelo id**, e não por arquivo:
+    os testes de um mesmo arquivo custam parecido, e por arquivo uma fatia
+    levaria o ``test_integration.py`` inteiro (36% do tempo da suíte). Em
+    revezamento, vizinhos pesados caem em fatias diferentes. A **ordem de coleta
+    é preservada** dentro da fatia: a suíte tem dependência de ordem latente (o
+    ``QPushButton already deleted`` de ``test_probe_lifecycle`` apareceu quando a
+    fatia foi reordenada por id), e a fatia só deve diferir da execução inteira
+    pelos testes que saem, nunca pela ordem dos que ficam.
+    """
+    ordenados = sorted(itens, key=lambda item: item.nodeid)
+    minha = set(ordenados[indice - 1::total])
+    return [item for item in itens if item in minha], [item for item in itens if item not in minha]
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    """``VM_SHARD="i/n"`` roda só a fatia ``i`` de ``n`` da suíte (a CI usa).
+
+    Dividir entre máquinas rende mais do que dentro de uma: as integrações com o
+    ffmpeg são ~85% do tempo e já ocupam os 4 núcleos do runner (o xdist ganhou
+    só 24%), enquanto cada job da CI traz núcleos próprios. Roda por último para
+    enxergar a lista já filtrada por ``-m``: **todas as fatias precisam do mesmo
+    ``-m``**, senão a união delas deixa de ser a suíte. Sem a variável, não faz
+    nada.
+    """
+    spec = os.environ.get("VM_SHARD")
+    if not spec:
+        return
+    try:
+        indice, total = (int(parte) for parte in spec.split("/"))
+        valido = 1 <= indice <= total
+    except ValueError:
+        valido = False
+    if not valido:
+        raise pytest.UsageError(f'VM_SHARD="{spec}" inválido: use "i/n", com 1 <= i <= n')
+    ficam, fora = fatiar(items, indice, total)
+    items[:] = ficam
+    config.hook.pytest_deselected(items=fora)
