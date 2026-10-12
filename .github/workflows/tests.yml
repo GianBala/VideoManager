@@ -67,8 +67,37 @@ jobs:
           PYTHONPATH: src
         run: python scripts/check_references.py
       - run: python -m pytest -q
+
+  # Os pacotes não dependem do resultado dos testes, então rodam ao lado deles:
+  # no Windows, empacotar depois do pytest somava ~110–170 s ao job mais lento
+  # da CI (o `desktop` do Windows com Python 3.12), que era quem decidia o tempo
+  # da execução inteira. O ambiente é o mesmo de antes — no Linux, o ffmpeg do
+  # apt e o `fetch_binaries.py` (que traz o Deno para o pacote).
+  pacote:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Ferramentas Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libegl1 libopengl0 libxcb-cursor0
+      - run: python -m pip install -e ".[dev]"
+      - name: Deno do pacote
+        if: runner.os == 'Linux'
+        env:
+          PYTHONPATH: src
+        run: python packaging/fetch_binaries.py
       - name: Gerar pacote Linux
-        if: runner.os == 'Linux' && matrix.python == '3.12'
+        if: runner.os == 'Linux'
         env:
           VM_BUNDLE_FFMPEG: '0'
         run: |
@@ -76,7 +105,7 @@ jobs:
           pyinstaller --noconfirm packaging/videomanager.spec
           packaging/smoke_run.sh dist/VideoManager/VideoManager 30
       - name: Gerar e verificar pacote Windows
-        if: runner.os == 'Windows' && matrix.python == '3.12'
+        if: runner.os == 'Windows'
         env:
           VM_BUNDLE_FFMPEG: '1'
         shell: pwsh
@@ -94,8 +123,10 @@ jobs:
           pyinstaller --noconfirm packaging/videomanager.spec
           if ($LASTEXITCODE -ne 0) { throw 'Falha no empacotamento.' }
           .\packaging\smoke_windows.ps1 -Executable '.\dist\VideoManager.exe' -Icon '.\build\videomanager.ico'
-      - name: Guardar pacote Windows validado
-        if: runner.os == 'Windows' && matrix.python == '3.12'
+      # Guardado mesmo que algum teste do `desktop` falhe, já que os jobs correm
+      # juntos: o pacote só vale como entrega com a execução inteira verde.
+      - name: Guardar pacote Windows verificado
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: VideoManager-Windows
