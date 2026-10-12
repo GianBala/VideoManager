@@ -1294,3 +1294,25 @@ def test_automatica_do_painel_diz_a_tela_do_material_e_nao_a_escolhida(panel):
     panel._after_edit()
     assert (panel._project.width, panel._project.height) == (1080, 1920)   # a edição está na tela escolhida
     assert (panel._aspect_box.itemText(0), panel._canvas_box.itemText(0)) == antes   # e o automático não mudou
+
+
+def test_sinal_tardio_de_quadros_chave_nao_toca_o_painel_ja_encerrado(monkeypatch):
+    """O worker de quadros-chave pode emitir antes de o ``shutdown`` cancelá-lo:
+    o sinal já está na fila e chega depois que os botões foram apagados. O
+    ``setEnabled`` do slot levantava ``QPushButton already deleted`` — sem janela
+    para mostrar o erro, e no primeiro teste seguinte que bombeasse eventos. Só
+    aparecia quando a ordem dos testes mudava (a suíte dividida entre jobs da CI)."""
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Ok)
+    instance = EditPanel(Settings(), ensure_tools=lambda: None, editor=build_editor_service(),
+                         processing=build_processing_service(), runtime=build_desktop_runtime())
+    source = Path('/m/a.mp4')
+    instance._keyframe_source, instance._keyframe_token = source, 7
+    instance.shutdown()
+    instance.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not shiboken6.isValid(instance._prev_key)   # a premissa: os botões já morreram
+
+    instance._on_keyframes((1.0, 2.0), source, 7)      # o sinal que já estava na fila
