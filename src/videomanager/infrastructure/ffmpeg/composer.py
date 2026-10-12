@@ -1148,11 +1148,12 @@ def _audio_chain(
     steps.append(
         _MONO_TO_STEREO if clip.media.channels == 1 else _TO_STEREO
     )
+    edges: list[str] = []
     for start, end in muted_ranges:
         local_start = start - piece.offset
         local_end = end - piece.offset
         if local_end > -1e-6 and local_start < piece.duration + 1e-6:
-            steps.append(_mute_filter(local_start, local_end, piece.duration))
+            edges.append(_mute_filter(local_start, local_end, piece.duration))
     for kind, start, end in fades:
         duration = end - start
         if duration <= 1e-6:
@@ -1163,11 +1164,11 @@ def _audio_chain(
             continue
         if local_start >= 0:
             # ``afade`` trabalha amostra a amostra, e ``qsin`` é a mesma curva de antes (cos na saída, sin na entrada).
-            steps.append(f"afade=t={kind}:st={local_start:.6f}:d={duration:.6f}:curve=qsin")
+            edges.append(f"afade=t={kind}:st={local_start:.6f}:d={duration:.6f}:curve=qsin")
             continue
         # A rampa já começou antes do primeiro som do trecho (prévia a partir de dentro dela): ``afade`` não aceita
         # início negativo, então fica a expressão, por quadro — em quadros de 1 ms (48 amostras), e não nos da fonte.
-        steps.append("asetnsamples=n=48:p=0")
+        edges.append("asetnsamples=n=48:p=0")
         progress = f"(t-{local_start:.6f})/{duration:.6f}"
         if kind == "out":
             gain = (
@@ -1181,7 +1182,13 @@ def _audio_chain(
             )
         # Seno/cosseno dão uma passagem perceptualmente mais uniforme que duas
         # retas de amplitude. ``eval=frame`` acompanha o relógio continuamente.
-        steps.append(f"volume='{gain}':eval=frame")
+        edges.append(f"volume='{gain}':eval=frame")
+    if edges:
+        # Quadros de 480 amostras (10 ms a 48 kHz) antes das pontas e da entrada do ``amix``: no ffmpeg 6.1 (o do Ubuntu 24.04)
+        # o ``amix`` **perde o fim da peça** quando o último quadro dela é grande e a outra entrada vem atrasada (``adelay``):
+        # numa fonte FLAC de 16384 amostras, o lado que sai ficava mudo nos últimos quadros antes do corte, com ou sem rampa.
+        steps.append("asetnsamples=n=480:p=0")
+        steps.extend(edges)
     if piece.offset > 0:
         # ``all=1`` aplica o atraso a todos os canais; sem ele, só o primeiro
         # canal é atrasado e o bloco sai com a imagem à frente do som num lado.
