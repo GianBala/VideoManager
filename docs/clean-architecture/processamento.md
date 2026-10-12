@@ -261,6 +261,18 @@ transição. A prévia monta esse grafo diretamente na resolução visível para
 processar uma tela
 4K que seria reduzida no fim; a exportação continua na resolução do projeto.
 
+**As bordas do áudio são exatas na amostra, e não por quadro.** O `volume` com `enable` ou `eval=frame` avalia por
+quadro de áudio, e o quadro é o da fonte (~21 ms em PCM, ~340 ms em FLAC de 16384 amostras). Medido, com um seno
+em fase nos dois lados: o lado que devia calar seguia soando no começo da janela (envelope 2,0, +6 dB, por ~25 ms), o
+que devia voltar só voltava um quadro depois do fim (buraco de ~3 ms, dezenas de ms em FLAC), e, sem alças, o de-click
+de 12 ms não existia — o som cortava seco e o outro lado vinha ~20 ms depois. Hoje o mudo de uma ponta é um `afade` de
+uma amostra (`_mute_filter`: `out` cala dali em diante, `in` cala até ali; a janela cobre sempre uma ponta, porque se
+centra no corte) e o de-click é `afade` com `curve=qsin`, a mesma curva cos/sin de antes. Quando a rampa já começou
+antes do primeiro som do trecho (prévia a partir de dentro dela), `afade` não aceita início negativo e fica a
+expressão, em quadros de 1 ms. As duas pontas do `acrossfade` passam por `asetnsamples=n=480:p=0`: com os quadros da
+fonte ele **às vezes não entrega nada** (FLAC de 16384 amostras: a janela inteira muda em ~1 de cada 4 exportações;
+3 de 12 exportações antes, 0 de 20 depois). Ver `tests/test_audio_bordas_da_transicao.py`.
+
 Quando o marcador habilita `transition_affects_additionals`, o compositor cria
 duas subcomposições adicionais antes do `xfade`. Elas respeitam visibilidade e
 ordem das trilhas, filtros e transformações de texto/imagem. Itens encerrados no
