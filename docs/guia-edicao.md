@@ -42,9 +42,9 @@ e Salvar como funcionam mesmo com o cursor num campo de texto; antes de gravar,
 o editor fecha os agrupamentos de desfazer em andamento, para o arquivo conter
 o que está na tela.
 
-Projetos são salvos em `.vmp` versão 3. A versão atual abre v1, v2 e v3;
-aplicativos antigos não abrem v3. Ao salvar sobre v1 ou v2, uma cópia
-`.vmp.v1.bak` ou `.vmp.v2.bak` conserva o arquivo original, com numeração se
+Projetos são salvos em `.vmp` versão 6. A versão atual abre v1 a v6;
+aplicativos antigos não abrem v6. Ao salvar sobre v1 a v5, uma cópia
+`.vmp.v1.bak` a `.vmp.v5.bak` conserva o arquivo original, com numeração se
 necessário. Guarde também as mídias externas.
 
 Ao abrir um projeto v1 ou v2, fotos que estavam em trilhas de Adicionais passam
@@ -276,11 +276,28 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
   podem ser feitos direto na prévia, arrastando o objeto e suas alças —
   inclusive a de rotação, acima da caixa de seleção. Um objeto arrastado ou
   digitado aparece na hora; o quadro completo do compositor chega logo depois.
+- **Velocidade** e **Volume** — os mesmos ajustes dos botões **⚡** e **🔊** da barra, também aqui:
+  são o que a aba mostra num bloco de **áudio** (que não tem transformação nem Fundo Verde) e
+  aparecem também em vídeo com áudio. Fotos, textos, filtros e transições não têm velocidade nem
+  volume; um vídeo sem som não tem volume. Num vídeo cujo áudio já foi separado, o volume fica à
+  vista e desligado, com a explicação: o som agora é do outro bloco. A velocidade segue a regra
+  da barra, inclusive a recusa com **um** aviso quando a nova duração passaria por cima do
+  vizinho.
 - **Fundo Verde (Chroma Key)** — remove uma cor do bloco (verde padrão, verde
   de estúdio, azul ou qualquer outra pelo seletor), com **Tolerância** e
   **Suavização**.
-- **Animação / Quadros-chave** — anima posição, escala, rotação e opacidade ao
-  longo do bloco:
+- **Fundo Desfocado** — em vídeos e fotos que não preenchem a tela (um vídeo
+  vertical num projeto 16:9, por exemplo), preenche as bordas com o próprio
+  bloco ampliado e desfocado, em vez de preto. O fundo é uma camada de tela
+  cheia **por baixo** do bloco: ele cobre as trilhas de baixo durante o bloco
+  inteiro, mesmo que a frente seja reduzida ou movida, e acompanha a opacidade
+  do bloco. Por isso a opção nasce desligada. Num bloco que já preenche a tela
+  em posição, escala e rotação neutras, ela não muda nada na imagem. Numa
+  imagem com transparência, a parte transparente entra no fundo como preto. Fica
+  indisponível enquanto o Fundo Verde está ligado.
+- **Animação / Quadros-chave** — anima posição, escala, rotação, opacidade e
+  **volume** ao longo do bloco (a **velocidade** não entra: ela muda a duração do
+  bloco, e uma curva dela mudaria o tamanho da trilha a cada ponto):
   - **◀ ◇ ▶** vão ao quadro-chave anterior, adicionam ou removem um quadro-chave
     no cursor e vão ao próximo. Cada quadro-chave é um losango na parte de
     baixo do bloco, na linha do tempo — amarelo, ou azul quando o cursor está
@@ -293,16 +310,35 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
     atualizando o quadro-chave dali. Marque **Editar toda a animação** para
     aplicar o ajuste à curva inteira, inclusive aos pontos que sustentam a
     curva depois de um corte.
+  - Um bloco que só tem **volume** animado (um fade de som, sem nenhuma pose
+    diferente da do bloco) conta como **sem animação de imagem**: mover,
+    escalar, girar ou mudar a opacidade, pela aba ou arrastando na prévia, vale
+    para o bloco inteiro, e os pontos de volume andam junto. Com o cursor
+    **sobre** um ponto (o ◇ aceso), a edição é do ponto e passa a animar a
+    imagem — é assim que se começa a animar a imagem de um bloco que já tem
+    fade de som.
   - **Interpolação** escolhe a curva do quadro-chave selecionado: Linear, Suave
     ao Entrar (*ease in*), Suave ao Sair (*ease out*), Suave Completo (*ease
     in-out*) ou Degrau (*hold*). Em cada trecho vale a curva do quadro-chave de
     chegada; o Degrau em qualquer das duas pontas mantém o valor até o ponto
     seguinte.
+  - **Volume animado.** O campo **Volume** da aba mostra o que se ouve no cursor.
+    Num bloco sem quadros-chave ele é o volume do bloco, como o 🔊 da barra; num
+    bloco animado, digitar ali cria ou atualiza o ponto do instante atual — um
+    fade-in, por exemplo, é um ponto em −60 dB no começo e outro em 0 dB um
+    pouco depois. O ponto guarda a diferença para o volume do bloco (o que o 🔊
+    ajusta continua valendo para o bloco todo, e a curva anda em cima dele), e a
+    interpolação é em dB, limitada a −60/+12 dB como o controle. **Editar toda a
+    animação** desloca o volume do bloco inteiro e deixa os pontos onde estão. Um
+    bloco de **áudio** só tem esta animação (sem transformação nem efeitos de
+    imagem); no vídeo com som, o mesmo ponto guarda a pose e o volume daquele
+    instante.
   - **Efeito Rápido** troca os quadros-chave do bloco por uma entrada pronta,
     que dura até 0,6 s a partir do começo do bloco (menos, se ele for mais
     curto): deslizar de baixo, de cima, da direita ou da esquerda, surgir com
-    fade, surgir com zoom ou girar e entrar. **Remover Animações** apaga todos
-    os quadros-chave.
+    fade, surgir com zoom ou girar e entrar — e leva junto a curva de volume, se
+    houver; num bloco de áudio só **Remover Animações** está disponível. **Remover
+    Animações** apaga todos os quadros-chave, também os de volume.
 
   A rotação segue o caminho angular mais curto entre dois pontos. Dividir ou
   aparar um bloco preserva a curva: o trecho que sobra continua avaliando a
@@ -310,7 +346,8 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
 
 O que a prévia mostra e o que o arquivo exportado contém coincide também para
 animação: o compositor traduz os quadros-chave em expressões que o ffmpeg avalia
-a cada quadro (escala, rotação, posição e opacidade).
+a cada quadro (escala, rotação, posição e opacidade) e, para o som, o filtro `volume`
+com o ganho em dB calculado no tempo.
 
 ### Texto
 
@@ -324,13 +361,46 @@ posição relativos do texto, incluindo contorno e animação.
 ### Velocidade e volume do bloco
 
 Os botões **🔊 dB** e **⚡ velocidade**, na barra da linha do tempo, abrem um
-painel curto para o bloco selecionado. A velocidade vai de 0,1× a 10×, com
+painel curto para o bloco selecionado (os mesmos valores estão na aba [Propriedades](#propriedades-e-animação)). A velocidade vai de 0,1× a 10×, com
 atalhos (0,5×, 1×, 1,5×, 2×, 4×); o bloco encurta ou alonga na trilha, e a
 animação por quadros-chave encurta ou alonga junto. Se a
 nova duração passaria por cima do bloco seguinte, a velocidade é recusada com
 **um** aviso por sessão do painel — mova o vizinho ou escolha outro valor. O
 áudio separado de um vídeo acelerado acompanha a mesma velocidade. Fotos,
 textos, filtros e transições não têm velocidade.
+
+### Inverter um bloco
+
+**Inverter**, no botão direito de um bloco de vídeo ou de áudio, toca o bloco
+de trás para frente — imagem e som. Não gera arquivo: o bloco continua cobrindo
+o mesmo trecho da mídia e só muda o sentido em que a edição o percorre, então
+inverter e desinverter são instantâneos e entram no histórico de desfazer. Um
+selo `⏪ invertido` aparece no título do bloco.
+
+- **Dividir, aparar e esticar** valem como num bloco normal, mas lembre que o
+  começo do bloco é o fim do trecho: apagar à esquerda tira o final da mídia, e
+  esticar o começo vai buscar mais mídia depois do trecho.
+- **Velocidade, volume, quadros-chave e transições** funcionam como antes: os
+  quadros-chave correm no relógio da edição, e a transição de um bloco invertido
+  usa o material além da ponta dele, na ordem em que o bloco toca.
+- **Separar áudio** leva a inversão junto; o som continua casado com a imagem.
+- **Tamanho.** Um bloco invertido pode ter qualquer duração, até meia hora de
+  mídia (`Clip.reverse_limit`); acima disso o item aparece desabilitado, com o
+  motivo na dica, e as alças de um bloco já invertido param nesse limite. Para
+  virar o trecho, o ffmpeg guarda todos os quadros dele na memória, então o
+  aplicativo o lê em **janelas curtas, uma por processo**: na prévia o fluxo
+  segue contínuo, porque a janela seguinte já está pronta quando a atual
+  acaba; na exportação cada janela vira um arquivo e as janelas se emendam sem
+  recodificar, uma de cada vez. Um bloco de 60 s em 1080p exporta com o maior
+  processo em 1,8 GB (um bloco normal já usa 1,3) e toca com 0,4 GB. Pode haver
+  alguns segundos a mais de exportação, pelas janelas. Com **Interpolar
+  movimento** ligado, um invertido que precise de janelas as interpola uma de
+  cada vez: a exportação não se divide em trechos paralelos nesse caso, e leva o
+  tempo da interpolação sem essa divisão. O GIF não se divide em janelas e
+  recusa, com o nome do bloco que mais pesa, um invertido que não caiba num
+  processo só; exporte em MP4, MKV, WebM ou MOV.
+- **Não há corte rápido.** Copiar os pacotes não vira o trecho do avesso: uma
+  edição com bloco invertido sempre é composta e recodificada.
 
 ### Menu de contexto (botão direito)
 
@@ -345,10 +415,12 @@ O conteúdo muda conforme o alvo sob o cursor:
 - Copiar (`Ctrl+C`)
 - Excluir bloco (`Del`)
 - *separador*
+- **Inverter** — só em blocos de vídeo ou de áudio; marcado, escolher de novo
+  devolve o bloco ao sentido normal (ver [Inverter um bloco](#inverter-um-bloco))
 - **Separar áudio** — só quando o bloco tem áudio embutido ainda não
   separado; cria um bloco de áudio independente na trilha de som, e o volume
   do bloco original passa a não fazer mais efeito (o som agora vive no bloco
-  novo)
+  novo, que leva também a curva de volume; o vídeo fica só com a animação da imagem)
 - **Bloco mudo** / **Voltar o som do bloco**
 
 **Sobre um espaço vazio, com algo copiado antes:**
@@ -461,7 +533,9 @@ corte rápido continua disponível —; o que difere do material volta fixo.
   ainda é um recorte de um único arquivo, na ordem e sem lacunas nem
   sobreposição entre os blocos, na tela e na taxa do próprio arquivo, sem
   volume, velocidade, opacidade, animação, posição, escala, rotação ou chroma
-  key alterados, sem mudo e sem trilha sobreposta. Qualquer um desses efeitos
+  key alterados, sem mudo e sem trilha sobreposta. O fundo desfocado só tira a
+  edição do corte rápido onde aparece, e na tela do próprio arquivo ele não
+  aparece. Qualquer um desses efeitos
   tira a edição do corte rápido, em vez de a exportação copiar os dados e
   descartá-lo sem avisar. Quando o corte rápido está valendo, exportar é
   instantâneo: os dados são copiados como estão, sem qualidade perdida, e os

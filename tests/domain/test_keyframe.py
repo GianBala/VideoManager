@@ -230,3 +230,24 @@ def test_editar_ponto_no_final_nao_cria_outro_no_quadro_anterior(offset):
     assert updated.keyframes[-1].time_offset == offset
     assert updated.transform_at(offset).x == pytest.approx(.9)
     assert updated.transform_at(offset).y == pytest.approx(.9)
+
+
+def test_quadro_chave_nasce_da_pose_com_todos_os_campos():
+    """Montar o quadro campo a campo esquece o campo que alguém acrescentar depois (foi assim que o
+    volume do quadro seria zerado ao mexer na posição). Cada campo da pose ganha um valor diferente."""
+    from dataclasses import fields
+
+    valores = {campo.name: 0.11 * (indice + 1) for indice, campo in enumerate(fields(ClipTransform))}
+    pose = ClipTransform(**valores)
+    quadro = Keyframe.from_pose(1.5, pose, "ease_in")
+    assert quadro.transform == pose
+    assert (quadro.time_offset, quadro.easing) == (1.5, "ease_in")
+    assert Keyframe.from_pose(0.0, pose).easing == "linear"
+
+
+def test_quadro_chave_no_mesmo_quadro_de_video_vem_do_dominio():
+    """O quadro-chave que a edição acha 'no mesmo quadro' é o mais perto do instante, dentro do quadro."""
+    midia = MediaRef(Path("/m/v.mp4"), MediaKind.VIDEO, duration=10.0, width=640, height=360, fps=30.0)
+    clip = Clip(midia, 0.0, 4.0, keyframes=(Keyframe(1.0), Keyframe(1.01), Keyframe(2.0)))
+    assert clip.keyframe_in_frame(1.008, 30.0).time_offset == pytest.approx(1.01)   # o mais perto, no quadro 30
+    assert clip.keyframe_in_frame(1.5, 30.0) is None                              # nenhum quadro-chave ali

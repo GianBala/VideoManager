@@ -32,6 +32,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from videomanager.infrastructure.ffmpeg.command_assets import filter_script
+from videomanager.infrastructure.ffmpeg.stages import Stages, open_process
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.errors import VideoManagerError
 from videomanager.domain.i18n import Text
@@ -519,7 +520,7 @@ class FramePump:
 
     def __init__(
         self,
-        command: list[str],
+        command: list[str] | Stages,
         start: float,
         size: tuple[int, int],
         *,
@@ -652,7 +653,7 @@ class FramePump:
         if self._stopped:
             return
         try:
-            process = subprocess.Popen(command, **subprocess_kwargs())
+            process = open_process(command, **subprocess_kwargs())
         except OSError as exc:
             raise VideoManagerError(Text("PREVIEW_PLAYBACK_START_FAILED")) from exc
         diagnostic = _DiagnosticTail(getattr(process, "stderr", None))

@@ -1049,3 +1049,75 @@ class TestAnimacao:
         # comparação entre vizinhos é o que pega. A prévia não a fazia.
         clip = Clip(self.MEDIA, 0.0, 5.0, keyframes=(Keyframe(0.0, scale_x=1 - 8e-10), Keyframe(1.0, scale_x=1 + 8e-10)))
         assert clip.animates("scale")
+
+
+class TestFundoDesfocado:
+    """O fundo só conta onde aparece: a opção sozinha não decide nada."""
+
+    TELA = (1920, 1080)
+    VERTICAL = MediaRef(Path("/m/vertical.mp4"), MediaKind.VIDEO, duration=10.0, width=1080, height=1920)
+    HD = MediaRef(Path("/m/hd.mp4"), MediaKind.VIDEO, duration=10.0, width=1280, height=720)
+    # 854×480 é a "16:9" dos DVDs: encaixa em 1920×1078 e não em 1920×1080.
+    DVD = MediaRef(Path("/m/dvd.mp4"), MediaKind.VIDEO, duration=10.0, width=854, height=480)
+
+    def _mostra(self, media=VERTICAL, **kw) -> bool:
+        return clip(media, blur_background=True, **kw).shows_blur_background(*self.TELA)
+
+    @pytest.mark.parametrize("media, kw", [
+        (VERTICAL, {}),
+        (FOTO, {}),
+        (HD, {"scale": 0.5, "scale_x": 0.5, "scale_y": 0.5}),
+        (HD, {"x": 0.7}),
+        (HD, {"rotation": 10.0}),
+        (HD, {"keyframes": (Keyframe(0.0), Keyframe(2.0, x=0.8))}),
+        # Os dois extremos estão em pose neutra, mas a curva gira pelo caminho
+        # inteiro (``_interpolate_scalar`` não toma o menor arco a partir de 359,9°).
+        (HD, {"keyframes": (Keyframe(0.0, rotation=0.0), Keyframe(2.0, rotation=360.0))}),
+        (HD, {"keyframes": (Keyframe(0.0, rotation=360.0), Keyframe(2.0, rotation=0.0))}),
+        (HD, {"keyframes": (Keyframe(0.0), Keyframe(1.0), Keyframe(2.0, rotation=720.0))}),
+    ])
+    def test_aparece_quando_o_bloco_nao_cobre_a_tela(self, media, kw):
+        assert self._mostra(media, **kw)
+
+    @pytest.mark.parametrize("media, kw", [
+        (VIDEO, {}),
+        (HD, {}),
+        (DVD, {}),
+        (HD, {"scale": 1.5, "scale_x": 1.5, "scale_y": 1.5}),
+        (HD, {"rotation": 360.0}),
+        # Opacidade não entra: o fade de quem preenche a tela sai como hoje.
+        (HD, {"opacity": 0.5}),
+        (HD, {"keyframes": (Keyframe(0.0), Keyframe(2.0, opacity=0.0))}),
+        # Sem giro entre os quadros-chave, mesmo com a rotação escrita como 360°.
+        (HD, {"keyframes": (Keyframe(0.0, rotation=360.0), Keyframe(2.0, rotation=360.0))}),
+    ])
+    def test_nao_aparece_quando_a_frente_cobre_a_tela(self, media, kw):
+        assert not self._mostra(media, **kw)
+
+    def test_opcao_desligada_nunca_aparece(self):
+        assert not clip(self.VERTICAL).shows_blur_background(*self.TELA)
+
+    def test_chroma_key_desliga_sem_apagar_a_escolha(self):
+        c = clip(self.VERTICAL, blur_background=True, chromakey_enabled=True)
+        assert c.blur_background and not c.shows_blur_background(*self.TELA)
+
+    def test_o_que_nao_e_imagem_de_arquivo_nao_tem_fundo(self):
+        sem_fundo = [
+            clip(self.VERTICAL, blur_background=True, overlay_type=OverlayType.TEXT),
+            clip(self.VERTICAL, blur_background=True, overlay_type=OverlayType.FILTER),
+            clip(self.VERTICAL, blur_background=True, audio_only=True),
+            clip(SOM, blur_background=True),
+            clip(MediaRef(Path("/m/x.mp4"), MediaKind.VIDEO, duration=5.0), blur_background=True),
+        ]
+        assert not any(c.shows_blur_background(*self.TELA) for c in sem_fundo)
+
+    def test_dividir_leva_a_opcao_para_os_dois_lados(self):
+        base = montado(clip(self.VERTICAL, blur_background=True))
+        dividido = base.split(base.tracks[0].clips[0].clip_id, 4.0)
+        assert [c.blur_background for c in dividido.tracks[0].clips] == [True, True]
+
+    def test_separar_audio_nao_leva_o_fundo(self):
+        base = montado(clip(VIDEO, blur_background=True))
+        separado = base.detached_audio(base.tracks[0].clips[0].clip_id)
+        audio = [c for t in separado.tracks if t.kind is TrackKind.AUDIO for c in t.clips]
+        assert audio and not any(c.blur_background for c in audio)

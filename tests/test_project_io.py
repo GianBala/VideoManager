@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from videomanager.application.errors import ProjectError
+from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
@@ -301,7 +302,7 @@ def test_recupera_origem_negativa_apenas_em_estatico(kind, overlay):
 
 
 def test_migracao_v1_preserva_backup_exato_e_nao_sobrescreve(tmp_path):
-    from videomanager.infrastructure.storage.project_json import project_from_dict
+    from videomanager.infrastructure.storage.project_json import PROJECT_VERSION, project_from_dict
     path = tmp_path / 'p.vmp'
     original = b'{"version": 1, "tracks": []}'
     path.write_bytes(original)
@@ -311,7 +312,7 @@ def test_migracao_v1_preserva_backup_exato_e_nao_sobrescreve(tmp_path):
     save_project(project, path)
     assert existing.read_bytes() == b'copia anterior'
     assert (tmp_path / 'p.vmp.v1.bak.1').read_bytes() == original
-    assert json.loads(path.read_text())['version'] == 3
+    assert json.loads(path.read_text())['version'] == PROJECT_VERSION
     save_project(project, path)
     assert not (tmp_path / 'p.vmp.v1.bak.2').exists()
 
@@ -410,12 +411,12 @@ def test_caminho_relativo_e_gravado_com_barra(tmp_path):
     assert data['tracks'][0]['clips'][0]['media']['rel_path'] == 'media/video.mp4'
 
 
-# As chaves que a versão 3 do .vmp grava. Uma versão anterior que abre um
+# As chaves que a versão 6 do .vmp grava. Uma versão anterior que abre um
 # arquivo com chave nova a perde em silêncio ao salvar (a leitura ignora o
 # que não conhece), e keyframes e opacity já entraram assim, sem subir a
 # versão. Mudou este conjunto? Suba PROJECT_VERSION: a versão anterior passa
 # a recusar o arquivo com mensagem, em vez de apagar o que não entende.
-_CHAVES_V3 = {
+_CHAVES_V6 = {
     'projeto': {'version', 'width', 'height', 'fps', 'text_reference_width', 'text_reference_height', 'tracks'},
     'trilha': {'track_id', 'name', 'kind', 'muted', 'visible', 'clips'},
     'bloco': {'clip_id', 'start', 'duration', 'in_point', 'gain_db', 'muted', 'detached', 'audio_only', 'speed',
@@ -423,9 +424,9 @@ _CHAVES_V3 = {
               'font_family', 'font_size', 'font_bold', 'font_italic', 'text_color', 'stroke_color',
               'stroke_width', 'filter_name', 'transition_name', 'transition_left_id', 'transition_right_id',
               'transition_affects_additionals', 'chromakey_enabled', 'chromakey_color',
-              'chromakey_similarity', 'chromakey_blend', 'opacity', 'keyframes', 'media'},
+              'chromakey_similarity', 'chromakey_blend', 'opacity', 'blur_background', 'reversed', 'keyframes', 'media'},
     'midia': {'path', 'rel_path', 'kind', 'duration', 'width', 'height', 'fps', 'has_audio', 'channels'},
-    'quadro_chave': {'time_offset', 'x', 'y', 'scale_x', 'scale_y', 'rotation', 'opacity', 'easing'},
+    'quadro_chave': {'time_offset', 'x', 'y', 'scale_x', 'scale_y', 'rotation', 'opacity', 'easing', 'gain_offset_db'},
 }
 
 
@@ -442,5 +443,133 @@ def test_campo_novo_no_projeto_exige_subir_a_versao(tmp_path):
     bloco = trilha['clips'][0]
     gravado = {'projeto': set(data), 'trilha': set(trilha), 'bloco': set(bloco),
                'midia': set(bloco['media']), 'quadro_chave': set(bloco['keyframes'][0])}
-    assert PROJECT_VERSION == 3, 'versão nova: atualize _CHAVES_V3 para o conjunto dela'
-    assert gravado == _CHAVES_V3
+    assert PROJECT_VERSION == 6, 'versão nova: atualize _CHAVES_V6 para o conjunto dela'
+    assert gravado == _CHAVES_V6
+
+
+class TestFundoDesfocadoNoArquivo:
+    def _projeto(self, tmp_path, **campos):
+        video = tmp_path / 'video.mp4'
+        video.write_bytes(b'x')
+        projeto = _sample_project(video)
+        return projeto.with_updated_clip(projeto.clips[0].clip_id, **campos)
+
+    def test_ida_e_volta_guarda_a_opcao(self, tmp_path):
+        projeto = self._projeto(tmp_path, blur_background=True)
+        lido, _ = project_from_dict(project_to_dict(projeto, base_dir=tmp_path), base_dir=tmp_path)
+        assert lido.clips[0].blur_background is True
+
+    def test_v3_abre_com_a_opcao_desligada_e_salvar_guarda_o_original(self, tmp_path):
+        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+        dados = project_to_dict(self._projeto(tmp_path), base_dir=tmp_path)
+        dados['version'] = 3
+        del dados['tracks'][0]['clips'][0]['blur_background']
+        path = tmp_path / 'antigo.vmp'
+        path.write_text(json.dumps(dados), encoding='utf-8')
+        original = path.read_bytes()
+        projeto, _ = load_project(path)
+        assert projeto.clips[0].blur_background is False
+        save_project(projeto, path)
+        assert json.loads(path.read_text(encoding='utf-8'))['version'] == PROJECT_VERSION
+        assert (tmp_path / 'antigo.vmp.v3.bak').read_bytes() == original
+
+    def test_valor_que_nao_e_booleano_e_recusado(self, tmp_path):
+        dados = project_to_dict(self._projeto(tmp_path), base_dir=tmp_path)
+        dados['tracks'][0]['clips'][0]['blur_background'] = 'sim'
+        with pytest.raises(ProjectError):
+            project_from_dict(dados, base_dir=tmp_path)
+
+
+class TestBlocoInvertidoNoArquivo:
+    def _projeto(self, tmp_path, **campos):
+        video = tmp_path / 'video.mp4'
+        video.write_bytes(b'x')
+        projeto = _sample_project(video)
+        return projeto.with_updated_clip(projeto.clips[0].clip_id, **campos)
+
+    def test_ida_e_volta_guarda_a_inversao_e_o_trecho(self, tmp_path):
+        projeto = self._projeto(tmp_path, reversed=True, in_point=1.0)
+        lido, _ = project_from_dict(project_to_dict(projeto, base_dir=tmp_path), base_dir=tmp_path)
+        assert lido.clips[0].reversed is True
+        assert lido.clips[0].in_point == 1.0
+        assert lido.clips[0].source_time(lido.clips[0].start) == projeto.clips[0].out_point
+
+    def test_bloco_normal_grava_falso(self, tmp_path):
+        assert project_to_dict(self._projeto(tmp_path), base_dir=tmp_path)['tracks'][0]['clips'][0]['reversed'] is False
+
+    def test_v4_abre_normal_e_salvar_guarda_o_original(self, tmp_path):
+        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+        dados = project_to_dict(self._projeto(tmp_path), base_dir=tmp_path)
+        dados['version'] = 4
+        del dados['tracks'][0]['clips'][0]['reversed']
+        path = tmp_path / 'antigo.vmp'
+        path.write_text(json.dumps(dados), encoding='utf-8')
+        original = path.read_bytes()
+        projeto, _ = load_project(path)
+        assert projeto.clips[0].reversed is False
+        save_project(projeto, path)
+        assert json.loads(path.read_text(encoding='utf-8'))['version'] == PROJECT_VERSION
+        assert (tmp_path / 'antigo.vmp.v4.bak').read_bytes() == original
+
+    def test_valor_que_nao_e_booleano_e_recusado(self, tmp_path):
+        dados = project_to_dict(self._projeto(tmp_path), base_dir=tmp_path)
+        dados['tracks'][0]['clips'][0]['reversed'] = 'sim'
+        with pytest.raises(ProjectError):
+            project_from_dict(dados, base_dir=tmp_path)
+
+    def test_a_versao_anterior_recusa_o_arquivo_novo(self, tmp_path):
+        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+        dados = project_to_dict(self._projeto(tmp_path, reversed=True), base_dir=tmp_path)
+        dados['version'] = PROJECT_VERSION + 1
+        with pytest.raises(ProjectError):
+            project_from_dict(dados, base_dir=tmp_path)
+
+
+class TestVolumeAnimadoNoArquivo:
+    """A curva de volume dos quadros-chave (``gain_offset_db``) no arquivo, e o v5 que não a conhece."""
+
+    CURVA = (Keyframe(0.0, gain_offset_db=-30.0), Keyframe(2.0, gain_offset_db=3.5, easing='ease_out'))
+
+    def _projeto(self, tmp_path, keyframes=()):
+        video = tmp_path / 'video.mp4'
+        video.write_bytes(b'x')
+        projeto = _sample_project(video)
+        return projeto.with_updated_clip(projeto.clips[0].clip_id, keyframes=keyframes)
+
+    def test_ida_e_volta_guarda_a_curva(self, tmp_path):
+        projeto = self._projeto(tmp_path, self.CURVA)
+        lido, _ = project_from_dict(project_to_dict(projeto, base_dir=tmp_path), base_dir=tmp_path)
+        assert [(k.time_offset, k.gain_offset_db, k.easing) for k in lido.clips[0].keyframes] == [
+            (0.0, -30.0, 'linear'), (2.0, 3.5, 'ease_out')]
+        assert lido.clips[0].gain_at(1.0) == projeto.clips[0].gain_at(1.0)
+
+    def test_v5_sem_a_chave_abre_neutro_e_salvar_guarda_o_original(self, tmp_path):
+        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+        dados = project_to_dict(self._projeto(tmp_path, (Keyframe(0.0, x=0.2), Keyframe(1.0, x=0.8))), base_dir=tmp_path)
+        dados['version'] = 5
+        for quadro in dados['tracks'][0]['clips'][0]['keyframes']:
+            del quadro['gain_offset_db']
+        path = tmp_path / 'antigo.vmp'
+        path.write_text(json.dumps(dados), encoding='utf-8')
+        original = path.read_bytes()
+        projeto, _ = load_project(path)
+        assert [k.gain_offset_db for k in projeto.clips[0].keyframes] == [0.0, 0.0]
+        assert not projeto.clips[0].animates_gain
+        save_project(projeto, path)
+        assert json.loads(path.read_text(encoding='utf-8'))['version'] == PROJECT_VERSION
+        assert (tmp_path / 'antigo.vmp.v5.bak').read_bytes() == original
+
+    @pytest.mark.parametrize('valor', ['alto', None, True, float('inf'), float('nan')])
+    def test_valor_que_nao_e_numero_finito_e_recusado(self, tmp_path, valor):
+        dados = project_to_dict(self._projeto(tmp_path, self.CURVA), base_dir=tmp_path)
+        dados['tracks'][0]['clips'][0]['keyframes'][0]['gain_offset_db'] = valor
+        with pytest.raises(ProjectError):
+            project_from_dict(dados, base_dir=tmp_path)
+
+    def test_a_versao_anterior_recusa_o_arquivo_novo(self, tmp_path):
+        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+        dados = project_to_dict(self._projeto(tmp_path, self.CURVA), base_dir=tmp_path)
+        assert dados['version'] == PROJECT_VERSION == 6
+        dados['version'] = PROJECT_VERSION + 1
+        with pytest.raises(ProjectError):
+            project_from_dict(dados, base_dir=tmp_path)

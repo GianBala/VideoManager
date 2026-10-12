@@ -213,6 +213,13 @@ class MainWindow(QMainWindow):
         # :meth:`_balance_panes`), então trocar de aba pede um novo cálculo.
         self._tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self._vertical, 1)
+        # Sem foco inicial, o Qt entrega o foco ao primeiro da ordem de Tab — a
+        # barra de abas —, e a aba Download abria com a borda de foco, como se
+        # Tab já tivesse sido apertado. O foco nasce no widget central, que não
+        # desenha nada: tirar a barra de abas do Tab custaria o teclado a quem
+        # navega por ele, e clicar num vão da janela devolve o foco para cá.
+        central.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        central.setFocus()
 
     def _build_download_tab(self) -> QWidget:
         """Endereço, destino, controles de qualidade e perfis rápidos."""

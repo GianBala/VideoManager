@@ -53,7 +53,7 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager.domain.geometry import image_base_size
-from videomanager.domain.timing import frame_index, last_frame_time
+from videomanager.domain.timing import last_frame_time
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 
 from videomanager.domain.preview import fit_size
@@ -1017,12 +1017,20 @@ class _Preview(QLabel):
         if has_active and self._interaction_visible and self._interaction_layers:
             geom = self._clip_geometry(clip)
             if geom:
-                background, texture, foreground = self._interaction_layers
+                background, texture, foreground, *fundo = self._interaction_layers
                 transform = clip.transform_at(max(0., self._position - clip.start))
                 cx, cy, w, h = geom
                 painter.save()
                 painter.setClipRect(target, Qt.ClipOperation.IntersectClip)
                 painter.drawPixmap(target, background)
+                # O fundo é decidido pela pose **de agora**, como no quadro final: um
+                # bloco 16:9 não o mostra parado, mas ao encolher no arrasto passa a
+                # mostrar. A opacidade também é a ao vivo, a mesma da textura.
+                if fundo and clip.shows_blur_background(self._proj_w, self._proj_h):
+                    painter.save()
+                    painter.setOpacity(transform.opacity)
+                    painter.drawPixmap(target, fundo[0])
+                    painter.restore()
                 painter.save()
                 painter.setOpacity(transform.opacity)
                 painter.translate(cx, cy)
@@ -1115,6 +1123,7 @@ class _ClipPropertiesWidget(QWidget):
     """Aba de propriedades do clipe com visualização e edição numérica precisa."""
 
     property_changed = Signal(int, dict)  # clip_id, dict de alterações
+    speed_changed = Signal(int, float)  # clip_id, velocidade pedida (o painel aplica e pode recusar)
     seek_requested = Signal(float)  # timestamp para navegação do cursor
     animation_scope_changed = Signal(bool)
     close_requested = Signal()
@@ -1158,12 +1167,27 @@ class _ClipPropertiesWidget(QWidget):
         self._build_ui()
         on_language_change(self._retranslate)
 
+    def _fill_presets(self, *, image: bool) -> None:
+        """A lista de efeitos rápidos do bloco: os de imagem só onde há imagem.
+
+        Deslizar, girar e surgir mexem na pose; um bloco de áudio só tem o volume, e para ele sobra o
+        "remover animações". Refaz a lista só quando muda, e o sinal fica calado: quem chama já está
+        sob ``_updating``.
+        """
+        wanted = [key for key in strings.EDIT_ANIMATION_PRESETS if image or key in ("", "clear")]
+        if [self._combo_presets.itemData(i) for i in range(self._combo_presets.count())] == wanted:
+            return
+        self._combo_presets.clear()
+        for key in wanted:
+            self._combo_presets.addItem(strings.EDIT_ANIMATION_PRESETS[key], key)
+
     def _retranslate(self) -> None:
         retext_items(self._combo_easing, strings.EDIT_EASINGS.get)
         retext_items(self._combo_presets, strings.EDIT_ANIMATION_PRESETS.get)
         retext_items(self._combo_trans_type, _transition_label)
         self._refresh_header()
         self._refresh_keyframe_controls()
+        self._lbl_blur.setText(self._blur_note())
 
     def _refresh_header(self) -> None:
         """Título, dica e espécie do bloco carregado, no idioma de agora."""
@@ -1324,6 +1348,46 @@ class _ClipPropertiesWidget(QWidget):
 
         self._layout.addWidget(self._transform_group)
 
+        # Grupos Velocidade e Volume: os mesmos ajustes dos botões ⚡ e 🔊 da barra, à vista
+        # também aqui — num bloco de áudio a aba abria vazia. A velocidade fica **fora** do grupo de
+        # Animação de propósito: ela muda a duração do bloco, e uma curva de velocidade mudaria o
+        # tamanho da trilha ao longo do próprio arrasto.
+        self._speed_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_SPEED)
+        speed_layout = QVBoxLayout(self._speed_group)
+        speed_layout.setContentsMargins(6, 8, 6, 6)
+        speed_layout.setSpacing(6)
+        self._spin_speed = QDoubleSpinBox()
+        self._spin_speed.setRange(0.1, 10.0)
+        self._spin_speed.setSingleStep(0.1)
+        self._spin_speed.setDecimals(1)
+        self._spin_speed.setSuffix("x")
+        # Sem rastrear a digitação: o painel recusa a velocidade que passa por cima do vizinho, e
+        # checar a cada tecla (de "1" a "15") avisaria por um valor que ainda estava sendo digitado.
+        self._spin_speed.setKeyboardTracking(False)
+        bind(self._spin_speed, "setToolTip", lambda: strings.EDIT_SPEED_TIP)
+        self._spin_speed.valueChanged.connect(self._on_speed_changed)
+        speed_layout.addWidget(self._spin_speed)
+        self._layout.addWidget(self._speed_group)
+
+        self._volume_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_VOLUME)
+        volume_layout = QVBoxLayout(self._volume_group)
+        volume_layout.setContentsMargins(6, 8, 6, 6)
+        volume_layout.setSpacing(6)
+        self._spin_gain = QDoubleSpinBox()
+        self._spin_gain.setRange(MIN_GAIN_DB, MAX_GAIN_DB)
+        self._spin_gain.setSingleStep(0.5)
+        self._spin_gain.setDecimals(1)
+        self._spin_gain.setSuffix(" dB")
+        bind(self._spin_gain, "setToolTip", lambda: strings.EDIT_GAIN_TIP)
+        self._spin_gain.valueChanged.connect(self._on_gain_changed)
+        volume_layout.addWidget(self._spin_gain)
+        # Em linha própria: o texto quebra, e a altura dele não atravessa um layout horizontal.
+        self._lbl_gain_detached = bind(QLabel(), "setText", lambda: strings.EDIT_GAIN_DETACHED)
+        self._lbl_gain_detached.setWordWrap(True)
+        self._lbl_gain_detached.setProperty("role", "dim")
+        volume_layout.addWidget(self._lbl_gain_detached)
+        self._layout.addWidget(self._volume_group)
+
         # Grupo Animação / Quadros-chave
         self._animation_group = bind(QGroupBox(), "setTitle", lambda: strings.EDIT_KEYFRAME_TITLE)
         anim_layout = QVBoxLayout(self._animation_group)
@@ -1459,6 +1523,29 @@ class _ClipPropertiesWidget(QWidget):
 
         self._layout.addWidget(self._chromakey_group)
 
+        # Grupo Fundo Desfocado
+        self._blur_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_BLUR)
+        blur_layout = QVBoxLayout(self._blur_group)
+        blur_layout.setContentsMargins(6, 8, 6, 6)
+        blur_layout.setSpacing(6)
+
+        self._chk_blur = bind(QCheckBox(), "setText", lambda: strings.PROP_BLUR_ENABLE)
+        self._chk_blur.toggled.connect(self._on_blur_toggled)
+        blur_layout.addWidget(self._chk_blur)
+
+        # Em linha própria: o texto quebra, e a altura dele não atravessa um
+        # layout horizontal. Sem ``bind``: o texto depende do estado (fundo verde
+        # ligado ou não), e quem o escreve é ``_sync_blur_controls`` — escrito por
+        # fora, o ``bind`` seria abandonado na primeira troca de idioma, que
+        # passa por ``_retranslate``.
+        self._blur_unavailable = False
+        self._lbl_blur = QLabel(self._blur_note())
+        self._lbl_blur.setWordWrap(True)
+        self._lbl_blur.setProperty("role", "dim")
+        blur_layout.addWidget(self._lbl_blur)
+
+        self._layout.addWidget(self._blur_group)
+
         # Grupo Transição (quando um clipe de transição é selecionado)
         self._transition_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_TRANSITION)
         t_layout = QVBoxLayout(self._transition_group)
@@ -1499,8 +1586,11 @@ class _ClipPropertiesWidget(QWidget):
         self._clip = None
         self._refresh_header()
         self._transform_group.setVisible(False)
+        self._speed_group.setVisible(False)
+        self._volume_group.setVisible(False)
         self._animation_group.setVisible(False)
         self._chromakey_group.setVisible(False)
+        self._blur_group.setVisible(False)
         self._transition_group.setVisible(False)
 
     def load_clip(self, clip: Clip, proj_w: int, proj_h: int, fps: float = 30.0, text_ratio: float = 1.0) -> None:
@@ -1555,14 +1645,41 @@ class _ClipPropertiesWidget(QWidget):
             self._aspect_ratio = max(0.001, cur_w / max(1.0, float(cur_h)))
 
             is_trans = clip.overlay_type is OverlayType.TRANSITION
-            has_image_media = bool(clip.media and (clip.media.has_video or clip.is_image))
-            can_chroma = has_image_media and clip.has_media_file
+            # A espécie é do bloco, não da mídia: o bloco de "separar áudio" vem de um
+            # arquivo com imagem e mesmo assim não tem nenhuma (a mesma regra do fundo
+            # desfocado, logo abaixo). Olhar a mídia mostrava o Fundo Verde num áudio.
+            can_chroma = clip.has_image and clip.has_media_file
 
-            can_animate = clip.overlay_type not in (OverlayType.TRANSITION, OverlayType.FILTER) and (clip.has_image or clip.is_additional)
-            self._transform_group.setVisible(can_animate)
+            can_pose = clip.overlay_type not in (OverlayType.TRANSITION, OverlayType.FILTER) and (clip.has_image or clip.is_additional)
+            # Um bloco de áudio não tem pose, mas tem volume: a animação é a mesma e anima o que ele tem.
+            can_animate = can_pose or clip.can_adjust_sound
+            self._transform_group.setVisible(can_pose)
             self._animation_group.setVisible(can_animate)
+            self._fill_presets(image=can_pose)
             self._chromakey_group.setVisible(can_chroma)
+            # Só mídia de arquivo com imagem: texto, filtro, transição e o bloco
+            # de "separar áudio" não têm o que desfocar.
+            can_blur = clip.has_image and clip.has_media_file
+            self._blur_group.setVisible(can_blur)
             self._transition_group.setVisible(is_trans)
+
+            # O mesmo critério dos botões ⚡ e 🔊 da barra (``edit_panel._refresh_controls``): velocidade
+            # onde há relógio de mídia; volume onde há som — e, no bloco cujo áudio foi separado, à vista
+            # e desligado com o motivo, porque o som agora é do outro bloco.
+            has_speed = clip.media is not None and not clip.is_additional
+            has_sound = clip.can_adjust_sound or clip.detached
+            self._speed_group.setVisible(has_speed)
+            self._volume_group.setVisible(has_sound)
+            if has_speed:
+                self._spin_speed.setValue(clip.speed)
+            if has_sound:
+                self._spin_gain.setEnabled(clip.can_adjust_sound)
+                self._lbl_gain_detached.setVisible(clip.detached)
+                self._spin_gain.setValue(clip.gain_db)
+
+            if can_blur:
+                self._chk_blur.setChecked(clip.blur_background)
+                self._sync_blur_controls(clip.chromakey_enabled)
 
             if is_trans:
                 idx = self._combo_trans_type.findData(clip.transition_name or "fade")
@@ -1588,7 +1705,7 @@ class _ClipPropertiesWidget(QWidget):
             self._last_y = clip.y
             self._last_rot = clip.rotation
 
-            if can_animate:
+            if can_pose:
                 px = round(clip.x * self._proj_w)
                 py = round(clip.y * self._proj_h)
                 self._spin_x.setValue(px)
@@ -1600,16 +1717,59 @@ class _ClipPropertiesWidget(QWidget):
                 op_pct = int(round(clip.opacity * 100))
                 self._slider_opacity.setValue(op_pct)
                 self._spin_opacity.setValue(op_pct)
+            if can_animate:
                 self._refresh_keyframe_controls()
 
         finally:
             self._updating = False
 
+    def _on_speed_changed(self, value: float) -> None:
+        if self._updating or self._clip_id < 0:
+            return
+        self.speed_changed.emit(self._clip_id, value)
+
+    def _on_gain_changed(self, value: float) -> None:
+        """O volume digitado vale no instante do cursor: um ponto da curva num bloco animado.
+
+        Sem quadros-chave é o volume do bloco, como o 🔊 da barra. Com eles, o valor é o que se **ouve** ali
+        e o ponto guarda a diferença para o volume do bloco (ver ``Clip.with_edited_gain``).
+        """
+        if self._updating or self._clip_id < 0 or self._clip is None:
+            return
+        offset = self._playhead_pos - self._clip.start
+        updated = self._clip.with_edited_gain(offset, value, fps=self._fps,
+                                              whole_animation=self._whole_animation.isChecked())
+        changes: dict = {"gain_db": updated.gain_db}
+        if updated.keyframes != self._clip.keyframes:
+            changes["keyframes"] = updated.keyframes
+        self._clip = updated
+        self.property_changed.emit(self._clip_id, changes)
+        self._refresh_keyframe_controls()
+
     def _on_chroma_toggled(self, checked: bool) -> None:
         self._enable_chroma_controls(checked)
+        self._sync_blur_controls(checked)
         if self._updating or self._clip_id < 0:
             return
         self.property_changed.emit(self._clip_id, {"chromakey_enabled": checked})
+
+    def _on_blur_toggled(self, checked: bool) -> None:
+        if self._updating or self._clip_id < 0:
+            return
+        self.property_changed.emit(self._clip_id, {"blur_background": checked})
+
+    def _blur_note(self) -> str:
+        return strings.PROP_BLUR_CHROMA if self._blur_unavailable else strings.PROP_BLUR_NOTE
+
+    def _sync_blur_controls(self, chroma: bool) -> None:
+        """Com o fundo verde ligado a opção fica desligada e a tela diz o porquê.
+
+        A escolha não é apagada: o compositor a ignora enquanto o chroma key
+        estiver ligado, e ela volta quando ele sair.
+        """
+        self._blur_unavailable = chroma
+        self._chk_blur.setEnabled(not chroma)
+        self._lbl_blur.setText(self._blur_note())
 
     def _enable_chroma_controls(self, enabled: bool) -> None:
         self._btn_chroma_color.setEnabled(enabled)
@@ -1683,10 +1843,7 @@ class _ClipPropertiesWidget(QWidget):
     def _keyframe_in_frame(self, offset: float) -> Keyframe | None:
         if self._clip is None:
             return None
-        frame = frame_index(self._clip.start + offset, self._fps)
-        candidates = [k for k in self._clip.visible_keyframes
-                      if frame_index(self._clip.start + k.time_offset, self._fps) == frame]
-        return min(candidates, key=lambda k: abs(k.time_offset - offset), default=None)
+        return self._clip.keyframe_in_frame(offset, self._fps)
 
     def _refresh_keyframe_controls(self, *, refresh_static: bool = False) -> None:
         if self._clip is None or not hasattr(self, "_animation_group"):
@@ -1759,6 +1916,8 @@ class _ClipPropertiesWidget(QWidget):
             self._last_x = cur_t.x
             self._last_y = cur_t.y
             self._last_rot = cur_t.rotation
+            # O volume ouvido no cursor: o do bloco, mais a curva dos quadros-chave.
+            self._spin_gain.setValue(self._clip.gain_at(t_offset))
         finally:
             self._updating = was_updating
 
@@ -1818,16 +1977,7 @@ class _ClipPropertiesWidget(QWidget):
         else:
             cur_t = self._clip.transform_at(t_offset)
             easing = self._combo_easing.currentData() or "linear"
-            new_kf = Keyframe(
-                time_offset=t_offset,
-                x=cur_t.x,
-                y=cur_t.y,
-                scale_x=cur_t.scale_x,
-                scale_y=cur_t.scale_y,
-                rotation=cur_t.rotation,
-                opacity=cur_t.opacity,
-                easing=easing,
-            )
+            new_kf = Keyframe.from_pose(t_offset, cur_t, easing)
             updated_clip = self._clip.with_keyframe(new_kf)
             self._clip = updated_clip
             self.property_changed.emit(self._clip_id, {"keyframes": updated_clip.keyframes})

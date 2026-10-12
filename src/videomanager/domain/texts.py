@@ -9,4 +9,5 @@ register({
     "TRACK_ADDITIONAL": ("Adicionais", "Overlays"),
     "CLIP_DETACHED": ("áudio separado", "audio detached"),
     "CLIP_MUTED": ("mudo", "muted"),
+    "CLIP_REVERSED": ("invertido", "reversed"),
 })
