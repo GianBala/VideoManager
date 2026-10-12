@@ -1372,7 +1372,9 @@ class TestFundoDesfocado:
 
     def test_opacidade_fixa_vale_para_o_fundo(self) -> None:
         fundo = next(f for f in self.ramos(build_graph(self.com(opacity=0.5))) if f.startswith("[d0_in]"))
-        assert "colorchannelmixer=aa=0.5000" in fundo and "format=yuva420p" in fundo
+        # A opacidade do fundo vai direto no plano de alfa: via ``rgba`` → ``yuva420p`` o ffmpeg 9 divide a cor pelo
+        # alfa e a opacidade se anula (medido na CI do Windows, que usa o ffmpeg do Chocolatey).
+        assert "format=yuva420p,lutyuv=a='val*0.5000'" in fundo and "colorchannelmixer" not in fundo
 
     def test_opacidade_animada_usa_a_mesma_expressao_da_frente(self) -> None:
         from videomanager.domain.keyframe import Keyframe

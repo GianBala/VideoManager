@@ -677,12 +677,15 @@ def _blur_steps(piece: _Piece, project: Project, fps: float) -> list[str]:
         f"gblur=sigma={_BLUR_SIGMA * short / _BLUR_SHORT_SIDE:.4f}",
         "format=yuv420p",
     ]
+    # A opacidade mexe só no **plano de alfa**, já em ``yuva420p``. Passar por ``rgba`` e voltar a ``yuva420p`` dava o
+    # mesmo resultado até o ffmpeg 8, mas no 9 (o do Chocolatey, que a CI usa no Windows) essa conversão **divide a cor
+    # pelo alfa** — medido, 136 virava 222 com alfa 0,6 —, e a opacidade do fundo se anulava: um bloco a 60% saía com o
+    # fundo a 100%, e um fade deixava o borrão na tela.
     if clip.animates("opacity"):
         expr = _keyframe_expr(clip.keyframes, "opacity", _clip_stream_origin(piece), clip.opacity, time_var="T")
-        steps += ["format=rgba", f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({expr})'",
-                  "format=yuva420p"]
+        steps += ["format=yuva420p", f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='alpha(X,Y)*({expr})'"]
     elif clip.opacity < 1 - 1e-9:
-        steps += ["format=rgba", f"colorchannelmixer=aa={clip.opacity:.4f}", "format=yuva420p"]
+        steps += ["format=yuva420p", f"lutyuv=a='val*{clip.opacity:.4f}'"]
     return steps + [f"scale={project.width}:{project.height}:flags=bilinear", "setsar=1", f"fps={fps:.6f}",
                     *_tail_hold(clip)]
 
