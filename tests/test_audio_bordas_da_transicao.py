@@ -107,6 +107,20 @@ def test_as_duas_pontas_do_acrossfade_chegam_em_quadros_pequenos():
     assert len(pontas) == 2 and all(",asetnsamples=n=480:p=0[tra0" in f for f in pontas), pontas
 
 
+def test_peca_com_ponta_chega_ao_amix_em_quadros_pequenos():
+    """No ffmpeg 6.1 (o do Ubuntu 24.04) o ``amix`` perde o fim da peça cujo último quadro é grande quando a outra
+    entrada vem atrasada: numa fonte FLAC de 16384 amostras o lado que sai ficava mudo nos últimos quadros antes do
+    corte, com ou sem rampa. A medida acima só falha lá; o que se fixa aqui é o que a evita."""
+    media = MediaRef(Path("v.mp4"), MediaKind.VIDEO, duration=4.0, width=64, height=64, fps=30.0, has_audio=True, channels=2)
+    esquerda, direita = Clip(media, 0.0, 4.0), Clip(media, 4.0, 4.0)       # sem alças: de-click nas duas pontas
+    projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=(esquerda, direita)),), width=64, height=64, fps=30.0)
+    projeto, _ = projeto.with_transition(0, esquerda, direita, "fade", "Transição_fade", 1.0, False)
+    pecas = [f for f in composer.build_graph(projeto, want_video=False).filters if f.endswith(("[a0]", "[a1]"))]
+    assert len(pecas) == 2
+    for peca in pecas:
+        assert peca.index(",asetnsamples=n=480:p=0,afade=") > 0, peca
+
+
 @ffmpeg
 def test_crossfade_com_alcas_sem_estouro_no_comeco_nem_buraco_no_fim(tools, fonte, tmp_path):
     """Janela [1,25 s; 1,75 s] entre dois blocos com sobra de mídia: o envelope é o do crossfade de potência constante
