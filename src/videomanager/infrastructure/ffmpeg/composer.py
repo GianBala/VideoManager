@@ -1074,8 +1074,8 @@ def _gain_filter(clip: Clip, origin: float) -> str | None:
     Sem curva o texto é exatamente o de antes (``volume=-6.00dB``), então o comando de todo projeto
     sem volume animado sai igual. Com curva, o volume ouvido é o do bloco mais a curva, limitado ao
     mesmo intervalo do controle, convertido de dB por ``pow`` e reavaliado a cada quadro de áudio
-    (``eval=frame``, como os fades logo abaixo). ``origin`` é onde o bloco começa no relógio ``t`` do
-    filtro, que o ffmpeg conta desde o início do trecho lido.
+    (``eval=frame``). ``origin`` é onde o bloco começa no relógio ``t`` do filtro, que o ffmpeg conta
+    desde o início do trecho lido.
 
     **O quadro de áudio é limitado a 480 amostras antes do ``volume``.** ``eval=frame`` reavalia a curva
     uma vez por quadro, e o quadro é o do decodificador: sem o limite o fade saía em escada, de degrau
@@ -1083,22 +1083,34 @@ def _gain_filter(clip: Clip, origin: float) -> str | None:
     4,38 dB em FLAC de 16384, contra 0,29 dB em AAC, MP3, Opus e Vorbis; com o limite, 0,15 dB em todos,
     e a mesma contagem de amostras (``p=0``: o último quadro não é preenchido). São 480 **amostras**, ou
     10 ms a 48 kHz; numa fonte de 8 kHz seriam 60 ms, ainda abaixo do que a escada tinha.
-
-    **Só quando a curva varia.** Uma curva constante não tem degrau a evitar, e o limite mexe nos quadros
-    que as fades das bordas (``eval=frame`` também) enxergam: com ele, o "declick" de uma transição cai
-    onde a granularidade de 10 ms manda, e não onde a do arquivo manda. Constante, o filtro continua
-    produzindo exatamente as amostras do volume fixo (``test_curva_constante_e_igual_ao_volume_fixo…``).
     """
     if clip.animates_gain:
         curve = _keyframe_expr(clip.keyframes, "gain_offset_db", origin, 0.0)
-        first = clip.keyframes[0].gain_offset_db
-        varies = any(abs(k.gain_offset_db - first) >= 1e-6 for k in clip.keyframes)
-        return ("asetnsamples=n=480:p=0," if varies else "") + (
-            f"volume='pow(10,max({MIN_GAIN_DB:g},min({MAX_GAIN_DB:g},{clip.gain_db:.6f}+({curve})))/20)'"
-            ":eval=frame")
+        return ("asetnsamples=n=480:p=0,"
+                f"volume='pow(10,max({MIN_GAIN_DB:g},min({MAX_GAIN_DB:g},{clip.gain_db:.6f}+({curve})))/20)'"
+                ":eval=frame")
     if clip.changes_gain:
         return f"volume={clip.gain_db:.2f}dB"
     return None
+
+
+def _mute_filter(local_start: float, local_end: float, duration: float) -> str:
+    """Cala o trecho ``[local_start, local_end]`` do bloco, com a precisão de **uma amostra**.
+
+    ``volume=0:enable='between(t,…)'`` avalia o intervalo por quadro de áudio, e o quadro é o da fonte: o lado que devia
+    calar seguia soando até o fim do quadro que cruzava o começo da janela (envelope 2,0 — +6 dB — por ~25 ms contra a
+    outra peça), e o que devia voltar só voltava depois do que cruzava o fim dela (um buraco de ~3 ms numa fonte PCM,
+    dezenas de ms em FLAC de 16384 amostras). A janela de uma transição cobre sempre **uma ponta** do bloco — o começo
+    do que entra ou o fim do que sai, já que ela se centra no corte —, e uma ponta se cala com um ``afade`` de uma
+    amostra: a saída (``out``) cala dali em diante, a entrada (``in``) cala até ali. Um trecho no meio do bloco, que
+    nenhuma transição produz, segue pela expressão antiga.
+    """
+    one_sample = 1.0 / SAMPLE_RATE
+    if local_start <= 1e-6:
+        return f"afade=t=in:st={max(0.0, local_end):.6f}:d={one_sample:.9f}"
+    if local_end >= duration - 1e-6:
+        return f"afade=t=out:st={local_start:.6f}:d={one_sample:.9f}"
+    return f"volume=0:enable='between(t,{local_start:.6f},{local_end:.6f})'"
 
 
 def _audio_chain(
@@ -1137,9 +1149,7 @@ def _audio_chain(
         local_start = start - piece.offset
         local_end = end - piece.offset
         if local_end > -1e-6 and local_start < piece.duration + 1e-6:
-            steps.append(
-                f"volume=0:enable='between(t,{local_start:.6f},{local_end:.6f})'"
-            )
+            steps.append(_mute_filter(local_start, local_end, piece.duration))
     for kind, start, end in fades:
         duration = end - start
         if duration <= 1e-6:
@@ -1148,6 +1158,13 @@ def _audio_chain(
         local_end = end - piece.offset
         if local_end <= -1e-6 or local_start >= piece.duration + 1e-6:
             continue
+        if local_start >= 0:
+            # ``afade`` trabalha amostra a amostra, e ``qsin`` é a mesma curva de antes (cos na saída, sin na entrada).
+            steps.append(f"afade=t={kind}:st={local_start:.6f}:d={duration:.6f}:curve=qsin")
+            continue
+        # A rampa já começou antes do primeiro som do trecho (prévia a partir de dentro dela): ``afade`` não aceita
+        # início negativo, então fica a expressão, por quadro — em quadros de 1 ms (48 amostras), e não nos da fonte.
+        steps.append("asetnsamples=n=48:p=0")
         progress = f"(t-{local_start:.6f})/{duration:.6f}"
         if kind == "out":
             gain = (
@@ -1473,6 +1490,10 @@ def _transition_audio_chain(side: _TransitionSide, label: str) -> str:
     if side.postpad > 1e-6:
         steps.append(f"apad=pad_dur={side.postpad:.6f}")
     steps.append(f"atrim=duration={side.duration:.6f}")
+    # O ``acrossfade`` com os quadros da fonte nas duas entradas **às vezes não entrega nada**: numa fonte FLAC de 16384
+    # amostras, a mesma exportação saiu com a janela inteira muda em ~1 de cada 4 execuções (medido, 12 repetições); com
+    # quadros de 480 amostras (10 ms a 48 kHz) saiu certa em todas. O mesmo limite de ``_gain_filter``.
+    steps.append("asetnsamples=n=480:p=0")
     return f"[{side.index}:a]" + ",".join(steps) + label
 
 
