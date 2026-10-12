@@ -206,11 +206,12 @@ para comparar máquinas e versões.
 
 ## Integração contínua
 
-`.github/workflows/tests.yml` tem dois jobs. O `internal` roda só Python 3.10 e
+`.github/workflows/tests.yml` tem três jobs. O `internal` roda só Python 3.10 e
 pytest sobre `tests/domain tests/application tests/architecture`, provando que
 o núcleo não depende do desktop. O `desktop` é uma matriz Ubuntu × Windows e
 Python 3.10 × 3.12 (prazo de 20 min, `QT_QPA_PLATFORM=offscreen`) que instala o
 ffmpeg do sistema, roda `pyflakes src/videomanager tests` e a suíte offline.
+O `pacote` gera os pacotes (ver abaixo) ao lado dos testes, e não depois deles.
 
 A versão do ffmpeg é parte do que a CI cobre: o Ubuntu instala a 6.1 e o
 Chocolatey do Windows, a 9.0, enquanto o pacote entrega a 7.1. Por isso, no
@@ -218,9 +219,40 @@ job Linux com Python 3.12, `packaging/fetch_binaries.py` roda antes dos testes e
 o aplicativo passa a usar o ffmpeg do pacote (`find_tools` procura o `vendor/`
 primeiro): sem isso, nada testaria a combinação que o usuário recebe. O resultado
 é uma cobertura de três versões — Linux 3.10 com a 6.1, Linux 3.12 com a 7.1 e
-Windows com a 9.0. Nas variantes 3.12 a CI também gera o pacote — Linux em pasta
-com `smoke_run.sh`, Windows em arquivo único com `smoke_windows.ps1 -Icon` — e
-guarda o `VideoManager.exe` por sete dias.
+Windows com a 9.0. Como a integração com o ffmpeg depende da versão dele e não
+do Python, o Windows com Python 3.10 roda `-m "not ffmpeg and not network"`: o
+ffmpeg 9 já é testado pelo 3.12, e o resto da suíte continua cobrindo o 3.10.
+
+### Fatias e tempo
+
+As integrações com o ffmpeg (`-m ffmpeg`) são ~85% do tempo da suíte — 301 dos
+2100 testes —, e um runner tem 4 núcleos que elas já ocupam. Por isso cada
+célula do `desktop` é dividida em **duas fatias** que correm em máquinas
+diferentes, e cada fatia roda `pytest -n auto` (pytest-xdist). A divisão é a
+variável `VM_SHARD="i/n"`, lida por `fatiar` em `tests/conftest.py`:
+
+- a fatia é por posição na lista ordenada por id, em revezamento — por arquivo,
+  uma fatia levaria o `test_integration.py` inteiro (36% do tempo);
+- **a ordem de coleta é preservada** dentro da fatia, e uma `VM_SHARD` inválida
+  interrompe a execução em vez de rodar a suíte errada;
+- todas as fatias de uma célula usam o **mesmo** `-m`, senão a união delas deixa
+  de ser a suíte;
+- o `pyflakes` e a conferência de referências rodam só na primeira fatia.
+
+**Todo teste tem de passar em qualquer metade.** A divisão trocou os vizinhos de
+cada teste e expôs um defeito que a ordem inteira escondia: o sinal de quadros-chave
+de um painel já encerrado chegava ao teste seguinte (`QPushButton already
+deleted`). Para reproduzir uma falha que só aparece na CI:
+
+```bash
+VM_SHARD=2/2 .venv/bin/python -m pytest -q          # a segunda metade
+VM_SHARD=1/2 .venv/bin/python -m pytest -q -n auto  # a primeira, em paralelo
+```
+
+Os pacotes — Linux em pasta com `smoke_run.sh`, Windows em arquivo único com
+`smoke_windows.ps1 -Icon` — saem do job `pacote`, que não espera os testes. O
+`VideoManager.exe` é guardado por sete dias **mesmo que um teste do `desktop`
+falhe**: ele só vale como entrega com a execução inteira verde.
 
 Adicionar o workflow ao repositório não significa que a execução remota já
 ocorreu; confira o resultado da CI antes de distribuir em outro sistema.
