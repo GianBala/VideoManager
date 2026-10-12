@@ -24,7 +24,7 @@ jobs:
         run: python -m pytest -q tests/domain tests/application tests/architecture
 
   desktop:
-    name: desktop (${{ matrix.os }}, ${{ matrix.python }})
+    name: desktop (${{ matrix.os }}, ${{ matrix.python }}, fatia ${{ matrix.shard }}/${{ matrix.shards }})
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -35,14 +35,25 @@ jobs:
         # sem cobrir nada novo; o resto da suíte (onde o PySide6 6.12 derrubou o
         # 3.10) continua rodando. O Ubuntu 3.10 mantém tudo: é o único com o
         # ffmpeg 6.1 do sistema.
+        #
+        # `shard`/`shards` dividem a suíte entre duas máquinas (ver `fatiar` em
+        # tests/conftest.py): cada job tem núcleos próprios, e as integrações
+        # com o ffmpeg já ocupam todos os de um runner. Duas fatias, e não mais,
+        # porque cada uma repete ~1 min de preparação e a conta de jobs
+        # simultâneos (20) já fecha com duas execuções por commit (push e PR).
+        # Todas as fatias de uma célula precisam do mesmo `marcador`.
         include:
-          - {os: ubuntu-latest,  python: '3.10', marcador: 'not network'}
-          - {os: ubuntu-latest,  python: '3.12', marcador: 'not network'}
-          - {os: windows-latest, python: '3.10', marcador: 'not ffmpeg and not network'}
-          - {os: windows-latest, python: '3.12', marcador: 'not network'}
+          - {os: ubuntu-latest,  python: '3.10', shard: 1, shards: 2, marcador: 'not network'}
+          - {os: ubuntu-latest,  python: '3.10', shard: 2, shards: 2, marcador: 'not network'}
+          - {os: ubuntu-latest,  python: '3.12', shard: 1, shards: 2, marcador: 'not network'}
+          - {os: ubuntu-latest,  python: '3.12', shard: 2, shards: 2, marcador: 'not network'}
+          - {os: windows-latest, python: '3.10', shard: 1, shards: 1, marcador: 'not ffmpeg and not network'}
+          - {os: windows-latest, python: '3.12', shard: 1, shards: 2, marcador: 'not network'}
+          - {os: windows-latest, python: '3.12', shard: 2, shards: 2, marcador: 'not network'}
     runs-on: ${{ matrix.os }}
     env:
       QT_QPA_PLATFORM: offscreen
+      VM_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
@@ -68,11 +79,15 @@ jobs:
         env:
           PYTHONPATH: src
         run: python packaging/fetch_binaries.py
-      - run: python -m pyflakes src/videomanager tests scripts
+      # As conferências estáticas não dependem da fatia: rodam na primeira só.
+      - name: pyflakes
+        if: matrix.shard == 1
+        run: python -m pyflakes src/videomanager tests scripts
       # Nomes e atributos que não existem: o pyflakes não segue importação nem
       # self. Fica aqui, e não no job internal, porque importa os módulos para
       # conferir — sem o PySide6 e o yt-dlp, acusa 712 falsos.
       - name: Referências sem destino
+        if: matrix.shard == 1
         env:
           PYTHONPATH: src
         run: python scripts/check_references.py
