@@ -5000,7 +5000,12 @@ class EditPanel(QWidget):
         self._background.start(worker, worker.signals.done)
 
     def _on_keyframes(self, times: object, source: Path, token: int) -> None:
-        if source != self._keyframe_source or token != self._keyframe_token:
+        # O worker pode ter emitido antes do cancelamento do ``shutdown``: o sinal
+        # já está na fila e chega depois que os botões foram apagados, e o
+        # ``setEnabled`` abaixo levantava ``QPushButton already deleted`` no
+        # slot — sem janela para mostrá-lo, e no teste seguinte que bombeasse
+        # eventos.
+        if self._closed or source != self._keyframe_source or token != self._keyframe_token:
             return
         self._keyframe_worker = None
         self._keyframes = tuple(times) if isinstance(times, tuple) else ()
