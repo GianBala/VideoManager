@@ -24,12 +24,22 @@ jobs:
         run: python -m pytest -q tests/domain tests/application tests/architecture
 
   desktop:
+    name: desktop (${{ matrix.os }}, ${{ matrix.python }})
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python: ['3.10', '3.12']
+        # As integrações com o ffmpeg (`-m ffmpeg`) são ~85% do tempo da suíte e
+        # dependem da versão do ffmpeg, não do Python. O Windows usa o mesmo
+        # ffmpeg 9 do Chocolatey nas duas versões, então no 3.10 elas se repetiam
+        # sem cobrir nada novo; o resto da suíte (onde o PySide6 6.12 derrubou o
+        # 3.10) continua rodando. O Ubuntu 3.10 mantém tudo: é o único com o
+        # ffmpeg 6.1 do sistema.
+        include:
+          - {os: ubuntu-latest,  python: '3.10', marcador: 'not network'}
+          - {os: ubuntu-latest,  python: '3.12', marcador: 'not network'}
+          - {os: windows-latest, python: '3.10', marcador: 'not ffmpeg and not network'}
+          - {os: windows-latest, python: '3.12', marcador: 'not network'}
     runs-on: ${{ matrix.os }}
     env:
       QT_QPA_PLATFORM: offscreen
@@ -66,7 +76,7 @@ jobs:
         env:
           PYTHONPATH: src
         run: python scripts/check_references.py
-      - run: python -m pytest -q
+      - run: python -m pytest -q -m "${{ matrix.marcador }}"
 
   # Os pacotes não dependem do resultado dos testes, então rodam ao lado deles:
   # no Windows, empacotar depois do pytest somava ~110–170 s ao job mais lento
