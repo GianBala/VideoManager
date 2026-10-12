@@ -594,9 +594,12 @@ def test_transicao_usa_alcas_e_faz_crossfade_do_audio_anexado() -> None:
     assert "-ss 6.500000 -i video.mp4" in inputs
     assert "acrossfade=d=1.000000:c1=qsin:c2=qsin" in filters
     # O segundo clipe ainda está no relógio local antes do adelay; seu mudo
-    # precisa começar em -0,5 s para cobrir os primeiros 0,5 s disponíveis.
-    assert "volume=0:enable='between(t,3.500000,4.500000)'" in filters
-    assert "volume=0:enable='between(t,-0.500000,0.500000)'" in filters
+    # precisa ir até 0,5 s (a janela começa em -0,5 s) para cobrir os primeiros 0,5 s
+    # disponíveis. O primeiro cala do 3,5 s dele em diante. As duas pontas se calam com um
+    # ``afade`` de uma amostra, que é exato — o ``enable`` por quadro errava por um quadro.
+    assert "afade=t=out:st=3.500000:d=0.000020833" in filters
+    assert "afade=t=in:st=0.500000:d=0.000020833" in filters
+    assert "volume=0:enable=" not in filters
 
 
 def test_sem_alcas_repete_quadro_mas_audio_faz_fade_sem_silencio_injetado() -> None:
@@ -634,8 +637,8 @@ def test_sem_alcas_repete_quadro_mas_audio_faz_fade_sem_silencio_injetado() -> N
     assert "tpad=start_mode=clone:start_duration=0.500000" in filters
     assert "acrossfade=" not in filters
     assert "apad=pad_dur=" not in filters
-    assert "cos((t-3.988000)/0.012000*PI/2)" in filters
-    assert "sin((t-0.000000)/0.012000*PI/2)" in filters
+    assert "afade=t=out:st=3.988000:d=0.012000:curve=qsin" in filters
+    assert "afade=t=in:st=0.000000:d=0.012000:curve=qsin" in filters
 
 
 @pytest.mark.parametrize(
@@ -673,8 +676,8 @@ def test_transicao_de_audio_respeita_mudo_de_cada_ponta(
     )
     filters = ";".join(graph.filters)
 
-    assert ("cos((t-3.988000)/0.012000*PI/2)" in filters) is fade_out
-    assert ("sin((t-0.000000)/0.012000*PI/2)" in filters) is fade_in
+    assert ("afade=t=out:st=3.988000:d=0.012000:curve=qsin" in filters) is fade_out
+    assert ("afade=t=in:st=0.000000:d=0.012000:curve=qsin" in filters) is fade_in
     assert "acrossfade=" not in filters
     assert (graph.audio_label is not None) is (not left_muted or not right_muted)
 
