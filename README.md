@@ -116,7 +116,7 @@ Multipista, com os gestos que o CapCut e o Filmora tornaram padrão.
 - **Som** — volume por bloco em decibéis, mudo por trilha ou por bloco e **velocidade** de 0,1× a 10×.
 - **Transições** entre dois cortes — Fade, Dissolve, Wipe, Slide.
 - **Texto, filtros e chroma key.**
-- **Animação por quadros-chave** — posição, escala, rotação e opacidade, com curvas de aceleração e efeitos rápidos de entrada; editável direto na prévia ou na aba **Propriedades**.
+- **Animação por quadros-chave** — posição, escala, rotação, opacidade e volume (fade de som), com curvas de aceleração e efeitos rápidos de entrada; editável direto na prévia ou na aba **Propriedades**.
 - **Prévia** — retrátil, em tela cheia (`F`), com o som da mixagem, loop sem corte e navegação quadro a quadro. Arrastar a agulha responde na hora.
 - **Tela** — proporção 16:9, 4:3, 9:16, 1:1 ou 21:9, e *Slideshow* para montagens só de fotos.
 - **Projetos `.vmp`** — Salvar e Salvar como, desfazer e refazer (cada gesto é um único passo).
