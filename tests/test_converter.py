@@ -384,15 +384,25 @@ def test_opcao_de_grafo_em_arquivo_segue_a_versao_do_ffmpeg(tmp_path, monkeypatc
     args = ['ffmpeg', '-filter_complex', 'null;' * 1000, 'saida.mp4']
     for versao, esperado in ((6, '-filter_complex_script'), (7, '-/filter_complex'),
                              (9, '-/filter_complex'), (None, '-filter_complex_script')):
-        command_assets._script_options.clear()
+        # Um dicionário novo por caso, desfeito no fim do teste: o ``clear()``
+        # deixava a opção do último caso guardada para os testes seguintes.
+        monkeypatch.setattr(command_assets, '_script_options', {})
         monkeypatch.setattr(command_assets, 'major_version', lambda _caminho, v=versao: v)
         with command_assets.filter_script(args, tmp_path) as prepared:
             assert prepared[1] == esperado, f"versão {versao}"
             assert Path(prepared[2]).read_text() == args[2]
 
 
-def test_script_longo_e_exclusivo_e_limpo_em_sucesso_e_falha(tmp_path):
+def test_script_longo_e_exclusivo_e_limpo_em_sucesso_e_falha(tmp_path, monkeypatch):
+    from videomanager.infrastructure.ffmpeg import command_assets
     from videomanager.infrastructure.ffmpeg.command_assets import filter_script
+
+    # O teste lê a opção antiga pelo nome, então fixa a versão: sem isso a opção
+    # vinha do ffmpeg que estivesse no PATH (o 9 do Chocolatey pede a nova) ou do
+    # que o teste vizinho deixou guardado — e só passava na ordem em que o vizinho
+    # rodava antes, o que a divisão da suíte entre jobs deixou de garantir.
+    monkeypatch.setattr(command_assets, '_script_options', {})
+    monkeypatch.setattr(command_assets, 'major_version', lambda _caminho: 6)
     graph = 'null;' * 1000
     args = ['ffmpeg', '-filter_complex', graph, 'saida.mp4']
     foreign = tmp_path / 'outro.filter_script'
