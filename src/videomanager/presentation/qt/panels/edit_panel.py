@@ -968,6 +968,7 @@ class EditPanel(QWidget):
         self._properties_widget = _ClipPropertiesWidget()
         self.destroyed.connect(self._properties_widget.deleteLater)
         self._properties_widget.property_changed.connect(self._on_properties_changed)
+        self._properties_widget.speed_changed.connect(self._on_properties_speed)
         self._properties_widget.animation_scope_changed.connect(
             lambda enabled: setattr(self._preview, "_whole_animation", enabled))
         self._properties_widget.close_requested.connect(self._close_properties_tab)
@@ -2541,6 +2542,13 @@ class EditPanel(QWidget):
             )
             self._act(menu, f"{strings.EDIT_DELETE}  (Del)", self._delete_selected)
             menu.addSeparator()
+            if clip.is_reversible:
+                self._act(
+                    menu, strings.EDIT_REVERSE,
+                    lambda: self._toggle_reverse(clip.clip_id),
+                    enabled=clip.can_reverse, checked=clip.reversed,
+                    tip=strings.EDIT_REVERSE_TIP if clip.can_reverse else strings.EDIT_REVERSE_TOO_LONG_TIP,
+                )
             if clip.has_image and clip.media.has_audio and clip.media.kind is MediaKind.VIDEO:
                 self._act(
                     menu, strings.EDIT_DETACH, self._detach_audio,
@@ -2621,6 +2629,8 @@ class EditPanel(QWidget):
     def _end_properties_session(self) -> None:
         self._properties_session = -1
         self._properties_session_timer.stop()
+        # A velocidade digitada na aba agrupa o desfazer pela mesma pausa dos outros campos.
+        self._end_speed_session()
         self._settle_pose()
 
     def _settle_pose(self) -> None:
@@ -2680,6 +2690,9 @@ class EditPanel(QWidget):
         if not found_after:
             return
         track_idx, updated_clip = found_after
+        if "gain_db" in changes:
+            # Só os botões da barra: recarregar a aba aqui reescreveria o campo no meio da digitação.
+            self._show_clip_numbers(updated_clip)
 
         self._sync_canvas()
 
@@ -2732,9 +2745,13 @@ class EditPanel(QWidget):
         *,
         enabled: bool = True,
         tip: str = "",
+        checked: bool | None = None,
     ) -> None:
         action = menu.addAction(text)
         action.setEnabled(enabled)
+        if checked is not None:
+            action.setCheckable(True)
+            action.setChecked(checked)
         if tip:
             action.setToolTip(tip)
         action.triggered.connect(slot)
@@ -2911,6 +2928,18 @@ class EditPanel(QWidget):
             )
         return self._position - clip.start >= MIN_SEGMENT
 
+    def _toggle_reverse(self, clip_id: int) -> None:
+        """Inverte o bloco clicado, ou o devolve ao sentido normal.
+
+        Pelo identificador do menu, e não pela seleção: o botão direito pode
+        cair num bloco que não é o selecionado.
+        """
+        found = self._project.find(clip_id)
+        if found is None or not found[1].can_reverse:
+            return
+        self._remember()
+        self._apply(self._project.with_updated_clip(clip_id, reversed=not found[1].reversed))
+
     def _detach_audio(self) -> None:
         clip = self._timeline.selected_clip
         if clip is None or not clip.can_detach_audio:
@@ -3076,6 +3105,22 @@ class EditPanel(QWidget):
         self._refresh_clip_fields()
         self._refresh_controls()
 
+    def _on_properties_speed(self, clip_id: int, value: float) -> None:
+        """Velocidade digitada na aba Propriedades: a mesma regra do botão ⚡ da barra.
+
+        ``_on_speed`` age sobre o bloco **selecionado**, e a aba pode estar mostrando outro; por isso a
+        seleção vem primeiro. A colisão com o vizinho recusa a velocidade e avisa uma vez só.
+        """
+        if self._timeline.selected != clip_id:
+            self._timeline.select(clip_id)
+        self._on_speed(value)
+        self._properties_session_timer.start()
+        found = self._project.find(clip_id)
+        if found is not None and abs(found[1].speed - value) >= 0.01:
+            # Recusada: o campo volta à velocidade que valeu, em vez de ficar com um número que não será tocado.
+            self._properties_widget.load_clip(found[1], self._project.width, self._project.height,
+                                              fps=self._project.fps, text_ratio=self._project.text_ratio)
+
     def _end_speed_session(self) -> None:
         self._speed_session = -1
         self._speed_warned = False
@@ -3139,18 +3184,25 @@ class EditPanel(QWidget):
         if self._overlay_drag_session == clip_id:
             self._on_edit_cancelled()
 
+    def _show_clip_numbers(self, clip: Clip | None) -> None:
+        """Volume e velocidade do bloco nos botões da barra, com o separador decimal do idioma (por ``bind``).
+
+        O sinal de "+" é do volume de um bloco: sem bloco o texto é "0,0 dB", que é mais estreito, e o
+        ``_clip_label`` ao lado ocupa o que sobra.
+        """
+        if clip is not None:
+            gain, speed = clip.gain_db, clip.speed
+            bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(gain, sign=True)} dB")
+            bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(speed)}x")
+        else:
+            bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(0.0)} dB")
+            bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(1.0)}x")
+
     def _refresh_clip_fields(self) -> None:
         clip = self._timeline.selected_clip
         self._syncing = True
         try:
-            # Por bind: os números levam o separador decimal do idioma.
-            if clip is not None:
-                gain, speed = clip.gain_db, clip.speed
-                bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(gain, sign=True)} dB")
-                bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(speed)}x")
-            else:
-                bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(0.0)} dB")
-                bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(1.0)}x")
+            self._show_clip_numbers(clip)
             self._sync_extras_controls(clip)
         finally:
             self._syncing = False
@@ -3322,9 +3374,12 @@ class EditPanel(QWidget):
         self._label_auto_items()
 
     def _label_auto_items(self) -> None:
-        # O que a escolha automática produziu fica à vista mesmo sem abrir a
-        # lista: sem isso, "Automática" não diz em que tela a edição está.
-        proj_aspect = format_aspect_ratio(self._project.width, self._project.height)
+        # O que a escolha automática produziria fica à vista mesmo sem abrir a
+        # lista: sem isso, "Automática" não diz que tela é essa. Vem do material
+        # (``output_canvas`` sem escolha), e não da tela do projeto, que já traz a
+        # escolhida: com 9:16 fixada, "Automática" passava a anunciar 9:16.
+        width, height, _fps = output_canvas(self._project, None, None)
+        proj_aspect = format_aspect_ratio(width, height)
         self._aspect_box.setItemText(
             0,
             f"{strings.EDIT_CANVAS_ASPECT_AUTO}  ({proj_aspect})"
@@ -3334,9 +3389,7 @@ class EditPanel(QWidget):
         self._canvas_box.setItemText(
             0,
             f"{strings.EDIT_CANVAS_AUTO}  ("
-            + strings.EDIT_CANVAS_SIZE.format(
-                width=self._project.width, height=self._project.height
-            )
+            + strings.EDIT_CANVAS_SIZE.format(width=width, height=height)
             + ")",
         )
 
@@ -3423,7 +3476,11 @@ class EditPanel(QWidget):
                 or self._interaction_context != self._interaction_key()):
             return
         layers = tuple(QPixmap.fromImage(QImage.fromData(data)) for data in images)
-        if len(layers) == 3 and all(not p.isNull() for p in layers):
+        # A contagem é a do plano: com o fundo desfocado são quatro imagens, sem
+        # ele três. Três para um plano com fundo deixariam a faixa descoberta
+        # mostrando a trilha de baixo, sem erro; quatro para um sem, o inverso.
+        expected = 4 if self._interaction_context[2].blur else 3
+        if len(layers) == expected and all(not p.isNull() for p in layers):
             self._preview.set_interaction_layers(layers)
 
     def _begin_loading_hint(self) -> None:
@@ -3688,7 +3745,8 @@ class EditPanel(QWidget):
         finish = min(clip.end, end)
         if finish <= begin:
             return clip.in_point, clip.out_point
-        return clip.source_time(begin), clip.source_time(finish)
+        # Invertido, o começo da vista é o topo do trecho: a janela sai ao contrário.
+        return tuple(sorted((clip.source_time(begin), clip.source_time(finish))))
 
     def _strip_is_stale(self, clip: Clip, kind: TrackKind) -> bool:
         current = self._timeline.strip_range(clip.clip_id)
@@ -4021,9 +4079,12 @@ class EditPanel(QWidget):
         clip = self._keyframe_clip()
         if clip is None:
             return
-        times = tuple(timeline_time(t, clip.start, clip.in_point, clip.speed)
-                      for t in self._keyframes_for(clip)
-                      if clip.in_point <= t < clip.out_point)
+        # Invertido, a mídia corre para baixo na edição: o tempo cresce ao
+        # contrário do da origem, e a lista precisa voltar a ficar em ordem.
+        head, speed = (clip.out_point, -clip.speed) if clip.reversed else (clip.in_point, clip.speed)
+        times = tuple(sorted(timeline_time(t, clip.start, head, speed)
+                             for t in self._keyframes_for(clip)
+                             if clip.in_point <= t < clip.out_point))
         if direction < 0:
             target = keyframe_at_or_before(
                 times, self._position - frame_step(self._fps)

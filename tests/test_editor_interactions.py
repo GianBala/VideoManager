@@ -517,6 +517,47 @@ def test_preview_drag_auto_keyframe_at_new_time() -> None:
     assert abs(kfs[2].x - 0.2) < 1e-4
 
 
+def _arrasta_na_previa(clip: Clip, instante: float) -> Clip:
+    """Arrasta o bloco 150 × 100 px na prévia, com o cursor em ``instante``, e devolve o bloco como ficou."""
+    preview = _Preview()
+    preview.resize(800, 600)
+    preview.set_active_clip(clip, 800, 600)
+    preview.set_position(instante)
+    cx, cy, _w, _h = preview._clip_geometry(clip)
+
+    def evento(tipo, ponto, botao, botoes):
+        return QMouseEvent(tipo, ponto, ponto, botao, botoes, Qt.KeyboardModifier.NoModifier)
+
+    inicio, fim = QPointF(cx, cy), QPointF(cx + 150, cy + 100)
+    preview.mousePressEvent(evento(QMouseEvent.Type.MouseButtonPress, inicio, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton))
+    assert preview._drag_mode == "move"
+    preview.mouseMoveEvent(evento(QMouseEvent.Type.MouseMove, fim, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton))
+    preview.mouseReleaseEvent(evento(QMouseEvent.Type.MouseButtonRelease, fim, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton))
+    return preview._active_clip
+
+
+def _video_com_fade_de_som() -> Clip:
+    media = MediaRef(Path("v.mp4"), MediaKind.VIDEO, duration=10.0, width=1280, height=720, fps=30.0, has_audio=True, channels=2)
+    return Clip(media=media, start=0.0, duration=4.0,
+                keyframes=(Keyframe(0.0, gain_offset_db=-30.0), Keyframe(2.0, gain_offset_db=0.0)))
+
+
+def test_arrastar_na_previa_o_bloco_que_so_tem_curva_de_volume_move_o_bloco_inteiro() -> None:
+    """Num bloco só com fade de som, arrastar fora de um ponto move o bloco, e não cria um ponto de pose: a imagem
+    ia e voltava (x: 0,5 → x novo → 0,5)."""
+    movido = _arrasta_na_previa(_video_com_fade_de_som(), 1.0)
+    assert movido.x > 0.55 and not movido.has_pose_keyframes
+    assert all(k.x == pytest.approx(movido.x) for k in movido.keyframes)
+    assert [k.gain_offset_db for k in movido.keyframes] == [-30.0, 0.0]
+
+
+def test_arrastar_na_previa_com_o_cursor_sobre_um_ponto_anima_a_imagem() -> None:
+    movido = _arrasta_na_previa(_video_com_fade_de_som(), 2.0)
+    assert movido.has_pose_keyframes
+    assert movido.keyframes[0].x == pytest.approx(0.5) and movido.keyframes[1].x > 0.55
+    assert [k.gain_offset_db for k in movido.keyframes] == [-30.0, 0.0]
+
+
 def test_preview_rotate_auto_keyframe_at_new_time() -> None:
     """Ao rotacionar pela alça no preview em instante sem keyframe, cria novo keyframe mantendo os outros intactos."""
     preview = _Preview()

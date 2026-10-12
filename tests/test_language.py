@@ -256,6 +256,8 @@ _IGUAIS = {
     "META_OPEN_TIP", "META_TAGS_GROUP", "META_TRACK_HEADERS",
     # "M" de mudo e de mute.
     "EDIT_TRACK_MUTED_BADGE",
+    # "Volume" é a mesma palavra nas duas línguas.
+    "PROP_VOLUME",
 }
 
 

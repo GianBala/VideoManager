@@ -594,9 +594,12 @@ def test_transicao_usa_alcas_e_faz_crossfade_do_audio_anexado() -> None:
     assert "-ss 6.500000 -i video.mp4" in inputs
     assert "acrossfade=d=1.000000:c1=qsin:c2=qsin" in filters
     # O segundo clipe ainda está no relógio local antes do adelay; seu mudo
-    # precisa começar em -0,5 s para cobrir os primeiros 0,5 s disponíveis.
-    assert "volume=0:enable='between(t,3.500000,4.500000)'" in filters
-    assert "volume=0:enable='between(t,-0.500000,0.500000)'" in filters
+    # precisa ir até 0,5 s (a janela começa em -0,5 s) para cobrir os primeiros 0,5 s
+    # disponíveis. O primeiro cala do 3,5 s dele em diante. As duas pontas se calam com um
+    # ``afade`` de uma amostra, que é exato — o ``enable`` por quadro errava por um quadro.
+    assert "afade=t=out:st=3.500000:d=0.000020833" in filters
+    assert "afade=t=in:st=0.500000:d=0.000020833" in filters
+    assert "volume=0:enable=" not in filters
 
 
 def test_sem_alcas_repete_quadro_mas_audio_faz_fade_sem_silencio_injetado() -> None:
@@ -634,8 +637,8 @@ def test_sem_alcas_repete_quadro_mas_audio_faz_fade_sem_silencio_injetado() -> N
     assert "tpad=start_mode=clone:start_duration=0.500000" in filters
     assert "acrossfade=" not in filters
     assert "apad=pad_dur=" not in filters
-    assert "cos((t-3.988000)/0.012000*PI/2)" in filters
-    assert "sin((t-0.000000)/0.012000*PI/2)" in filters
+    assert "afade=t=out:st=3.988000:d=0.012000:curve=qsin" in filters
+    assert "afade=t=in:st=0.000000:d=0.012000:curve=qsin" in filters
 
 
 @pytest.mark.parametrize(
@@ -673,8 +676,8 @@ def test_transicao_de_audio_respeita_mudo_de_cada_ponta(
     )
     filters = ";".join(graph.filters)
 
-    assert ("cos((t-3.988000)/0.012000*PI/2)" in filters) is fade_out
-    assert ("sin((t-0.000000)/0.012000*PI/2)" in filters) is fade_in
+    assert ("afade=t=out:st=3.988000:d=0.012000:curve=qsin" in filters) is fade_out
+    assert ("afade=t=in:st=0.000000:d=0.012000:curve=qsin" in filters) is fade_in
     assert "acrossfade=" not in filters
     assert (graph.audio_label is not None) is (not left_muted or not right_muted)
 
@@ -851,3 +854,74 @@ def test_sem_teto_fixo_a_transicao_vai_ate_o_que_cabe_nos_dois_lados():
     assert projeto.transition_limit(clip) == pytest.approx(20.0)
     puxada = projeto.resized(marcador, "fim", 20.0 + 6.0)
     assert puxada.find(marcador)[1].duration == pytest.approx(12.0)
+
+
+class TestFundoDesfocadoNasPropriedades:
+    """O controle do fundo desfocado: onde aparece, o que emite e quando se cala."""
+
+    @staticmethod
+    def _bloco(kind: MediaKind = MediaKind.VIDEO, **campos) -> Clip:
+        media = MediaRef(Path("/m/arquivo"), kind, duration=5.0, width=1080, height=1920)
+        return Clip(media=media, start=0.0, duration=5.0, **campos)
+
+    def _carregado(self, clip: Clip) -> _ClipPropertiesWidget:
+        w = _ClipPropertiesWidget()
+        w.load_clip(clip, 1920, 1080)
+        return w
+
+    def test_aparece_em_video_e_em_foto(self, qapp: QApplication) -> None:
+        for clip in (self._bloco(), self._bloco(MediaKind.IMAGE)):
+            w = self._carregado(clip)
+            assert not w._blur_group.isHidden()
+            w.deleteLater()
+
+    def test_nao_aparece_onde_nao_ha_o_que_desfocar(self, qapp: QApplication) -> None:
+        sem = MediaRef(Path("Rótulo"), MediaKind.IMAGE, duration=3.0)
+        casos = [
+            Clip(media=sem, start=0.0, duration=3.0, overlay_type="text", text_content="oi"),
+            Clip(media=sem, start=0.0, duration=3.0, overlay_type="filter", filter_name="sepia"),
+            Clip(media=sem, start=0.0, duration=1.0, overlay_type="transition", transition_name="fade"),
+            self._bloco(audio_only=True),
+        ]
+        for clip in casos:
+            w = self._carregado(clip)
+            assert w._blur_group.isHidden(), clip.overlay_type
+            w.deleteLater()
+
+    def test_marcar_emite_a_mudanca_e_carregar_nao(self, qapp: QApplication) -> None:
+        clip = self._bloco(blur_background=True)
+        w = _ClipPropertiesWidget()
+        emitidos: list[tuple[int, dict]] = []
+        w.property_changed.connect(lambda i, v: emitidos.append((i, v)))
+        w.load_clip(clip, 1920, 1080)
+        assert w._chk_blur.isChecked() and not emitidos
+        w._chk_blur.setChecked(False)
+        assert emitidos == [(clip.clip_id, {"blur_background": False})]
+        w.deleteLater()
+
+    def test_fundo_verde_desliga_a_opcao_sem_apagar_a_escolha(self, qapp: QApplication) -> None:
+        w = self._carregado(self._bloco(blur_background=True))
+        w._chk_chroma.setChecked(True)
+        assert not w._chk_blur.isEnabled() and w._chk_blur.isChecked()
+        explicacao = w._lbl_blur.text()
+        w._chk_chroma.setChecked(False)
+        assert w._chk_blur.isEnabled() and w._lbl_blur.text() != explicacao
+        w.deleteLater()
+
+    def test_bloco_com_fundo_verde_nasce_com_a_opcao_desligada_e_explicada(self, qapp: QApplication) -> None:
+        w = self._carregado(self._bloco(blur_background=True, chromakey_enabled=True))
+        assert not w._chk_blur.isEnabled()
+        from videomanager.presentation.qt import strings
+        assert w._lbl_blur.text() == strings.PROP_BLUR_CHROMA
+        w.deleteLater()
+
+    def test_troca_de_idioma_leva_titulo_opcao_e_nota(self, pseudo) -> None:
+        from videomanager.domain import i18n
+        from videomanager.presentation.qt.i18n import apply_language
+        w = self._carregado(self._bloco(chromakey_enabled=True))
+        apply_language(i18n.ENGLISH)
+        for texto in (w._blur_group.title(), w._chk_blur.text(), w._lbl_blur.text()):
+            assert texto.startswith("⟦"), texto
+        w._chk_chroma.setChecked(False)
+        assert w._lbl_blur.text().startswith("⟦")
+        w.deleteLater()

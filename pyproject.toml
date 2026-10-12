@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "videomanager"
-version = "3.1"
+version = "3.3"
 description = "Baixa, converte e edita vídeo e áudio, e ajusta metadados (Windows e Linux)"
 readme = "README.md"
 # Expressão SPDX (PEP 639), que pede setuptools 77 ou mais novo.
@@ -12,7 +12,12 @@ license = "GPL-3.0-or-later"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.10"
 dependencies = [
-    "PySide6>=6.6",
+    # PySide6 6.12.0 com Python 3.10: o interpretador morre ao finalizar ("Fatal Python error:
+    # none_dealloc: deallocating None"), com todos os testes passando — reproduzido no main puro, e com
+    # a 6.11.1 não acontece. Foi o que derrubou o job do Ubuntu com 3.10 na CI. O teto vale só ali;
+    # tire-o quando houver uma 6.12.x que corrija.
+    "PySide6>=6.6,<6.12; python_version < '3.11'",
+    "PySide6>=6.6; python_version >= '3.11'",
     # Sem teto de versão de propósito: extratores quebram quando as plataformas
     # mudam, então o yt-dlp precisa poder ser atualizado a qualquer momento.
     # O extra "default" traz o que o pacote não tinha: os scripts do solver

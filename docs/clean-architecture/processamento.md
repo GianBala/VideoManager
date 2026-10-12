@@ -210,17 +210,32 @@ compartilhado preserva as mesmas regras de montagem entre prévia e saída.
   e camadas simultâneas.
 - Cada peça traduz tempo da edição para tempo da origem, incluindo velocidade.
 - Mixagem usa `amix` com `normalize=0`, preservando o ganho solicitado.
+- Um bloco invertido lê o trecho de baixo para cima (`seek` é o menor instante, um quarto de
+  segundo antes para o áudio não nascer degradado), corta com `trim` e vira com
+  `reverse`/`areverse` antes do `setpts`; o `reverse` guarda todos os quadros, então o vídeo é
+  lido em janelas, uma por processo, na exportação (`ParallelExport` com uma vaga) e na
+  reprodução (`Stages`). O quadro parado da prévia não vira nada, lê de frente o quadro
+  espelhado (ver
+  [Decisões de projeto](../decisoes-de-projeto.md#o-bloco-invertido)).
 - Transformações, filtros, transições, chroma key e recursos de texto entram
   no grafo sem depender de widgets.
 - Ajuste comum de fps não implica interpolação de movimento. `minterpolate`
   só entra quando solicitado e elegível.
 - Quadros-chave viram expressões avaliadas pelo ffmpeg a cada quadro (ver
   [Animação no grafo](#animação-no-grafo)).
+- O fundo desfocado de um bloco é um ramo `split` do mesmo fluxo, que não abre o
+  arquivo de novo: o bloco coberto à tela, borrado numa tela de trabalho pequena
+  e ampliado, por baixo da frente e só na janela dela (as decisões estão em
+  [Decisões de projeto](../decisoes-de-projeto.md#o-fundo-desfocado-do-bloco)).
+  Custa: a 1080p, uma exportação de 5 s leva +23% de tempo e +45 MB de pico em
+  MP4 e +48% e +13 MB em GIF; o fluxo da reprodução de uma montagem com dois
+  blocos leva de +7% a +18% de tempo (varia de sessão para sessão) e cerca de
+  +320 MB de pico (1473 para 1789 MB). Medido com `scripts/validate_blur_export.py`.
 
 Os consumidores do mesmo grafo são: `export_args` (arquivo; `gif_args` para GIF),
 `frame_command` (quadro parado, com `still=True`), `scrub_command` (trecho de
 até 20 s em MJPEG para o cache da agulha), `interaction_commands` (fundo, objeto
-e frente para o arrasto na prévia), `playback_command` (fluxo de reprodução) e
+e frente para o arrasto na prévia, mais o fundo desfocado quando ligado), `playback_command` (fluxo de reprodução) e
 `audio_command` (PCM, com `until` para a emenda do loop). Veja
 [prévia](previa.md) para o ciclo de cada um.
 
@@ -245,6 +260,18 @@ resolvidos antes dessas curvas, portanto uma ponta muda nunca reaparece pela
 transição. A prévia monta esse grafo diretamente na resolução visível para não
 processar uma tela
 4K que seria reduzida no fim; a exportação continua na resolução do projeto.
+
+**As bordas do áudio são exatas na amostra, e não por quadro.** O `volume` com `enable` ou `eval=frame` avalia por
+quadro de áudio, e o quadro é o da fonte (~21 ms em PCM, ~340 ms em FLAC de 16384 amostras). Medido, com um seno
+em fase nos dois lados: o lado que devia calar seguia soando no começo da janela (envelope 2,0, +6 dB, por ~25 ms), o
+que devia voltar só voltava um quadro depois do fim (buraco de ~3 ms, dezenas de ms em FLAC), e, sem alças, o de-click
+de 12 ms não existia — o som cortava seco e o outro lado vinha ~20 ms depois. Hoje o mudo de uma ponta é um `afade` de
+uma amostra (`_mute_filter`: `out` cala dali em diante, `in` cala até ali; a janela cobre sempre uma ponta, porque se
+centra no corte) e o de-click é `afade` com `curve=qsin`, a mesma curva cos/sin de antes. Quando a rampa já começou
+antes do primeiro som do trecho (prévia a partir de dentro dela), `afade` não aceita início negativo e fica a
+expressão, em quadros de 1 ms. As duas pontas do `acrossfade` passam por `asetnsamples=n=480:p=0`: com os quadros da
+fonte ele **às vezes não entrega nada** (FLAC de 16384 amostras: a janela inteira muda em ~1 de cada 4 exportações;
+3 de 12 exportações antes, 0 de 20 depois). Ver `tests/test_audio_bordas_da_transicao.py`.
 
 Quando o marcador habilita `transition_affects_additionals`, o compositor cria
 duas subcomposições adicionais antes do `xfade`. Elas respeitam visibilidade e
@@ -289,6 +316,10 @@ varia vira um número literal, sem expressão.
   o tamanho que devia variar. O preset `zoom_in`, que anima escala e opacidade
   juntas, saía do arquivo com a imagem no tamanho do primeiro quadro-chave,
   enquanto a prévia — que monta um grafo por quadro — mostrava o movimento certo.
+- **Volume:** `composer._gain_filter` monta `volume='pow(10,max(-60,min(12,G+(curva)))/20)':eval=frame` com a mesma
+  `_keyframe_expr` (propriedade `gain_offset_db`); sem curva o filtro é o fixo de sempre. A origem do relógio é
+  `-piece.elapsed` no trecho e `-_side_elapsed(side)` no lado de uma transição, e a imagem escolhe o caminho por
+  `has_pose_keyframes` para um fade de som não mudar a montagem do vídeo.
 - **Posição:** expressões nas coordenadas do `overlay`
   (`x='round((expr)*W-w/2)'`), arredondadas como o Qt arredonda a geometria das
   alças (`_image_overlay_geometry`). `tests/test_preview_overlay_alignment.py`

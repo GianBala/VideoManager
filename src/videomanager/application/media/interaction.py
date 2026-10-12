@@ -11,6 +11,9 @@ class InteractionPlan:
     source: Project
     clip_id: int
     seconds: float
+    # Se o gesto precisa da imagem do fundo desfocado como quarta camada. É a
+    # opção ligada, e não "aparece agora": a pose muda durante o arrasto.
+    blur: bool = False
 
 
 def interaction_plan(project: Project, clip_id: int, seconds: float) -> InteractionPlan | None:
@@ -39,4 +42,4 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     source = subset([clip]).with_updated_clip(clip_id, x=.5, y=.5, scale=1.,
                     scale_x=1., scale_y=1., rotation=0., opacity=1., keyframes=())
     return InteractionPlan(subset(ordered[:selected]), subset(ordered[selected + 1:]),
-                           source, clip_id, seconds)
+                           source, clip_id, seconds, blur=clip.has_blur_background)

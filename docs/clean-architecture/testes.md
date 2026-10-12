@@ -59,15 +59,25 @@ usam o programa de verdade, porque o defeito só existe na execução.
 | --- | --- |
 | `tests/domain/test_keyframe.py` | Curvas, interpolação, menor caminho angular, presets, divisão/aparo preservando a curva e edição por instante × animação inteira. |
 | `tests/domain/test_project.py` | Tela automática (o maior vídeo e a maior taxa mandam; foto não), transições ligadas ao corte por identidade, mover/trocar/aparar/dividir blocos, separar áudio, trilhas, soltura de mídia e aritmética temporal. |
+| `tests/domain/test_reverse_windows.py` | O planejador de janelas do bloco invertido: orçamento com blocos simultâneos somados, grade de quadros, pulo do trecho sem inversão, janela da prévia e termina em qualquer combinação. |
+| `tests/domain/test_reversed_clip.py` | Bloco invertido sem ffmpeg: tempo da origem, divisão sem perder nem repetir, alças que tiram do topo ou da base, teto de memória e quem pode ser invertido. |
 | `tests/domain/test_export_safety.py` | O corte rápido não pode descartar velocidade, opacidade, quadros-chave nem lacunas. |
 | `tests/application/test_editor.py` | Histórico, transações de gesto (`begin_edit`/`commit_edit`/`cancel_edit`), respostas atrasadas. |
 | `tests/application/test_formatting.py` | Nome da proporção de aspecto. |
-| `tests/test_project_io.py` | Persistência real: ida e volta, quadros-chave, versão não suportada, caminhos relativos a partir da pasta do documento, cópia `.v1.bak` exata sem sobrescrever e pontos de suporte negativos. |
+| `tests/test_project_io.py` | Persistência real: ida e volta, quadros-chave, versão não suportada, caminhos relativos a partir da pasta do documento, cópia `.v1.bak` exata sem sobrescrever, pontos de suporte negativos, a inversão do bloco no v5 e a curva de volume no v6. |
+| `tests/test_stages.py` | Comandos em sequência como um cano só: ordem e contagem, abertura da janela seguinte só na metade, falha no meio, término que derruba todos e arquivos de filtro que vivem até o fim. |
+| `tests/test_reversal.py` | Bloco invertido medido na saída do ffmpeg: exportação espelho da normal (quadros e amostras), quadro parado e reprodução iguais à exportação, divisão, quadros-chave, transições contra o mesmo projeto montado com um arquivo invertido de verdade, e as janelas: exportação em janelas igual à de um processo só, reprodução e som encadeados no ritmo e sem estalo nas emendas, e o cache da agulha. |
+| `tests/domain/test_volume_animado.py` | A curva de volume sem Qt nem ffmpeg: interpolação em dB e easing, soma ao volume do bloco e limites, `has_pose_keyframes`, edição do ponto, pose que não apaga o volume, dividir e aparar sem degrau e separar áudio. |
+| `tests/test_volume_animado_som.py` | O som da curva medido na saída: nível em janelas de 20 ms contra o mesmo trecho sem curva, na exportação, na prévia (inclusive a partir do meio), em bloco invertido, dividido, com transição e depois de separar o áudio; mais o grafo (filtro, relógio e caminho da imagem). |
+| `tests/test_audio_bordas_da_transicao.py` | As bordas de uma transição de som medidas na saída, com seno em fase em PCM/MOV e FLAC de 16384/MKV: com alças, sem estouro no começo da janela nem buraco no fim (envelope contra cos+sin); sem alças, o de-click de 12 ms no lugar e sem silêncio depois do corte; e as pontas do `acrossfade` em quadros de 480 amostras. |
+| `tests/test_propriedades_som.py` | A aba Propriedades por tipo de bloco (fundo verde só onde há imagem, velocidade e volume, animação do volume e efeitos rápidos filtrados), o que ela emite e o desfazer. |
+| `tests/test_reversal_menu.py` | O "Inverter" do botão direito: quem o recebe, marca, desfazer e o bloco clicado (não o selecionado). |
 | `tests/test_images_in_video_tracks.py` | Fotos na trilha de vídeo, ajuste à tela, migração v1/v2 → v3 com a mesma aparência (comparada ao ffmpeg). |
 | `tests/test_track_order.py`, `tests/test_timeline_ruler.py` | Ordem livre das trilhas; régua e agulha fixas com as trilhas rolando por baixo. |
 | `tests/test_media_drop.py` | Importar só leva ao acervo; arrasto com eventos de mouse reais até a trilha, bloco fantasma, trilha nova, um passo de desfazer. |
 | `tests/test_editor_interactions.py`, `tests/test_editor_regressions.py`, `tests/test_additional_tracks_ui.py` | Gestos, alvos de comando, rolagem, cancelamento por Escape, propriedades, popups, Adicionais, persistência e mudanças pendentes. |
 | `tests/test_chromakey_and_transitions.py`, `tests/test_editor_media_integration.py` | Chroma key, transições (duração, alças, quadro final, filtros e adicionais na passagem) e classificação/orientação de mídias sintéticas; os que dependem do ffmpeg 7 declaram `_exige_ffmpeg(tools, 7)`. |
+| `tests/test_fundo_desfocado_caminhos.py` | O fundo desfocado do bloco medido por pixel contra o mesmo projeto sem a opção: onde aparece e onde o quadro sai byte a byte igual (proporção × pose, quadros-chave e giro completo), opacidade, imagem com transparência (o alfa é composto sobre preto, não a cor escondida), trilha de baixo só na janela do bloco, último quadro em várias taxas, duração e quadros exportados, velocidade, divisão, filtro acima e transição. |
 | `tests/test_still_frame.py` | Quadro parado no meio de um quadro, nos cortes e no fim, inclusive num GIF de passo irregular (o brilho da fonte diz qual quadro apareceu). |
 | `tests/test_preview.py` | Taxa da prévia, quadros de reprodução (cancelamento, pré-carga sem consumir o relógio, só o quadro mais recente), encaixe na área e tira de miniaturas. |
 | `tests/test_scrub_cache.py` | Assinatura por instante, teto de memória, obsolescência, preenchimento e arrasto com quadro guardado. |
@@ -176,6 +186,8 @@ PYTHONPATH=src .venv/bin/python scripts/validate_scrub.py --seconds 30 --size 19
 QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_preview_gestures.py
 QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_editor_responsiveness.py
 QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_language.py --modo ingles
+QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_blur_drag.py
+PYTHONPATH=src .venv/bin/python scripts/validate_blur_export.py --tela 1080 --casos mp4,gif
 ```
 
 | Script | O que mede |
@@ -185,6 +197,9 @@ QT_QPA_PLATFORM=offscreen PYTHONPATH=src .venv/bin/python scripts/validate_langu
 | `validate_preview_gestures.py` | Eventos de mouse reais na prévia: se as bordas dos pixels do objeto acompanham cada movimento. `--canonical-only` desliga as camadas para comparar no mesmo código. |
 | `validate_editor_responsiveness.py` | 30 gestos a 60 Hz: latência dos quadros parciais e finais, workers vivos, processos e encerramento. |
 | `validate_language.py` | A troca de idioma em quinze cenas: a janela trocada ao vivo contra uma que nasce no idioma, a ida e volta, pinturas durante a troca, efeitos colaterais e o tempo. `--modo pseudo` acha texto fora do catálogo, `identidade` confere a geometria da troca, `ingles` acha texto com cara de português; `--cortes` lista o texto que corta em inglês e não em português. A troca durante a reprodução se mede com `validate_playback.py --trocar-idioma`. |
+| `validate_playback.py` | Pré-carga, ritmo, velocidade da mídia e emenda do loop em duas cenas (`--cenas` escolhe outras). `reduzido`, `montagem_reduzida` e o sufixo `_fundo` medem o fundo desfocado contra uma cena gêmea de mesma geometria. `--trocar-idioma` troca a interface durante a reprodução. |
+| `validate_blur_drag.py` | Arrasto de um bloco com fundo desfocado em quatro variantes (sem fundo, com o fundo já à vista e o bloco 16:9 que só descobre a tela ao sair do lugar, mais o 16:9 sem a opção para separar o custo): em todas o gesto usa as camadas prontas, com o fundo como quarta imagem: quanto a imagem fica atrás da mão, se a faixa descoberta mostra o borrão e não a trilha de baixo, e o tempo até assentar depois de soltar. |
+| `validate_blur_export.py` | **Só Linux** (o pico de memória vem de `os.wait4` e `/proc/meminfo`; em outro sistema o roteiro recusa com uma mensagem). O custo do fundo na exportação, sem e com a opção em rodadas alternadas: tempo, pico de memória, quadros e duração do arquivo, em MP4, GIF, interpolado e em trechos paralelos × serial. Recusa os casos interpolados em 4K e sem memória livre. |
 
 Nenhum deles substitui arrastar a agulha e reproduzir no aplicativo; servem
 para comparar máquinas e versões.

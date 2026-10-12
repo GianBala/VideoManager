@@ -881,8 +881,14 @@ class Timeline(QWidget):
 
     def _source_rect(self, clip: Clip, rect: QRectF, begin: float, end: float) -> QRectF:
         """Onde um trecho de origem cai dentro do bloco, em pixels."""
-        left = self._x_of(clip.start + (begin - clip.in_point))
-        right = self._x_of(clip.start + (end - clip.in_point))
+        if clip.reversed:
+            # Invertido, o começo do bloco é o topo do trecho: o que está mais
+            # acima na mídia aparece mais à esquerda.
+            left = self._x_of(clip.start + (clip.out_point - end))
+            right = self._x_of(clip.start + (clip.out_point - begin))
+        else:
+            left = self._x_of(clip.start + (begin - clip.in_point))
+            right = self._x_of(clip.start + (end - clip.in_point))
         return QRectF(left, rect.top(), max(1.0, right - left), rect.height())
 
     def _paint_thumbs(self, painter: QPainter, clip: Clip, rect: QRectF) -> None:
@@ -912,10 +918,18 @@ class Timeline(QWidget):
         if strip is None or strip.wave is None:
             return
         area = self._source_rect(clip, rect, strip.in_point, strip.out_point)
-        painter.drawImage(
-            QRectF(area.left(), rect.top() + 12, area.width(), rect.height() - 14),
-            strip.wave,
-        )
+        target = QRectF(area.left(), rect.top() + 12, area.width(), rect.height() - 14)
+        if clip.reversed:
+            # A onda é desenhada da esquerda para a direita no sentido da mídia;
+            # espelhada em torno do centro dela, ela acompanha o bloco invertido.
+            painter.save()
+            painter.translate(target.center().x(), 0.0)
+            painter.scale(-1.0, 1.0)
+            painter.translate(-target.center().x(), 0.0)
+            painter.drawImage(target, strip.wave)
+            painter.restore()
+            return
+        painter.drawImage(target, strip.wave)
 
     def _paint_clip_label(
         self, painter: QPainter, clip: Clip, rect: QRectF, track
@@ -932,6 +946,8 @@ class Timeline(QWidget):
         )
 
         badges: list[str] = []
+        if clip.reversed:
+            badges.append(f"⏪ {clip.reverse_label}")
         if clip.speed_label:
             badges.append(f"⚡ {clip.speed_label}")
         if clip.gain_label:
