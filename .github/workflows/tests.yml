@@ -96,12 +96,11 @@ jobs:
         env:
           PYTHONPATH: src
         run: python scripts/check_references.py
-      # `-n auto` reparte a fatia entre os núcleos do runner (4). Medido em 4
-      # núcleos: 87 s → 55 s numa fatia; o ganho é menor que o número de
-      # núcleos porque cada ffmpeg já usa vários. Os testes que medem tempo de
-      # reprodução competem por CPU com os vizinhos: se algum começar a falhar
-      # só aqui, o primeiro suspeito é a carga, e `-n 2` é o recuo.
-      - run: python -m pytest -q -n auto -m "${{ matrix.marcador }}"
+      # Sem pytest-xdist de propósito. Em 4 núcleos locais ele cortava 35% de uma
+      # fatia, mas no runner não rendeu nada (98–110 s por fatia, contra 103–116 s
+      # da metade em série) e a carga extra estourou o limite de 5 s do teste de
+      # cancelamento no Windows. Quem divide o trabalho aqui são as fatias.
+      - run: python -m pytest -q -m "${{ matrix.marcador }}"
 
   # Os pacotes não dependem do resultado dos testes, então rodam ao lado deles:
   # no Windows, empacotar depois do pytest somava ~110–170 s ao job mais lento
