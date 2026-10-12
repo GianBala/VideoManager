@@ -485,6 +485,16 @@ EDIT_DETACH_TIP = (
     "Tira o som do bloco de vídeo e o põe numa trilha de áudio própria, na "
     "mesma posição — o vídeo fica mudo e o som passa a se mover sozinho"
 )
+EDIT_REVERSE = "Inverter"
+EDIT_REVERSE_TIP = (
+    "Toca o bloco de trás para frente, imagem e som. Marcado, escolher de novo "
+    "devolve o bloco ao sentido normal."
+)
+EDIT_REVERSE_TOO_LONG_TIP = (
+    "Não dá para inverter este bloco: o limite é de meia hora de mídia por "
+    "bloco, e o vídeo precisa informar o tamanho do quadro. Se o bloco passa de "
+    "meia hora, divida-o (S) e inverta cada parte."
+)
 EDIT_COPY = "Copiar"
 EDIT_PASTE = "Colar"
 EDIT_ADD_VIDEO_TRACK = "+ Vídeo"
@@ -814,7 +824,7 @@ EDIT_LOAD_CHANGED = "A edição mudou durante a leitura. Abra o projeto novament
 EDIT_MISSING_MEDIA = "O projeto foi aberto, mas os seguintes arquivos não foram encontrados:\n\n{files}"
 EDIT_READ_CANCEL = "Cancelar"
 
-EDIT_SAVING_PROJECT = "Salvando projeto v3… Projetos anteriores recebem cópia .v1.bak ou .v2.bak antes da atualização."
+EDIT_SAVING_PROJECT = "Salvando projeto v6… Projetos anteriores recebem cópia .v1.bak a .v5.bak antes da atualização."
 
 EDIT_TRANSITION_AFFECT_ADDITIONALS = "Afetar itens adicionais"
 EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP = (
@@ -859,6 +869,8 @@ PROP_CLIP_ID = "ID #{id} · {kind}"
 # Espécie do bloco, pelo tipo de sobreposição gravado no projeto.
 PROP_KINDS = {"none": "Mídia", "image": "Imagem", "text": "Texto", "filter": "Filtro", "transition": "Transição"}
 PROP_TRANSFORM = "Transformação"
+PROP_SPEED = "Velocidade"
+PROP_VOLUME = "Volume"
 PROP_POS_X = "Posição X:"
 PROP_POS_Y = "Posição Y:"
 PROP_WIDTH = "Largura:"
@@ -878,6 +890,10 @@ PROP_CHROMA_PRESETS = {"#00FF00": "Verde Padrão", "#00B140": "Verde Studio", "#
 PROP_CHROMA_PRESET_TIP = "{name} ({color})"
 PROP_CHROMA_TOLERANCE = "Tolerância:"
 PROP_CHROMA_SMOOTHING = "Suavização:"
+PROP_BLUR = "Fundo Desfocado"
+PROP_BLUR_ENABLE = "Preencher as bordas com o bloco desfocado"
+PROP_BLUR_NOTE = "Cobre a tela inteira por baixo do bloco, inclusive as trilhas abaixo dele."
+PROP_BLUR_CHROMA = "Indisponível com o fundo verde ligado: o borrão apareceria onde a cor foi removida."
 PROP_TRANSITION = "Transição de Vídeo"
 PROP_TRANSITION_EFFECT = "Efeito:"
 EDIT_FONT_SEARCH = "🔍 Buscar fonte..."
@@ -889,7 +905,7 @@ JOB_STATUS_LABELS = {
 EXPORT_SOURCE_CODEC = "codec da origem"
 EXPORT_COPY_CODEC = "Copiar sem recodificar ({codec})"
 EDIT_SPEED_COLLISION = "Não há espaço antes do próximo clipe para essa velocidade. Mova o próximo clipe ou escolha outra velocidade."
-EDIT_PROJECT_V2_TIP = "Formato v3: imagens na trilha de vídeo, ajustadas à tela, e animações recortadas preservadas. Versões antigas do aplicativo não abrem v3. Ao atualizar um projeto v1 ou v2, o original fica em .vmp.v1.bak ou .vmp.v2.bak (ou cópia numerada)."
+EDIT_PROJECT_V2_TIP = "Formato v6: imagens na trilha de vídeo, ajustadas à tela, animações recortadas, fundo desfocado, blocos invertidos e volume animado preservados. Versões antigas do aplicativo não abrem v6. Ao atualizar um projeto v1 a v5, o original fica em .vmp.v1.bak a .vmp.v5.bak (ou cópia numerada)."
 
 EDIT_ANIMATION_GLOBAL = "Editar toda a animação"
 EDIT_ANIMATION_GLOBAL_TIP = "Aplica o ajuste a todos os pontos, inclusive suportes de cortes. Desmarcado: edita somente o instante atual."

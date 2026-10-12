@@ -605,3 +605,62 @@ def test_opcoes_desligadas_dizem_por_que(qapp: QApplication) -> None:
                           processing=build_processing_service(), runtime=build_desktop_runtime(audio_enabled=False))
     assert not dialog._fast.isEnabled() and dialog._fast.toolTip() == strings.EDIT_FAST_UNAVAILABLE
     assert not dialog._interpolate.isEnabled() and dialog._interpolate.toolTip() == strings.EDIT_INTERPOLATE_OFF
+
+
+def _escolhe(box, dado) -> None:
+    """Seleciona o item pelo dado, na mão: ``findData`` compara ``QVariant`` e falha com tuplas."""
+    box.setCurrentIndex(next(i for i in range(box.count()) if box.itemData(i) == dado))
+
+
+def _rotulos_automaticos(dialog: ExportDialog) -> tuple[str, str, str]:
+    return (dialog._aspect_box.itemText(0), dialog._canvas_box.itemText(0), dialog._rate_box.itemText(0))
+
+
+def test_automatica_diz_o_que_o_automatico_produz_e_nao_o_que_foi_escolhido(qapp: QApplication) -> None:
+    """Os itens "Automática" anunciam a tela, a proporção e a taxa que a escolha automática dá.
+
+    Eles eram escritos com o projeto efetivo, que já traz o que o usuário escolheu: escolher 60 q/s
+    fazia "Automática" dizer 60 q/s, e só voltava a dizer a verdade com ela selecionada.
+    """
+    from videomanager.application.formatting import format_rate
+    from videomanager.presentation.qt import strings
+
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=10.0, width=1280, height=720, fps=24.0)
+    projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0, 5.0),)),))
+    dialog = ExportDialog(project=projeto, settings=Settings(), pool=[video], probed={},
+                          processing=build_processing_service(), runtime=build_desktop_runtime(audio_enabled=False))
+    aspecto, tela, taxa = _rotulos_automaticos(dialog)
+    assert "16:9" in aspecto
+    assert strings.EDIT_CANVAS_SIZE.format(width=1280, height=720) in tela
+    assert strings.EDIT_CANVAS_FPS.format(fps=format_rate(24.0)) in taxa
+
+    _escolhe(dialog._rate_box, 60.0)
+    _escolhe(dialog._canvas_box, (1080, 1920))     # outra tela e outra proporção (9:16)
+    assert (dialog._rate_box.currentData(), dialog._canvas_box.currentData()) == (60.0, (1080, 1920))
+    assert _rotulos_automaticos(dialog) == (aspecto, tela, taxa), "o automático continua sendo o do material"
+
+    # Voltar ao automático não muda o que ele anuncia.
+    dialog._rate_box.setCurrentIndex(0)
+    dialog._canvas_box.setCurrentIndex(0)
+    assert _rotulos_automaticos(dialog) == (aspecto, tela, taxa)
+
+
+def test_automatica_do_gif_anuncia_os_limites_do_gif_mesmo_com_taxa_escolhida(qapp: QApplication) -> None:
+    from videomanager.application.formatting import format_rate
+    from videomanager.presentation.qt import strings
+    from videomanager.presentation.qt.export_dialog import _GIF_MAX_RATE, _gif_canvas
+
+    video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=10.0, width=1280, height=720, fps=24.0)
+    projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0, 5.0),)),))
+    dialog = ExportDialog(project=projeto, settings=Settings(), pool=[video], probed={},
+                          processing=build_processing_service(), runtime=build_desktop_runtime(audio_enabled=False))
+    dialog._fast.setChecked(False)
+    _escolhe(dialog._container_box, "gif")
+    largura, altura = _gif_canvas(1280, 720)
+    esperado_tela = strings.EDIT_CANVAS_SIZE.format(width=largura, height=altura)
+    esperada_taxa = strings.EDIT_CANVAS_FPS.format(fps=format_rate(_GIF_MAX_RATE))
+    assert esperado_tela in dialog._canvas_box.itemText(0) and esperada_taxa in dialog._rate_box.itemText(0)
+
+    _escolhe(dialog._rate_box, 25.0)
+    _escolhe(dialog._canvas_box, (1920, 1080))
+    assert esperado_tela in dialog._canvas_box.itemText(0) and esperada_taxa in dialog._rate_box.itemText(0)

@@ -1,13 +1,13 @@
 """Modelos e regras de interpolação para quadros-chave (keyframes).
 
 Permite animar propriedades de transformação (posição, escala, rotação e
-opacidade) ao longo do tempo relativo de um clipe, preservando o modelo
-imutável do domínio sem dependências de frameworks ou subprocessos.
+opacidade) e o volume ao longo do tempo relativo de um clipe, preservando o
+modelo imutável do domínio sem dependências de frameworks ou subprocessos.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Sequence
 
 SUPPORTED_EASINGS = (
@@ -29,6 +29,9 @@ class ClipTransform:
     scale_y: float = 1.0
     rotation: float = 0.0
     opacity: float = 1.0
+    # Volume em dB **relativo** ao do bloco (``Clip.gain_db``): com 0 a curva não mexe, então todo
+    # quadro-chave antigo segue neutro, e o 🔊 da barra continua sendo o volume do bloco inteiro.
+    gain_offset_db: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -43,12 +46,23 @@ class Keyframe:
     rotation: float = 0.0
     opacity: float = 1.0
     easing: str = "linear"
+    # Depois do ``easing`` para nenhuma construção posicional mudar de sentido (ver ``ClipTransform``).
+    gain_offset_db: float = 0.0
 
     def __post_init__(self) -> None:
         if self.easing not in SUPPORTED_EASINGS:
             object.__setattr__(self, "easing", "linear")
         clamped_opacity = max(0.0, min(1.0, float(self.opacity)))
         object.__setattr__(self, "opacity", clamped_opacity)
+
+    @classmethod
+    def from_pose(cls, time_offset: float, pose: ClipTransform, easing: str = "linear") -> Keyframe:
+        """O quadro-chave de uma pose: **todo** campo dela vira campo do quadro.
+
+        Montar o quadro campo a campo esquece o campo que alguém acrescentar depois à pose; por
+        aqui, ele já viaja junto.
+        """
+        return cls(time_offset, **asdict(pose), easing=easing)
 
     @property
     def transform(self) -> ClipTransform:
@@ -59,6 +73,7 @@ class Keyframe:
             scale_y=self.scale_y,
             rotation=self.rotation,
             opacity=self.opacity,
+            gain_offset_db=self.gain_offset_db,
         )
 
 
@@ -97,10 +112,17 @@ def resolve_segment_easing(start_easing: str, end_easing: str) -> str:
     return start_easing
 
 
+# Entre dois quadros-chave, a rotação toma o menor arco — a não ser que a
+# diferença seja de uma volta inteira ou mais, que é um giro de propósito e vale
+# pelo caminho todo. Quem pergunta "a rotação passa por uma pose não neutra?"
+# (a regra do fundo desfocado) precisa do mesmo limiar, senão as duas discordam.
+FULL_TURN = 359.9
+
+
 def _interpolate_scalar(
     v0: float, v1: float, factor: float, is_angle: bool = False
 ) -> float:
-    if not is_angle or abs(v1 - v0) >= 359.9:
+    if not is_angle or abs(v1 - v0) >= FULL_TURN:
         return v0 + (v1 - v0) * factor
     # Menor caminho angular para interpolação de rotação (-180 a +180)
     diff = (v1 - v0) % 360.0
@@ -159,6 +181,9 @@ def interpolate_keyframes(
                         _interpolate_scalar(k0.opacity, k1.opacity, factor),
                     ),
                 ),
+                # Em dB, como a automação de volume dos editores de referência: a passagem soa
+                # uniforme, o que não acontece interpolando a amplitude.
+                gain_offset_db=_interpolate_scalar(k0.gain_offset_db, k1.gain_offset_db, factor),
             )
 
     return sorted_kfs[-1].transform

@@ -37,10 +37,13 @@ from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.constants import GAIN_EPSILON
 from videomanager.domain.keyframe import ClipTransform
+from videomanager.domain.keyframe import FULL_TURN
 from videomanager.domain.geometry import image_base_size, natural_image_size
 from videomanager.domain.i18n import decimal, t, variants
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import interpolate_keyframes
+from videomanager.domain.preview import fit_size
+from videomanager.domain.reversal import MAX_REVERSE_SPAN, reverse_rate
 from videomanager.domain.timing import source_time, available_duration, frame_index
 
 if TYPE_CHECKING:  # pragma: no cover - só para o verificador de tipos
@@ -54,6 +57,10 @@ IMAGE_DURATION = 5.0
 # ouvido; acima de +12 dB o que se ganha é distorção.
 MIN_GAIN_DB = -60.0
 MAX_GAIN_DB = 12.0
+
+
+def _clamp_gain(value: float) -> float:
+    return max(MIN_GAIN_DB, min(MAX_GAIN_DB, value))
 
 # Tela de uma edição que ainda não tem imagem nenhuma.
 DEFAULT_WIDTH = 1920
@@ -309,6 +316,18 @@ class Clip:
     opacity: float = 1.0
     # Sequência de quadros-chave para animação de transformações
     keyframes: tuple[Keyframe, ...] = ()
+    # Camada própria e opaca de tela cheia por baixo do bloco: ele mesmo,
+    # ampliado até cobrir a tela e desfocado. Fica **antes** de ``clip_id`` para
+    # nenhuma construção posicional mudar de sentido. Cobre as trilhas de baixo
+    # na janela do bloco — por isso nasce desligada (ver ``shows_blur_background``).
+    blur_background: bool = False
+    # O bloco toca de trás para frente. Ele continua cobrindo o mesmo trecho da
+    # mídia, de ``in_point`` a ``out_point``; o que muda é o sentido em que a
+    # edição o percorre: o começo do bloco é o ``out_point``. Marca no bloco, e
+    # não um arquivo novo, para inverter e desinverter serem instantâneos e
+    # desfazíveis. Fica **antes** de ``clip_id`` para nenhuma construção
+    # posicional mudar de sentido.
+    reversed: bool = False
     # Identidade estável, preservada por ``dataclasses.replace``: é por ela que
     # a seleção, o cache de miniaturas e o desfazer reconhecem o mesmo bloco
     # depois de qualquer alteração.
@@ -323,6 +342,10 @@ class Clip:
         if self.scale_y is None:
             object.__setattr__(self, "scale_y", self.scale)
         object.__setattr__(self, "opacity", max(0.0, min(1.0, float(self.opacity))))
+        # Imagem, texto, filtro e transição não têm trecho de mídia para tocar ao
+        # contrário; um .vmp editado à mão não pode inverter o que não tem sentido.
+        if self.reversed and (self.is_additional or self.media is None):
+            object.__setattr__(self, "reversed", False)
         if self.keyframes and not isinstance(self.keyframes, tuple):
             object.__setattr__(
                 self,
@@ -415,8 +438,70 @@ class Clip:
         return self.start <= seconds < self.end
 
     def source_time(self, seconds: float) -> float:
-        """Instante dentro do arquivo que corresponde a um instante da edição."""
+        """Instante dentro do arquivo que corresponde a um instante da edição.
+
+        Invertido, o começo do bloco é o fim do trecho e o tempo corre para
+        baixo: é a mesma conta com a origem em ``out_point`` e a velocidade
+        negada.
+        """
+        if self.reversed:
+            return source_time(max(seconds, self.start), self.start, self.out_point, -self.speed)
         return source_time(max(seconds, self.start), self.start, self.in_point, self.speed)
+
+    @property
+    def head_point(self) -> float:
+        """Instante da mídia onde o bloco **começa** na edição."""
+        return self.out_point if self.reversed else self.in_point
+
+    @property
+    def tail_point(self) -> float:
+        """Instante da mídia onde o bloco **termina** na edição."""
+        return self.in_point if self.reversed else self.out_point
+
+    @property
+    def is_reversible(self) -> bool:
+        """Se o bloco toca um trecho de vídeo ou de áudio que possa ser invertido."""
+        return bool(
+            self.media is not None
+            and not self.is_additional
+            and self.media.kind in (MediaKind.VIDEO, MediaKind.AUDIO)
+        )
+
+    @property
+    def reverse_rate(self) -> float:
+        """Bytes que a imagem invertida deste bloco guarda por segundo de edição.
+
+        Zero num bloco sem imagem (o som invertido pesa uma fração dela) e
+        infinito quando o arquivo não informa o tamanho do quadro — e com ele a
+        conta de janela de ``render_cost.reverse_cuts``.
+        """
+        if not self.is_reversible or not self.has_image:
+            return 0.0
+        media = self.media
+        return reverse_rate(media.width, media.height, media.fps, self.speed)
+
+    @property
+    def reverse_limit(self) -> float:
+        """Maior duração que um bloco invertido pode ter na edição (``inf`` se não inverte).
+
+        O vídeo não tem teto: a exportação e a prévia o leem em janelas. O som
+        sai num passe só e tem o seu (``MAX_REVERSE_SPAN``).
+        """
+        if not self.is_reversible:
+            return float("inf")
+        return MAX_REVERSE_SPAN / self.speed
+
+    @property
+    def can_reverse(self) -> bool:
+        """Se o menu pode oferecer a inversão: tem o que inverter e dá para planejar.
+
+        Já invertido, desfazer é sempre possível — mesmo que o bloco tenha
+        crescido além do limite, ou que a mídia tenha mudado, depois de invertido.
+        """
+        return self.is_reversible and (
+            self.reversed
+            or (self.reverse_rate != float("inf") and self.duration <= self.reverse_limit + 1e-9)
+        )
 
     @property
     def gain_label(self) -> str:
@@ -427,6 +512,10 @@ class Clip:
         if not self.changes_gain:
             return ""
         return f"{decimal(self.gain_db, sign=True)} dB"
+
+    @property
+    def reverse_label(self) -> str:
+        return t("CLIP_REVERSED") if self.reversed else ""
 
     @property
     def speed_label(self) -> str:
@@ -466,6 +555,38 @@ class Clip:
         return bool(self.keyframes)
 
     @property
+    def animates_gain(self) -> bool:
+        """Se os quadros-chave mexem no **volume** (``gain_offset_db`` fora do neutro em algum ponto)."""
+        return any(abs(k.gain_offset_db) >= GAIN_EPSILON for k in self.keyframes)
+
+    @property
+    def has_pose_keyframes(self) -> bool:
+        """Se os quadros-chave mexem na **imagem**, e não só no volume.
+
+        O compositor escolhe o caminho do vídeo por esta pergunta, e não por ``has_keyframes``: um fade
+        de som num vídeo tiraria a imagem do caminho barato (``scale`` + ``pad``) para o das
+        transformações (``scale`` e ``overlay`` com ``eval=frame``), mudando o comando e a velocidade da
+        composição sem que a imagem tivesse mudado. Sem curva de volume é o que sempre foi: existir
+        quadro-chave basta.
+        """
+        if not self.animates_gain:
+            return bool(self.keyframes)
+        fields = ("x", "y", "scale_x", "scale_y", "rotation", "opacity")
+        frames = self.keyframes
+        return any(abs(getattr(k, f) - getattr(self, f)) > 1e-9 for k in frames for f in fields) or any(
+            abs(getattr(a, f) - getattr(b, f)) > 1e-9 for a, b in zip(frames, frames[1:]) for f in fields)
+
+    def gain_at(self, time_offset: float) -> float:
+        """O volume que se ouve no instante: o do bloco, mais a curva dos quadros-chave.
+
+        Sem curva é o ``gain_db`` cru, sem limite (é o valor que o arquivo traz); com curva, a soma
+        fica dentro dos limites do controle.
+        """
+        if not self.animates_gain:
+            return self.gain_db
+        return _clamp_gain(self.gain_db + self.transform_at(time_offset).gain_offset_db)
+
+    @property
     def peak_scale(self) -> tuple[float, float]:
         """A maior escala que o bloco atinge em cada eixo, parado ou animado.
 
@@ -474,6 +595,51 @@ class Clip:
         """
         return (max([self.scale_x, *(k.scale_x for k in self.keyframes)]),
                 max([self.scale_y, *(k.scale_y for k in self.keyframes)]))
+
+    @property
+    def has_blur_background(self) -> bool:
+        """Se a opção está ligada **e** vale para este bloco, em qualquer pose.
+
+        É o que decide se o arrasto prepara a imagem do fundo; se ela é pintada
+        agora, quem responde é ``shows_blur_background``, com a pose do momento.
+        """
+        media = self.media
+        return bool(self.blur_background and not self.chromakey_enabled and not self.is_overlay
+                    and self.has_image and media is not None and media.width and media.height)
+
+    def shows_blur_background(self, width: int, height: int) -> bool:
+        """Se o fundo desfocado aparece **de fato** numa tela ``width``×``height``.
+
+        A opção sozinha não basta: um bloco que já preenche a tela, em pose
+        neutra, esconderia o fundo atrás da frente e o grafo pagaria uma camada
+        inteira por nada — o que também quebraria a promessa de que ligar a
+        opção onde ela não muda a imagem não muda o arquivo. Pose neutra é
+        posição central, escala ``>= 1`` e sem giro, **no bloco e em cada
+        quadro-chave**: reduzido ou deslocado deixa de preencher, mesmo na
+        proporção da tela. Entre dois quadros-chave a curva pode sair da pose
+        neutra sem que os extremos saiam — só a rotação, e só num giro de uma
+        volta inteira (0° a 360°), que passa por todos os ângulos. Opacidade não
+        entra na conta, para o fade de um bloco que preenche a tela continuar
+        saindo como hoje.
+
+        A proporção é medida com a tela de quem pergunta, e quem monta o grafo
+        pergunta uma vez só, com a tela de exportação: pela da prévia (arredondada
+        para par) um clipe 16:9 deixaria de "preencher" só ali.
+        """
+        if not self.has_blur_background:
+            return False
+        media = self.media
+        fit = image_base_size if self.is_image else fit_size
+        fit_w, fit_h = fit(media.width, media.height, width, height)
+        if width - fit_w > 2 or height - fit_h > 2:
+            return True
+        poses = sorted(self.keyframes, key=lambda k: k.time_offset)
+        return any(
+            abs(p.x - 0.5) > 1e-9 or abs(p.y - 0.5) > 1e-9
+            or p.scale_x < 1 - 1e-9 or p.scale_y < 1 - 1e-9
+            or min(p.rotation % 360, 360 - p.rotation % 360) > 1e-9
+            for p in (self, *poses)
+        ) or any(abs(b.rotation - a.rotation) >= FULL_TURN for a, b in zip(poses, poses[1:]))
 
     @property
     def base_transform(self) -> ClipTransform:
@@ -507,6 +673,14 @@ class Clip:
         target = replace(current, **{k: v for k, v in changes.items() if k in names})
         if not self.keyframes:
             return replace(self, scale=(target.scale_x + target.scale_y) / 2, **{k: getattr(target, k) for k in names})
+        if not whole_animation and not self.has_pose_keyframes and self.keyframe_in_frame(offset, fps) is None:
+            # Só há curva de volume e o cursor não está num ponto: a imagem não é animada, e a edição vale para o
+            # bloco inteiro, com os pontos de volume andando junto (a pose deles é a do bloco). Contando o ponto de
+            # volume como animação, o gesto criava um ponto de pose e a imagem ia e voltava. Sobre um ponto (◇ aceso)
+            # a edição segue sendo dele — é o único gesto que começa a animar a imagem de um bloco com fade de som.
+            pose = {k: getattr(target, k) for k in names}
+            return replace(self, scale=(target.scale_x + target.scale_y) / 2, **pose,
+                           keyframes=tuple(replace(k, **pose) for k in self.keyframes))
         if whole_animation:
             dx, dy = target.x - current.x, target.y - current.y
             rotation = target.rotation - current.rotation
@@ -535,16 +709,38 @@ class Clip:
                                    scale_y=k.scale_y * factors["scale_y"]) for k in self.keyframes)
             updated = replace(self, keyframes=points)
         else:
-            frame = frame_index(self.start + offset, fps)
-            nearest = min((k for k in self.visible_keyframes
-                           if frame_index(self.start + k.time_offset, fps) == frame),
-                          key=lambda k: abs(k.time_offset - offset), default=None)
-            point = Keyframe(nearest.time_offset if nearest else offset,
-                             **{k: getattr(target, k) for k in names},
-                             easing=nearest.easing if nearest else "linear")
+            nearest = self.keyframe_in_frame(offset, fps)
+            point = Keyframe.from_pose(nearest.time_offset if nearest else offset, target,
+                                       nearest.easing if nearest else "linear")
+            if nearest is not None:
+                # O ponto reaproveitado fica no instante dele, e a curva ali pode diferir do volume
+                # interpolado em ``offset`` (meio quadro de distância): mexer na posição não muda volume.
+                point = replace(point, gain_offset_db=nearest.gain_offset_db)
             updated = self.with_keyframe(point)
         pose = updated.transform_at(offset)
         return replace(updated, scale=(pose.scale_x + pose.scale_y) / 2, **{k: getattr(pose, k) for k in names})
+
+    def with_edited_gain(self, offset: float, value: float, *, fps: float, whole_animation: bool = False) -> Clip:
+        """Edita o volume ouvido em ``offset``: o do bloco, ou um ponto da curva, ou a curva inteira.
+
+        Sem quadros-chave, ou com "Editar toda a animação", muda o ``gain_db`` do bloco (a curva, se
+        houver, sobe ou desce inteira). Num bloco animado, grava no quadro-chave do quadro atual — criando-o
+        com a pose de agora — o volume **relativo** ao do bloco, que é o que o ponto guarda.
+        """
+        value = _clamp_gain(value)
+        offset = max(0.0, min(self.duration, offset))
+        if not self.keyframes or whole_animation:
+            # Pela curva **crua** (``transform_at``), e não por ``gain_at``: este já vem limitado a −60/+12, e com a
+            # soma saturada o deslocamento saía menor que o pedido — o ponto continuava no limite e o bloco todo mudava.
+            return replace(self, gain_db=_clamp_gain(value - self.transform_at(offset).gain_offset_db))
+        point = self.keyframe_in_frame(offset, fps) or Keyframe.from_pose(offset, self.transform_at(offset))
+        return self.with_keyframe(replace(point, gain_offset_db=value - self.gain_db))
+
+    def keyframe_in_frame(self, offset: float, fps: float) -> Keyframe | None:
+        """O quadro-chave que cai no mesmo quadro de vídeo que ``offset`` — o mais perto dele, se houver."""
+        frame = frame_index(self.start + offset, fps)
+        return min((k for k in self.visible_keyframes if frame_index(self.start + k.time_offset, fps) == frame),
+                   key=lambda k: abs(k.time_offset - offset), default=None)
 
     def with_keyframe(self, keyframe: Keyframe) -> Clip:
         """Adiciona ou atualiza um keyframe mantendo a lista ordenada por time_offset."""
@@ -1060,7 +1256,7 @@ class Project:
         updated_project = self._replace_track(index, replace(track, clips=clips))
         if clip.is_transition:
             updated_project = updated_project._sync_transition_markers(clip_id)
-        elif {"start", "duration", "in_point", "speed"}.intersection(changes):
+        elif {"start", "duration", "in_point", "speed", "reversed"}.intersection(changes):
             updated_project = updated_project._sync_transition_markers(clip_id)
         return updated_project
 
@@ -1268,7 +1464,7 @@ class Project:
             # Uma imagem não tem começo de arquivo para respeitar; um vídeo não
             # pode ser puxado para antes do primeiro quadro que ele tem.
             limit = (
-                clip.start - clip.in_point / clip.speed
+                clip.start - self._head_reach(clip)
                 if not (clip.is_image or clip.is_additional)
                 else floor
             )
@@ -1277,25 +1473,56 @@ class Project:
             # MIN_SEGMENT`` fica antes do começo, e a alça sobrepunha o vizinho
             # e lia antes do primeiro quadro da mídia.
             lower = max(floor, limit)
+            if clip.reversed:
+                # Esticar um bloco já invertido não pode passar do teto de
+                # memória (ver ``domain.reversal``); encolher é sempre livre.
+                lower = max(lower, clip.end - max(clip.reverse_limit, clip.duration))
             upper = max(clip.end - MIN_SEGMENT, clip.start)
             value = min(max(lower, seconds), max(upper, lower))
             return self.with_updated_clip(
                 clip_id,
                 start=value,
                 duration=clip.end - value,
-                in_point=0.0 if clip.is_additional else source_time(value, clip.start, clip.in_point, clip.speed),
+                # Invertido, o começo da edição é o topo do trecho: encurtá-lo
+                # tira do topo e o ``in_point`` fica onde está.
+                in_point=0.0 if clip.is_additional else clip.in_point if clip.reversed
+                else source_time(value, clip.start, clip.in_point, clip.speed),
                 keyframes=tuple(replace(k, time_offset=k.time_offset - (value-clip.start)) for k in clip.keyframes),
             )
 
         available = (
             float("inf")
             if (clip.is_image or clip.is_additional)
-            else available_duration(clip.media.duration or 0.0, clip.in_point, clip.speed)
+            else self._tail_reach(clip)
         )
+        if clip.reversed:
+            available = min(available, max(clip.reverse_limit, clip.duration))
         value = min(
             max(seconds, clip.start + MIN_SEGMENT), min(ceiling, clip.start + available)
         )
+        if clip.reversed:
+            # O fim da edição é a base do trecho: esticá-lo desce o ``in_point``.
+            # O ``max`` guarda o zero contra o resto de ponto flutuante, que o
+            # .vmp recusaria como entrada negativa.
+            return self.with_updated_clip(
+                clip_id, duration=value - clip.start,
+                in_point=max(0.0, clip.out_point - (value - clip.start) * clip.speed),
+            )
         return self.with_updated_clip(clip_id, duration=value - clip.start)
+
+    @staticmethod
+    def _head_reach(clip: Clip) -> float:
+        """Quanto a ponta inicial pode recuar na edição antes de acabar a mídia."""
+        if clip.reversed:
+            return max(0.0, (clip.media.duration or 0.0) - clip.out_point) / clip.speed
+        return clip.in_point / clip.speed
+
+    @staticmethod
+    def _tail_reach(clip: Clip) -> float:
+        """Quanto a ponta final pode avançar na edição antes de acabar a mídia."""
+        if clip.reversed:
+            return clip.out_point / clip.speed
+        return available_duration(clip.media.duration or 0.0, clip.in_point, clip.speed)
 
     def split(self, clip_id: int, seconds: float) -> Project:
         """Divide o bloco no instante dado, como a tesoura da barra."""
@@ -1319,12 +1546,18 @@ class Project:
             replace(k, time_offset=k.time_offset - split_offset)
             for k in clip.keyframes
         )
-        left = replace(clip, duration=split_offset, keyframes=left_kfs)
+        # Invertido, a primeira metade da edição é o topo do trecho: é ela que
+        # ganha o ponto novo, e a segunda fica com a base.
+        left = replace(
+            clip, duration=split_offset, keyframes=left_kfs,
+            in_point=clip.source_time(seconds) if clip.reversed else clip.in_point,
+        )
         right = replace(
             clip,
             start=seconds,
             duration=clip.end - seconds,
-            in_point=0.0 if clip.is_additional else clip.source_time(seconds),
+            in_point=(0.0 if clip.is_additional
+                      else clip.in_point if clip.reversed else clip.source_time(seconds)),
             clip_id=next_clip_id(),
             keyframes=right_kfs,
         )
@@ -1383,7 +1616,14 @@ class Project:
         if not clip.can_detach_audio:
             return self
 
-        project = self.with_updated_clip(clip_id, detached=True, muted=False)
+        # O volume é do som: a curva vai para o bloco novo e sai do vídeo, que fica só com a pose (e sem
+        # quadros-chave se a animação era só de volume).
+        sound = (tuple(Keyframe(k.time_offset, gain_offset_db=k.gain_offset_db, easing=k.easing)
+                       for k in clip.keyframes) if clip.animates_gain else ())
+        image = (tuple(replace(k, gain_offset_db=0.0) for k in clip.keyframes)
+                 if clip.animates_gain and clip.has_pose_keyframes else
+                 () if clip.animates_gain else clip.keyframes)
+        project = self.with_updated_clip(clip_id, detached=True, muted=False, keyframes=image)
         target = project._free_audio_track(clip.start, clip.duration)
         if target is None:
             project = project.with_track(TrackKind.AUDIO)
@@ -1397,6 +1637,9 @@ class Project:
             muted=clip.muted,
             speed=clip.speed,
             audio_only=True,
+            # O som segue a imagem de onde saiu: separar não desfaz a inversão.
+            reversed=clip.reversed,
+            keyframes=sound,
         )
         return project.with_clip(target, detached)
 

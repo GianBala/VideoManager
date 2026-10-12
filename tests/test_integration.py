@@ -1686,3 +1686,156 @@ class TestReservaDoNomeComFfmpegDeVerdade:
         assert destino.stat().st_size > 0, "a reserva virou arquivo de verdade"
         assert stream_of(streams, "video") is not None
         assert float(formato["duration"]) == pytest.approx(2.0, abs=0.3)
+
+
+def quadro_rgb(path: Path, tools, at: float, size: tuple[int, int]) -> bytes:
+    """Quadro em ``at`` como rgb24 cru, para medir região por região."""
+    dados = subprocess.run(
+        [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-ss", f"{at:.3f}",
+         "-i", str(path), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+        capture_output=True, check=True,
+    ).stdout
+    assert len(dados) == size[0] * size[1] * 3, f"quadro de tamanho inesperado em {at} s"
+    return dados
+
+
+def faixa(dados: bytes, size: tuple[int, int], x0: int, x1: int, canais: tuple[int, ...] = (0, 1, 2)) -> float:
+    """Média (0 a 255) dos ``canais`` rgb nas colunas ``x0``..``x1`` do quadro."""
+    largura, altura = size
+    valores = [dados[(y * largura + x) * 3 + c] for y in range(altura) for x in range(x0, x1) for c in canais]
+    return sum(valores) / len(valores)
+
+
+class TestFundoDesfocadoExportado:
+    """O fundo precisa estar **na imagem**: duração e streams iguais não o enxergam."""
+
+    TELA = (320, 180)
+    # Vertical 9:16 na tela 16:9: a frente encaixa em 100×180, centralizada, e
+    # sobram 110 colunas de cada lado.
+    ESQ, DIR_, MEIO = (0, 100), (220, 320), (130, 190)
+
+    def _fonte(self, tmp_path: Path, tools, nome: str, filtro: str, quadros: str):
+        from videomanager.domain.project import media_ref
+        path = tmp_path / nome
+        subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", filtro,
+             *quadros.split(), "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)]
+            if nome.endswith(".mp4") else
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", filtro,
+             "-frames:v", "1", str(path)],
+            check=True, capture_output=True,
+        )
+        return media_ref(probe_file(path, tools))
+
+    def _exportar(self, tmp_path: Path, tools, nome: str, clips: tuple) -> Path:
+        from videomanager.domain.composition import Composition
+        from videomanager.domain.project import Project, Track, TrackKind
+        projeto = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=clips),),
+                          width=self.TELA[0], height=self.TELA[1], fps=30.0)
+        saida = tmp_path / nome
+        Converter(probe_file(clips[0].media.path, tools), Composition(projeto, "mp4"), saida, tools).run()
+        return saida
+
+    def _par(self, tmp_path: Path, tools, media, **extra):
+        """Exporta o mesmo bloco sem e com o fundo e devolve os dois arquivos."""
+        from videomanager.domain.project import Clip
+        sem = self._exportar(tmp_path, tools, "sem.mp4", (Clip(media, 0.0, 2.0, **extra),))
+        com = self._exportar(tmp_path, tools, "com.mp4", (Clip(media, 0.0, 2.0, blur_background=True, **extra),))
+        return sem, com
+
+    @pytest.mark.parametrize("tipo", ("video", "foto"))
+    def test_bordas_ganham_imagem_e_o_centro_nao_muda(self, tmp_path: Path, tools, tipo: str) -> None:
+        if tipo == "video":
+            media = self._fonte(tmp_path, tools, "v.mp4", "testsrc2=s=90x160:r=30:d=3", "")
+        else:
+            media = self._fonte(tmp_path, tools, "f.png", "testsrc2=s=180x320", "")
+        sem, com = self._par(tmp_path, tools, media)
+        a, b = quadro_rgb(sem, tools, 1.0, self.TELA), quadro_rgb(com, tools, 1.0, self.TELA)
+        # Preto codificado não é exatamente 0: o x264 deixa ruído abaixo de 1.
+        assert faixa(a, self.TELA, *self.ESQ) < 1 and faixa(a, self.TELA, *self.DIR_) < 1
+        assert faixa(b, self.TELA, *self.ESQ) > 20 and faixa(b, self.TELA, *self.DIR_) > 20
+        # A frente é a mesma: o fundo só ocupa o que era preto.
+        assert faixa(b, self.TELA, *self.MEIO) == pytest.approx(faixa(a, self.TELA, *self.MEIO), abs=1.5)
+        assert float(ffprobe_streams(com, tools)[0]["duration"]) == pytest.approx(
+            float(ffprobe_streams(sem, tools)[0]["duration"]), abs=0.05)
+
+    def test_fade_leva_o_fundo_junto(self, tmp_path: Path, tools) -> None:
+        from videomanager.domain.keyframe import Keyframe
+        media = self._fonte(tmp_path, tools, "v.mp4", "testsrc2=s=90x160:r=30:d=3", "")
+        _, com = self._par(tmp_path, tools, media,
+                           keyframes=(Keyframe(0.0, opacity=1.0), Keyframe(2.0, opacity=0.0)))
+        cheio, metade = (faixa(quadro_rgb(com, tools, t, self.TELA), self.TELA, *self.ESQ) for t in (0.0, 1.0))
+        assert metade == pytest.approx(cheio / 2, rel=0.25)
+
+    def test_bloco_que_preenche_a_tela_sai_identico(self, tmp_path: Path, tools) -> None:
+        """Ligar a opção onde ela não aparece não pode mudar o arquivo."""
+        media = self._fonte(tmp_path, tools, "h.mp4", "testsrc2=s=320x180:r=30:d=3", "")
+        sem, com = self._par(tmp_path, tools, media)
+        assert quadro_rgb(sem, tools, 1.0, self.TELA) == quadro_rgb(com, tools, 1.0, self.TELA)
+
+    def test_trilha_de_cima_com_fundo_tapa_a_de_baixo(self, tmp_path: Path, tools) -> None:
+        """É a regra que o texto da opção promete: o fundo cobre as trilhas de baixo."""
+        from videomanager.domain.composition import Composition
+        from videomanager.domain.project import Clip, Project, Track, TrackKind
+        vermelho = tmp_path / "vermelho.mp4"
+        subprocess.run([tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i",
+                        "color=red:s=320x180:r=30:d=3", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(vermelho)],
+                       check=True, capture_output=True)
+        from videomanager.domain.project import media_ref
+        embaixo = media_ref(probe_file(vermelho, tools))
+        em_cima = self._fonte(tmp_path, tools, "v.mp4", "testsrc2=s=90x160:r=30:d=3", "")
+        mediu = {}
+        for blur in (False, True):
+            projeto = Project(tracks=(
+                Track(kind=TrackKind.VIDEO, clips=(Clip(em_cima, 0.0, 2.0, blur_background=blur),)),
+                Track(kind=TrackKind.VIDEO, clips=(Clip(embaixo, 0.0, 2.0),)),
+            ), width=self.TELA[0], height=self.TELA[1], fps=30.0)
+            saida = tmp_path / f"duas_{blur}.mp4"
+            Converter(probe_file(vermelho, tools), Composition(projeto, "mp4"), saida, tools).run()
+            quadro = quadro_rgb(saida, tools, 1.0, self.TELA)
+            mediu[blur] = (faixa(quadro, self.TELA, *self.ESQ, canais=(0,)), faixa(quadro, self.TELA, *self.ESQ, canais=(1,)))
+        # Sem o fundo as laterais mostram o vermelho de baixo; com ele, a imagem desfocada de cima.
+        assert mediu[False][0] > 200 and mediu[False][1] < 40
+        assert mediu[True][0] < 160 and mediu[True][1] > 40
+
+    def test_transicao_leva_o_fundo_junto(self, tmp_path: Path, tools) -> None:
+        from videomanager.domain.composition import Composition
+        from videomanager.domain.project import Clip, MediaKind, MediaRef, Project, Track, TrackKind
+        media = self._fonte(tmp_path, tools, "v.mp4", "testsrc2=s=90x160:r=30:d=3", "")
+        resultados = {}
+        for blur in (False, True):
+            esquerda = Clip(media, 0.0, 2.0, in_point=0.5, blur_background=blur)
+            direita = Clip(media, 2.0, 2.0, in_point=0.5, blur_background=blur)
+            marcador = Clip(
+                media=MediaRef(Path("Transição_Fade"), MediaKind.IMAGE, 0.5), start=1.75, duration=0.5,
+                overlay_type="transition", transition_name="fade",
+                transition_left_id=esquerda.clip_id, transition_right_id=direita.clip_id,
+            )
+            projeto = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(esquerda, direita, marcador)),),
+                              width=self.TELA[0], height=self.TELA[1], fps=30.0)
+            saida = tmp_path / f"transicao_{blur}.mp4"
+            Converter(probe_file(media.path, tools), Composition(projeto, "mp4"), saida, tools).run()
+            _, streams = ffprobe_streams(saida, tools)
+            quadro = quadro_rgb(saida, tools, 2.0, self.TELA)
+            resultados[blur] = (int(stream_of(streams, "video")["nb_frames"]), faixa(quadro, self.TELA, *self.ESQ))
+        assert resultados[True][0] == resultados[False][0], "o fundo mudou a contagem de quadros"
+        assert resultados[False][1] < 1 and resultados[True][1] > 20, "a borda no meio da transição ficou preta"
+
+    def test_previa_e_exportacao_mostram_o_mesmo_fundo(self, tmp_path: Path, tools) -> None:
+        from videomanager.domain.project import Clip, Project, Track, TrackKind
+        from videomanager.infrastructure.ffmpeg.composer import frame_command
+        media = self._fonte(tmp_path, tools, "v.mp4", "testsrc2=s=90x160:r=30:d=3", "")
+        _, exportado = self._par(tmp_path, tools, media)
+        projeto = Project(tracks=(Track(kind=TrackKind.VIDEO, clips=(Clip(media, 0.0, 2.0, blur_background=True),)),),
+                          width=self.TELA[0], height=self.TELA[1], fps=30.0)
+        pequena = (160, 90)
+        previa = subprocess.run(frame_command(projeto, 1.0, pequena, tools), capture_output=True, check=True).stdout
+        reduzido = subprocess.run(
+            [tools.ffmpeg_str, "-hide_banner", "-v", "error", "-ss", "1.0", "-i", str(exportado), "-frames:v", "1",
+             "-vf", "scale=160:90", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+            capture_output=True, check=True).stdout
+        # A frente da prévia ocupa x 55..105: as duas laterais são só fundo.
+        # Medido: 0,6 e 1,3 de diferença; fração fixa em vez da tela de trabalho dava mais.
+        for lateral in ((0, 50), (110, 160)):
+            assert faixa(previa, pequena, *lateral) > 20
+            assert faixa(previa, pequena, *lateral) == pytest.approx(faixa(reduzido, pequena, *lateral), abs=3)

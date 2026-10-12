@@ -66,8 +66,10 @@ o domínio só aplica a regra, e cada soltura é um único passo de desfazer.
 ### Quadros-chave e animação
 
 `domain/keyframe.py` define `ClipTransform` (x, y, `scale_x`, `scale_y`,
-rotação e opacidade) e `Keyframe`, que é um `ClipTransform` mais um
-`time_offset` local ao bloco e uma curva. As curvas são `linear`, `ease_in`,
+rotação, opacidade e `gain_offset_db`, o volume relativo ao do bloco) e `Keyframe`, que é um
+`ClipTransform` mais um `time_offset` local ao bloco e uma curva. `Keyframe.from_pose` faz o quadro
+nascer de uma pose levando **todo** campo dela, e `Clip.keyframe_in_frame` é a conta única de "o quadro-chave
+deste quadro de vídeo". As curvas são `linear`, `ease_in`,
 `ease_out`, `ease_in_out` e `hold`; uma curva desconhecida vira `linear` e a
 opacidade é limitada a 0–1 na construção.
 
@@ -90,6 +92,12 @@ opacidade é limitada a 0–1 na construção.
   (`whole_animation=True`, respeitando os limites de escala de 0,05 a 10 e de
   opacidade de 0 a 1). Em ambos os casos a pose base do bloco acompanha o
   instante editado.
+- O volume anda na mesma curva: `Clip.gain_at(offset)` é `gain_db` mais a curva, limitado a −60/+12 dB (sem curva,
+  o `gain_db` cru), `Clip.with_edited_gain` edita o ponto do instante (ou o volume do bloco, sem quadros-chave
+  ou com `whole_animation`), `animates_gain` diz se há curva e `has_pose_keyframes` separa os quadros que mexem na
+  **imagem** dos que só mexem no volume — é por ele que o compositor escolhe o caminho do vídeo e que
+  `with_edited_transform` decide se a edição da pose é do bloco inteiro (só volume, cursor fora de um ponto) ou do ponto. Separar áudio leva
+  a curva para o bloco de som. Ver [o volume animado](../decisoes-de-projeto.md#o-volume-animado).
 - `create_preset_keyframes` gera os presets de entrada (deslizar, fade, zoom e
   giro) a partir da transformação-alvo e de uma duração; a apresentação a limita
   a 0,6 s ou ao último quadro do bloco.
@@ -265,7 +273,7 @@ que ainda pode emitir callbacks.
 
 ## Formato .vmp
 
-`infrastructure/storage/project_json.py` escreve JSON versão 3 e lê versões 1 a 3.
+`infrastructure/storage/project_json.py` escreve JSON versão 6 e lê versões 1 a 6.
 `projects.py` o expõe pela porta `ProjectRepository`. A versão 2 permite pontos
 de suporte assinados e grava `text_reference_width` / `text_reference_height`.
 A versão 3 põe imagens na trilha de vídeo ajustadas à tela. Ao ler v1 ou v2,
@@ -276,14 +284,22 @@ quadros-chave, arredondando para cima em seis casas — a mesma precisão com qu
 o compositor escreve a escala, para o truncamento das animações não perder
 pixels. Um v3 é reaberto sem migração. Imagens migradas deixam de entrar em
 transições com `transition_affects_additionals`.
+A versão 4 acrescenta `blur_background` ao bloco; um v3 abre com a opção desligada.
+A versão 5 acrescenta `reversed` (o bloco toca de trás para frente); um v4 abre com
+o bloco no sentido normal. O trecho (`in_point`, `duration`, `speed`) não muda de
+significado: só o sentido em que a edição o percorre.
+A versão 6 acrescenta `gain_offset_db` ao quadro-chave (a curva de volume, relativa à do bloco); um v5 abre com a
+curva zerada.
 Essas dimensões conservam a escala relativa do texto quando a resolução muda;
 `Project.for_render` deriva escalas sem modificar o documento nem seus ativos.
 
 Ao substituir um documento de versão anterior, o repositório cria uma cópia dos
-bytes originais em `.vmp.v1.bak` ou `.vmp.v2.bak`, numerada se já existir, antes
-de escrever v3. Binários antigos não abrem a versão nova. Reverter o aplicativo
-exige usar a cópia; não se deve reduzir a versão no JSON, porque a escala das
-imagens e os pontos que preservam a animação já estão no formato novo.
+bytes originais em `.vmp.v1.bak` a `.vmp.v5.bak`, numerada se
+já existir, antes de escrever v6. Binários antigos não abrem a versão nova.
+Reverter o aplicativo exige usar a cópia; não se deve reduzir a versão no JSON,
+porque a escala das imagens, os pontos que preservam a animação, o fundo
+desfocado e a inversão dos blocos já estão no formato novo (uma versão anterior ignoraria o campo e o
+perderia ao salvar).
 
 O projeto referencia mídias externas. Caminhos relativos são resolvidos em
 relação ao arquivo de projeto; mover só o `.vmp` não move os vídeos.

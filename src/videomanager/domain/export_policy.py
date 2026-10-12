@@ -59,7 +59,8 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
     # levaria a imagem junto: o que se pediu na tela deixaria de ser o que sai.
     if any(clip.audio_only or clip.detached for clip in clips):
         return None
-    if any(clip.changes_speed or clip.opacity != 1.0 or clip.keyframes for clip in clips):
+    # Copiar os dados não vira o trecho do avesso: o bloco invertido só sai composto.
+    if any(clip.changes_speed or clip.opacity != 1.0 or clip.keyframes or clip.reversed for clip in clips):
         return None
     if first.kind is MediaKind.IMAGE:
         return None

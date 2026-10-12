@@ -486,6 +486,16 @@ EDIT_DETACH_TIP = (
     "Takes the sound out of the video clip and puts it on its own audio track, "
     "at the same position — the video goes silent and the sound moves on its own"
 )
+EDIT_REVERSE = "Reverse"
+EDIT_REVERSE_TIP = (
+    "Plays the clip backwards, picture and sound. When checked, choosing it "
+    "again puts the clip back to normal."
+)
+EDIT_REVERSE_TOO_LONG_TIP = (
+    "This clip can't be reversed: the limit is half an hour of media per clip, "
+    "and the video has to report its frame size. If the clip is over half an "
+    "hour, split it (S) and reverse each part."
+)
 EDIT_COPY = "Copy"
 EDIT_PASTE = "Paste"
 EDIT_ADD_VIDEO_TRACK = "+ Video"
@@ -802,7 +812,7 @@ EDIT_LOAD_CHANGED = "The edit changed while loading. Open the project again to r
 EDIT_MISSING_MEDIA = "The project was opened, but the following files were not found:\n\n{files}"
 EDIT_READ_CANCEL = "Cancel"
 
-EDIT_SAVING_PROJECT = "Saving project v3… Older projects get a .v1.bak or .v2.bak copy before the upgrade."
+EDIT_SAVING_PROJECT = "Saving project v6… Older projects get a .v1.bak to .v5.bak copy before the upgrade."
 
 EDIT_TRANSITION_AFFECT_ADDITIONALS = "Affect overlay items"
 EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP = (
@@ -845,6 +855,8 @@ PROP_CLOSE_TIP = "Close the Properties tab"
 PROP_CLIP_ID = "ID #{id} · {kind}"
 PROP_KINDS = {"none": "Media", "image": "Image", "text": "Text", "filter": "Filter", "transition": "Transition"}
 PROP_TRANSFORM = "Transform"
+PROP_SPEED = "Speed"
+PROP_VOLUME = "Volume"
 PROP_POS_X = "Position X:"
 PROP_POS_Y = "Position Y:"
 PROP_WIDTH = "Width:"
@@ -864,6 +876,10 @@ PROP_CHROMA_PRESETS = {"#00FF00": "Standard green", "#00B140": "Studio green", "
 PROP_CHROMA_PRESET_TIP = "{name} ({color})"
 PROP_CHROMA_TOLERANCE = "Tolerance:"
 PROP_CHROMA_SMOOTHING = "Smoothing:"
+PROP_BLUR = "Blurred Background"
+PROP_BLUR_ENABLE = "Fill the edges with the blurred clip"
+PROP_BLUR_NOTE = "Covers the whole canvas under the clip, including the tracks below it."
+PROP_BLUR_CHROMA = "Unavailable while green screen is on: the blur would show where the color was removed."
 PROP_TRANSITION = "Video transition"
 PROP_TRANSITION_EFFECT = "Effect:"
 EDIT_FONT_SEARCH = "🔍 Search fonts…"
@@ -875,7 +891,7 @@ JOB_STATUS_LABELS = {
 EXPORT_SOURCE_CODEC = "source codec"
 EXPORT_COPY_CODEC = "Copy without re-encoding ({codec})"
 EDIT_SPEED_COLLISION = "There is no room before the next clip for this speed. Move the next clip or choose another speed."
-EDIT_PROJECT_V2_TIP = "v3 format: images on the video track, fitted to the canvas, and trimmed animations preserved. Older versions of the application can't open v3. When a v1 or v2 project is upgraded, the original is kept as .vmp.v1.bak or .vmp.v2.bak (or a numbered copy)."
+EDIT_PROJECT_V2_TIP = "v6 format: images on the video track, fitted to the canvas, trimmed animations, blurred background, reversed clips and animated volume preserved. Older versions of the application can't open v6. When a v1 to v5 project is upgraded, the original is kept as .vmp.v1.bak to .vmp.v5.bak (or a numbered copy)."
 
 EDIT_ANIMATION_GLOBAL = "Edit the whole animation"
 EDIT_ANIMATION_GLOBAL_TIP = "Applies the change to every point, including the ones kept outside trimmed edges. Unchecked: edits only the current time."

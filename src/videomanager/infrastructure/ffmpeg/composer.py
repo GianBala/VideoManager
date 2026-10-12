@@ -44,7 +44,10 @@ from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.constants import GAIN_EPSILON
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
+from videomanager.domain.preview import BYTES_PER_PIXEL
 from videomanager.domain.preview import fit_size
+from videomanager.domain.project import MAX_GAIN_DB
+from videomanager.domain.project import MIN_GAIN_DB
 from videomanager.domain.project import Clip
 from videomanager.domain.project import OverlayType
 from videomanager.domain.project import MediaKind
@@ -59,6 +62,9 @@ from videomanager.domain.timing import last_frame_time
 from videomanager.infrastructure.ffmpeg.trimmer import tail_args
 from videomanager.domain.geometry import image_base_size
 from videomanager.domain.render_cost import interpolation_bytes
+from videomanager.domain.render_cost import reverse_cuts
+from videomanager.domain.reversal import MAX_REVERSE_BYTES, PREVIEW_WINDOW_SECONDS
+from videomanager.infrastructure.ffmpeg.stages import Stages
 
 # Formato interno do áudio. Fixá-lo antes da mixagem evita o erro mais comum de
 # ``amix``: entradas com taxas ou layouts diferentes, que ele recusa.
@@ -86,10 +92,35 @@ _AUDIO_DECLICK = 0.012
 # mostrar, senão o ffmpeg sai sem escrever nada e a prévia fica sem explicação.
 _MIN_CANVAS = 0.04
 
+# Folga que impede um quadro exatamente sobre a borda de uma janela de ler de
+# ser tomado pelo lado errado dela (ver :func:`_transition_side`). Bem abaixo de
+# qualquer quadro real e bem acima do ruído de ponto flutuante.
+_FRAME_EDGE = 1e-3
+
+# Quanto antes do trecho o ffmpeg começa a ler um bloco invertido. Depois de um
+# ``-ss`` o primeiro quadro de áudio sai sem o vizinho de que o codec precisa
+# (a sobreposição do AAC, o ``bit reservoir`` do MP3, a pré-carga do Opus): as
+# primeiras ~1000 amostras saem atenuadas. Medido: 995 a 1001 amostras erradas
+# em cada emenda de janela. No começo de um bloco normal isso mal se ouve; num
+# invertido o começo da leitura é o **fim** do que toca, e cada janela abre uma
+# emenda no meio do som. Ler mais cedo e descartar a sobra tira o defeito do
+# trecho; um quarto de segundo cobre os codecs comuns com folga.
+_PREROLL = 0.25
+
 # Sobra clonada no fim de um bloco interpolado (ver :func:`_rate_chain`). Meio
 # segundo cobre com folga os poucos quadros que o filtro não consegue produzir,
 # e nada disso aparece: a sobreposição é desligada no fim do bloco.
 _INTERPOLATE_TAIL = 0.5
+
+# O fundo desfocado é borrado numa tela de trabalho pequena e só depois ampliada
+# até a do projeto: o resultado é uma mancha de cor, e desfocar 4K inteiro custa
+# o que não se vê. Medido numa exportação de 5 s: ``gblur`` em tamanho cheio
+# 2,44 s a 1080p e 8,47 s a 4K; na tela de trabalho 1,36 s e 4,69 s, com SSIM
+# 0,998 contra o desfoque cheio (``boxblur`` é pior nos dois eixos). O lado
+# menor fixo faz a prévia e a exportação saírem do mesmo desenho — com fração
+# fixa ou sigma em pixels a prévia pequena divergia (SSIM 0,935 e 0,781).
+_BLUR_SHORT_SIDE = 136
+_BLUR_SIGMA = 6.0
 
 
 @dataclass(frozen=True)
@@ -108,6 +139,34 @@ class _Piece:
     # Instante real em que o último quadro do arquivo começa, lido dele mesmo
     # (ver ``lastframe``). Só vem preenchido quando a agulha cai nesse quadro.
     tail_start: float | None = None
+    # Lido de trás para frente: ``seek`` é o **menor** instante lido, e depois de
+    # ``trim`` o ``reverse``/``areverse`` vira o trecho. Os quadros parados da
+    # prévia não usam isto (ver ``_pieces``): leem um quadro só, já no lugar.
+    flip: bool = False
+    # Tempo de edição entre o começo do bloco e o começo deste trecho. Só o bloco
+    # invertido o usa: nele ``seek`` deixa de dizer quanto do bloco já passou.
+    elapsed: float = 0.0
+    # Quanto antes do trecho a leitura começa (ver ``_PREROLL``): ``trim`` e
+    # ``atrim`` descartam essa sobra.
+    lead: float = 0.0
+
+
+def _reversed_still_seek(clip: Clip, moment: float) -> float:
+    """Instante do quadro que a exportação mostra em ``moment`` num bloco invertido.
+
+    A exportação lê o trecho em ordem, vira a lista de quadros e a coloca no
+    relógio da edição a partir do começo do bloco. O quadro ``k`` desse relógio
+    é, portanto, o ``k``-ésimo contado do **fim** do trecho — e é essa a conta
+    que o quadro parado repete, em vez de achar o quadro "mais perto" do tempo
+    espelhado, que erra por um quadro nas bordas de cada quadro da edição.
+    Devolve o meio do quadro de origem, para a grade do arquivo não desempatar.
+    """
+    fps = clip.media.fps
+    first = math.ceil(clip.in_point * fps - 1e-6)
+    last = math.ceil(clip.out_point * fps - 1e-6) - 1
+    shown = math.floor(max(0.0, moment - clip.start) * clip.speed * fps + 1e-6)
+    index = max(first, last - shown)
+    return (index + 0.5) / fps
 
 
 def _pieces(
@@ -163,6 +222,26 @@ def _pieces(
             has_a = want_audio and clip.has_sound and not track.muted
             if not has_v and not has_a:
                 continue
+            is_still = (still and clip.media is not None and clip.media.kind is MediaKind.VIDEO
+                        and bool(clip.media.fps))
+            seek = clip.source_time(begin)
+            flip = False
+            lead = 0.0
+            if clip.reversed:
+                if is_still and end is not None:
+                    # Um quadro só: lê-se o quadro espelhado de frente para trás,
+                    # sem ``reverse`` e sem guardar nada. O trecho encolhe até o
+                    # último instante da janela, que é o que a tela mostra; se o
+                    # bloco já acabou antes dele, não há o que desenhar.
+                    begin = max(begin, end - 1.0 / project.fps)
+                    if finish - begin <= 0:
+                        continue
+                    seek = _reversed_still_seek(clip, begin)
+                else:
+                    seek = clip.source_time(finish)
+                    flip = True
+                    lead = min(seek, _PREROLL)
+                    seek -= lead
             is_overlay_filter = clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION)
             idx = -1 if is_overlay_filter else input_idx
             if not is_overlay_filter:
@@ -171,14 +250,16 @@ def _pieces(
                 _Piece(
                     clip=clip,
                     index=idx,
-                    seek=clip.source_time(begin),
+                    seek=seek,
                     offset=begin - at,
                     duration=finish - begin,
                     track_index=track_index,
                     track_muted=track.muted,
-                    still=(still and clip.media is not None and clip.media.kind is MediaKind.VIDEO
-                           and bool(clip.media.fps)),
-                    tail_start=(tails or {}).get(clip.clip_id) if still else None,
+                    still=is_still,
+                    tail_start=((tails or {}).get(clip.clip_id) if is_still and not clip.reversed else None),
+                    flip=flip,
+                    elapsed=begin - clip.start,
+                    lead=lead,
                 )
             )
     return pieces
@@ -203,7 +284,7 @@ def _tail_clips(project: Project, at: float) -> list[Clip]:
         for clip in track.clips:
             media = clip.media
             if (not clip.contains(at) or media is None or media.kind is not MediaKind.VIDEO
-                    or not media.fps or not media.duration):
+                    or not media.fps or not media.duration or clip.reversed):
                 continue
             last = frame_time(max(0, frame_index(media.duration, media.fps) - 1), media.fps)
             if clip.source_time(at) >= last - 1e-9:
@@ -342,6 +423,12 @@ def _input_args(
     if piece.still:
         seek, _margin = _still_seek(piece)
         return ["-noaccurate_seek", "-ss", f"{seek:.6f}", "-i", str(clip.media.path)]
+    if piece.flip and piece.seek <= 0:
+        # Um ``-ss 0`` não é "não buscar": o ffmpeg busca o começo e entrega as
+        # primeiras 576 amostras do AAC zeradas (medido: 0 contra 95, 910,
+        # 1786… da leitura simples). Num bloco invertido o começo da leitura é o
+        # fim do que toca. Os blocos normais seguem como sempre.
+        return ["-i", str(clip.media.path)]
     return ["-ss", f"{piece.seek:.6f}", "-i", str(clip.media.path)]
 
 
@@ -451,6 +538,9 @@ def _chromakey_filter(clip: Clip) -> str | None:
 def _clip_stream_origin(piece: _Piece) -> float:
     """Calcula a origem temporal do clipe no fluxo (PTS=0), considerando o seek."""
     clip = piece.clip
+    if clip.reversed:
+        # Lendo para baixo, ``seek`` deixou de medir o quanto do bloco já passou.
+        return piece.offset - piece.elapsed
     speed = max(0.001, clip.speed)
     elapsed = max(0.0, (piece.seek - clip.in_point) / speed)
     return piece.offset - elapsed
@@ -525,6 +615,100 @@ def _keyframe_expr(
     return expr
 
 
+def _blur_steps(piece: _Piece, project: Project, fps: float) -> list[str]:
+    """Cadeia do fundo desfocado: o bloco coberto à tela, borrado e ampliado.
+
+    Cobre pela forma de **exibição** (``dar``), como ``_fit_scale`` encaixa a
+    frente: pela proporção armazenada, um arquivo de pixel não quadrado cobria
+    com a razão errada. Não passa pelo ``minterpolate``: o movimento some no
+    desfoque, e interpolar custaria memória sem mostrar nada. A opacidade vale
+    para o conjunto — senão, num fade, a frente some e o borrão fica na tela.
+
+    O ``fps`` entra **no fim**, onde duplicar quadro é de graça, e não por
+    fidelidade de movimento: sem ele o fluxo carrega a taxa da fonte, e numa
+    tela de taxa maior (30 fps dentro de 60) o último instante do bloco caía
+    depois do último quadro do fundo — um quadro preto nas laterais, em cada
+    emenda. Medido: o quadro 89 de 90 sem fundo. Também é ele que dá ao ``tpad``
+    seguinte a taxa de que precisa: sem taxa conhecida o filtro não clona nada.
+
+    Os dois ``scale`` são bilineares: o resultado é um borrão de sigma 6 na tela
+    de trabalho, e o bicúbico padrão gastava CPU num detalhe que o desfoque já
+    tirou. Medido no fluxo da reprodução da montagem a 1080p (9 s de mídia): o
+    fundo custava +30% de tempo e passou a +14%; a imagem muda 43 dB de PSNR
+    (diferença máxima de 6 em 255, sem estrutura visível a 30× de contraste).
+
+    O ``gblur`` roda num formato **fixo** (``gbrp``) e o resultado volta a
+    ``yuv420p`` ainda no tamanho pequeno. Sem isso ele roda no formato que o
+    filtro seguinte negociar, e num vídeo ``yuv420p`` o desfoque dos planos de
+    cor saía na metade da resolução — o mesmo sigma valendo o dobro em pixels
+    de tela. Medido num ``testsrc2`` de vídeo contra o mesmo quadro em foto: a
+    cor do fundo divergia 6,5 a 13,4 em 255 (máximo 92). Voltar a ``yuv420p``
+    ainda no tamanho pequeno poupa o aumento até a tela e o ``overlay`` de
+    trabalharem em ``gbrp`` (3 bytes por pixel): num grafo isolado de 9 s a
+    1080p, 2,30 s contra 2,79 s (mínimo de 5). Contra o formato negociado de
+    antes, o fluxo da reprodução da montagem não mudou de forma mensurável
+    (12,08 s contra 12,15 s, mínimo de 5 repetições).
+
+    O ``gbrp`` também **não tem alfa**, e a conversão de ``rgba`` o descartava
+    sem compô-lo: numa imagem com transparência o fundo nascia da cor que o
+    arquivo guarda sob o alfa (branca, preta ou outra, conforme o editor de
+    imagem), opaca e cobrindo a trilha de baixo. ``premultiply=inplace=1``
+    compõe a imagem sobre preto antes da conversão: o que era transparente vira
+    preto, e para uma fonte sem alfa (alfa 255) nada muda. Tudo no tamanho
+    pequeno, então o custo some. A conversão vai para ``gbrap`` (planar, com
+    alfa) e não para ``rgba`` (empacotado) de propósito: para fonte sem alfa o
+    ``scale`` anterior converte direto para o mesmo formato planar de antes e o
+    fundo sai **byte a byte igual** (144 de 144 quadros de fontes de 720p a 4000×3000,
+    vídeo 8 e 10 bits, foto, pixel não quadrado); via ``rgba`` a conversão
+    acontecia noutra etapa do ``swscale`` e 158 de 216 quadros mudavam, até 20 em
+    255.
+    """
+    clip = piece.clip
+    short = min(_BLUR_SHORT_SIDE, project.width, project.height)
+    ratio = short / min(project.width, project.height)
+    work_w = max(2, round(project.width * ratio / 2) * 2)
+    work_h = max(2, round(project.height * ratio / 2) * 2)
+    steps = [
+        f"scale=w='ceil(max({work_w},{work_h}*dar)/2)*2':h='ceil(max({work_h},{work_w}/dar)/2)*2':flags=bilinear",
+        f"crop={work_w}:{work_h}",
+        "format=gbrap",
+        "premultiply=inplace=1",
+        "format=gbrp",
+        f"gblur=sigma={_BLUR_SIGMA * short / _BLUR_SHORT_SIDE:.4f}",
+        "format=yuv420p",
+    ]
+    # A opacidade mexe só no **plano de alfa**, já em ``yuva420p``. Passar por ``rgba`` e voltar a ``yuva420p`` dava o
+    # mesmo resultado até o ffmpeg 8, mas no 9 (o do Chocolatey, que a CI usa no Windows) essa conversão **divide a cor
+    # pelo alfa** — medido, 136 virava 222 com alfa 0,6 —, e a opacidade do fundo se anulava: um bloco a 60% saía com o
+    # fundo a 100%, e um fade deixava o borrão na tela.
+    if clip.animates("opacity"):
+        expr = _keyframe_expr(clip.keyframes, "opacity", _clip_stream_origin(piece), clip.opacity, time_var="T")
+        steps += ["format=yuva420p", f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='alpha(X,Y)*({expr})'"]
+    elif clip.opacity < 1 - 1e-9:
+        steps += ["format=yuva420p", f"lutyuv=a='val*{clip.opacity:.4f}'"]
+    return steps + [f"scale={project.width}:{project.height}:flags=bilinear", "setsar=1", f"fps={fps:.6f}",
+                    *_tail_hold(clip)]
+
+
+def _chain_text(
+    piece: _Piece, project: Project, steps: list[str], lead: int, blur: str | None, fps: float
+) -> str:
+    """Monta a cadeia do bloco; com fundo, divide o fluxo depois dos ``lead`` primeiros passos.
+
+    A divisão vem **depois** do ``trim`` e do ``setpts``: frente e fundo partem do
+    mesmo instante e do mesmo decodificador, sem abrir o arquivo duas vezes.
+    """
+    head, tail = f"[{piece.index}:v]", f"[v{piece.index}]"
+    if blur is None:
+        return head + ",".join(steps) + tail
+    key = blur[:-1]
+    return (
+        f"{head}{','.join(steps[:lead])},split=2{key}_in]{key}_front];"
+        f"{key}_front]{','.join(steps[lead:])}{tail};"
+        f"{key}_in]{','.join(_blur_steps(piece, project, fps))}{blur}"
+    )
+
+
 def _video_chain(
     piece: _Piece,
     project: Project,
@@ -532,8 +716,13 @@ def _video_chain(
     interpolate: bool = False,
     canonical_size: tuple[int, int] | None = None,
     standalone: bool = False,
+    blur: str | None = None,
 ) -> str:
-    """Ajusta um bloco ao formato da tela e o coloca no instante certo."""
+    """Ajusta um bloco ao formato da tela e o coloca no instante certo.
+
+    ``blur`` é o rótulo da saída do fundo desfocado, quando o bloco o tem (ver
+    :func:`_chain_text`).
+    """
     clip = piece.clip
     is_overlay = clip.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT) or clip.is_image
     if is_overlay:
@@ -542,6 +731,7 @@ def _video_chain(
             steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
         else:
             steps.append("setpts=PTS-STARTPTS")
+        lead = len(steps)
         steps.append(f"fps={fps:.6f}")
         steps.append("format=rgba")
         sx = clip.scale_x
@@ -597,7 +787,7 @@ def _video_chain(
 
         has_anim_rotation = clip.animates("rotation")
         max_diag: int | None = None
-        if clip.has_keyframes:
+        if clip.has_pose_keyframes:
             all_k_sx = [clip.scale_x] + [k.scale_x for k in clip.keyframes]
             all_k_sy = [clip.scale_y] + [k.scale_y for k in clip.keyframes]
             max_k_sx = max(all_k_sx)
@@ -643,7 +833,7 @@ def _video_chain(
                     f"rotate={rad:.4f}:ow='2*ceil(rotw({rad:.4f})/2)':oh='2*ceil(roth({rad:.4f})/2)':c=black@0"
                 )
 
-        if clip.has_keyframes:
+        if clip.has_pose_keyframes:
             has_anim_opacity = clip.animates("opacity")
             if has_anim_opacity:
                 expr_op = _keyframe_expr(
@@ -659,29 +849,39 @@ def _video_chain(
             steps.append(f"colorchannelmixer=aa={clip.opacity:.4f}")
         steps.append("format=rgba")
         steps = _alpha_before_dynamic_scale(steps)
-        return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
+        return _chain_text(piece, project, steps, lead, blur, fps)
 
     steps = []
     if piece.still:
         _seek, margin = _still_seek(piece)
         steps.append(f"select='gte(t,{-margin:.6f})'")
+    cut = f"start={piece.lead:.6f}:" if piece.lead > 0 else ""
     if clip.changes_speed:
-        steps.append(f"trim=duration={piece.duration * clip.speed:.6f}")
+        steps.append(f"trim={cut}duration={piece.duration * clip.speed:.6f}")
+        if piece.flip:
+            steps.append("reverse")
         inv = 1.0 / clip.speed
         if piece.offset > 0:
             steps.append(f"setpts={inv:.6f}*(PTS-STARTPTS)+{piece.offset:.6f}/TB")
         else:
             steps.append(f"setpts={inv:.6f}*(PTS-STARTPTS)")
     else:
-        steps.append(f"trim=duration={piece.duration:.6f}")
+        steps.append(f"trim={cut}duration={piece.duration:.6f}")
+        if piece.flip:
+            # Logo depois do ``trim`` e antes do ``setpts``: o ``reverse`` devolve
+            # os instantes originais em ordem crescente, e é o ``setpts`` que os
+            # leva ao relógio da edição. Também antes da divisão do fundo
+            # desfocado (``lead``), para frente e fundo saírem do mesmo fluxo.
+            steps.append("reverse")
         if piece.offset > 0:
             steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
         else:
             steps.append("setpts=PTS-STARTPTS")
+    lead = len(steps)
 
     sx = clip.scale_x
     sy = clip.scale_y
-    has_keyframes = clip.has_keyframes
+    has_keyframes = clip.has_pose_keyframes
     origin = _clip_stream_origin(piece)
     has_anim_scale = clip.animates("scale")
     has_anim_rotation = clip.animates("rotation")
@@ -735,7 +935,7 @@ def _video_chain(
                 steps.append(ck)
 
         max_diag: int | None = None
-        if clip.has_keyframes:
+        if clip.has_pose_keyframes:
             all_k_sx = [clip.scale_x] + [k.scale_x for k in clip.keyframes]
             all_k_sy = [clip.scale_y] + [k.scale_y for k in clip.keyframes]
             max_k_sx = max(all_k_sx)
@@ -765,7 +965,7 @@ def _video_chain(
                     f"rotate={rad:.4f}:ow='2*ceil(rotw({rad:.4f})/2)':oh='2*ceil(roth({rad:.4f})/2)':c=black@0"
                 )
 
-        if clip.has_keyframes:
+        if clip.has_pose_keyframes:
             has_anim_opacity = clip.animates("opacity")
             if has_anim_opacity:
                 expr_op = _keyframe_expr(
@@ -783,7 +983,7 @@ def _video_chain(
         steps.append("setsar=1")
         steps = _alpha_before_dynamic_scale(steps)
         steps += _tail_hold(clip)
-        return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
+        return _chain_text(piece, project, steps, lead, blur, fps)
 
     if _rate_first(piece, project, fps, interpolate):
         steps.append(_rate_chain(piece, fps, interpolate))
@@ -797,7 +997,7 @@ def _video_chain(
     )
     steps.append("setsar=1")
     steps += _tail_hold(clip)
-    return f"[{piece.index}:v]" + ",".join(steps) + f"[v{piece.index}]"
+    return _chain_text(piece, project, steps, lead, blur, fps)
 
 
 # Quanto um bloco de vídeo pode segurar o último quadro quando a trilha de vídeo
@@ -871,6 +1071,51 @@ def _fit_scale(width: int, height: int) -> str:
     return f"scale=w='trunc({largest}/2)*2':h='trunc({tallest}/2)*2'"
 
 
+def _gain_filter(clip: Clip, origin: float) -> str | None:
+    """O filtro de volume do bloco: o valor fixo de sempre, ou a curva dos quadros-chave no tempo.
+
+    Sem curva o texto é exatamente o de antes (``volume=-6.00dB``), então o comando de todo projeto
+    sem volume animado sai igual. Com curva, o volume ouvido é o do bloco mais a curva, limitado ao
+    mesmo intervalo do controle, convertido de dB por ``pow`` e reavaliado a cada quadro de áudio
+    (``eval=frame``). ``origin`` é onde o bloco começa no relógio ``t`` do filtro, que o ffmpeg conta
+    desde o início do trecho lido.
+
+    **O quadro de áudio é limitado a 480 amostras antes do ``volume``.** ``eval=frame`` reavalia a curva
+    uma vez por quadro, e o quadro é o do decodificador: sem o limite o fade saía em escada, de degrau
+    do tamanho dele. Medido numa rampa de 15 dB/s: 1,18 dB por degrau em WAV e FLAC de 4096 amostras,
+    4,38 dB em FLAC de 16384, contra 0,29 dB em AAC, MP3, Opus e Vorbis; com o limite, 0,15 dB em todos,
+    e a mesma contagem de amostras (``p=0``: o último quadro não é preenchido). São 480 **amostras**, ou
+    10 ms a 48 kHz; numa fonte de 8 kHz seriam 60 ms, ainda abaixo do que a escada tinha.
+    """
+    if clip.animates_gain:
+        curve = _keyframe_expr(clip.keyframes, "gain_offset_db", origin, 0.0)
+        return ("asetnsamples=n=480:p=0,"
+                f"volume='pow(10,max({MIN_GAIN_DB:g},min({MAX_GAIN_DB:g},{clip.gain_db:.6f}+({curve})))/20)'"
+                ":eval=frame")
+    if clip.changes_gain:
+        return f"volume={clip.gain_db:.2f}dB"
+    return None
+
+
+def _mute_filter(local_start: float, local_end: float, duration: float) -> str:
+    """Cala o trecho ``[local_start, local_end]`` do bloco, com a precisão de **uma amostra**.
+
+    ``volume=0:enable='between(t,…)'`` avalia o intervalo por quadro de áudio, e o quadro é o da fonte: o lado que devia
+    calar seguia soando até o fim do quadro que cruzava o começo da janela (envelope 2,0 — +6 dB — por ~25 ms contra a
+    outra peça), e o que devia voltar só voltava depois do que cruzava o fim dela (um buraco de ~3 ms numa fonte PCM,
+    dezenas de ms em FLAC de 16384 amostras). A janela de uma transição cobre sempre **uma ponta** do bloco — o começo
+    do que entra ou o fim do que sai, já que ela se centra no corte —, e uma ponta se cala com um ``afade`` de uma
+    amostra: a saída (``out``) cala dali em diante, a entrada (``in``) cala até ali. Um trecho no meio do bloco, que
+    nenhuma transição produz, segue pela expressão antiga.
+    """
+    one_sample = 1.0 / SAMPLE_RATE
+    if local_start <= 1e-6:
+        return f"afade=t=in:st={max(0.0, local_end):.6f}:d={one_sample:.9f}"
+    if local_end >= duration - 1e-6:
+        return f"afade=t=out:st={local_start:.6f}:d={one_sample:.9f}"
+    return f"volume=0:enable='between(t,{local_start:.6f},{local_end:.6f})'"
+
+
 def _audio_chain(
     piece: _Piece,
     muted_ranges: tuple[tuple[float, float], ...] = (),
@@ -884,24 +1129,31 @@ def _audio_chain(
     o fade acontecerem vários segundos depois do corte.
     """
     clip = piece.clip
+    cut = f"start={piece.lead:.6f}:" if piece.lead > 0 else ""
     if clip.changes_speed:
-        steps = [f"atrim=duration={piece.duration * clip.speed:.6f}", "asetpts=PTS-STARTPTS"]
+        steps = [f"atrim={cut}duration={piece.duration * clip.speed:.6f}", "asetpts=PTS-STARTPTS"]
+        if piece.flip:
+            steps.append("areverse")
         steps += _atempo_filters(clip.speed)
     else:
-        steps = [f"atrim=duration={piece.duration:.6f}", "asetpts=PTS-STARTPTS"]
-    if clip.changes_gain:
-        steps.append(f"volume={clip.gain_db:.2f}dB")
+        steps = [f"atrim={cut}duration={piece.duration:.6f}", "asetpts=PTS-STARTPTS"]
+        if piece.flip:
+            steps.append("areverse")
+    # O trecho lido começa ``piece.elapsed`` depois do começo do bloco (uma janela, a prévia a partir do
+    # meio): a curva, medida desde o começo do bloco, desloca-se por isso.
+    gain = _gain_filter(clip, -piece.elapsed)
+    if gain:
+        steps.append(gain)
     steps.append(_AUDIO_BASE)
     steps.append(
         _MONO_TO_STEREO if clip.media.channels == 1 else _TO_STEREO
     )
+    edges: list[str] = []
     for start, end in muted_ranges:
         local_start = start - piece.offset
         local_end = end - piece.offset
         if local_end > -1e-6 and local_start < piece.duration + 1e-6:
-            steps.append(
-                f"volume=0:enable='between(t,{local_start:.6f},{local_end:.6f})'"
-            )
+            edges.append(_mute_filter(local_start, local_end, piece.duration))
     for kind, start, end in fades:
         duration = end - start
         if duration <= 1e-6:
@@ -910,6 +1162,13 @@ def _audio_chain(
         local_end = end - piece.offset
         if local_end <= -1e-6 or local_start >= piece.duration + 1e-6:
             continue
+        if local_start >= 0:
+            # ``afade`` trabalha amostra a amostra, e ``qsin`` é a mesma curva de antes (cos na saída, sin na entrada).
+            edges.append(f"afade=t={kind}:st={local_start:.6f}:d={duration:.6f}:curve=qsin")
+            continue
+        # A rampa já começou antes do primeiro som do trecho (prévia a partir de dentro dela): ``afade`` não aceita
+        # início negativo, então fica a expressão, por quadro — em quadros de 1 ms (48 amostras), e não nos da fonte.
+        edges.append("asetnsamples=n=48:p=0")
         progress = f"(t-{local_start:.6f})/{duration:.6f}"
         if kind == "out":
             gain = (
@@ -923,7 +1182,13 @@ def _audio_chain(
             )
         # Seno/cosseno dão uma passagem perceptualmente mais uniforme que duas
         # retas de amplitude. ``eval=frame`` acompanha o relógio continuamente.
-        steps.append(f"volume='{gain}':eval=frame")
+        edges.append(f"volume='{gain}':eval=frame")
+    if edges:
+        # Quadros de 480 amostras (10 ms a 48 kHz) antes das pontas e da entrada do ``amix``: no ffmpeg 6.1 (o do Ubuntu 24.04)
+        # o ``amix`` **perde o fim da peça** quando o último quadro dela é grande e a outra entrada vem atrasada (``adelay``):
+        # numa fonte FLAC de 16384 amostras, o lado que sai ficava mudo nos últimos quadros antes do corte, com ou sem rampa.
+        steps.append("asetnsamples=n=480:p=0")
+        steps.extend(edges)
     if piece.offset > 0:
         # ``all=1`` aplica o atraso a todos os canais; sem ele, só o primeiro
         # canal é atrasado e o bloco sai com a imagem à frente do som num lado.
@@ -943,6 +1208,14 @@ class _TransitionSide:
     postpad: float
     duration: float
     playback_speed: float
+    # O bloco é invertido: o trecho é lido para cima e virado (ver ``_Piece.flip``).
+    flip: bool = False
+    # Quanto **antes** do começo do trecho a leitura começa (ver
+    # :func:`_transition_side`). O som descarta essa sobra, a imagem a usa.
+    lead: float = 0.0
+    # Quanto o recuo da leitura **não pôde** recuar, por faltar mídia antes de zero:
+    # a imagem encurta o trecho lido por esse tanto (o som não).
+    image_cut: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -1027,7 +1300,11 @@ def _is_continuous_source_cut(context: TransitionContext) -> bool:
     return bool(
         context.left.media.path == context.right.media.path
         and context.left.media.kind is context.right.media.kind
-        and abs(context.left.out_point - context.right.in_point) <= 1e-4
+        # Onde um termina e o outro começa, lidos no sentido de cada um: dois
+        # blocos invertidos de uma mesma divisão se emendam pela base do
+        # primeiro, e um invertido nunca emenda com um que não é.
+        and context.left.reversed == context.right.reversed
+        and abs(context.left.tail_point - context.right.head_point) <= 1e-4
         and abs(context.left.speed - context.right.speed) <= 1e-6
     )
 
@@ -1053,15 +1330,44 @@ def _transition_side(
     if clip.media.duration is not None:
         actual_end = min(actual_end, clip.media.duration)
     actual_end = max(actual_start, actual_end)
+    prepad = max(0.0, (actual_start - wanted_start) / playback_speed)
+    postpad = max(0.0, (wanted_end - actual_end) / playback_speed)
+    lead = 0.0
+    image_cut = 0.0
+    if clip.reversed:
+        # O que falta antes do começo da mídia fica, depois de virar o trecho,
+        # no **fim** do que a edição mostra — e o que falta depois do fim da
+        # mídia, no começo.
+        prepad, postpad = postpad, prepad
+        # A janela de uma transição começa no meio de um quadro, e a regra de
+        # quem entra nela é a do ``-ss``: descarta o quadro que a atravessa no
+        # começo. Lida para baixo, a ponta que abre a transição é a de cima, e
+        # ali o mesmo quadro entrava: o lado invertido repetia um quadro no
+        # começo do cross-fade. Recuar a leitura quase um quadro espelha a regra
+        # (medido contra o mesmo projeto montado com o arquivo invertido de
+        # verdade: 12 de 90 quadros divergiam, nenhum depois). O "quase" é o
+        # que mantém a regra certa quando a janela cai exatamente na grade.
+        if clip.media.fps:
+            nominal = 1.0 / clip.media.fps - _FRAME_EDGE
+            lead = min(actual_start, nominal)
+            # Com a janela começando em zero (inverter o arquivo inteiro e pôr uma
+            # transição depois) não há mídia antes para recuar a leitura, e o quadro
+            # da ponta de cima entrava: um quadro a mais que o mesmo projeto montado
+            # com o arquivo invertido (4 a 5 de 90 quadros, até 3 de brilho). O que
+            # faltou do recuo sai do topo do trecho de imagem, que dá o mesmo corte.
+            image_cut = nominal - lead
     return _TransitionSide(
         clip=clip,
         index=index,
-        seek=actual_start,
+        seek=actual_start - lead,
+        lead=lead,
+        image_cut=image_cut,
         source_duration=max(0.001, actual_end - actual_start),
-        prepad=max(0.0, (actual_start - wanted_start) / playback_speed),
-        postpad=max(0.0, (wanted_end - actual_end) / playback_speed),
+        prepad=prepad,
+        postpad=postpad,
         duration=duration,
         playback_speed=playback_speed,
+        flip=clip.reversed,
     )
 
 
@@ -1074,11 +1380,14 @@ def _has_audio_handles(context: TransitionContext) -> bool:
     lados. Sem elas, o áudio normal recebe fades curtos até/depois do corte.
     """
     half = context.duration / 2.0
-    left_media_end = context.left.media.duration
-    if left_media_end is None:
+    left, right = context.left, context.right
+    if left.media.duration is None or (right.reversed and right.media.duration is None):
         return False
-    left_handle = max(0.0, (left_media_end - context.left.out_point) / context.left.speed)
-    right_handle = max(0.0, context.right.in_point / context.right.speed)
+    # Material que sobra além da ponta, no sentido em que cada bloco toca.
+    left_handle = max(0.0, (left.tail_point if left.reversed else left.media.duration - left.tail_point)
+                      / left.speed)
+    right_handle = max(0.0, ((right.media.duration - right.head_point) if right.reversed else right.head_point)
+                       / right.speed)
     return left_handle + 1e-6 >= half and right_handle + 1e-6 >= half
 
 
@@ -1091,6 +1400,20 @@ def _transition_input_args(side: _TransitionSide, fps: float) -> list[str]:
     return ["-ss", f"{side.seek:.6f}", "-i", str(side.clip.media.path)]
 
 
+def _side_elapsed(side: _TransitionSide) -> float:
+    """Quanto do bloco, na edição, já passou quando este lado da transição começa a ler.
+
+    É o que desloca a origem do relógio dos quadros-chave (imagem e, no som, o volume) para o
+    relógio do próprio lado, que nasce no início da janela e não no do bloco. Não conta o
+    ``prepad``: a imagem o recebe na cadeia dela, e o som, depois do ``volume``, no ``adelay``.
+    """
+    clip = side.clip
+    if clip.reversed:
+        top = side.seek + side.lead + side.source_duration
+        return (clip.out_point - top) / side.playback_speed
+    return (side.seek - clip.in_point) / side.playback_speed
+
+
 def _transition_video_chain(
     side: _TransitionSide,
     project: Project,
@@ -1100,7 +1423,8 @@ def _transition_video_chain(
     """Produz uma fonte de tela inteira com duração exata para o ``xfade``."""
     clip = side.clip
     steps = [
-        f"trim=duration={side.source_duration:.6f}",
+        f"trim=duration={max(0.001, side.source_duration - side.image_cut):.6f}",
+        *(["reverse"] if side.flip else []),
         f"setpts=(PTS-STARTPTS)/{side.playback_speed:.6f}",
         # ``tpad`` só consegue converter segundos em quadros quando estes já
         # têm duração. Alguns MP4 entregam ``duration=0`` no fim do arquivo;
@@ -1131,8 +1455,8 @@ def _transition_video_chain(
 
     # Decodificação/alças são específicas da transição; transformação e alfa
     # usam a mesma composição de uma camada normal, no relógio da timeline.
-    elapsed = (side.seek - clip.in_point) / side.playback_speed - side.prepad
-    local_clip = replace(clip, start=0, duration=side.duration, in_point=0, speed=1,
+    elapsed = _side_elapsed(side) - side.prepad
+    local_clip = replace(clip, start=0, duration=side.duration, in_point=0, speed=1, reversed=False,
                          keyframes=tuple(replace(k, time_offset=k.time_offset-elapsed) for k in clip.keyframes))
     decoded = f"{label[:-1]}_decoded]"
     base = f"{label[:-1]}_base]"
@@ -1152,12 +1476,19 @@ def _transition_video_chain(
 def _transition_audio_chain(side: _TransitionSide, label: str) -> str:
     clip = side.clip
     steps = [
-        f"atrim=duration={side.source_duration:.6f}",
+        # O som lê desde o mesmo ``-ss`` da imagem: a sobra de leitura dela é
+        # descartada aqui, para a janela do som continuar a que foi pedida.
+        f"atrim=start={side.lead:.6f}:duration={side.source_duration:.6f}" if side.lead > 0
+        else f"atrim=duration={side.source_duration:.6f}",
         "asetpts=PTS-STARTPTS",
+        *(["areverse"] if side.flip else []),
         *_atempo_filters(side.playback_speed),
     ]
-    if clip.changes_gain:
-        steps.append(f"volume={clip.gain_db:.2f}dB")
+    # O ``volume`` vem antes do ``adelay`` da alça: ali o relógio começa na primeira amostra de verdade,
+    # que é onde o lado começa a ler o bloco.
+    gain = _gain_filter(clip, -_side_elapsed(side))
+    if gain:
+        steps.append(gain)
     steps.extend(
         (
             _AUDIO_BASE,
@@ -1169,6 +1500,10 @@ def _transition_audio_chain(side: _TransitionSide, label: str) -> str:
     if side.postpad > 1e-6:
         steps.append(f"apad=pad_dur={side.postpad:.6f}")
     steps.append(f"atrim=duration={side.duration:.6f}")
+    # O ``acrossfade`` com os quadros da fonte nas duas entradas **às vezes não entrega nada**: numa fonte FLAC de 16384
+    # amostras, a mesma exportação saiu com a janela inteira muda em ~1 de cada 4 execuções (medido, 12 repetições); com
+    # quadros de 480 amostras (10 ms a 48 kHz) saiu certa em todas. O mesmo limite de ``_gain_filter``.
+    steps.append("asetnsamples=n=480:p=0")
     return f"[{side.index}:a]" + ",".join(steps) + label
 
 
@@ -1232,12 +1567,15 @@ def _compose_video_piece(
         return label
 
     video_label = f'[v{piece.index}{label_suffix}]'
-    filters.append(_video_chain(piece, project, fps, interpolate, canonical_size=canonical_size)
+    # O rótulo carrega o sufixo: a mesma peça é composta mais de uma vez quando
+    # há janelas de transição, e rótulo repetido o ffmpeg recusa.
+    blur = f'[d{piece.index}{label_suffix}]' if piece.clip.blur_background else None
+    filters.append(_video_chain(piece, project, fps, interpolate, canonical_size=canonical_size, blur=blur)
                    .replace(f'[v{piece.index}]', video_label))
     label = f"[o{order}]"
     is_overlay_item = piece.clip.overlay_type in (OverlayType.IMAGE, OverlayType.TEXT) or piece.clip.is_image
     has_transform = (
-        piece.clip.has_keyframes
+        piece.clip.has_pose_keyframes
         or abs(piece.clip.x - 0.5) > 1e-9
         or abs(piece.clip.y - 0.5) > 1e-9
         or abs(piece.clip.scale_x - 1.0) > 1e-9
@@ -1246,7 +1584,7 @@ def _compose_video_piece(
         or piece.clip.chromakey_enabled
         or piece.clip.opacity < 1 - 1e-9
     )
-    if piece.clip.has_keyframes:
+    if piece.clip.has_pose_keyframes:
         origin = _clip_stream_origin(piece)
         expr_x = _keyframe_expr(piece.clip.keyframes, "x", origin, piece.clip.x)
         expr_y = _keyframe_expr(piece.clip.keyframes, "y", origin, piece.clip.y)
@@ -1258,6 +1596,13 @@ def _compose_video_piece(
     else:
         coordinates = "x=0:y=0"
     eof = "repeat:repeatlast=1" if hold_last else "pass:repeatlast=0"
+    if blur:
+        # Por baixo da frente e por cima das trilhas de baixo, na mesma janela.
+        under = f"[u{order}]"
+        filters.append(
+            f"{current}{blur}overlay=x=0:y=0:eof_action={eof}:format=auto:enable='{enable}'{under}"
+        )
+        current = under
     filters.append(
         f"{current}{video_label}"
         f"overlay={coordinates}:eof_action={eof}:format=auto"
@@ -1466,6 +1811,53 @@ class Graph:
     audio_label: str | None
 
 
+def _blur_where_visible(project: Project, size: tuple[int, int]) -> Project:
+    """Desliga o fundo nos blocos em que ele não apareceria na tela de ``size``.
+
+    A decisão é tomada **uma vez**, com a tela de exportação: pela da prévia
+    (arredondada para par) um clipe 16:9 deixaria de preencher a tela só ali, e
+    os dois lados de uma transição são compostos sem a tela canônica. Daí em
+    diante o grafo só lê ``clip.blur_background``.
+    """
+    if not any(c.blur_background for t in project.tracks for c in t.clips):
+        return project
+    return replace(project, tracks=tuple(
+        replace(t, clips=tuple(
+            replace(c, blur_background=False)
+            if c.blur_background and not c.shows_blur_background(*size) else c
+            for c in t.clips
+        ))
+        for t in project.tracks
+    ))
+
+
+def reversal_cuts_for_export(project: Project, duration: float) -> tuple[float, ...]:
+    """Cortes em que a exportação precisa ser dividida por causa de blocos invertidos.
+
+    Vazio é "um processo só dá conta". O som não entra: sai num passe só e pesa
+    pouco (ver ``domain.reversal``).
+    """
+    return reverse_cuts(project, 0.0, duration, media="video", budget=MAX_REVERSE_BYTES)
+
+
+def check_reversal(project: Project) -> None:
+    """Recusa o que um processo só não consegue exportar: bloco invertido grande demais.
+
+    A exportação em vídeo divide o bloco em janelas, cada uma num processo (ver
+    ``parallel.reversal_bounds``), e só chega aqui quando não há divisão. O que
+    não divide — o GIF, que monta uma paleta sobre o fluxo inteiro — recusa, com
+    o nome do bloco, em vez de esgotar a memória no meio da exportação.
+
+    O nome é o do bloco que mais memória pede (``reverse_rate`` × duração), e não
+    o do primeiro invertido: com um bloco de 3 s antes de um de 5 min, a mensagem
+    mandava dividir o curto.
+    """
+    if not reversal_cuts_for_export(project, project.export_duration):
+        return
+    maior = max((c for c in project.clips if c.reversed and c.has_image), key=lambda c: c.reverse_rate * c.duration)
+    raise ConversionError(Text("COMPOSE_REVERSE_TOO_LONG", name=maior.media.name))
+
+
 def build_graph(
     project: Project,
     *,
@@ -1488,7 +1880,7 @@ def build_graph(
     reprodução da prévia, que precisam sair na hora. É a única coisa que a
     prévia não mostra do resultado, e a aba diz isso ao lado do controle.
     """
-    project = project.for_render()
+    project = _blur_where_visible(project.for_render(), canonical_size or (project.width, project.height))
     fps = fps or project.fps
     pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio, still=still,
                      tails=tails)
@@ -1543,7 +1935,7 @@ def build_graph(
             continuous_source_cut
             and context.left.has_sound
             and context.right.has_sound
-            and abs(context.left.gain_db - context.right.gain_db) < GAIN_EPSILON
+            and abs(context.left.gain_at(context.left.duration) - context.right.gain_at(0.0)) < GAIN_EPSILON
         )
         has_audio_transition = bool(
             has_audio_at_cut
@@ -1559,13 +1951,13 @@ def build_graph(
         left = _transition_side(
             context.left,
             next_input,
-            context.left.out_point,
+            context.left.tail_point,
             context.duration,
         )
         right = _transition_side(
             context.right,
             next_input + 1,
-            context.right.in_point,
+            context.right.head_point,
             context.duration,
         )
         inputs += _transition_input_args(left, fps)
@@ -1827,6 +2219,8 @@ def export_args(
     project = project.for_export()
     if project.is_empty:
         raise ConversionError(Text("COMPOSE_NOTHING"))
+    if not audio_only:
+        check_reversal(project)
 
     if audio_only:
         graph = build_graph(project, want_video=False, want_audio=True, text_assets=text_assets)
@@ -2025,6 +2419,12 @@ def scrub_command(
     o instante ``at + k / fps``.
     """
     width, height = size
+    # Um bloco invertido guarda os quadros do trecho que o comando lê: o trecho
+    # encolhe até a primeira janela que cabe na memória (ver ``domain.reversal``).
+    # Quem pediu volta a pedir o resto, porque o que falta continua sem quadro.
+    cuts = reverse_cuts(project, at, at + span, media="video", budget=MAX_REVERSE_BYTES, fps=float(fps))
+    if cuts:
+        span = cuts[0] - at
     count = max(1, int(round(span * fps)))
     preview_project = _preview_project(project, size)
     graph = build_graph(
@@ -2054,14 +2454,49 @@ def playback_command(
     *,
     fps: float,
     text_assets: dict[int, Path] | None = None,
+) -> list[str] | Stages:
+    """Comando que produz o fluxo de quadros da reprodução, a partir de ``at``.
+
+    Com bloco invertido, o fluxo é lido em janelas curtas, **uma por processo**
+    (``Stages``): o ``reverse`` só entrega o primeiro quadro depois de ler a
+    janela inteira e guarda todos os quadros dela, então a janela curta é o que
+    faz a reprodução começar logo e a memória ficar limitada. Cada janela dura um
+    número inteiro de quadros, e a reprodução enxerga um fluxo só.
+    """
+    cuts = reverse_cuts(project, at, project.export_duration, media="video", window=PREVIEW_WINDOW_SECONDS,
+                        budget=MAX_REVERSE_BYTES // 2, fps=float(fps))
+    if not cuts:
+        return _playback_stage(project, at, None, size, tools, fps=fps, text_assets=text_assets)
+    edges = (at, *cuts)
+    commands, sizes = [], []
+    for index, begin in enumerate(edges):
+        last = index == len(edges) - 1
+        span = None if last else edges[index + 1] - begin
+        frames = None if last else int(round(span * fps))
+        commands.append(tuple(_playback_stage(project, begin, span, size, tools, fps=fps,
+                                              text_assets=text_assets, frames=frames)))
+        sizes.append(None if last else frames * size[0] * size[1] * BYTES_PER_PIXEL)
+    return Stages(tuple(commands), tuple(sizes))
+
+
+def _playback_stage(
+    project: Project,
+    at: float,
+    span: float | None,
+    size: tuple[int, int],
+    tools: FFmpegTools,
+    *,
+    fps: float,
+    text_assets: dict[int, Path] | None,
+    frames: int | None = None,
 ) -> list[str]:
-    """Comando que produz o fluxo de quadros da reprodução, a partir de ``at``."""
+    """Um comando de reprodução: de ``at`` até o fim da edição ou por ``span``."""
     width, height = size
     preview_project = _preview_project(project, size)
     graph = build_graph(
         preview_project,
         at=at,
-        span=None,
+        span=span,
         fps=float(fps),
         want_audio=False,
         text_assets=text_assets,
@@ -2080,11 +2515,15 @@ def playback_command(
         filters.append(f"{graph.video_label}scale={width}:{height}[out]")
         args += ["-filter_complex", ";".join(filters), "-map", "[out]"]
     else:
-        remaining = max(_MIN_CANVAS, project.duration - at)
+        remaining = max(_MIN_CANVAS, project.duration - at) if span is None else span
         args += [
             "-f", "lavfi",
             "-i", f"color=c=black:s={width}x{height}:r={fps}:d={remaining:.3f}",
         ]
+    if frames is not None:
+        # A janela entrega exatamente os quadros dela: um a mais ou a menos
+        # deslocaria o resto do fluxo em relação ao som.
+        args += ["-frames:v", str(frames)]
     return args + ["-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
 
 
@@ -2097,7 +2536,7 @@ def audio_command(
     channels: int = CHANNELS,
     text_assets: dict[int, Path] | None = None,
     until: float | None = None,
-) -> list[str] | None:
+) -> list[str] | Stages | None:
     """Comando que produz a mixagem em PCM, a partir de ``at``.
 
     ``None`` quando não há som a tocar — o que a interface usa para não abrir
@@ -2106,14 +2545,44 @@ def audio_command(
     ``until`` completa com silêncio e corta a mixagem exatamente no fim do loop
     da prévia: o trecho seguinte é emendado quando este acaba, e um som que
     terminasse antes do fim da edição faria a volta ao começo chegar cedo.
+
+    Com som invertido o fluxo é lido em janelas curtas, uma por processo
+    (``Stages``): o ``areverse`` só começa a entregar depois de ler tudo o que
+    vem pela frente, e um bloco de minutos faria a reprodução esperar segundos
+    pelo primeiro som. Cada janela entrega exatamente a duração dela, com
+    silêncio onde não há som, para as emendas caírem no instante certo.
     """
     graph = build_graph(project, at=at, span=None, want_video=False, text_assets=text_assets)
     if not graph.audio_label:
         return None
+    end = until if until is not None and until > at else None
+    cuts = reverse_cuts(project, at, end if end is not None else project.export_duration, media="audio",
+                        window=PREVIEW_WINDOW_SECONDS)
+    if not cuts:
+        return _pcm_command(tools, graph, at, None, end, sample_rate, channels)
+    edges = (at, *cuts)
+    commands, sizes = [], []
+    for index, begin in enumerate(edges):
+        last = index == len(edges) - 1
+        span = None if last else edges[index + 1] - begin
+        stage = build_graph(project, at=begin, span=span, want_video=False, text_assets=text_assets)
+        if stage.audio_label:
+            commands.append(tuple(_pcm_command(tools, stage, begin, span, end if last else None,
+                                               sample_rate, channels)))
+        else:
+            commands.append(tuple(_silence_command(tools, span, end, begin, sample_rate, channels)))
+        sizes.append(None if last else int(round(span * sample_rate)) * channels * 2)
+    return Stages(tuple(commands), tuple(sizes))
+
+
+def _pcm_command(tools: FFmpegTools, graph: Graph, at: float, span: float | None, until: float | None,
+                 sample_rate: int, channels: int) -> list[str]:
+    """A mixagem do grafo em PCM, completada e cortada em ``span`` ou em ``until``."""
     filters = list(graph.filters)
     label = graph.audio_label
-    if until is not None and until > at:
-        filters.append(f"{label}apad,atrim=end={until - at:.6f}[loopmix]")
+    length = span if span is not None else (until - at if until is not None else None)
+    if length is not None:
+        filters.append(f"{label}apad,atrim=end={length:.6f}[loopmix]")
         label = "[loopmix]"
     return [
         tools.ffmpeg_str,
@@ -2127,6 +2596,19 @@ def audio_command(
         "-acodec", "pcm_s16le",
         "-ar", str(sample_rate),
         "-ac", str(channels),
+        "pipe:1",
+    ]
+
+
+def _silence_command(tools: FFmpegTools, span: float | None, until: float | None, at: float,
+                     sample_rate: int, channels: int) -> list[str]:
+    """Silêncio com a duração de uma janela em que nenhum som toca."""
+    length = span if span is not None else (until - at if until is not None else 0.0)
+    return [
+        tools.ffmpeg_str, "-nostdin", "-hide_banner", "-v", "error",
+        "-f", "lavfi", "-i", f"anullsrc=r={sample_rate}:cl={'mono' if channels == 1 else 'stereo'}",
+        "-t", f"{max(length, 0.0):.6f}",
+        "-f", "s16le", "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", str(channels),
         "pipe:1",
     ]
 
@@ -2219,6 +2701,7 @@ def segment_video_args(
     hardware: str = hwaccel.SOFTWARE,
     quality: str = hwaccel.DEFAULT_QUALITY,
     text_assets: dict[int, Path] | None = None,
+    interpolate: bool = True,
 ) -> list[str]:
     """Um trecho da composição, **só vídeo**, para ser concatenado depois.
 
@@ -2231,9 +2714,11 @@ def segment_video_args(
     arbitrários produz salto ou estalo na junção, porque o quadro de áudio não
     termina onde o corte cai; o som sai num passe só, que é barato.
     """
+    # A sobra existe para o ``minterpolate``; sem interpolação não há quadro
+    # seguinte a esperar, e a janela de um bloco invertido não deve crescer.
     graph = build_graph(
-        project, at=at, span=span + _SEGMENT_TAIL, want_audio=False, interpolate=True
-    , text_assets=text_assets)
+        project, at=at, span=span + (_SEGMENT_TAIL if interpolate else 0.0), want_audio=False,
+        interpolate=interpolate, text_assets=text_assets)
     if not graph.video_label:
         raise ConversionError(Text("COMPOSE_SEGMENT_NO_IMAGE"))
     codec_family = family or hwaccel.family_for(container)
@@ -2319,7 +2804,11 @@ def mux_args(
 
 
 def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[str], ...]:
-    """Fundo e frente canônicos; textura isolada sem recortar pixels da cena."""
+    """Fundo e frente canônicos; textura isolada sem recortar pixels da cena.
+
+    Com o fundo desfocado ligado no bloco, uma quarta imagem: o fundo de tela
+    cheia dele, pintado entre ``background`` e a textura.
+    """
     background = frame_command(plan.background, plan.seconds, size, tools, text_assets=text_assets, png=True)
     foreground = frame_command(plan.foreground, plan.seconds, size, tools, text_assets=text_assets,
                                transparent=True, png=True)
@@ -2336,4 +2825,15 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
                *_limited_inputs(_input_args(piece, source.fps, text_assets=text_assets)),
                '-filter_complex', graph, '-map', '[texture]',
                '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgba', 'pipe:1']
-    return background, texture, foreground
+    if not plan.blur:
+        return background, texture, foreground
+    # O fundo não depende da pose (cobre a tela inteira e a opacidade é aplicada
+    # ao pintar), então uma imagem só serve o gesto todo. A frente vai para o
+    # ``nullsink`` porque a cadeia do bloco só existe com as duas saídas ligadas.
+    graph = _video_chain(piece, source, source.fps, canonical_size=(plan.source.width, plan.source.height),
+                         standalone=True, blur="[blur]") + f";[v{piece.index}]nullsink"
+    blur = [tools.ffmpeg_str, '-nostdin', '-hide_banner', '-v', 'error',
+            *_limited_inputs(_input_args(piece, source.fps, text_assets=text_assets)),
+            '-filter_complex', graph, '-map', '[blur]',
+            '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgb24', 'pipe:1']
+    return background, texture, foreground, blur
