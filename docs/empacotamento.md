@@ -234,11 +234,12 @@ usuário (`%LOCALAPPDATA%\VideoManager\Logs` no Windows), incluindo exceções n
 tratadas em slots e threads (o caminho no Linux e o que ele guarda estão em
 [instalação](instalacao.md#onde-fica-o-registro-de-execução)).
 
-A CI gera o pacote do Windows como o build local — provisiona ffmpeg e Deno,
+A CI gera o pacote do Windows, no job `pacote` (em paralelo aos testes), como o build local — provisiona ffmpeg e Deno,
 gera o `.ico` antes do PyInstaller e roda `smoke_windows.ps1` com `-Icon`, para
 o ícone do `.exe` ser conferido — e guarda o `VideoManager.exe` (arquivo único)
-por sete dias. O pacote em pasta do Linux é gerado com `VM_BUNDLE_FFMPEG=0` e
-aprovado por `smoke_run.sh`.
+por sete dias — mesmo que um teste falhe, já que os jobs correm juntos; só vale
+como entrega com a execução inteira verde. O pacote em pasta do Linux é gerado
+com `VM_BUNDLE_FFMPEG=0` e aprovado por `smoke_run.sh`.
 
 Em Linux, `VM_DIST_DIR` e `VM_BUILD_DIR` permitem escolher diretórios separados
 para PyInstaller e AppImage. O build não precisa apagar todo o `dist` existente.
