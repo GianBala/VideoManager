@@ -228,8 +228,10 @@ ffmpeg 9 já é testado pelo 3.12, e o resto da suíte continua cobrindo o 3.10.
 As integrações com o ffmpeg (`-m ffmpeg`) são ~85% do tempo da suíte — 301 dos
 2100 testes —, e um runner tem 4 núcleos que elas já ocupam. Por isso cada
 célula do `desktop` é dividida em **duas fatias** que correm em máquinas
-diferentes, e cada fatia roda `pytest -n auto` (pytest-xdist). A divisão é a
-variável `VM_SHARD="i/n"`, lida por `fatiar` em `tests/conftest.py`:
+diferentes. A divisão é a variável `VM_SHARD="i/n"`, lida por `fatiar` em
+`tests/conftest.py`. O pytest-xdist dentro de cada fatia foi medido e descartado:
+cortava 35% em 4 núcleos locais, mas no runner não rendeu nada e a carga extra
+estourou o limite de tempo do teste de cancelamento no Windows.
 
 - a fatia é por posição na lista ordenada por id, em revezamento — por arquivo,
   uma fatia levaria o `test_integration.py` inteiro (36% do tempo);
@@ -245,8 +247,8 @@ de um painel já encerrado chegava ao teste seguinte (`QPushButton already
 deleted`). Para reproduzir uma falha que só aparece na CI:
 
 ```bash
-VM_SHARD=2/2 .venv/bin/python -m pytest -q          # a segunda metade
-VM_SHARD=1/2 .venv/bin/python -m pytest -q -n auto  # a primeira, em paralelo
+VM_SHARD=1/2 .venv/bin/python -m pytest -q   # a primeira metade
+VM_SHARD=2/2 .venv/bin/python -m pytest -q   # a segunda
 ```
 
 Os pacotes — Linux em pasta com `smoke_run.sh`, Windows em arquivo único com
