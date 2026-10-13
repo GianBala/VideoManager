@@ -15,16 +15,16 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QThreadPool, Signal, Slot
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPainter, QPalette
+from PySide6.QtCore import QRectF, QSize, Qt, QThreadPool, Signal, Slot
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -58,7 +58,9 @@ from videomanager.application.jobs.models import Job
 from videomanager.domain.selection import AUDIO_BITRATES
 from videomanager.domain.selection import LOSSLESS_AUDIO
 from videomanager.application.preferences import Preferences as Settings
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import strings, theme
+from videomanager.presentation.qt.panels import convert_rows
+from videomanager.presentation.qt.panels.segmented import SegmentButton
 from videomanager.presentation.qt.i18n import align_label_column, bind, on_language_change, retext_items
 from videomanager.presentation.qt.theme import FIELD_WIDTH
 from videomanager.presentation.qt.ports import DesktopRuntimePort
@@ -89,25 +91,79 @@ class _DropList(QListWidget):
 
     O mesmo tratamento da fila, na outra aba: uma área grande e em branco
     parece tela que não carregou, e o convite a arrastar arquivos precisa estar
-    onde os arquivos são soltos.
+    onde os arquivos são soltos — com a moldura tracejada, que é o que diz "solte aqui".
     """
 
     delete_requested = Signal()
+    #: O × de uma linha foi clicado (pressionado e solto nele).
+    remove_requested = Signal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._pressed_remove = -1
+        self.setProperty("role", "files")
+        self.setFrameShape(QListWidget.Shape.NoFrame)
+        self.setMouseTracking(True)
+        self.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.rows = convert_rows.RowDelegate(self)
+        self.setItemDelegate(self.rows)
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(super().sizeHint().width(), self.minimumHeight())
+
+    def _remove_row_at(self, position) -> int:
+        """A linha cujo × está em ``position``, ou -1."""
+        item = self.itemAt(position)
+        if item is None or item.data(convert_rows.ROLE_MEDIA) is None:
+            return -1
+        rect = self.visualItemRect(item)
+        return self.row(item) if self.rows.remove_rect(rect.width()).contains(position - rect.topLeft()) else -1
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        # O × não é um clique na linha: não pode mudar a seleção que o usuário montou.
+        self._pressed_remove = self._remove_row_at(event.position().toPoint())
+        if self._pressed_remove >= 0 and event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        pressed, self._pressed_remove = self._pressed_remove, -1
+        if pressed >= 0 and event.button() == Qt.MouseButton.LeftButton:
+            if self._remove_row_at(event.position().toPoint()) == pressed:
+                self.remove_requested.emit(pressed)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        super().mouseMoveEvent(event)
+        item = self.itemAt(event.position().toPoint())
+        row = self.row(item) if item is not None else -1
+        if self.rows.set_hover(row):
+            self.viewport().update()
+        over_remove = self._remove_row_at(event.position().toPoint()) >= 0
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if over_remove else Qt.CursorShape.ArrowCursor)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        if self.rows.set_hover(-1):
+            self.viewport().update()
+        super().leaveEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         super().paintEvent(event)
         if self.count():
             return
+        cores = theme.papeis(*theme.atual())
         painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        area = self.viewport().rect().adjusted(1, 1, -1, -1)
+        pen = QPen(QColor(cores["t3"]), 1.2, Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(area), 12, 12)
         painter.setPen(self.palette().color(QPalette.ColorRole.PlaceholderText))
-        painter.drawText(
-            self.viewport().rect(),
-            Qt.AlignmentFlag.AlignCenter,
-            strings.CONVERT_DROP_HINT,
-        )
+        painter.drawText(area, Qt.AlignmentFlag.AlignCenter, strings.CONVERT_DROP_HINT)
         painter.end()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
@@ -169,20 +225,25 @@ class ConvertPanel(QWidget):
         self._start.setProperty("role", "primary")
         self._start.clicked.connect(self._start_conversion)
         self._plan = QLabel("")
-        self._plan.setProperty("role", "dim")
         self._plan.setWordWrap(True)
+        self._estimate_label = QLabel(DASH)
+        self._estimate_label.setProperty("role", "result-size")
+        # O resumo "O que vai acontecer" é um destaque: moldura própria, com o título em cima.
+        self._plan_box = QFrame()
+        self._plan_box.setProperty("role", "callout")
+        caixa = QVBoxLayout(self._plan_box)
+        caixa.setContentsMargins(14, 10, 14, 12)
+        caixa.setSpacing(4)
+        titulo = bind(QLabel(), "setText", lambda: strings.CONVERT_PLAN_TITLE.upper())
+        titulo.setProperty("role", "callout-title")
+        caixa.addWidget(titulo)
+        caixa.addWidget(self._plan)
+        self._plan_box.setVisible(False)
 
         layout.addWidget(self._build_files_group(), 1)
         layout.addWidget(self._build_target_group())
         self._align_label_column()
-
-        actions = QHBoxLayout()
-        self._same_folder = bind(QCheckBox(), "setText", lambda: strings.CONVERT_SAME_FOLDER)
-        self._same_folder.setChecked(True)
-        actions.addWidget(self._same_folder)
-        actions.addStretch(1)
-        actions.addWidget(self._start)
-        layout.addLayout(actions)
+        layout.addWidget(self._build_footer())
 
         self._update_plan()
         on_language_change(self._retranslate)
@@ -191,6 +252,7 @@ class ConvertPanel(QWidget):
         retext_items(self._video_codec, _codec_label)
         retext_items(self._resize, _resize_label)
         retext_items(self._compress_codec, strings.EXPORT_VIDEO_CODECS.get)
+        self._update_files_chip()
         self._align_label_column()
         # O plano, o tamanho estimado e a descrição de cada arquivo levam texto
         # e números do idioma.
@@ -200,18 +262,23 @@ class ConvertPanel(QWidget):
     # Construção
     # ------------------------------------------------------------------
 
-    def _build_files_group(self) -> QGroupBox:
-        group = bind(QGroupBox(), "setTitle", lambda: strings.CONVERT_FILES_GROUP)
+    def _build_files_group(self) -> QFrame:
+        group = QFrame()
+        group.setProperty("role", "section")
         box = QVBoxLayout(group)
-        box.setSpacing(8)
-
-        self._list = _DropList()
-        self._list.setMinimumHeight(_LIST_MIN_HEIGHT)
-        self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        self._list.delete_requested.connect(self._remove_selected)
-        box.addWidget(self._list, 1)
+        box.setContentsMargins(14, 12, 14, 14)
+        box.setSpacing(10)
 
         row = QHBoxLayout()
+        row.setSpacing(8)
+        title = bind(QLabel(), "setText", lambda: strings.CONVERT_FILES_GROUP)
+        title.setProperty("role", "section-title")
+        row.addWidget(title)
+        self._files_chip = QLabel()
+        self._files_chip.setProperty("role", "chip")
+        self._files_chip.setVisible(False)
+        row.addWidget(self._files_chip)
+        row.addStretch(1)
         pick = bind(QPushButton(), "setText", lambda: strings.CONVERT_PICK)
         bind(pick, "setToolTip", lambda: strings.CONVERT_PICK_TIP.format(label=strings.CONVERT_PICK))
         pick.clicked.connect(self._choose_files)
@@ -225,37 +292,83 @@ class ConvertPanel(QWidget):
         self._clear_btn.clicked.connect(self.clear_files)
         self._clear_btn.setEnabled(False)
         row.addWidget(self._clear_btn)
-        row.addStretch(1)
         box.addLayout(row)
+
+        self._list = _DropList()
+        bind(self._list, "setAccessibleName", lambda: strings.CONVERT_FILES_GROUP)
+        self._list.setMinimumHeight(_LIST_MIN_HEIGHT)
+        self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self._list.delete_requested.connect(self._remove_selected)
+        self._list.remove_requested.connect(self._remove_row)
+        box.addWidget(self._list, 1)
 
         self._list.itemSelectionChanged.connect(self._update_remove_button)
         return group
+
+    def _build_footer(self) -> QWidget:
+        """Onde salvar, quanto deve sair e a ação."""
+        footer = QFrame()
+        footer.setProperty("role", "footer")
+        linha = QHBoxLayout(footer)
+        linha.setContentsMargins(16, 12, 12, 12)
+        linha.setSpacing(16)
+        self._same_folder = bind(QCheckBox(), "setText", lambda: strings.CONVERT_SAME_FOLDER)
+        self._same_folder.setChecked(True)
+        linha.addWidget(self._same_folder)
+        linha.addStretch(1)
+        linha.addWidget(self._estimate_label, 0, Qt.AlignmentFlag.AlignBottom)
+        estimated = bind(QLabel(), "setText", lambda: strings.CONVERT_ESTIMATED)
+        estimated.setProperty("role", "dim")
+        linha.addWidget(estimated, 0, Qt.AlignmentFlag.AlignBottom)
+        self._start.setProperty("emphasis", "large")
+        linha.addWidget(self._start)
+        return footer
 
     def _update_remove_button(self) -> None:
         self._remove.setEnabled(bool(self._list.selectedItems()))
         if hasattr(self, "_clear_btn"):
             self._clear_btn.setEnabled(bool(self._media) or self._inspection_worker is not None)
+            self._update_files_chip()
 
-    def _build_target_group(self) -> QGroupBox:
-        group = bind(QGroupBox(), "setTitle", lambda: strings.CONVERT_TARGET_GROUP)
+    def _update_files_chip(self) -> None:
+        """"3 arquivos · 472 KB" ao lado do título: o que está na lista, de relance."""
+        count = len(self._media)
+        self._files_chip.setVisible(count > 0)
+        if count:
+            singular, plural = strings.CONVERT_FILES_COUNT
+            size = format_size(sum(m.size or 0 for m in self._media))
+            self._files_chip.setText((singular if count == 1 else plural).format(count=count, size=size))
+
+    def _build_target_group(self) -> QFrame:
+        group = QFrame()
+        group.setProperty("role", "section")
         outer = QVBoxLayout(group)
-        outer.setSpacing(8)
+        outer.setContentsMargins(14, 12, 14, 14)
+        outer.setSpacing(10)
+        title = bind(QLabel(), "setText", lambda: strings.CONVERT_TARGET_GROUP)
+        title.setProperty("role", "section-title")
+        outer.addWidget(title)
 
-        modes = QHBoxLayout()
-        modes.setContentsMargins(0, 0, 0, 0)
-        modes.setSpacing(18)
-        self._to_audio = bind(QRadioButton(), "setText", lambda: strings.CONVERT_TO_AUDIO)
+        # Os três modos num controle segmentado. Continuam sendo três botões de rádio irmãos (o mesmo grupo
+        # exclusivo, os mesmos sinais): muda o desenho, não o comportamento nem o teclado (setas trocam de modo).
+        segmentos = QFrame()
+        segmentos.setProperty("role", "segments")
+        modes = QHBoxLayout(segmentos)
+        modes.setContentsMargins(4, 4, 4, 4)
+        modes.setSpacing(4)
+        self._to_audio = bind(SegmentButton(), "setText", lambda: strings.CONVERT_TO_AUDIO)
         self._to_audio.setChecked(True)
         self._to_audio.toggled.connect(self._on_mode_changed)
-        self._to_video = bind(QRadioButton(), "setText", lambda: strings.CONVERT_TO_VIDEO)
-        self._to_compress = bind(QRadioButton(), "setText", lambda: strings.CONVERT_TO_COMPRESS)
+        self._to_video = bind(SegmentButton(), "setText", lambda: strings.CONVERT_TO_VIDEO)
+        self._to_compress = bind(SegmentButton(), "setText", lambda: strings.CONVERT_TO_COMPRESS)
         # O rádio de áudio não avisa a troca entre vídeo e compressão.
         self._to_compress.toggled.connect(self._on_mode_changed)
-        modes.addWidget(self._to_audio)
-        modes.addWidget(self._to_video)
-        modes.addWidget(self._to_compress)
-        modes.addStretch(1)
-        outer.addLayout(modes)
+        for botao in (self._to_audio, self._to_video, self._to_compress):
+            modes.addWidget(botao)
+        linha_modos = QHBoxLayout()
+        linha_modos.addWidget(segmentos)
+        linha_modos.addStretch(1)
+        outer.addLayout(linha_modos)
         outer.addWidget(self._build_level_table())
 
         form = QFormLayout()
@@ -315,7 +428,7 @@ class ConvertPanel(QWidget):
             combo.setFixedWidth(FIELD_WIDTH)
 
         outer.addLayout(form)
-        outer.addWidget(self._plan)
+        outer.addWidget(self._plan_box)
         self._form = form
         self._on_mode_changed()
         return group
@@ -480,7 +593,9 @@ class ConvertPanel(QWidget):
         for media in result.probed.values():
             if media.path not in known:
                 self._media.append(media)
-                self._list.addItem(QListWidgetItem(self._describe(media)))
+                item = QListWidgetItem(self._describe(media))
+                item.setData(convert_rows.ROLE_MEDIA, media)
+                self._list.addItem(item)
                 known.add(media.path)
         if result.rejected:
             QMessageBox.warning(
@@ -537,11 +652,19 @@ class ConvertPanel(QWidget):
                 estimated = self._estimate(media, target)
                 after = strings.CONVERT_MEASURING if estimated is None else format_size(estimated, estimated=True)
                 item.setText(self._describe(media, after))
+                item.setData(convert_rows.ROLE_AFTER, {"size": estimated})
 
     def _remove_selected(self) -> None:
+        self._remove_rows([self._list.row(item) for item in self._list.selectedItems()])
+
+    def _remove_row(self, row: int) -> None:
+        """O × da linha: tira só ela, mesmo que outras estejam selecionadas."""
+        self._remove_rows([row])
+
+    def _remove_rows(self, rows: list[int]) -> None:
         self._cancel_sampling()
-        for item in self._list.selectedItems():
-            row = self._list.row(item)
+        # De trás para frente: tirar uma linha desloca as de baixo.
+        for row in sorted(set(rows), reverse=True):
             self._list.takeItem(row)
             if 0 <= row < len(self._media):
                 self._media.pop(row)
@@ -661,6 +784,10 @@ class ConvertPanel(QWidget):
                 text += f"  ({change:+d}%)"
             label.setText(text)
 
+    def _set_plan_visible(self, visible: bool) -> None:
+        self._plan.setVisible(visible)
+        self._plan_box.setVisible(visible)
+
     def _update_plan(self) -> None:
         if self._to_compress.isChecked():
             self._update_level_sizes()
@@ -671,13 +798,15 @@ class ConvertPanel(QWidget):
         self._start.setEnabled(bool(self._media) and self._inspection_worker is None)
         if self._inspection_worker is not None:
             self._plan.setText(strings.CONVERT_INSPECTING.format(count=len(self._inspection_paths)))
-            self._plan.setVisible(True)
+            self._set_plan_visible(True)
+            self._estimate_label.setText(DASH)
             return
         if not self._media:
             # Escondido, e não só vazio: um rótulo em branco deixava uma faixa
             # de altura sem explicação no meio do grupo.
             self._plan.clear()
-            self._plan.setVisible(False)
+            self._set_plan_visible(False)
+            self._estimate_label.setText(DASH)
             return
 
         targets = [self._build_target(m) for m in self._media]
@@ -704,13 +833,12 @@ class ConvertPanel(QWidget):
                 size_info += "\n• " + strings.CONVERT_COMPRESS_NO_GAIN.format(count=larger)
 
         if len(unique_plans) == 1:
-            plan_str = strings.CONVERT_PLAN.format(plan=unique_plans[0])
+            plan_str = unique_plans[0]
         else:
-            plan_str = strings.CONVERT_PLAN.format(
-                plan=strings.CONVERT_PLAN_MIXED.format(plan=unique_plans[0], count=len(self._media))
-            )
+            plan_str = strings.CONVERT_PLAN_MIXED.format(plan=unique_plans[0], count=len(self._media))
         self._plan.setText(f"{plan_str}\n• {size_info}")
-        self._plan.setVisible(True)
+        self._set_plan_visible(True)
+        self._estimate_label.setText(formatted_size)
         if self._to_compress.isChecked():
             self._request_samples()
 

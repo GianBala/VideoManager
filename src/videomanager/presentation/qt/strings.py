@@ -211,7 +211,11 @@ PLAYLIST_NOTE = (
 )
 
 # --- conversor local ---------------------------------------------------------
-CONVERT_FILES_GROUP = "Arquivos a converter"
+CONVERT_FILES_GROUP = "Arquivos"
+CONVERT_FILES_COUNT = ("{count} arquivo · {size}", "{count} arquivos · {size}")
+CONVERT_NO_AUDIO = "sem áudio"
+CONVERT_PLAN_TITLE = "O que vai acontecer"
+CONVERT_ESTIMATED = "estimado"
 CONVERT_PICK = "Escolher arquivos…"
 CONVERT_INSPECTING = "Inspecionando {count} arquivo(s)…"
 CONVERT_REJECTED = "Estes arquivos foram ignorados:"
@@ -222,7 +226,6 @@ CONVERT_TO_VIDEO = "Converter vídeo"
 CONVERT_START = "Converter"
 CONVERT_SAME_FOLDER = "Salvar na mesma pasta do arquivo original"
 CONVERT_TARGET_GROUP = "Converter para"
-CONVERT_PLAN = "O que vai acontecer: {plan}"
 CONVERT_ESTIMATED_SIZE = "Tamanho estimado: {size}"
 CONVERT_RESIZE = "Redimensionar para"
 CONVERT_KEEP = "Manter original"
