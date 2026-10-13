@@ -88,6 +88,17 @@ def _transition_label(transition: object) -> str | None:
     return f"{entry[0]} {entry[1]}" if entry else None
 
 
+def _filter_name(filter_name: object) -> str | None:
+    """Só o nome do filtro: o botão tem o ícone desenhado, e o emoji da tabela fica para o identificador."""
+    entry = strings.EDIT_FILTERS.get(filter_name)
+    return entry[1] if entry else None
+
+
+def _transition_name(transition: object) -> str | None:
+    entry = strings.EDIT_TRANSITIONS.get(transition)
+    return entry[1] if entry else None
+
+
 def _clip_name(clip: Clip) -> str:
     """Nome do bloco para quem lê: o arquivo, o texto digitado, o filtro ou a transição.
 

@@ -557,3 +557,118 @@ def type_image(color: str, size: int = _NAV) -> QIcon:
         p.drawPolyline(QPolygonF([QPointF(5 * u, 17 * u), QPointF(10.5 * u, 12.5 * u), QPointF(14 * u, 15.5 * u),
                                   QPointF(16.5 * u, 13.5 * u), QPointF(19 * u, 16.5 * u)]))
     return _nav(color, size, desenho)
+
+
+# ---------------------------------------------------------------------------
+# Opções de filtro e de transição (aba Adicionais do editor)
+# ---------------------------------------------------------------------------
+
+def half_circle(color: str, size: int = _NAV) -> QIcon:
+    """Preto e branco: círculo metade cheio."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawEllipse(QPointF(12 * u, 12 * u), 7 * u, 7 * u)
+        caminho = QPainterPath(QPointF(12 * u, 5 * u))
+        caminho.arcTo(QRectF(5 * u, 5 * u, 14 * u, 14 * u), 90, 180)
+        caminho.closeSubpath()
+        p.setBrush(QColor(color))
+        p.drawPath(caminho)
+    return _nav(color, size, desenho)
+
+
+def cup(color: str, size: int = _NAV) -> QIcon:
+    """Sépia: xícara de café."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawRoundedRect(QRectF(5 * u, 9 * u, 11 * u, 8 * u), 2 * u, 2 * u)
+        p.drawArc(QRectF(13 * u, 10.5 * u, 6 * u, 5 * u), -90 * 16, 180 * 16)
+        p.drawLine(QPointF(9 * u, 5 * u), QPointF(9 * u, 7 * u))
+        p.drawLine(QPointF(12 * u, 5 * u), QPointF(12 * u, 7 * u))
+    return _nav(color, size, desenho)
+
+
+def bolt(color: str, size: int = _NAV) -> QIcon:
+    """Alto contraste: raio."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawPolygon(QPolygonF([QPointF(13.5 * u, 4 * u), QPointF(6.5 * u, 13 * u), QPointF(12 * u, 13 * u),
+                                 QPointF(10.5 * u, 20 * u), QPointF(17.5 * u, 11 * u), QPointF(12 * u, 11 * u)]))
+    return _nav(color, size, desenho)
+
+
+def target(color: str, size: int = _NAV) -> QIcon:
+    """Vinheta: círculos concêntricos."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawEllipse(QPointF(12 * u, 12 * u), 8 * u, 8 * u)
+        p.drawEllipse(QPointF(12 * u, 12 * u), 4.2 * u, 4.2 * u)
+    return _nav(color, size, desenho)
+
+
+def dashed_circle(color: str, size: int = _NAV) -> QIcon:
+    """Fade: círculo tracejado."""
+    def desenho(p: QPainter, u: float) -> None:
+        caneta = p.pen()
+        caneta.setStyle(Qt.PenStyle.DotLine)
+        p.setPen(caneta)
+        p.drawEllipse(QPointF(12 * u, 12 * u), 7.5 * u, 7.5 * u)
+    return _nav(color, size, desenho)
+
+
+def square_filled(color: str, size: int = _NAV) -> QIcon:
+    """Fade para preto: quadrado cheio."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.setBrush(QColor(color))
+        p.drawRoundedRect(QRectF(5.5 * u, 5.5 * u, 13 * u, 13 * u), 2.5 * u, 2.5 * u)
+    return _nav(color, size, desenho)
+
+
+def square_outline(color: str, size: int = _NAV) -> QIcon:
+    """Fade para branco: quadrado vazado."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawRoundedRect(QRectF(5.5 * u, 5.5 * u, 13 * u, 13 * u), 2.5 * u, 2.5 * u)
+    return _nav(color, size, desenho)
+
+
+def _wipe(color: str, size: int, para_esquerda: bool) -> QIcon:
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawRoundedRect(QRectF(4.5 * u, 5.5 * u, 15 * u, 13 * u), 2 * u, 2 * u)
+        x = 9.5 if para_esquerda else 14.5
+        p.drawLine(QPointF(x * u, 5.5 * u), QPointF(x * u, 18.5 * u))
+        sentido = -1 if para_esquerda else 1
+        meio = 14.5 if para_esquerda else 9.5
+        p.drawPolyline(QPolygonF([QPointF((meio - sentido * 1.6) * u, 9.5 * u), QPointF((meio + sentido * 1.2) * u, 12 * u),
+                                  QPointF((meio - sentido * 1.6) * u, 14.5 * u)]))
+    return _nav(color, size, desenho)
+
+
+def wipe_left(color: str, size: int = _NAV) -> QIcon:
+    return _wipe(color, size, True)
+
+
+def wipe_right(color: str, size: int = _NAV) -> QIcon:
+    return _wipe(color, size, False)
+
+
+def _slide(color: str, size: int, para_esquerda: bool) -> QIcon:
+    def desenho(p: QPainter, u: float) -> None:
+        borda = 5.5 if para_esquerda else 18.5
+        p.drawLine(QPointF(borda * u, 5.5 * u), QPointF(borda * u, 18.5 * u))
+        sentido = 1 if para_esquerda else -1
+        ponta = 9.5 if para_esquerda else 14.5
+        p.drawLine(QPointF(ponta * u, 12 * u), QPointF((ponta + sentido * 8) * u, 12 * u))
+        p.drawPolyline(QPolygonF([QPointF((ponta + sentido * 3.2) * u, 8.6 * u), QPointF(ponta * u, 12 * u),
+                                  QPointF((ponta + sentido * 3.2) * u, 15.4 * u)]))
+    return _nav(color, size, desenho)
+
+
+def slide_left(color: str, size: int = _NAV) -> QIcon:
+    return _slide(color, size, True)
+
+
+def slide_right(color: str, size: int = _NAV) -> QIcon:
+    return _slide(color, size, False)
+
+
+# Qual desenho acompanha cada opção, por identificador gravado no projeto.
+FILTER_ICONS = {"pb": half_circle, "sepia": cup, "contraste": bolt, "vinheta": target, "inverter": nav_convert}
+TRANSITION_ICONS = {
+    "fade": dashed_circle, "fadeblack": square_filled, "fadewhite": square_outline, "dissolve": type_filter,
+    "wipeleft": wipe_left, "wiperight": wipe_right, "slideleft": slide_left, "slideright": slide_right,
+}
