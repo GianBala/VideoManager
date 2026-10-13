@@ -253,6 +253,7 @@ CONVERT_COMPRESS_NO_GAIN = (
 
 # --- metadados ---------------------------------------------------------------
 TAB_METADATA = "Metadata"
+NAV_SETTINGS = "Settings"
 ACTION_META_OPEN = "Open File…"
 ACTION_META_SAVE = "Save Copy"
 META_FILE_GROUP = "File"

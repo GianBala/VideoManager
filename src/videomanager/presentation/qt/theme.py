@@ -139,6 +139,14 @@ QPushButton[role="profile"]:hover {{ background: {raised2}; border-color: {raise
    o cartão marcado não crescer e empurrar os vizinhos. */
 QPushButton[role="palette"] {{ background: {raised}; border: 2px solid {raised}; border-radius: 10px; padding: 0px; text-align: left; }}
 QPushButton[role="palette"]:hover {{ border-color: {raised2}; }}
+/* Menu lateral: itens de ícone e texto embaixo; o marcado leva o tom do acento e uma faixa na borda. A
+   borda existe sempre (transparente) para o item marcado ou focado não mudar de medida: 1 px em volta, 3 px à esquerda. */
+QWidget[role="rail"] {{ background: {panel}; }}
+QToolButton[role="rail-item"] {{ background: transparent; color: {t2}; border: 1px solid transparent; border-left: 3px solid transparent; border-radius: 11px; padding: 8px 0px 6px 0px; font-size: 11px; font-weight: 500; }}
+QToolButton[role="rail-item"]:hover {{ background: {raised}; color: {text}; }}
+QToolButton[role="rail-item"]:checked {{ background: {soft16}; color: {text}; border-left-color: {accent}; }}
+QToolButton[role="rail-item"]:focus {{ border-color: {focus}; }}
+QToolButton[role="rail-item"]:checked:focus {{ border-left-color: {accent}; }}
 /* Aviso flutuante: sobre a janela, no plano elevado, com a ação e o fechar sem moldura. */
 QFrame[role="toast"] {{ background: {raised2}; border: 1px solid {raised2}; border-radius: 13px; }}
 QFrame[role="toast"] QLabel {{ background: transparent; }}
