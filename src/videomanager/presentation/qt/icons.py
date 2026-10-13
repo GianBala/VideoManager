@@ -19,6 +19,8 @@ já toma ao se pintar sozinha.
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 
@@ -468,5 +470,59 @@ def chevron_right(color: str, size: int = _SIZE) -> QIcon:
     painter.setPen(_pen(color, _STROKE * 1.1))
     u = size / 18.0
     painter.drawPolyline(QPolygonF([QPointF(6.8 * u, 3.8 * u), QPointF(12.0 * u, 9.0 * u), QPointF(6.8 * u, 14.2 * u)]))
+    painter.end()
+    return QIcon(pixmap)
+
+
+# ---------------------------------------------------------------------------
+# Aba Download
+# ---------------------------------------------------------------------------
+
+def link(color: str, size: int = _NAV) -> QIcon:
+    """O campo do endereço: dois elos de corrente."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawArc(QRectF(4 * u, 10 * u, 9 * u, 6 * u), 50 * 16, 260 * 16)
+        p.drawArc(QRectF(11 * u, 8 * u, 9 * u, 6 * u), 230 * 16, 260 * 16)
+        p.drawLine(QPointF(9 * u, 12 * u), QPointF(15 * u, 12 * u))
+    return _nav(color, size, desenho)
+
+
+def star(color: str, size: int = _NAV) -> QIcon:
+    """Máxima qualidade."""
+    def desenho(p: QPainter, u: float) -> None:
+        pontos = []
+        for i in range(10):
+            raio = 8 * u if i % 2 == 0 else 3.6 * u
+            angulo = -math.pi / 2 + i * math.pi / 5
+            pontos.append(QPointF(12 * u + raio * math.cos(angulo), 12.4 * u + raio * math.sin(angulo)))
+        p.drawPolygon(QPolygonF(pontos))
+    return _nav(color, size, desenho)
+
+
+def music(color: str, size: int = _NAV) -> QIcon:
+    """Só o áudio: nota musical."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawLine(QPointF(10 * u, 17 * u), QPointF(10 * u, 6 * u))
+        p.drawLine(QPointF(10 * u, 6 * u), QPointF(18 * u, 4.5 * u))
+        p.drawLine(QPointF(18 * u, 4.5 * u), QPointF(18 * u, 15 * u))
+        p.drawEllipse(QPointF(7.6 * u, 17 * u), 2.4 * u, 2.4 * u)
+        p.drawEllipse(QPointF(15.6 * u, 15 * u), 2.4 * u, 2.4 * u)
+    return _nav(color, size, desenho)
+
+
+def waveform(color: str, size: int = _NAV) -> QIcon:
+    """Áudio original, sem perda: barras de onda."""
+    def desenho(p: QPainter, u: float) -> None:
+        for x, meia in ((6, 2.5), (9, 5), (12, 8), (15, 5), (18, 2.5)):
+            p.drawLine(QPointF(x * u, (12 - meia) * u), QPointF(x * u, (12 + meia) * u))
+    return _nav(color, size, desenho)
+
+
+def chevron_down(color: str, size: int = _SIZE) -> QIcon:
+    """Seção aberta."""
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color, _STROKE * 1.1))
+    u = size / 18.0
+    painter.drawPolyline(QPolygonF([QPointF(3.8 * u, 6.8 * u), QPointF(9.0 * u, 12.0 * u), QPointF(14.2 * u, 6.8 * u)]))
     painter.end()
     return QIcon(pixmap)

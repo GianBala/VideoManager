@@ -19,10 +19,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Slot
-from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
+from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -32,7 +33,6 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QScrollArea,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -54,7 +54,8 @@ from videomanager.domain.selection import AudioRequest
 from videomanager.domain.selection import VideoRequest
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt.tasks import WorkerRunner
-from videomanager.presentation.qt import icons, strings
+from videomanager.application.formatting import DASH
+from videomanager.presentation.qt import icons, strings, theme
 from videomanager.presentation.qt.accessibility import name_controls
 from videomanager.presentation.qt.i18n import apply_language, bind, on_language_change
 from videomanager.presentation.qt.ffmpeg_setup import ensure_ffmpeg
@@ -62,6 +63,7 @@ from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
 from videomanager.presentation.qt.panels.media_card import MediaCard
 from videomanager.presentation.qt.panels.metadata_panel import MetadataPanel
+from videomanager.presentation.qt.panels.personalize_card import PersonalizeCard
 from videomanager.presentation.qt.panels.profiles_panel import Profile
 from videomanager.presentation.qt.panels.profiles_panel import ProfilesPanel
 from videomanager.presentation.qt.panels.quality_panel import QualityPanel
@@ -221,7 +223,7 @@ class MainWindow(QMainWindow):
         central.setFocus()
 
     def _build_download_tab(self) -> QWidget:
-        """Endereço, destino, controles de qualidade e perfis rápidos."""
+        """Endereço e destino em cima, o que se baixa no meio (rola) e o resultado com a ação embaixo."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(*_TAB_MARGINS)
@@ -230,17 +232,67 @@ class MainWindow(QMainWindow):
         self._header = self._build_header()
         layout.addWidget(self._header)
 
-        self._left_pane = self._build_left_pane()
-        self._right_pane = self._build_right_pane()
-        self._middle = QSplitter(Qt.Orientation.Horizontal)
-        self._middle.addWidget(self._left_pane)
-        self._middle.addWidget(self._right_pane)
-        self._middle.setStretchFactor(0, 1)
-        self._middle.setStretchFactor(1, 0)
-        self._middle.setSizes([820, 300])
-        self._middle.setChildrenCollapsible(False)
+        # A coluna do meio é o que rola; o rodapé fica fora dela, à vista, porque é onde está a ação.
+        self._middle = QWidget()
+        self._middle.setProperty("role", "plain")
+        coluna = QVBoxLayout(self._middle)
+        coluna.setContentsMargins(0, 0, 0, 0)
+        coluna.setSpacing(16)
+        self._card = MediaCard(runtime=self._runtime)
+        coluna.addWidget(self._card)
+        self._profiles = ProfilesPanel()
+        self._profiles.profile_chosen.connect(self._on_profile)
+        coluna.addWidget(self._profiles)
+        # Recolher o "Personalizar" só esconde os campos: eles guardam o que foi escolhido, e o rodapé continua
+        # enfileirando com isso.
+        self._quality = QualityPanel(self._settings)
+        self._quality.changed.connect(self._update_add_button)
+        self._personalize = PersonalizeCard(self._quality)
+        coluna.addWidget(self._personalize)
+        coluna.addStretch(1)
         layout.addWidget(self._wrap_scrollable(self._middle), 1)
+        layout.addWidget(self._build_footer())
         return tab
+
+    def _retheme_header(self) -> None:
+        self._url_link.setIcon(icons.link(theme.papeis(*theme.atual())["t3"], 18))
+
+    def _build_footer(self) -> QWidget:
+        """O resultado do que está escolhido, o tamanho estimado e a ação de enfileirar."""
+        footer = QFrame()
+        footer.setProperty("role", "footer")
+        linha = QHBoxLayout(footer)
+        linha.setContentsMargins(16, 12, 12, 12)
+        linha.setSpacing(16)
+
+        resultado = QVBoxLayout()
+        resultado.setSpacing(2)
+        legenda = bind(QLabel(), "setText", lambda: strings.RESULT_LABEL)
+        legenda.setProperty("role", "dim")
+        resultado.addWidget(legenda)
+        self._result_summary = QLabel(DASH)
+        self._result_summary.setProperty("role", "result")
+        self._result_summary.setWordWrap(True)
+        resultado.addWidget(self._result_summary)
+        linha.addLayout(resultado, 1)
+
+        tamanho = QHBoxLayout()
+        tamanho.setSpacing(6)
+        self._result_size = QLabel(DASH)
+        self._result_size.setProperty("role", "result-size")
+        tamanho.addWidget(self._result_size, 0, Qt.AlignmentFlag.AlignBottom)
+        self._result_estimated = bind(QLabel(), "setText", lambda: strings.RESULT_ESTIMATED)
+        self._result_estimated.setProperty("role", "dim")
+        tamanho.addWidget(self._result_estimated, 0, Qt.AlignmentFlag.AlignBottom)
+        linha.addLayout(tamanho)
+
+        self._add_button = bind(QPushButton(), "setText", lambda: strings.ADD_TO_QUEUE)
+        self._add_button.setProperty("role", "primary")
+        self._add_button.setEnabled(False)
+        bind(self._add_button, "setToolTip", lambda: strings.ADD_TO_QUEUE_TIP)
+        self._add_button.clicked.connect(self._add_current_to_queue)
+        linha.addWidget(self._add_button)
+        return footer
 
     @staticmethod
     def _wrap_tab(inner: QWidget, *, horizontal: bool = False) -> QWidget:
@@ -259,6 +311,7 @@ class MainWindow(QMainWindow):
         self._nav_settings.set_text(strings.NAV_SETTINGS)
         self._nav_tasks.set_text(strings.NAV_TASKS)
         self._update_tasks_badge()
+        self._update_footer()
         # Os nomes acessíveis tirados das dicas acompanham as dicas novas.
         name_controls(self)
 
@@ -330,25 +383,35 @@ class MainWindow(QMainWindow):
         # Só a coluna dos campos cresce; rótulos e botões ficam no tamanho deles,
         # nas mesmas colunas nas duas linhas.
         grid.setColumnStretch(1, 1)
+        grid.setColumnMinimumWidth(0, 0)
 
-        url_label = bind(QLabel(), "setText", lambda: strings.URL_LABEL)
-        grid.addWidget(url_label, 0, 0)
+        # O endereço é o que a aba pede primeiro: campo grande, com o elo na frente e o botão de limpar, e sem
+        # rótulo (o campo diz o que espera, e o nome acessível mantém "Endereço" para o leitor de tela).
         self._url = bind(QLineEdit(), "setPlaceholderText", lambda: strings.URL_PLACEHOLDER)
+        bind(self._url, "setAccessibleName", lambda: strings.URL_LABEL)
+        self._url.setProperty("role", "address")
         self._url.setClearButtonEnabled(True)
+        self._url_link = self._url.addAction(QIcon(), QLineEdit.ActionPosition.LeadingPosition)
+        bind(self._url_link, "setToolTip", lambda: strings.URL_LABEL)
+        self._retheme_header()
+        theme.on_theme_change(self._retheme_header)
         self._url.returnPressed.connect(self._analyze)
-        grid.addWidget(self._url, 0, 1)
+        grid.addWidget(self._url, 0, 0, 1, 2)
 
         self._paste = bind(QPushButton(), "setText", lambda: strings.URL_PASTE_AND_ANALYZE)
+        self._paste.setProperty("role", "address-action")
         self._paste.clicked.connect(self._paste_and_analyze)
         grid.addWidget(self._paste, 0, 2)
 
         self._analyze_button = bind(QPushButton(), "setText", lambda: strings.URL_ANALYZE)
         self._analyze_button.setProperty("role", "primary")
+        self._analyze_button.setProperty("emphasis", "large")
         self._analyze_button.setDefault(True)
         self._analyze_button.clicked.connect(self._analyze)
         grid.addWidget(self._analyze_button, 0, 3)
 
         dest_label = bind(QLabel(), "setText", lambda: strings.DEST_LABEL)
+        dest_label.setProperty("role", "dim")
         grid.addWidget(dest_label, 1, 0)
         self._dest = bind(QLineEdit(self._settings.download_dir), "setToolTip", lambda: strings.DEST_TOOLTIP)
         self._dest.editingFinished.connect(self._on_dest_edited)
@@ -361,41 +424,6 @@ class MainWindow(QMainWindow):
         grid.addWidget(browse, 1, 2)
 
         return box
-
-    def _build_left_pane(self) -> QWidget:
-        pane = QWidget()
-        layout = QVBoxLayout(pane)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        self._card = MediaCard(runtime=self._runtime)
-        layout.addWidget(self._card)
-
-        self._quality = QualityPanel(self._settings)
-        self._quality.changed.connect(self._update_add_button)
-        layout.addWidget(self._quality)
-
-        layout.addStretch(1)
-        return pane
-
-    def _build_right_pane(self) -> QWidget:
-        pane = QWidget()
-        layout = QVBoxLayout(pane)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        self._profiles = ProfilesPanel()
-        self._profiles.profile_chosen.connect(self._on_profile)
-        layout.addWidget(self._profiles, 1)
-
-        self._add_button = bind(QPushButton(), "setText", lambda: strings.ADD_TO_QUEUE)
-        self._add_button.setProperty("role", "primary")
-        self._add_button.setEnabled(False)
-        bind(self._add_button, "setToolTip", lambda: strings.ADD_TO_QUEUE_TIP)
-        self._add_button.clicked.connect(self._add_current_to_queue)
-        layout.addWidget(self._add_button)
-
-        return pane
 
     def _build_menu(self) -> None:
         self._file_menu = bind(self.menuBar().addMenu(""), "setTitle", lambda: strings.MENU_FILE)
@@ -633,6 +661,13 @@ class MainWindow(QMainWindow):
         self._add_button.setEnabled(self._media is not None)
         if self._media is not None:
             self._add_button.setToolTip("")
+        self._update_footer()
+
+    def _update_footer(self) -> None:
+        """O resultado e o tamanho, lidos do que os campos mostram agora."""
+        analyzed = self._media is not None
+        self._result_summary.setText(self._quality.summary() if analyzed else DASH)
+        self._result_size.setText(self._quality.estimated_size() if analyzed else DASH)
 
     def _on_profile(self, profile: Profile) -> None:
         """Aplica o perfil e enfileira em seguida — um clique só."""

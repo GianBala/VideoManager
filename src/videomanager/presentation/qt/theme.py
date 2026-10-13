@@ -127,14 +127,19 @@ QPushButton[role="primary"]:hover {{ border-color: {on_fill}; }}
 QPushButton[role="primary"]:disabled {{
     background: {raised2}; color: {t2}; border-color: {raised2};
 }}
-QPushButton[role="profile"] {{
-    background: {raised};
-    border: 1px solid {raised};
-    border-radius: 8px;
-    padding: 10px;
-    text-align: left;
-}}
-QPushButton[role="profile"]:hover {{ background: {raised2}; border-color: {raised2}; }}
+/* Aba Download: o endereço é o que ela pede primeiro (campo, "Colar e analisar" e "Analisar" na mesma altura,
+   por isso o ``min-height``), as seções são cartões, e o rodapé leva o resultado e a ação. */
+QLineEdit[role="address"] {{ padding: 10px 12px; font-size: 14px; border-radius: 10px; min-height: 20px; }}
+QPushButton[role="address-action"] {{ padding: 10px 14px; min-height: 20px; }}
+QPushButton[role="primary"][emphasis="large"] {{ padding: 10px 18px; font-size: 14px; min-height: 20px; }}
+QLabel[role="section-title"] {{ font-size: 15px; font-weight: 600; color: {text}; }}
+QFrame[role="section"], QFrame[role="footer"] {{ background: {card}; border: 1px solid {card}; border-radius: 12px; }}
+QToolButton[role="section-header"] {{ background: transparent; border: 1px solid transparent; border-radius: 8px;
+    padding: 2px 8px 2px 2px; font-size: 15px; font-weight: 600; color: {text}; }}
+QToolButton[role="section-header"]:hover {{ background: {raised}; }}
+QToolButton[role="section-header"]:focus {{ border-color: {focus}; }}
+QLabel[role="result"] {{ font-size: 13px; font-weight: 600; color: {text}; }}
+QLabel[role="result-size"] {{ font-size: 22px; font-weight: 700; color: {text}; }}
 /* Cartão de paleta (aba Tema): miniatura e nome dentro do botão. A borda é sempre de 2 px, para
    o cartão marcado não crescer e empurrar os vizinhos. */
 QPushButton[role="palette"] {{ background: {raised}; border: 2px solid {raised}; border-radius: 10px; padding: 0px; text-align: left; }}
@@ -362,7 +367,7 @@ QTabBar::tab:focus {{ border-color: {focus}; }}
    por Tab não sabia em que botão o Enter ia cair. No fim do estilo para
    valer sobre o :hover e os papéis. */
 QPushButton:focus, QPushButton[role="transport"]:focus,
-QPushButton[role="profile"]:focus, QPushButton[role="spin-tool"]:focus, QPushButton[role="palette"]:focus {{ border-color: {focus}; }}
+QPushButton[role="spin-tool"]:focus, QPushButton[role="palette"]:focus {{ border-color: {focus}; }}
 /* O anel de foco do botão primário é a cor do texto dele: o foco branco ou preto some sobre um
    preenchimento claro, escuro ou âmbar (medido nas paletas Estúdio e Cinema). */
 QPushButton[role="primary"]:focus {{ border-color: {on_fill}; }}

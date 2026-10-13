@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QFormLayout,
-    QGroupBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLayout,
@@ -33,6 +33,7 @@ from videomanager.domain.format_policy import available_families
 from videomanager.domain.format_policy import available_fps
 from videomanager.domain.format_policy import available_heights
 from videomanager.domain.format_policy import find_video
+from videomanager.application.formatting import DASH
 from videomanager.application.formatting import format_bitrate
 from videomanager.application.formatting import format_size
 from videomanager.domain.formats import AudioChoice
@@ -103,7 +104,7 @@ class QualityPanel(QWidget):
     # Construção
     # ------------------------------------------------------------------
 
-    def _build_group(self) -> QGroupBox:
+    def _build_group(self) -> QFrame:
         """Modo, controles do modo e avisos, num grupo só.
 
         Um grupo separado só para as duas opções de modo custava uma faixa
@@ -111,8 +112,11 @@ class QualityPanel(QWidget):
         melhor. Juntos, o rótulo "O que baixar" ainda divide a coluna de rótulos
         com os campos que ele comanda.
         """
-        group = bind(QGroupBox(), "setTitle", lambda: strings.QUALITY_GROUP)
+        # Sem título e sem moldura: o cartão "Personalizar" em volta já diz do que se trata.
+        group = QFrame()
+        group.setProperty("role", "plain")
         outer = QVBoxLayout(group)
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(8)
 
         mode_form = _make_form()
@@ -260,6 +264,29 @@ class QualityPanel(QWidget):
     @property
     def mode(self) -> Mode:
         return Mode.AUDIO_ONLY if self._radio_audio.isChecked() else Mode.VIDEO
+
+    def summary(self) -> str:
+        """O resultado do que está escolhido, numa linha: "1080p · .mkv · melhor disponível".
+
+        Lê o que os campos mostram agora (e não o pedido guardado), que é o que o usuário vê e o que
+        ``build_request`` vai usar. Sem mídia analisada não há resultado a descrever.
+        """
+        if self._matrix.is_empty:
+            return DASH
+        if self.mode is Mode.AUDIO_ONLY:
+            parts = [self._audio_codec.currentText()]
+            if self._audio_quality.isEnabled():
+                parts.append(self._audio_quality.currentText())
+        else:
+            parts = [self._resolution.currentText(), self._container.currentText()]
+            if not self._audio_track.isHidden():
+                parts.append(self._audio_track.currentText())
+        return " · ".join(part for part in parts if part)
+
+    def estimated_size(self) -> str:
+        """O tamanho estimado do modo atual, já formatado (ou o traço, se não há como estimar)."""
+        label = self._audio_size_label if self.mode is Mode.AUDIO_ONLY else self._video_size_label
+        return label.text()
 
     def set_mode(self, mode: Mode) -> None:
         """Troca de modo, respeitando o que a mídia oferece.
