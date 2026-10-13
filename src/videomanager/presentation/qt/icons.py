@@ -20,7 +20,7 @@ já toma ao se pintar sozinha.
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 
 # Lado do ícone, em pixels lógicos. Os botões da barra têm 40 px de largura;
 # 18 deixa respiro suficiente para a borda do botão não encostar no desenho.
@@ -136,5 +136,162 @@ def trash(color: str, size: int = _SIZE) -> QIcon:
     painter.setPen(_pen(color, _STROKE * 0.75))
     painter.drawLine(QPointF(7.6 * u, 7.4 * u), QPointF(7.9 * u, 13.0 * u))
     painter.drawLine(QPointF(10.4 * u, 7.4 * u), QPointF(10.1 * u, 13.0 * u))
+    painter.end()
+    return QIcon(pixmap)
+
+
+# ---------------------------------------------------------------------------
+# Transporte, desfazer e zoom
+#
+# Eram texto (▶ ❚❚ ◀◀ ↶ ↷ − +) e dependiam de uma fonte com símbolos: onde ela falta (o Qt do
+# Windows sem a fonte de símbolos) cada um saía como um quadrado. Desenhados, saem iguais em
+# qualquer sistema e na cor do tema. Todos no mesmo desenho de 18 px e no mesmo traço dos de cima.
+# ---------------------------------------------------------------------------
+
+
+def _preenchido(painter: QPainter, color: str) -> None:
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+
+
+def _triangulo(painter: QPainter, u: float, tip_x: float, base_x: float, meio_y: float = 9.0, meia_altura: float = 5.0) -> None:
+    """Triângulo apontando de ``base_x`` para ``tip_x`` (esquerda ou direita), em unidades de 18 px."""
+    painter.drawPolygon(QPolygonF([
+        QPointF(base_x * u, (meio_y - meia_altura) * u),
+        QPointF(tip_x * u, meio_y * u),
+        QPointF(base_x * u, (meio_y + meia_altura) * u),
+    ]))
+
+
+def _barra(painter: QPainter, u: float, x: float, largura: float = 1.9) -> None:
+    painter.drawRoundedRect(QRectF(x * u, 4.0 * u, largura * u, 10.0 * u), 0.7 * u, 0.7 * u)
+
+
+def play(color: str, size: int = _SIZE) -> QIcon:
+    pixmap, painter = _canvas(size)
+    u = size / 18.0
+    _preenchido(painter, color)
+    _triangulo(painter, u, 14.2, 5.2, meia_altura=5.6)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def pause(color: str, size: int = _SIZE) -> QIcon:
+    pixmap, painter = _canvas(size)
+    u = size / 18.0
+    _preenchido(painter, color)
+    for x in (4.8, 10.4):
+        painter.drawRoundedRect(QRectF(x * u, 3.8 * u, 2.9 * u, 10.4 * u), 0.9 * u, 0.9 * u)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def to_start(color: str, size: int = _SIZE) -> QIcon:
+    """Ir ao início: uma barra e um triângulo para a esquerda."""
+    pixmap, painter = _canvas(size)
+    u = size / 18.0
+    _preenchido(painter, color)
+    _barra(painter, u, 3.4)
+    _triangulo(painter, u, 6.6, 14.6)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def to_end(color: str, size: int = _SIZE) -> QIcon:
+    pixmap, painter = _canvas(size)
+    u = size / 18.0
+    _preenchido(painter, color)
+    _barra(painter, u, 12.7)
+    _triangulo(painter, u, 11.4, 3.4)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def rewind(color: str, size: int = _SIZE) -> QIcon:
+    """Voltar: dois triângulos para a esquerda."""
+    pixmap, painter = _canvas(size)
+    u = size / 18.0
+    _preenchido(painter, color)
+    _triangulo(painter, u, 2.6, 9.4, meia_altura=4.6)
+    _triangulo(painter, u, 8.6, 15.4, meia_altura=4.6)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def fast_forward(color: str, size: int = _SIZE) -> QIcon:
+    pixmap, painter = _canvas(size)
+    u = size / 18.0
+    _preenchido(painter, color)
+    _triangulo(painter, u, 9.4, 2.6, meia_altura=4.6)
+    _triangulo(painter, u, 15.4, 8.6, meia_altura=4.6)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def frame_back(color: str, size: int = _SIZE) -> QIcon:
+    """Quadro anterior: um triângulo para a esquerda e a barra do quadro."""
+    pixmap, painter = _canvas(size)
+    u = size / 18.0
+    _preenchido(painter, color)
+    _triangulo(painter, u, 4.2, 11.4)
+    _barra(painter, u, 12.6)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def frame_forward(color: str, size: int = _SIZE) -> QIcon:
+    pixmap, painter = _canvas(size)
+    u = size / 18.0
+    _preenchido(painter, color)
+    _barra(painter, u, 3.5)
+    _triangulo(painter, u, 13.8, 6.6)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _volta(color: str, size: int, espelhar: bool) -> QIcon:
+    """Seta curva de desfazer; refazer é a mesma, espelhada."""
+    pixmap, painter = _canvas(size)
+    u = size / 18.0
+    if espelhar:
+        painter.translate(size, 0)
+        painter.scale(-1, 1)
+    painter.setPen(_pen(color))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    curva = QPainterPath(QPointF(4.4 * u, 7.0 * u))
+    curva.cubicTo(QPointF(6.6 * u, 3.4 * u), QPointF(13.4 * u, 3.6 * u), QPointF(14.0 * u, 9.2 * u))
+    curva.cubicTo(QPointF(14.4 * u, 12.6 * u), QPointF(11.8 * u, 14.4 * u), QPointF(8.6 * u, 14.2 * u))
+    painter.drawPath(curva)
+    ponta = QPainterPath(QPointF(4.2 * u, 3.4 * u))
+    ponta.lineTo(QPointF(4.4 * u, 7.2 * u))
+    ponta.lineTo(QPointF(8.2 * u, 6.8 * u))
+    painter.drawPath(ponta)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def undo(color: str, size: int = _SIZE) -> QIcon:
+    return _volta(color, size, espelhar=False)
+
+
+def redo(color: str, size: int = _SIZE) -> QIcon:
+    return _volta(color, size, espelhar=True)
+
+
+def plus(color: str, size: int = _SIZE) -> QIcon:
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color))
+    u = size / 18.0
+    painter.drawLine(QPointF(4.0 * u, 9.0 * u), QPointF(14.0 * u, 9.0 * u))
+    painter.drawLine(QPointF(9.0 * u, 4.0 * u), QPointF(9.0 * u, 14.0 * u))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def minus(color: str, size: int = _SIZE) -> QIcon:
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color))
+    u = size / 18.0
+    painter.drawLine(QPointF(4.0 * u, 9.0 * u), QPointF(14.0 * u, 9.0 * u))
     painter.end()
     return QIcon(pixmap)

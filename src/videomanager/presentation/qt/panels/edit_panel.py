@@ -1721,20 +1721,22 @@ class EditPanel(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
         self._buttons: list[QPushButton] = []
+        # Sem texto: cada botão leva o ícone desenhado de ``_set_toolbar_icons`` (a ordem é a mesma).
         specs = (
-            ("|◀◀", lambda: strings.EDIT_TO_START, lambda: self._seek_to(0.0)),
-            ("◀◀", lambda: strings.EDIT_BACK, lambda: self._nudge(-1.0)),
-            ("◀|", lambda: strings.EDIT_SHORTCUT.format(label=strings.EDIT_PREV_FRAME, key=","),
+            (lambda: strings.EDIT_TO_START, lambda: self._seek_to(0.0)),
+            (lambda: strings.EDIT_BACK, lambda: self._nudge(-1.0)),
+            (lambda: strings.EDIT_SHORTCUT.format(label=strings.EDIT_PREV_FRAME, key=","),
              lambda: self._step_frame(-1)),
-            ("▶", lambda: strings.EDIT_SHORTCUT.format(label=strings.EDIT_PLAY, key=strings.EDIT_KEY_SPACE),
+            (lambda: strings.EDIT_SHORTCUT.format(label=strings.EDIT_PLAY, key=strings.EDIT_KEY_SPACE),
              self._toggle_play),
-            ("|▶", lambda: strings.EDIT_SHORTCUT.format(label=strings.EDIT_NEXT_FRAME, key="."),
+            (lambda: strings.EDIT_SHORTCUT.format(label=strings.EDIT_NEXT_FRAME, key="."),
              lambda: self._step_frame(+1)),
-            ("▶▶", lambda: strings.EDIT_FORWARD, lambda: self._nudge(+1.0)),
-            ("▶▶|", lambda: strings.EDIT_TO_END, lambda: self._seek_to(self._duration)),
+            (lambda: strings.EDIT_FORWARD, lambda: self._nudge(+1.0)),
+            (lambda: strings.EDIT_TO_END, lambda: self._seek_to(self._duration)),
         )
-        for text, tip, slot in specs:
-            button = QPushButton(text)
+        for tip, slot in specs:
+            button = QPushButton()
+            button.setIconSize(QSize(18, 18))
             bind(button, "setToolTip", tip)
             button.setProperty("role", "transport")
             button.setFixedWidth(38)
@@ -1916,9 +1918,9 @@ class EditPanel(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
 
-        self._undo = self._tool(row, "↶", "Ctrl+Z", self._undo_edit, lambda: strings.EDIT_UNDO, 40)
+        self._undo = self._tool(row, "", "Ctrl+Z", self._undo_edit, lambda: strings.EDIT_UNDO, 40)
         self._redo = self._tool(
-            row, "↷", "Ctrl+Shift+Z", self._redo_edit, lambda: strings.EDIT_REDO, 40
+            row, "", "Ctrl+Shift+Z", self._redo_edit, lambda: strings.EDIT_REDO, 40
         )
 
         row.addSpacing(_TOOL_GROUP_GAP)
@@ -1945,8 +1947,6 @@ class EditPanel(QWidget):
         self._delete_button = self._tool(
             row, "", "Del", self._delete_selected, lambda: strings.EDIT_DELETE, 40
         )
-        self._set_toolbar_icons()
-
         row.addSpacing(_TOOL_GROUP_GAP)
         self._add_video_button = bind(QPushButton(), "setText", lambda: strings.EDIT_ADD_VIDEO_TRACK)
         bind(self._add_video_button, "setToolTip", lambda: strings.EDIT_ADD_VIDEO_TRACK_FULL)
@@ -1993,20 +1993,23 @@ class EditPanel(QWidget):
         # um no outro faria a barra terminar num amontoado de coisas sem relação.
         row.addSpacing(_VOLUME_ZOOM_GAP)
 
-        for text, tip, slot in (
-            ("−", lambda: strings.EDIT_ZOOM_OUT, lambda: self._zoom(1 / _ZOOM_FACTOR)),
-            ("+", lambda: strings.EDIT_ZOOM_IN, lambda: self._zoom(_ZOOM_FACTOR)),
+        for atributo, tip, slot in (
+            ("_zoom_out_button", lambda: strings.EDIT_ZOOM_OUT, lambda: self._zoom(1 / _ZOOM_FACTOR)),
+            ("_zoom_in_button", lambda: strings.EDIT_ZOOM_IN, lambda: self._zoom(_ZOOM_FACTOR)),
         ):
-            button = QPushButton(text)
+            button = QPushButton()
             bind(button, "setToolTip", tip)
             button.setFixedWidth(40)
             button.clicked.connect(slot)
             row.addWidget(button)
+            setattr(self, atributo, button)
         fit = bind(QPushButton(), "setText", lambda: strings.EDIT_ZOOM_FIT)
         bind(fit, "setToolTip", lambda: strings.EDIT_ZOOM_FIT_TIP)
         # Por lambda: a barra é montada antes da linha do tempo existir.
         fit.clicked.connect(lambda: self._timeline.fit())
         row.addWidget(fit)
+        # Depois de todos os botões de ícone existirem (a tesoura e a lixeira lá em cima, o zoom aqui).
+        self._set_toolbar_icons()
         return row
 
     @staticmethod
@@ -4671,7 +4674,7 @@ class EditPanel(QWidget):
 
     def _refresh_play_button(self) -> None:
         self._play_button.setEnabled(self._playable)
-        self._play_button.setText("❚❚" if self._playing else "▶")
+        self._play_button.setIcon((icons.pause if self._playing else icons.play)(self._colors["accent_text"]))
         if not self._playable:
             self._play_button.setToolTip(strings.EDIT_NO_PLAYBACK)
             return
@@ -4858,6 +4861,20 @@ class EditPanel(QWidget):
         self._trim_left_button.setIcon(icons.trim_left(cor))
         self._trim_right_button.setIcon(icons.trim_right(cor))
         self._delete_button.setIcon(icons.trash(cor))
+        self._undo.setIcon(icons.undo(cor))
+        self._redo.setIcon(icons.redo(cor))
+        self._zoom_out_button.setIcon(icons.minus(cor))
+        self._zoom_in_button.setIcon(icons.plus(cor))
+        self._set_transport_icons()
+
+    def _set_transport_icons(self) -> None:
+        """Ícones da barra de transporte, na cor do texto; o do play é o do botão primário."""
+        cor, sobre_o_botao = self._colors["text"], self._colors["accent_text"]
+        for botao, desenho in zip(self._buttons[:7], (icons.to_start, icons.rewind, icons.frame_back, None,
+                                                       icons.frame_forward, icons.fast_forward, icons.to_end)):
+            if desenho is not None:
+                botao.setIcon(desenho(cor))
+        self._play_button.setIcon((icons.pause if self._playing else icons.play)(sobre_o_botao))
 
     def _retheme(self) -> None:
         """Acompanha a troca de tema e de paleta com o editor aberto.
