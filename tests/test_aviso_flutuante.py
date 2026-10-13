@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import QRect
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QStatusBar, QWidget
 
 from videomanager.application.jobs.models import Job, JobKind
 from videomanager.bootstrap import (build_desktop_runtime, build_download_service, build_editor_service,
@@ -111,12 +111,12 @@ def principal(desktop_app, monkeypatch):
     janela.close()
 
 
-def test_adicionar_a_fila_responde_na_barra_e_no_aviso(principal, monkeypatch):
+def test_adicionar_a_fila_responde_com_o_aviso_e_o_botao_ver_tarefas(principal, monkeypatch):
     monkeypatch.setattr(principal._queue, "submit", lambda job: None)
     principal._submit_jobs([Job("", "a", "", kind=JobKind.EXPORT), Job("", "b", "", kind=JobKind.EXPORT)])
     esperado = strings.STATUS_ENQUEUED.format(count=2)
-    assert principal.statusBar().currentMessage() == esperado
     assert [a.mensagem.text() for a in principal._toasts.ativos] == [esperado]
+    assert not principal.findChildren(QStatusBar)
 
 
 def test_falha_ao_gravar_preferencias_avisa_como_erro(principal, monkeypatch):

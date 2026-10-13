@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager.application import encoding as hwaccel
+from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.application.preferences import RANGES
 from videomanager.presentation.qt.tasks import WorkerRunner
@@ -46,9 +47,11 @@ class SettingsDialog(QDialog):
         parent: QWidget | None = None,
         *,
         runtime: DesktopRuntimePort,
+        tools: FFmpegTools | None = None,
     ) -> None:
         super().__init__(parent)
         self._runtime = runtime
+        self._tools = tools
         # A sondagem da placa corre fora da thread da interface (ver
         # :meth:`_describe_encoder`).
         self._runner = WorkerRunner()
@@ -190,8 +193,35 @@ class SettingsDialog(QDialog):
         row.addWidget(test)
         form.addRow(row)
         self._describe_encoder()
+        self._add_row(form, strings.SETTINGS_FFMPEG, self._build_ffmpeg_info())
 
         return page
+
+    def _build_ffmpeg_info(self) -> QVBoxLayout:
+        """De onde veio o ffmpeg em uso e onde ele está.
+
+        Mora ao lado da codificação porque as duas linhas respondem à mesma pergunta: com o que este
+        aplicativo vai codificar. Era a única coisa que a barra de status dizia só ali, em português de
+        uma palavra ("ffmpeg: sistema"), e só enquanto a janela estava aberta.
+        """
+        coluna = QVBoxLayout()
+        coluna.setContentsMargins(0, 0, 0, 0)
+        coluna.setSpacing(2)
+        if self._tools is None:
+            origem, caminho = strings.SETTINGS_FFMPEG_UNKNOWN, ""
+        else:
+            origem = strings.FFMPEG_SOURCES.get(self._tools.source, self._tools.source)
+            caminho = str(self._tools.ffmpeg)
+        self._ffmpeg_source = QLabel(origem)
+        self._ffmpeg_source.setWordWrap(True)
+        coluna.addWidget(self._ffmpeg_source)
+        self._ffmpeg_path = QLabel(caminho)
+        self._ffmpeg_path.setProperty("role", "dim")
+        self._ffmpeg_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._ffmpeg_path.setWordWrap(True)
+        self._ffmpeg_path.setVisible(bool(caminho))
+        coluna.addWidget(self._ffmpeg_path)
+        return coluna
 
     def _build_theme(self) -> QWidget:
         """Modo (escuro ou claro) e paleta: as duas escolhas que definem as cores do aplicativo."""
