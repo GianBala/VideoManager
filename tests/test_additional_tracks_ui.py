@@ -2026,8 +2026,9 @@ def test_edit_panel_save_as_button(dummy_tools: FFmpegTools) -> None:
         processing=build_processing_service(),
         runtime=build_desktop_runtime(),
     )
-    assert hasattr(panel, "_save_as_btn")
-    assert panel._save_as_btn.text() == strings.EDIT_SAVE_AS_BUTTON
+    # "Salvar como" é uma ação do menu do botão direito sobre o Salvar (e do menu Arquivo da janela).
+    assert hasattr(panel, "_save_as_action")
+    assert panel._save_as_action.text() == strings.EDIT_SAVE_AS_BUTTON
 
     # Testa acionamento do botão chamando save_project_as
     saved_as_called = False
@@ -2038,7 +2039,7 @@ def test_edit_panel_save_as_button(dummy_tools: FFmpegTools) -> None:
         return True
 
     panel.save_project_as = mock_save_as
-    panel._save_as_btn.click()
+    panel._save_as_action.trigger()
     assert saved_as_called
     panel.shutdown()
 

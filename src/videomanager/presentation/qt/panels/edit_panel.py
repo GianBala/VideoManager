@@ -39,6 +39,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import (
+    QAction,
     QColor,
     QDragEnterEvent,
     QDropEvent,
@@ -81,6 +82,7 @@ from PySide6.QtWidgets import (
     QSplitterHandle,
     QTabWidget,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -96,7 +98,7 @@ from videomanager.domain.project import slideshow_canvas
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.domain.media import LocalMedia
 from videomanager.application.editor.service import EditorService
-from videomanager.application.formatting import format_aspect_ratio, format_rate
+from videomanager.application.formatting import DASH, format_aspect_ratio, format_rate
 from videomanager.domain.preview import fit_size
 from videomanager.domain.preview import preview_fps
 from videomanager.domain.project import IMAGE_DURATION
@@ -127,6 +129,7 @@ from videomanager.presentation.qt.export_dialog import ExportDialog, canvas_opti
 from videomanager.application.editor.canvas import aspect_of, canvas_for_aspect, output_canvas
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
 from videomanager.presentation.qt.theme import atual, on_theme_change, palette
+from videomanager.presentation.qt.panels.canvas_selector import CanvasPopup, CanvasSelector
 from videomanager.presentation.qt.panels.timeline import AUDIO_TRACK_HEIGHT
 from videomanager.presentation.qt.panels.timeline import FILM_CELL_WIDTH
 from videomanager.presentation.qt.panels.timeline import VIDEO_TRACK_HEIGHT
@@ -801,75 +804,86 @@ class EditPanel(QWidget):
         box.setProperty("role", "plain")
         row = QHBoxLayout(box)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
+        row.setSpacing(6)
 
-        self._new_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_NEW_BUTTON)
-        bind(self._new_btn, "setToolTip", lambda: f"{strings.ACTION_NEW_PROJECT} (Ctrl+N)")
-        self._new_btn.clicked.connect(self.new_project)
-        row.addWidget(self._new_btn)
+        # Projeto: três ícones e o nome. O que os botões diziam por extenso vai na dica e no nome acessível.
+        self._new_btn = self._icon_button(lambda: f"{strings.ACTION_NEW_PROJECT} (Ctrl+N)",
+                                          lambda: strings.EDIT_NEW_BUTTON, self.new_project)
+        self._open_btn = self._icon_button(lambda: f"{strings.ACTION_OPEN_PROJECT} (Ctrl+O)",
+                                           lambda: strings.EDIT_OPEN_BUTTON, lambda: self.open_project())
+        self._save_btn = self._icon_button(lambda: f"{strings.ACTION_SAVE_PROJECT} (Ctrl+S)",
+                                           lambda: strings.EDIT_SAVE_BUTTON, self.save_project)
+        for button in (self._new_btn, self._open_btn, self._save_btn):
+            row.addWidget(button)
+        # "Salvar como" não tem ícone próprio na barra: mora no botão direito do Salvar e no menu Arquivo da janela.
+        self._save_as_action = bind(QAction(self), "setText", lambda: strings.EDIT_SAVE_AS_BUTTON)
+        bind(self._save_as_action, "setToolTip", lambda: f"{strings.ACTION_SAVE_PROJECT_AS} (Ctrl+Shift+S)")
+        self._save_as_action.triggered.connect(lambda: self.save_project_as())
+        self._save_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._save_btn.customContextMenuRequested.connect(self._show_save_menu)
 
-        self._open_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_OPEN_BUTTON)
-        bind(self._open_btn, "setToolTip", lambda: f"{strings.ACTION_OPEN_PROJECT} (Ctrl+O)")
-        self._open_btn.clicked.connect(lambda: self.open_project())
-        row.addWidget(self._open_btn)
-
-        self._save_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_SAVE_BUTTON)
-        bind(self._save_btn, "setToolTip", lambda: f"{strings.ACTION_SAVE_PROJECT} (Ctrl+S)")
-        self._save_btn.clicked.connect(self.save_project)
-        row.addWidget(self._save_btn)
-
-        self._save_as_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_SAVE_AS_BUTTON)
-        bind(self._save_as_btn, "setToolTip", lambda: f"{strings.ACTION_SAVE_PROJECT_AS} (Ctrl+Shift+S)")
-        self._save_as_btn.clicked.connect(self.save_project_as)
-        row.addWidget(self._save_as_btn)
-
-        row.addSpacing(6)
+        row.addSpacing(8)
         self._project_label = QLabel("")
-        self._project_label.setProperty("role", "dim")
+        self._project_label.setProperty("role", "title")
         self._project_label.setMinimumWidth(40)
+        bind(self._project_label, "setToolTip", lambda: strings.EDIT_PROJECT_V2_TIP)
         row.addWidget(self._project_label)
+
+        # A marca de "não salvo" ocupa o lugar só quando há o que avisar, e o que sobra da linha é do espaço vazio.
+        self._dirty_mark = QWidget()
+        self._dirty_mark.setProperty("role", "plain")
+        mark = QHBoxLayout(self._dirty_mark)
+        mark.setContentsMargins(4, 0, 0, 0)
+        mark.setSpacing(6)
+        dot = QLabel()
+        dot.setProperty("role", "dirty-dot")
+        dot.setFixedSize(8, 8)
+        mark.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        unsaved = bind(QLabel(), "setText", lambda: strings.EDIT_UNSAVED)
+        unsaved.setProperty("role", "dim")
+        mark.addWidget(unsaved)
+        row.addWidget(self._dirty_mark)
         self._update_project_label()
 
         row.addStretch(1)
 
-        self._slideshow_button = bind(QPushButton(), "setText", lambda: strings.EDIT_SLIDESHOW)
-        bind(self._slideshow_button, "setToolTip", lambda: strings.EDIT_SLIDESHOW_TIP)
-        self._slideshow_button.clicked.connect(self._apply_slideshow_canvas)
-        row.addWidget(self._slideshow_button)
+        # Tela do projeto: um botão que resume e um painel com os controles de sempre. O painel nasce com a barra,
+        # e não sob demanda — os testes e ``_refresh_canvas_controls`` precisam encontrá-los.
+        popup = CanvasPopup(self)
+        self._canvas_popup = popup
+        self._canvas_selector = CanvasSelector(popup)
+        bind(self._canvas_selector, "setAccessibleName", lambda: strings.EDIT_CANVAS_BUTTON_TIP)
 
-        aspect_label = bind(QLabel(), "setText", lambda: strings.EDIT_CANVAS_ASPECT)
-        aspect_label.setProperty("role", "dim")
-        row.addWidget(aspect_label)
-
-        # Pisos explícitos, abaixo da largura do texto: com espaço a lista mostra
-        # o texto inteiro; sem, encolhe em vez de empurrar Exportar para fora da
-        # tela. O item longo continua inteiro ao abrir a lista.
         self._aspect_box = QComboBox()
         self._aspect_box.setMinimumWidth(110)
         bind(self._aspect_box, "setToolTip", lambda: strings.EDIT_CANVAS_ASPECT_TIP)
         self._aspect_box.currentIndexChanged.connect(self._on_aspect_choice)
-        row.addWidget(self._aspect_box)
-
-        canvas_label = bind(QLabel(), "setText", lambda: strings.EDIT_CANVAS)
-        canvas_label.setProperty("role", "dim")
-        row.addWidget(canvas_label)
-
         self._canvas_box = QComboBox()
         self._canvas_box.setMinimumWidth(150)
         bind(self._canvas_box, "setToolTip", lambda: strings.EDIT_CANVAS_TIP)
         self._canvas_box.currentIndexChanged.connect(self._on_canvas_choice)
-        row.addWidget(self._canvas_box)
+
+        for label_text, combo in ((lambda: strings.EDIT_CANVAS_ASPECT, self._aspect_box),
+                                  (lambda: strings.EDIT_CANVAS, self._canvas_box)):
+            label = bind(QLabel(), "setText", label_text)
+            label.setProperty("role", "dim")
+            popup.column.addWidget(label)
+            popup.column.addWidget(combo)
+        self._slideshow_button = bind(QPushButton(), "setText", lambda: strings.EDIT_SLIDESHOW)
+        bind(self._slideshow_button, "setToolTip", lambda: strings.EDIT_SLIDESHOW_TIP)
+        self._slideshow_button.clicked.connect(self._apply_slideshow_canvas)
+        popup.column.addSpacing(4)
+        popup.column.addWidget(self._slideshow_button)
+        row.addWidget(self._canvas_selector)
 
         row.addSpacing(6)
 
-        self._collapse = bind(QPushButton(), "setText", lambda: strings.EDIT_COLLAPSE)
-        bind(self._collapse, "setToolTip", lambda: strings.EDIT_COLLAPSE_TIP)
-        self._collapse.clicked.connect(self._toggle_collapsed)
+        self._collapse = self._icon_button(lambda: strings.EDIT_COLLAPSE_TIP, lambda: strings.EDIT_COLLAPSE,
+                                           self._toggle_collapsed)
         row.addWidget(self._collapse)
 
-        self._fullscreen_button = bind(QPushButton(), "setText", lambda: strings.EDIT_FULLSCREEN)
-        bind(self._fullscreen_button, "setToolTip", lambda: strings.EDIT_FULLSCREEN_TIP)
-        self._fullscreen_button.clicked.connect(self._toggle_fullscreen)
+        self._fullscreen_button = self._icon_button(lambda: strings.EDIT_FULLSCREEN_TIP,
+                                                    lambda: strings.EDIT_FULLSCREEN, self._toggle_fullscreen)
         row.addWidget(self._fullscreen_button)
 
         self._export_button = bind(QPushButton(), "setText", lambda: strings.EDIT_EXPORT_BUTTON)
@@ -880,14 +894,34 @@ class EditPanel(QWidget):
 
         return box
 
+    @staticmethod
+    def _icon_button(tip: Callable[[], str], name: Callable[[], str], slot: Callable[[], None]) -> QToolButton:
+        """Botão só de ícone: o ícone vem de ``_set_toolbar_icons``, e o nome que o texto dava vai para a leitura de tela."""
+        button = QToolButton()
+        button.setProperty("role", "icon")
+        button.setIconSize(QSize(20, 20))
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        bind(button, "setToolTip", tip)
+        bind(button, "setAccessibleName", name)
+        button.clicked.connect(slot)
+        return button
+
+    def build_save_menu(self) -> QMenu:
+        """O menu do botão direito sobre o Salvar. Montar e exibir são separados pelo mesmo motivo do ``build_menu``."""
+        menu = QMenu(self)
+        menu.addAction(strings.EDIT_SAVE_BUTTON, lambda: self.save_project())
+        menu.addAction(self._save_as_action)
+        return menu
+
+    def _show_save_menu(self, position) -> None:
+        self.build_save_menu().exec(self._save_btn.mapToGlobal(position))
+
     def _update_project_label(self) -> None:
         if not hasattr(self, "_project_label"):
             return
         name = self._project_path.name if self._project_path else None
-        dirty = " *" if self.has_unsaved_changes else ""
-        bind(self._project_label, "setText", lambda: strings.EDIT_PROJECT_STATUS.format(
-            name=name or strings.EDIT_UNTITLED, dirty=dirty))
-        bind(self._project_label, "setToolTip", lambda: strings.EDIT_PROJECT_V2_TIP)
+        bind(self._project_label, "setText", lambda: name or strings.EDIT_UNTITLED)
+        self._dirty_mark.setVisible(self.has_unsaved_changes)
 
     def _build_media_box(self) -> QWidget:
         # Ícones que dependem da cor do tema: refeitos em ``_set_extras_icons`` a cada troca de tema.
@@ -3383,6 +3417,7 @@ class EditPanel(QWidget):
             self._syncing = False
 
         self._label_auto_items()
+        self._update_canvas_summary()
 
     def _retext_canvas_controls(self) -> None:
         """Texto novo nas listas de proporção e tela, sem reconstruí-las.
@@ -3396,6 +3431,17 @@ class EditPanel(QWidget):
         sizes = {data: label for label, data in canvas_options(self._pool, self._aspect_choice, self._canvas_choice)}
         retext_items(self._canvas_box, sizes.get)
         self._label_auto_items()
+        self._update_canvas_summary()
+
+    def _update_canvas_summary(self) -> None:
+        """O texto do seletor da barra: a tela que o projeto tem agora, e se ela é a automática ou uma escolha."""
+        project = self._project
+        automatic = self._canvas_choice is None and self._aspect_choice is None
+        self._canvas_selector.set_summary((strings.EDIT_CANVAS_SUMMARY_AUTO if automatic else strings.EDIT_CANVAS_SUMMARY).format(
+            aspect=format_aspect_ratio(project.width, project.height) or DASH,
+            size=strings.EDIT_CANVAS_SIZE.format(width=project.width, height=project.height),
+            rate=strings.EDIT_CANVAS_FPS.format(fps=format_rate(project.fps)),
+        ))
 
     def _label_auto_items(self) -> None:
         # O que a escolha automática produziria fica à vista mesmo sem abrir a
@@ -3711,7 +3757,8 @@ class EditPanel(QWidget):
         else:
             self._split_view.setSizes([total // 2, total - total // 2])
         collapsed = self._collapsed
-        bind(self._collapse, "setText", lambda: strings.EDIT_EXPAND if collapsed else strings.EDIT_COLLAPSE)
+        bind(self._collapse, "setAccessibleName", lambda: strings.EDIT_EXPAND if collapsed else strings.EDIT_COLLAPSE)
+        self._set_toolbar_icons()
         self._preview.update()
         self._resize_timer.start()
 
@@ -4887,6 +4934,12 @@ class EditPanel(QWidget):
         self._redo.setIcon(icons.redo(cor))
         self._zoom_out_button.setIcon(icons.minus(cor))
         self._zoom_in_button.setIcon(icons.plus(cor))
+        self._new_btn.setIcon(icons.file_plus(cor))
+        self._open_btn.setIcon(icons.folder(cor))
+        self._save_btn.setIcon(icons.save(cor))
+        self._collapse.setIcon((icons.preview_expand if self._collapsed else icons.preview_collapse)(cor))
+        self._fullscreen_button.setIcon(icons.fullscreen(cor))
+        self._export_button.setIcon(icons.upload(self._colors["accent_text"], 18))
         self._set_transport_icons()
 
     def _set_extras_icons(self) -> None:
