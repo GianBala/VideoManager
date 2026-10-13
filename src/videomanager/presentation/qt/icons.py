@@ -401,3 +401,62 @@ def two_states(desenho, normal: str, marcado: str, size: int = _NAV) -> QIcon:
     icone.addPixmap(desenho(normal, size).pixmap(size, size), QIcon.Mode.Normal, QIcon.State.Off)
     icone.addPixmap(desenho(marcado, size).pixmap(size, size), QIcon.Mode.Normal, QIcon.State.On)
     return icone
+
+
+# ---------------------------------------------------------------------------
+# Tarefas
+# ---------------------------------------------------------------------------
+
+def upload(color: str, size: int = _NAV) -> QIcon:
+    """Exportação: a seta de baixar, de cabeça para cima."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawLine(QPointF(12 * u, 19 * u), QPointF(12 * u, 8.5 * u))
+        p.drawPolyline(QPolygonF([QPointF(7.5 * u, 12.8 * u), QPointF(12 * u, 8.3 * u), QPointF(16.5 * u, 12.8 * u)]))
+        p.drawLine(QPointF(5 * u, 5 * u), QPointF(19 * u, 5 * u))
+    return _nav(color, size, desenho)
+
+
+def sync(color: str, size: int = _NAV) -> QIcon:
+    """Processamento: duas setas em volta, uma para cada metade do círculo."""
+    def desenho(p: QPainter, u: float) -> None:
+        caixa = QRectF(5 * u, 5 * u, 14 * u, 14 * u)
+        p.drawArc(caixa, 20 * 16, 140 * 16)
+        p.drawArc(caixa, 200 * 16, 140 * 16)
+        p.drawPolyline(QPolygonF([QPointF(15.2 * u, 3.8 * u), QPointF(18.6 * u, 7.0 * u), QPointF(14.6 * u, 8.4 * u)]))
+        p.drawPolyline(QPolygonF([QPointF(8.8 * u, 20.2 * u), QPointF(5.4 * u, 17.0 * u), QPointF(9.4 * u, 15.6 * u)]))
+    return _nav(color, size, desenho)
+
+
+def clock(color: str, size: int = _NAV) -> QIcon:
+    """Na fila: relógio."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawEllipse(QPointF(12 * u, 12 * u), 7.5 * u, 7.5 * u)
+        p.drawPolyline(QPolygonF([QPointF(12 * u, 7.8 * u), QPointF(12 * u, 12 * u), QPointF(15 * u, 13.8 * u)]))
+    return _nav(color, size, desenho)
+
+
+def folder(color: str, size: int = _NAV) -> QIcon:
+    """Abrir a pasta do arquivo."""
+    def desenho(p: QPainter, u: float) -> None:
+        pasta = QPainterPath(QPointF(4 * u, 8 * u))
+        pasta.lineTo(QPointF(4 * u, 17 * u))
+        pasta.quadTo(QPointF(4 * u, 18.5 * u), QPointF(5.5 * u, 18.5 * u))
+        pasta.lineTo(QPointF(18.5 * u, 18.5 * u))
+        pasta.quadTo(QPointF(20 * u, 18.5 * u), QPointF(20 * u, 17 * u))
+        pasta.lineTo(QPointF(20 * u, 9.5 * u))
+        pasta.quadTo(QPointF(20 * u, 8 * u), QPointF(18.5 * u, 8 * u))
+        pasta.lineTo(QPointF(11.5 * u, 8 * u))
+        pasta.lineTo(QPointF(9.8 * u, 5.8 * u))
+        pasta.lineTo(QPointF(5.5 * u, 5.8 * u))
+        pasta.quadTo(QPointF(4 * u, 5.8 * u), QPointF(4 * u, 7.3 * u))
+        p.drawPath(pasta)
+    return _nav(color, size, desenho)
+
+
+def task_list(color: str, size: int = _NAV) -> QIcon:
+    """A fila vazia: três linhas com marcador."""
+    def desenho(p: QPainter, u: float) -> None:
+        for y in (7, 12, 17):
+            p.drawPoint(QPointF(5.5 * u, y * u))
+            p.drawLine(QPointF(9 * u, y * u), QPointF(19 * u, y * u))
+    return _nav(color, size, desenho)

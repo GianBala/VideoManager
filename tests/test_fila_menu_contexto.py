@@ -53,7 +53,7 @@ def cenario(desktop_app, monkeypatch, tmp_path):
 
 
 def _menu_para(cenario, *nomes: str) -> list[str] | None:
-    tabela = cenario.painel._table
+    tabela = cenario.painel._list
     tabela.clearSelection()
     modelo = tabela.model()
     for nome in nomes:
