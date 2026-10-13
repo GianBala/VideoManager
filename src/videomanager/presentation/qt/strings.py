@@ -186,6 +186,13 @@ FFMPEG_SOURCES = {
     "sistema": "Sistema — instalado no computador",
 }
 SETTINGS_FFMPEG = "FFmpeg"
+SETTINGS_GROUP_DOWNLOADS = "Downloads"
+SETTINGS_GROUP_LANGUAGE = "Idioma"
+SETTINGS_GROUP_VIDEO = "Vídeo"
+SETTINGS_GROUP_SPEED = "Velocidade"
+SETTINGS_GROUP_COOKIES = "Cookies"
+SETTINGS_GROUP_FILE = "No arquivo"
+SETTINGS_GROUP_SUBS = "Legendas"
 SETTINGS_FFMPEG_UNKNOWN = "Ainda não localizado"
 TOAST_CLOSE = "Fechar aviso"
 STATUS_ENQUEUED = "{count} tarefa(s) adicionada(s) à fila"
@@ -710,7 +717,7 @@ EDIT_MODE_TIP = (
     "O corte rápido copia os dados como estão: sai em segundos e sem perda "
     "nenhuma, mas começa no keyframe anterior ao ponto marcado."
 )
-EDIT_PLAN = "O que vai acontecer: {plan}"
+EXPORT_PLAN_TITLE = "O que vai acontecer"
 EDIT_PLAN_FAST = ".{container} · cópia direta (sem recodificar) · {duration}"
 EDIT_FAST_UNAVAILABLE = (
     "O corte rápido vale enquanto a edição for um recorte de um arquivo só, na "
