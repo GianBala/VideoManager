@@ -25,7 +25,7 @@ _HEX = re.compile(r"#[0-9a-fA-F]{8}\b|#[0-9a-fA-F]{6}\b")
 _HEX_CURTO = re.compile(r"^#[0-9a-fA-F]{3}$")
 
 # A casa das cores: aqui pode.
-_LIVRES = {"qt/theme.py"}
+_LIVRES = {"qt/theme.py", "qt/paletas.py"}
 
 # Arquivo -> quantas cores literais ele tinha no começo da renovação.
 _ORCAMENTO = {
