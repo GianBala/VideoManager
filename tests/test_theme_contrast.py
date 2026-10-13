@@ -13,6 +13,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QCheckBox, QLineEdit, QPushButton, QRadioButton, QSlider, QTabWidget, QVBoxLayout, QWidget
 
+from videomanager.presentation.qt import paletas
 from videomanager.presentation.qt.theme import qpalette, stylesheet
 
 
@@ -26,11 +27,12 @@ def contraste(a, b) -> float:
     return (claro + 0.05) / (escuro + 0.05)
 
 
+@pytest.mark.parametrize("nome", paletas.nomes())
 @pytest.mark.parametrize("tema", ["dark", "light"])
-def test_foco_do_teclado_tem_pelo_menos_3_para_1_em_cada_controle(desktop_app, tema):
+def test_foco_do_teclado_tem_pelo_menos_3_para_1_em_cada_controle(desktop_app, tema, nome):
     estilo, paleta = desktop_app.styleSheet(), desktop_app.palette()
-    desktop_app.setPalette(qpalette(tema))
-    desktop_app.setStyleSheet(stylesheet(tema))
+    desktop_app.setPalette(qpalette(tema, nome))
+    desktop_app.setStyleSheet(stylesheet(tema, nome))
     host = QWidget()
     try:
         layout = QVBoxLayout(host)
@@ -78,14 +80,19 @@ def test_foco_do_teclado_tem_pelo_menos_3_para_1_em_cada_controle(desktop_app, t
 _TEXTO = [("text", "bg"), ("text", "surface"), ("text", "surface_alt"), ("text_dim", "bg"),
           ("text_dim", "surface"), ("text_dim", "surface_alt"), ("accent_text", "accent_fill"),
           ("accent_text", "accent_fill_hover"), ("accent_fg", "surface"), ("warn", "bg"),
-          ("warn", "surface"), ("accent_text", "live")]
-_INDICADOR = [("focus", "border"), ("focus", "accent_fill"), ("accent", "surface_alt"), ("accent", "border")]
+          ("warn", "surface")]
+# O foco do botão primário é o texto dele sobre o preenchimento (ver o QSS), e não ``focus``:
+# o branco ou o preto some sobre um preenchimento claro, escuro ou âmbar.
+_INDICADOR = [("focus", "border"), ("accent_text", "accent_fill"), ("accent", "surface_alt"), ("accent", "border")]
 
 
+@pytest.mark.parametrize("nome", paletas.nomes())
 @pytest.mark.parametrize("tema", ["dark", "light"])
-def test_texto_e_indicadores_tem_o_contraste_minimo(tema):
+def test_texto_e_indicadores_tem_o_contraste_minimo(tema, nome):
     from videomanager.presentation.qt.theme import palette
-    cores = palette(tema)
+    cores = palette(tema, nome)
+    # O selo "ao vivo" tem fundo vermelho fixo e texto sempre branco.
+    assert contraste("#ffffff", cores["live"]) >= 4.5
     fracos = [f"{a}/{b}: {contraste(cores[a], cores[b]):.2f}" for a, b in _TEXTO
               if contraste(cores[a], cores[b]) < 4.5]
     fracos += [f"{a}/{b}: {contraste(cores[a], cores[b]):.2f}" for a, b in _INDICADOR

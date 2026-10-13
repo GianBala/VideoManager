@@ -36,7 +36,7 @@ LIGHT = paletas.legado(paletas.PADRAO, "light")
 
 _QSS = """
 QWidget {{
-    background: {bg};
+    background: {canvas};
     color: {text};
     font-size: 10pt;
 }}
@@ -46,9 +46,9 @@ QWidget {{
    a qual dos dois pertencia. O recuo de 19 px (padding 10 + margem padrão do
    layout, 9) põe o título na mesma coluna em que começa o conteúdo abaixo. */
 QGroupBox {{
-    background: {surface};
-    border: 1px solid {border};
-    border-radius: 8px;
+    background: {card};
+    border: 1px solid {card};
+    border-radius: 12px;
     margin-top: 0;
     padding: 28px 10px 10px 10px;
     font-weight: 600;
@@ -59,15 +59,15 @@ QGroupBox::title {{
     left: 19px;
     top: 4px;
     padding: 0;
-    color: {text_dim};
+    color: {text};
 }}
 /* O card da mídia é o único painel sem título, então não pode ser um QGroupBox.
    O recuo interno (borda + padding + margem do layout) é o mesmo dos grupos,
    para que a miniatura comece na mesma coluna dos rótulos abaixo dela. */
 QFrame#mediaCard {{
-    background: {surface};
-    border: 1px solid {border};
-    border-radius: 8px;
+    background: {card};
+    border: 1px solid {card};
+    border-radius: 12px;
     padding: 10px;
 }}
 
@@ -77,84 +77,84 @@ QFrame#mediaCard {{
 QWidget[role="plain"] {{ background: transparent; }}
 
 QLabel {{ background: transparent; }}
-QLabel[role="dim"] {{ color: {text_dim}; }}
+QLabel[role="dim"] {{ color: {t2}; }}
 /* Nota ao pé de uma coluna estreita (aba Transições): menor que o texto dos
    controles, para a coluna não pedir altura que a prévia ao lado perderia. */
-QLabel[role="note"] {{ color: {text_dim}; font-size: 11px; }}
+QLabel[role="note"] {{ color: {t2}; font-size: 11px; }}
 QLabel[role="title"] {{ font-size: 13pt; font-weight: 600; }}
-QLabel[role="live"] {{ color: {accent_text}; background: {live};
+QLabel[role="live"] {{ color: {live_text}; background: {live};
     border-radius: 4px; padding: 2px 6px; font-weight: 700; font-size: 8pt; }}
 QLabel[role="warn"] {{ color: {warn}; }}
 
 QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QListWidget, QTreeWidget {{
-    background: {surface_alt};
-    border: 1px solid {border};
-    border-radius: 6px;
+    background: {raised};
+    border: 1px solid {raised};
+    border-radius: 8px;
     padding: 6px 8px;
-    selection-background-color: {accent_fill};
-    selection-color: {accent_text};
+    selection-background-color: {fill_a};
+    selection-color: {on_fill};
 }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {accent}; }}
-QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{ color: {text_dim}; }}
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{ color: {t2}; }}
 QComboBox::drop-down {{ border: none; width: 20px; }}
 QComboBox QAbstractItemView {{
-    background: {surface_alt};
-    border: 1px solid {border};
-    selection-background-color: {accent_fill};
-    selection-color: {accent_text};
+    background: {raised};
+    border: 1px solid {raised2};
+    selection-background-color: {fill_a};
+    selection-color: {on_fill};
     outline: none;
 }}
 
 QPushButton {{
-    background: {surface_alt};
-    border: 1px solid {border};
-    border-radius: 6px;
+    background: {raised};
+    border: 1px solid {raised};
+    border-radius: 8px;
     padding: 7px 14px;
 }}
-QPushButton:hover {{ border-color: {accent}; }}
-QPushButton:disabled {{ color: {text_dim}; border-color: {border}; }}
+QPushButton:hover {{ background: {raised2}; border-color: {raised2}; }}
+QPushButton:disabled {{ color: {t2}; border-color: {raised}; }}
 QPushButton[role="primary"] {{
-    background: {accent_fill};
-    color: {accent_text};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {fill_a}, stop:1 {fill_b});
+    color: {on_fill};
     /* Borda da mesma cor do fundo em vez de "none": mantém a altura idêntica à
        do botão comum, senão o botão primário fica 2 px mais alto e desalinha a
        linha inteira em que estiver. */
-    border: 1px solid {accent_fill};
+    border: 1px solid {fill_a};
     font-weight: 600;
     padding: 7px 16px;
 }}
-QPushButton[role="primary"]:hover {{ background: {accent_fill_hover}; border-color: {accent_fill_hover}; }}
+QPushButton[role="primary"]:hover {{ border-color: {on_fill}; }}
 QPushButton[role="primary"]:disabled {{
-    background: {track}; color: {text_dim}; border-color: {track};
+    background: {raised2}; color: {t2}; border-color: {raised2};
 }}
 QPushButton[role="profile"] {{
-    background: {surface_alt};
-    border: 1px solid {border};
+    background: {raised};
+    border: 1px solid {raised};
     border-radius: 8px;
     padding: 10px;
     text-align: left;
 }}
-QPushButton[role="profile"]:hover {{ border-color: {accent}; background: {surface}; }}
+QPushButton[role="profile"]:hover {{ background: {raised2}; border-color: {raised2}; }}
 /* Cartão de paleta (aba Tema): miniatura e nome dentro do botão. A borda é sempre de 2 px, para
    o cartão marcado não crescer e empurrar os vizinhos. */
-QPushButton[role="palette"] {{ background: {surface_alt}; border: 2px solid {surface_alt}; border-radius: 10px; padding: 0px; text-align: left; }}
-QPushButton[role="palette"]:hover {{ border-color: {border}; }}
-QPushButton[role="palette"]:checked {{ border-color: {accent}; }}
+QPushButton[role="palette"] {{ background: {raised}; border: 2px solid {raised}; border-radius: 10px; padding: 0px; text-align: left; }}
+QPushButton[role="palette"]:hover {{ border-color: {raised2}; }}
+QPushButton[role="palette"]:checked {{ background: {soft16}; border-color: {accent}; }}
 
 QPushButton[role="transport"] {{
-    background: {surface_alt};
-    border: 1px solid {border};
+    background: {raised};
+    border: 1px solid {raised};
     border-radius: 6px;
     padding: 2px 6px;
     font-size: 13px;
 }}
-QPushButton[role="transport"]:hover {{ border-color: {accent}; }}
-QPushButton[role="transport"]:checked {{ background: {accent_fill}; color: {accent_text}; border-color: {accent_fill}; }}
-QPushButton[role="transport"]:disabled {{ color: {text_dim}; border-color: {border}; }}
+QPushButton[role="transport"]:hover {{ background: {raised2}; border-color: {raised2}; }}
+QPushButton[role="transport"]:checked {{ background: {fill_a}; color: {on_fill}; border-color: {fill_a}; }}
+QPushButton[role="transport"]:disabled {{ color: {t2}; border-color: {raised}; }}
 
 QPushButton[role="spin-tool"] {{
-    background: {surface_alt};
-    border: 1px solid {border};
+    background: {raised};
+    border: 1px solid {raised};
     border-radius: 4px;
     padding: 0px;
     margin: 0px;
@@ -165,26 +165,26 @@ QPushButton[role="spin-tool"] {{
     font-size: 16px;
     font-weight: bold;
 }}
-QPushButton[role="spin-tool"]:hover {{ border-color: {accent}; }}
-QPushButton[role="spin-tool"]:pressed {{ background: {accent_fill}; color: {accent_text}; }}
+QPushButton[role="spin-tool"]:hover {{ background: {raised2}; border-color: {raised2}; }}
+QPushButton[role="spin-tool"]:pressed {{ background: {fill_a}; color: {on_fill}; }}
 
 /* Escolha entre opções (filtros, transições, fonte): texto à esquerda e a
    marcada com a borda da cor de destaque. Letra de 12 px: com a do resto da
    aplicação, as oito transições pediam 18 px a mais, tirados da prévia. */
 QPushButton[role="option"] {{ text-align: left; padding: 6px 10px; font-size: 12px; }}
-QPushButton[role="option"]:checked {{ border: 2px solid {accent}; font-weight: 600; }}
+QPushButton[role="option"]:checked {{ background: {soft16}; border: 2px solid {accent}; font-weight: 600; }}
 /* Lista de escolha aberta dentro de um painel (fontes): sem moldura própria,
    a do painel já separa, e linhas com folga — sem o padding de item, a lista
    espremia oito nomes no espaço de cinco e a escolhida não se destacava. */
 QListWidget[role="picker"] {{ background: transparent; border: none; }}
 QListWidget[role="picker"]::item {{ padding: 4px 6px; border-radius: 3px; }}
-QListWidget[role="picker"]::item:hover {{ background: {surface_alt}; }}
-QListWidget[role="picker"]::item:selected {{ background: {accent_fill}; color: {accent_text}; }}
+QListWidget[role="picker"]::item:hover {{ background: {raised}; }}
+QListWidget[role="picker"]::item:selected {{ background: {fill_a}; color: {on_fill}; }}
 QLineEdit[role="picker"] {{ padding: 4px 6px; font-size: 11px; }}
 /* Botão curto de atalho de valor (tamanhos de fonte, predefinições). */
 QPushButton[role="chip"] {{ padding: 2px 4px; font-size: 11px; }}
 /* Painel suspenso sem moldura de janela (volume e velocidade do bloco). */
-QDialog[role="popup"] {{ background: {surface}; border: 1px solid {border}; border-radius: 8px; }}
+QDialog[role="popup"] {{ background: {card}; border: 1px solid {raised2}; border-radius: 8px; }}
 
 /* O indicador precisa ser desenhado aqui: assim que o QSS toca no QRadioButton,
    o estilo deixa de pintar o círculo nativo e sobra um marcador quase invisível
@@ -196,8 +196,8 @@ QRadioButton, QCheckBox {{ background: transparent; spacing: 8px; }}
 QRadioButton::indicator, QCheckBox::indicator {{
     width: 14px;
     height: 14px;
-    background: {surface_alt};
-    border: 1px solid {text_dim};
+    background: {raised};
+    border: 1px solid {t2};
 }}
 QRadioButton::indicator {{ border-radius: 8px; }}
 QCheckBox::indicator {{ border-radius: 4px; }}
@@ -213,38 +213,38 @@ QRadioButton::indicator:checked {{
        botão de rádio, sem depender de imagem embutida. */
     width: 8px;
     height: 8px;
-    background: {surface_alt};
+    background: {raised};
     border: 4px solid {accent};
 }}
 QCheckBox::indicator:checked {{ background: {accent}; border-color: {accent}; }}
 QRadioButton::indicator:hover, QCheckBox::indicator:hover {{ border-color: {accent}; }}
 QRadioButton::indicator:checked:focus, QCheckBox::indicator:checked:focus {{ border-color: {focus}; }}
-QRadioButton:disabled, QCheckBox:disabled {{ color: {text_dim}; }}
+QRadioButton:disabled, QCheckBox:disabled {{ color: {t2}; }}
 QRadioButton::indicator:disabled, QCheckBox::indicator:disabled {{
-    border-color: {border};
+    border-color: {raised2};
 }}
 
 QTableView {{
-    background: {surface};
-    alternate-background-color: {surface_alt};
-    border: 1px solid {border};
+    background: {card};
+    alternate-background-color: {raised};
+    border: 1px solid {raised};
     border-radius: 8px;
-    gridline-color: {border};
-    selection-background-color: {accent_fill};
-    selection-color: {accent_text};
+    gridline-color: {raised};
+    selection-background-color: {fill_a};
+    selection-color: {on_fill};
 }}
 QHeaderView::section {{
-    background: {surface_alt};
-    color: {text_dim};
+    background: {raised};
+    color: {t2};
     border: none;
-    border-bottom: 1px solid {border};
+    border-bottom: 1px solid {raised2};
     padding: 7px;
     font-weight: 600;
 }}
 QTableView::item {{ padding: 4px; }}
 
 QProgressBar {{
-    background: {track};
+    background: {raised2};
     border: none;
     border-radius: 5px;
     text-align: center;
@@ -258,7 +258,7 @@ QSlider {{
     height: 22px;
 }}
 QSlider::groove:horizontal {{
-    background: {track};
+    background: {raised2};
     height: 4px;
     border-radius: 2px;
 }}
@@ -268,18 +268,18 @@ QSlider::sub-page:horizontal {{
 }}
 QSlider::handle:horizontal {{
     background: {text};
-    border: 1px solid {border};
+    border: 1px solid {raised2};
     width: 12px;
     height: 12px;
     margin: -4px 0;
     border-radius: 6px;
 }}
 QSlider::handle:horizontal:hover {{
-    background: {accent_hover};
-    border-color: {accent_hover};
+    background: {accent};
+    border-color: {accent};
 }}
 QSlider::handle:horizontal:disabled {{
-    background: {text_dim};
+    background: {t2};
 }}
 QSlider::handle:horizontal:focus {{ border: 2px solid {focus}; margin: -5px 0; }}
 
@@ -288,27 +288,27 @@ QSlider::handle:horizontal:focus {{ border: 2px solid {focus}; margin: -5px 0; }
 QSplitter::handle {{ background: transparent; }}
 QSplitter::handle:horizontal {{ width: 12px; }}
 QSplitter::handle:vertical {{ height: 8px; }}
-QSplitter::handle:hover {{ background: {border}; }}
+QSplitter::handle:hover {{ background: {raised2}; }}
 
-QMenuBar, QMenu {{ background: {surface}; }}
+QMenuBar, QMenu {{ background: {panel}; }}
 QMenuBar::item:selected, QMenu::item:selected {{
-    background: {accent_fill}; color: {accent_text};
+    background: {fill_a}; color: {on_fill};
 }}
-QMenu {{ border: 1px solid {border}; padding: 4px; }}
+QMenu {{ border: 1px solid {raised2}; padding: 4px; }}
 QMenu::item {{ padding: 6px 22px; border-radius: 4px; }}
 
-QStatusBar {{ background: {surface}; color: {text_dim}; }}
+QStatusBar {{ background: {panel}; color: {t2}; }}
 QStatusBar::item {{ border: none; }}
 
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
-QScrollBar::handle:vertical {{ background: {border}; border-radius: 5px; min-height: 24px; }}
-QScrollBar::handle:vertical:hover {{ background: {text_dim}; }}
+QScrollBar::handle:vertical {{ background: {raised2}; border-radius: 5px; min-height: 24px; }}
+QScrollBar::handle:vertical:hover {{ background: {t2}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar:horizontal {{ background: transparent; height: 10px; }}
-QScrollBar::handle:horizontal {{ background: {border}; border-radius: 5px; min-width: 24px; }}
+QScrollBar::handle:horizontal {{ background: {raised2}; border-radius: 5px; min-width: 24px; }}
 
 QToolTip {{
-    background: {surface_alt};
+    background: {raised};
     color: {text};
     border: 1px solid {accent};
     border-radius: 4px;
@@ -319,14 +319,14 @@ QToolTip {{
    dentro, e uma moldura por fora deles só duplicaria a borda. */
 QTabWidget::pane {{ border: none; }}
 QTabBar::tab {{
-    background: transparent; color: {text_dim};
+    background: transparent; color: {t2};
     padding: 8px 16px; margin-right: 4px;
     border: 1px solid transparent; border-radius: 6px;
 }}
 QTabBar::tab:hover {{ color: {text}; }}
 QTabBar::tab:selected {{
-    background: {surface}; border-color: {border};
-    color: {accent_fg}; font-weight: 600;
+    background: {card}; border-color: {raised2};
+    color: {accent}; font-weight: 600;
 }}
 QTabBar::tab:focus {{ border-color: {focus}; }}
 
@@ -335,8 +335,11 @@ QTabBar::tab:focus {{ border-color: {focus}; }}
    entre o botão com e sem foco, onde a referência pede 3:1, e quem navega
    por Tab não sabia em que botão o Enter ia cair. No fim do estilo para
    valer sobre o :hover e os papéis. */
-QPushButton:focus, QPushButton[role="primary"]:focus, QPushButton[role="transport"]:focus,
+QPushButton:focus, QPushButton[role="transport"]:focus,
 QPushButton[role="profile"]:focus, QPushButton[role="spin-tool"]:focus, QPushButton[role="palette"]:focus {{ border-color: {focus}; }}
+/* O anel de foco do botão primário é a cor do texto dele: o foco branco ou preto some sobre um
+   preenchimento claro, escuro ou âmbar (medido nas paletas Estúdio e Cinema). */
+QPushButton[role="primary"]:focus {{ border-color: {on_fill}; }}
 """
 
 
@@ -402,8 +405,19 @@ def papeis(theme: str, nome: str = paletas.PADRAO) -> dict[str, str]:
     return paletas.papeis(nome, theme)
 
 
+def _cores_do_estilo(theme: str, nome: str) -> dict[str, str]:
+    """O que o QSS interpola: os papéis, o foco e o selo, e o acento a 16% de opacidade."""
+    cores = {**papeis(theme, nome), **{k: palette(theme, nome)[k] for k in ("focus", "live")}}
+    vermelho, verde, azul = (int(cores["soft"][i:i + 2], 16) for i in (1, 3, 5))
+    cores["soft16"] = f"rgba({vermelho}, {verde}, {azul}, 0.16)"
+    # O selo "ao vivo" tem fundo vermelho fixo nos dois modos; o texto dele é sempre branco, e não o
+    # texto do botão primário, que nas paletas de botão claro ou âmbar é escuro.
+    cores["live_text"] = "#ffffff"
+    return cores
+
+
 def stylesheet(theme: str, nome: str = paletas.PADRAO) -> str:
-    return _QSS.format(**palette(theme, nome))
+    return _QSS.format(**_cores_do_estilo(theme, nome))
 
 
 def qpalette(theme: str, nome: str = paletas.PADRAO) -> QPalette:
