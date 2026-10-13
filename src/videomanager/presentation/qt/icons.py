@@ -328,3 +328,76 @@ def close(color: str, size: int = _SIZE) -> QIcon:
     painter.drawLine(QPointF(13.4 * u, 4.6 * u), QPointF(4.6 * u, 13.4 * u))
     painter.end()
     return QIcon(pixmap)
+
+
+# ---------------------------------------------------------------------------
+# Menu lateral
+# ---------------------------------------------------------------------------
+
+_NAV = 22
+
+
+def _nav(color: str, size: int, desenho) -> QIcon:
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color, 1.7))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    desenho(painter, size / 24.0)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def nav_download(color: str, size: int = _NAV) -> QIcon:
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawLine(QPointF(12 * u, 4 * u), QPointF(12 * u, 14.5 * u))
+        p.drawPolyline(QPolygonF([QPointF(7.5 * u, 10.2 * u), QPointF(12 * u, 14.7 * u), QPointF(16.5 * u, 10.2 * u)]))
+        p.drawPolyline(QPolygonF([QPointF(5 * u, 18.5 * u), QPointF(19 * u, 18.5 * u)]))
+    return _nav(color, size, desenho)
+
+
+def nav_convert(color: str, size: int = _NAV) -> QIcon:
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawLine(QPointF(5 * u, 8 * u), QPointF(18 * u, 8 * u))
+        p.drawPolyline(QPolygonF([QPointF(14.8 * u, 4.8 * u), QPointF(18 * u, 8 * u), QPointF(14.8 * u, 11.2 * u)]))
+        p.drawLine(QPointF(19 * u, 16 * u), QPointF(6 * u, 16 * u))
+        p.drawPolyline(QPolygonF([QPointF(9.2 * u, 12.8 * u), QPointF(6 * u, 16 * u), QPointF(9.2 * u, 19.2 * u)]))
+    return _nav(color, size, desenho)
+
+
+def nav_edit(color: str, size: int = _NAV) -> QIcon:
+    """Fita de filme: moldura, duas divisões e os furos das bordas."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawRoundedRect(QRectF(4 * u, 5 * u, 16 * u, 14 * u), 2 * u, 2 * u)
+        p.drawLine(QPointF(8.5 * u, 5 * u), QPointF(8.5 * u, 19 * u))
+        p.drawLine(QPointF(15.5 * u, 5 * u), QPointF(15.5 * u, 19 * u))
+        for y in (9.5, 14.5):
+            p.drawLine(QPointF(4 * u, y * u), QPointF(8.5 * u, y * u))
+            p.drawLine(QPointF(15.5 * u, y * u), QPointF(20 * u, y * u))
+    return _nav(color, size, desenho)
+
+
+def nav_metadata(color: str, size: int = _NAV) -> QIcon:
+    """Etiqueta: o contorno em losango alongado e o furo."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawPolygon(QPolygonF([QPointF(4.5 * u, 4.5 * u), QPointF(12.5 * u, 4.5 * u), QPointF(19.5 * u, 11.5 * u),
+                                 QPointF(12.5 * u, 19.5 * u), QPointF(4.5 * u, 11.5 * u)]))
+        p.drawPoint(QPointF(8.3 * u, 8.3 * u))
+    return _nav(color, size, desenho)
+
+
+def nav_settings(color: str, size: int = _NAV) -> QIcon:
+    """Dois controles deslizantes."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawLine(QPointF(5 * u, 8 * u), QPointF(19 * u, 8 * u))
+        p.drawLine(QPointF(5 * u, 16 * u), QPointF(19 * u, 16 * u))
+        p.setBrush(QColor(color))
+        p.drawEllipse(QPointF(9 * u, 8 * u), 2.2 * u, 2.2 * u)
+        p.drawEllipse(QPointF(15 * u, 16 * u), 2.2 * u, 2.2 * u)
+    return _nav(color, size, desenho)
+
+
+def two_states(desenho, normal: str, marcado: str, size: int = _NAV) -> QIcon:
+    """Um ícone com uma cor em repouso e outra quando o botão está marcado."""
+    icone = QIcon()
+    icone.addPixmap(desenho(normal, size).pixmap(size, size), QIcon.Mode.Normal, QIcon.State.Off)
+    icone.addPixmap(desenho(marcado, size).pixmap(size, size), QIcon.Mode.Normal, QIcon.State.On)
+    return icone
