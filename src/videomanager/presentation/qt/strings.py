@@ -172,6 +172,7 @@ STATUS_COUNTS = "{active} em andamento · {pending} na fila · {done} concluído
 STATUS_FFMPEG = "ffmpeg: {source}"
 # De onde veio o ffmpeg em uso, pelo identificador que o localizador devolve.
 FFMPEG_SOURCES = {"empacotado": "empacotado", "gerenciado": "gerenciado", "sistema": "sistema"}
+TOAST_CLOSE = "Fechar aviso"
 STATUS_ENQUEUED = "{count} tarefa(s) adicionada(s) à fila — acompanhe na aba Download"
 # Na barra de status, e não num diálogo: não poder gravar as preferências não
 # interrompe nada do que está em andamento.
