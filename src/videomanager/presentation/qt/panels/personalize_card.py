@@ -25,13 +25,14 @@ class PersonalizeCard(QFrame):
         self.setProperty("role", "section")
         self._body = body
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 14)
-        layout.setSpacing(12)
+        layout.setContentsMargins(18, 14, 18, 18)
+        layout.setSpacing(14)
 
         header = QHBoxLayout()
-        header.setSpacing(10)
+        header.setSpacing(8)
         self._toggle = QToolButton()
         self._toggle.setProperty("role", "section-header")
+        self._toggle.setProperty("tight", "true")
         self._toggle.setCheckable(True)
         self._toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._toggle.setIconSize(QSize(16, 16))
@@ -40,8 +41,12 @@ class PersonalizeCard(QFrame):
         self._toggle.toggled.connect(self._on_toggled)
         header.addWidget(self._toggle)
         hint = bind(QLabel(), "setText", lambda: strings.PERSONALIZE_HINT)
-        hint.setProperty("role", "dim")
+        hint.setProperty("role", "hint")
         header.addWidget(hint, 1)
+        # O seletor de modo (vídeo/áudio) é do corpo, mas se mostra aqui, à direita do título.
+        modos = getattr(body, "mode_selector", None)
+        if modos is not None:
+            header.addWidget(modos)
         layout.addLayout(header)
         layout.addWidget(body)
 

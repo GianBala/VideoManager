@@ -184,6 +184,31 @@ def estimate_download_size(
     return None
 
 
+def estimate_profile_size(
+    matrix: FormatMatrix,
+    mode: Mode,
+    *,
+    max_height: int | None = None,
+    audio_codec: str = "mp3",
+    audio_quality: str = "320",
+    duration: float | None = None,
+) -> int | None:
+    """Tamanho estimado de um perfil rápido ("MP4 1080p", "MP3 320k"…) para esta mídia.
+
+    É a mesma conta do rodapé depois de o perfil ser aplicado: o melhor vídeo que respeita o limite de altura e a
+    primeira trilha de áudio, ou o áudio no codec e na qualidade do perfil. Por isso o número do cartão e o do rodapé,
+    depois do clique, não discordam.
+    """
+    from videomanager.domain.format_policy import pick_audio, pick_video
+    from videomanager.domain.formats import Mode
+
+    audio = pick_audio(matrix)
+    if mode is Mode.VIDEO:
+        return estimate_download_size(matrix, Mode.VIDEO, pick_video(matrix, max_height=max_height), audio, duration=duration)
+    return estimate_download_size(
+        matrix, Mode.AUDIO_ONLY, None, audio, audio_codec=audio_codec, audio_quality=audio_quality, duration=duration)
+
+
 def estimate_convert_size(
     media: LocalMedia,
     target: VideoTarget | AudioTarget,

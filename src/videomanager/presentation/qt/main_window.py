@@ -19,12 +19,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Slot
-from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -46,6 +45,7 @@ from videomanager.application.preferences import Preferences
 from dataclasses import asdict
 from videomanager.application.jobs.models import Job
 from videomanager.application.jobs.models import JobStatus
+from videomanager.domain.estimator import estimate_profile_size
 from videomanager.domain.formats import FormatMatrix
 from videomanager.domain.formats import MediaInfo
 from videomanager.domain.formats import Mode
@@ -59,12 +59,13 @@ from videomanager.presentation.qt import icons, strings, theme
 from videomanager.presentation.qt.accessibility import name_controls
 from videomanager.presentation.qt.i18n import apply_language, bind, on_language_change
 from videomanager.presentation.qt.ffmpeg_setup import ensure_ffmpeg
+from videomanager.presentation.qt.panels.address_bar import AddressBar
 from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
 from videomanager.presentation.qt.panels.media_card import MediaCard
 from videomanager.presentation.qt.panels.metadata_panel import MetadataPanel
 from videomanager.presentation.qt.panels.personalize_card import PersonalizeCard
-from videomanager.presentation.qt.panels.profiles_panel import Profile
+from videomanager.presentation.qt.panels.profiles_panel import PROFILES, Profile
 from videomanager.presentation.qt.panels.profiles_panel import ProfilesPanel
 from videomanager.presentation.qt.panels.quality_panel import QualityPanel
 from videomanager.presentation.qt.panels.queue_panel import QueuePanel
@@ -84,8 +85,13 @@ _TAB_EDIT = 2
 _TAB_METADATA = 3
 # Sem margem lateral: o conteúdo da aba fica na mesma coluna da fila, que está
 # fora das abas. Em cima, só o respiro que separa da barra de abas.
-_TAB_MARGINS = (0, 10, 0, 0)
+# Cada página decide a própria margem (a janela não tem mais uma moldura em volta de todas): as que ainda não foram
+# redesenhadas mantêm o recuo de sempre (12 px de cada lado e 22 em cima, que eram os 12 da moldura mais 10); as que
+# seguem o protótipo usam 28 px nas laterais, 24 em cima e embaixo e 18 entre os blocos.
+_TAB_MARGINS = (12, 22, 12, 12)
 _TAB_SPACING = 10
+_PAGE_MARGINS = (28, 24, 28, 24)
+_PAGE_SPACING = 18
 # Quanto tempo o aviso de "adicionado à fila" fica na tela.
 _ENQUEUED_MS = 5000
 
@@ -179,8 +185,8 @@ class MainWindow(QMainWindow):
         conteudo = QWidget()
         conteudo.setProperty("role", "plain")
         root = QVBoxLayout(conteudo)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         # As tarefas ficam fora das abas, numa gaveta à direita: todas as abas alimentam a mesma fila, e trocar
         # de aba não pode esconder o que está em andamento — salvo no editor e nos Metadados, onde a gaveta dá
@@ -226,8 +232,8 @@ class MainWindow(QMainWindow):
         """Endereço e destino em cima, o que se baixa no meio (rola) e o resultado com a ação embaixo."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(*_TAB_MARGINS)
-        layout.setSpacing(_TAB_SPACING)
+        layout.setContentsMargins(*_PAGE_MARGINS)
+        layout.setSpacing(_PAGE_SPACING)
 
         self._header = self._build_header()
         layout.addWidget(self._header)
@@ -237,7 +243,7 @@ class MainWindow(QMainWindow):
         self._middle.setProperty("role", "plain")
         coluna = QVBoxLayout(self._middle)
         coluna.setContentsMargins(0, 0, 0, 0)
-        coluna.setSpacing(16)
+        coluna.setSpacing(_PAGE_SPACING)
         self._card = MediaCard(runtime=self._runtime)
         coluna.addWidget(self._card)
         self._profiles = ProfilesPanel()
@@ -255,7 +261,10 @@ class MainWindow(QMainWindow):
         return tab
 
     def _retheme_header(self) -> None:
-        self._url_link.setIcon(icons.link(theme.papeis(*theme.atual())["t3"], 18))
+        self._dest_icon.setPixmap(icons.folder(theme.papeis(*theme.atual())["t3"], 16).pixmap(16, 16))
+
+    def _retheme_footer(self) -> None:
+        self._add_button.setIcon(icons.plus(theme.papeis(*theme.atual())["on_fill"], 18))
 
     def _build_footer(self) -> QWidget:
         """O resultado do que está escolhido, o tamanho estimado e a ação de enfileirar."""
@@ -268,7 +277,7 @@ class MainWindow(QMainWindow):
         resultado = QVBoxLayout()
         resultado.setSpacing(2)
         legenda = bind(QLabel(), "setText", lambda: strings.RESULT_LABEL)
-        legenda.setProperty("role", "dim")
+        legenda.setProperty("role", "micro")
         resultado.addWidget(legenda)
         self._result_summary = QLabel(DASH)
         self._result_summary.setProperty("role", "result")
@@ -288,10 +297,13 @@ class MainWindow(QMainWindow):
 
         self._add_button = bind(QPushButton(), "setText", lambda: strings.ADD_TO_QUEUE)
         self._add_button.setProperty("role", "primary")
+        self._add_button.setProperty("emphasis", "large")
         self._add_button.setEnabled(False)
         bind(self._add_button, "setToolTip", lambda: strings.ADD_TO_QUEUE_TIP)
         self._add_button.clicked.connect(self._add_current_to_queue)
         linha.addWidget(self._add_button)
+        self._retheme_footer()
+        theme.on_theme_change(self._retheme_footer)
         return footer
 
     @staticmethod
@@ -374,56 +386,54 @@ class MainWindow(QMainWindow):
         return area
 
     def _build_header(self) -> QWidget:
-        """Endereço e destino: duas linhas na mesma grade, tudo alinhado."""
+        """Endereço (uma barra só) e, embaixo, a pasta de destino em linha corrida."""
         box = QWidget()
-        grid = QGridLayout(box)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(8)
-        # Só a coluna dos campos cresce; rótulos e botões ficam no tamanho deles,
-        # nas mesmas colunas nas duas linhas.
-        grid.setColumnStretch(1, 1)
-        grid.setColumnMinimumWidth(0, 0)
+        box.setProperty("role", "plain")
+        coluna = QVBoxLayout(box)
+        coluna.setContentsMargins(0, 0, 0, 0)
+        coluna.setSpacing(12)
 
-        # O endereço é o que a aba pede primeiro: campo grande, com o elo na frente e o botão de limpar, e sem
-        # rótulo (o campo diz o que espera, e o nome acessível mantém "Endereço" para o leitor de tela).
-        self._url = bind(QLineEdit(), "setPlaceholderText", lambda: strings.URL_PLACEHOLDER)
-        bind(self._url, "setAccessibleName", lambda: strings.URL_LABEL)
-        self._url.setProperty("role", "address")
-        self._url.setClearButtonEnabled(True)
-        self._url_link = self._url.addAction(QIcon(), QLineEdit.ActionPosition.LeadingPosition)
-        bind(self._url_link, "setToolTip", lambda: strings.URL_LABEL)
-        self._retheme_header()
-        theme.on_theme_change(self._retheme_header)
+        self._address = AddressBar()
+        self._url = self._address.edit
         self._url.returnPressed.connect(self._analyze)
-        grid.addWidget(self._url, 0, 0, 1, 2)
-
-        self._paste = bind(QPushButton(), "setText", lambda: strings.URL_PASTE_AND_ANALYZE)
-        self._paste.setProperty("role", "address-action")
+        self._paste = self._address.paste
         self._paste.clicked.connect(self._paste_and_analyze)
-        grid.addWidget(self._paste, 0, 2)
-
-        self._analyze_button = bind(QPushButton(), "setText", lambda: strings.URL_ANALYZE)
-        self._analyze_button.setProperty("role", "primary")
-        self._analyze_button.setProperty("emphasis", "large")
-        self._analyze_button.setDefault(True)
+        self._analyze_button = self._address.analyze
         self._analyze_button.clicked.connect(self._analyze)
-        grid.addWidget(self._analyze_button, 0, 3)
+        coluna.addWidget(self._address)
 
+        # "Salvar em  /pasta  Alterar": o caminho é texto corrido (o campo é editável, mas sem moldura), e o "Alterar"
+        # vem logo depois dele.
+        destino = QHBoxLayout()
+        destino.setContentsMargins(4, 0, 0, 0)
+        destino.setSpacing(8)
+        self._dest_icon = QLabel()
+        self._dest_icon.setProperty("role", "plain")
+        destino.addWidget(self._dest_icon)
         dest_label = bind(QLabel(), "setText", lambda: strings.DEST_LABEL)
         dest_label.setProperty("role", "dim")
-        grid.addWidget(dest_label, 1, 0)
+        destino.addWidget(dest_label)
         self._dest = bind(QLineEdit(self._settings.download_dir), "setToolTip", lambda: strings.DEST_TOOLTIP)
+        self._dest.setProperty("role", "path")
         self._dest.editingFinished.connect(self._on_dest_edited)
-        grid.addWidget(self._dest, 1, 1)
-
-        browse = bind(QPushButton(), "setText", lambda: strings.DEST_BROWSE)
+        self._dest.textChanged.connect(self._fit_dest)
+        destino.addWidget(self._dest, 1000)
+        browse = bind(QPushButton(), "setText", lambda: strings.DEST_CHANGE)
+        browse.setProperty("role", "link")
+        browse.setCursor(Qt.CursorShape.PointingHandCursor)
         browse.clicked.connect(self._choose_dest)
-        # Logo abaixo de "Colar e analisar", na mesma coluna e com a mesma
-        # largura: os dois botões formam uma pilha só, ao lado dos dois campos.
-        grid.addWidget(browse, 1, 2)
-
+        destino.addWidget(browse)
+        destino.addStretch(1)
+        coluna.addLayout(destino)
+        self._fit_dest()
+        self._retheme_header()
+        theme.on_theme_change(self._retheme_header)
         return box
+
+    def _fit_dest(self) -> None:
+        """O campo do caminho tem a largura do texto: o "Alterar" fica colado nele, e não na ponta da linha."""
+        largura = self._dest.fontMetrics().horizontalAdvance(self._dest.text()) + 6
+        self._dest.setMaximumWidth(max(60, largura))
 
     def _build_menu(self) -> None:
         self._file_menu = bind(self.menuBar().addMenu(""), "setTitle", lambda: strings.MENU_FILE)
@@ -646,6 +656,10 @@ class MainWindow(QMainWindow):
         self._card.set_media(result)
         self._quality.set_matrix(result.matrix, duration=result.duration)
         self._profiles.set_enabled(True)
+        self._profiles.set_estimates([
+            estimate_profile_size(result.matrix, p.mode, max_height=p.height, audio_codec=p.audio_codec,
+                                  audio_quality=p.audio_quality, duration=result.duration)
+            for p in PROFILES])
         self._update_add_button()
 
     def _on_probe_failed(self, message: object) -> None:

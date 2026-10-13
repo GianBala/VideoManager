@@ -34,6 +34,23 @@ def format_size(num_bytes: int | float | None, *, estimated: bool = False) -> st
     return DASH  # inalcançável, mantido para o verificador de tipos
 
 
+def format_size_compact(num_bytes: int | float | None, *, estimated: bool = False) -> str:
+    """Tamanho para um espaço pequeno: sem casa decimal até os megabytes ("~255 MB"), e uma nos gigabytes ("~1,4 GB").
+
+    ``format_size`` dá "255,0 MB", que num cartão de perfil é ruído: a estimativa não tem precisão para o décimo.
+    """
+    if num_bytes is None or num_bytes < 0:
+        return DASH
+    prefix = "~" if estimated else ""
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            places = 1 if unit in ("GB", "TB") else 0
+            return f"{prefix}{_decimal(size, places)} {unit}"
+        size /= 1024
+    return DASH  # inalcançável, mantido para o verificador de tipos
+
+
 def format_bitrate(kbps: float | None) -> str:
     """Bitrate recebido em kbps (a unidade que o yt-dlp usa em tbr/vbr/abr)."""
     if kbps is None or kbps <= 0:

@@ -67,17 +67,20 @@ URL_ANALYZE = "Analyze"
 URL_CANCEL = "Cancel"
 URL_CANCEL_TIP = "Cancel the URL analysis in progress"
 URL_PASTE_AND_ANALYZE = "Paste and Analyze"
+URL_CLEAR = "Clear the address"
 
 # --- card da mídia -----------------------------------------------------------
 CARD_EMPTY = "No media analyzed.\nPaste a URL above and click Analyze."
 CARD_LIVE = "LIVE STREAM"
 CARD_NO_THUMB = "no\nthumbnail"
+CARD_LIVE_BADGE = "LIVE"
+CARD_CHIP_UP_TO = "up to {height}p"
 CARD_SUBTITLES = "{count} subtitle(s) available"
 CARD_DRM = "{count} format(s) blocked by DRM"
 
 # --- modo --------------------------------------------------------------------
 MODE_LABEL = "What to download"
-MODE_VIDEO = "Video (with audio)"
+MODE_VIDEO = "Video with audio"
 MODE_AUDIO = "Audio only"
 
 # --- controles de vídeo ------------------------------------------------------
@@ -139,11 +142,12 @@ TIP_AUDIO_FORMAT = (
 # --- destino -----------------------------------------------------------------
 DEST_LABEL = "Save to"
 DEST_BROWSE = "Browse…"
+DEST_CHANGE = "Change"
 DEST_TOOLTIP = "Folder where finished files are saved"
 
 # --- perfis ------------------------------------------------------------------
 PROFILES_GROUP = "Download in one click"
-PROFILE_HINT = "One click sets everything up and adds it to the queue."
+PROFILE_HINT = "the profile goes straight into the queue with its own settings"
 PROFILE_MP4_1080 = "MP4 1080p"
 PROFILE_MP4_1080_SUB = "plays everywhere"
 PROFILE_MP3_320 = "MP3 320k"

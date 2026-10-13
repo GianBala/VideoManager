@@ -58,17 +58,20 @@ URL_ANALYZE = "Analisar"
 URL_CANCEL = "Cancelar"
 URL_CANCEL_TIP = "Cancelar a análise do endereço em andamento"
 URL_PASTE_AND_ANALYZE = "Colar e analisar"
+URL_CLEAR = "Limpar o endereço"
 
 # --- card da mídia -----------------------------------------------------------
 CARD_EMPTY = "Nenhuma mídia analisada.\nCole um endereço acima e clique em Analisar."
 CARD_LIVE = "TRANSMISSÃO AO VIVO"
 CARD_NO_THUMB = "sem\nminiatura"
+CARD_LIVE_BADGE = "AO VIVO"
+CARD_CHIP_UP_TO = "até {height}p"
 CARD_SUBTITLES = "{count} legenda(s) disponível(is)"
 CARD_DRM = "{count} formato(s) bloqueado(s) por DRM"
 
 # --- modo --------------------------------------------------------------------
 MODE_LABEL = "O que baixar"
-MODE_VIDEO = "Vídeo (com áudio)"
+MODE_VIDEO = "Vídeo com áudio"
 MODE_AUDIO = "Somente áudio"
 
 # --- controles de vídeo ------------------------------------------------------
@@ -130,11 +133,12 @@ TIP_AUDIO_FORMAT = (
 # --- destino -----------------------------------------------------------------
 DEST_LABEL = "Salvar em"
 DEST_BROWSE = "Escolher…"
+DEST_CHANGE = "Alterar"
 DEST_TOOLTIP = "Pasta onde os arquivos concluídos são salvos"
 
 # --- perfis ------------------------------------------------------------------
 PROFILES_GROUP = "Baixar com um clique"
-PROFILE_HINT = "Um clique configura tudo e adiciona à fila."
+PROFILE_HINT = "o perfil já entra na fila com a configuração dele"
 PROFILE_MP4_1080 = "MP4 1080p"
 PROFILE_MP4_1080_SUB = "compatível com tudo"
 PROFILE_MP3_320 = "MP3 320k"
