@@ -464,6 +464,74 @@ def task_list(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+# ---------------------------------------------------------------------------
+# Barra superior do editor
+# ---------------------------------------------------------------------------
+
+def file_plus(color: str, size: int = _NAV) -> QIcon:
+    """Novo projeto: a folha com a ponta dobrada e um mais."""
+    def desenho(p: QPainter, u: float) -> None:
+        folha = QPainterPath(QPointF(13.5 * u, 3.8 * u))
+        folha.lineTo(QPointF(7 * u, 3.8 * u))
+        folha.quadTo(QPointF(5.3 * u, 3.8 * u), QPointF(5.3 * u, 5.5 * u))
+        folha.lineTo(QPointF(5.3 * u, 18.5 * u))
+        folha.quadTo(QPointF(5.3 * u, 20.2 * u), QPointF(7 * u, 20.2 * u))
+        folha.lineTo(QPointF(17 * u, 20.2 * u))
+        folha.quadTo(QPointF(18.7 * u, 20.2 * u), QPointF(18.7 * u, 18.5 * u))
+        folha.lineTo(QPointF(18.7 * u, 9 * u))
+        folha.lineTo(QPointF(13.5 * u, 3.8 * u))
+        folha.lineTo(QPointF(13.5 * u, 9 * u))
+        folha.lineTo(QPointF(18.7 * u, 9 * u))
+        p.drawPath(folha)
+        p.drawLine(QPointF(12 * u, 12.6 * u), QPointF(12 * u, 17.2 * u))
+        p.drawLine(QPointF(9.7 * u, 14.9 * u), QPointF(14.3 * u, 14.9 * u))
+    return _nav(color, size, desenho)
+
+
+def save(color: str, size: int = _NAV) -> QIcon:
+    """Salvar: o disquete, com a aba de cima e a etiqueta de baixo."""
+    def desenho(p: QPainter, u: float) -> None:
+        corpo = QPainterPath(QPointF(6.8 * u, 4.5 * u))
+        corpo.lineTo(QPointF(15.8 * u, 4.5 * u))
+        corpo.lineTo(QPointF(19.5 * u, 8.2 * u))
+        corpo.lineTo(QPointF(19.5 * u, 17.7 * u))
+        corpo.quadTo(QPointF(19.5 * u, 19.5 * u), QPointF(17.7 * u, 19.5 * u))
+        corpo.lineTo(QPointF(6.8 * u, 19.5 * u))
+        corpo.quadTo(QPointF(4.5 * u, 19.5 * u), QPointF(4.5 * u, 17.2 * u))
+        corpo.lineTo(QPointF(4.5 * u, 6.8 * u))
+        corpo.quadTo(QPointF(4.5 * u, 4.5 * u), QPointF(6.8 * u, 4.5 * u))
+        p.drawPath(corpo)
+        p.drawPolyline(QPolygonF([QPointF(8 * u, 4.6 * u), QPointF(8 * u, 8.6 * u), QPointF(14.5 * u, 8.6 * u), QPointF(14.5 * u, 4.6 * u)]))
+        p.drawPolyline(QPolygonF([QPointF(8 * u, 19.4 * u), QPointF(8 * u, 13.8 * u), QPointF(16 * u, 13.8 * u), QPointF(16 * u, 19.4 * u)]))
+    return _nav(color, size, desenho)
+
+
+def _painel(color: str, size: int, divisao: float) -> QIcon:
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawRoundedRect(QRectF(4.5 * u, 5 * u, 15 * u, 14 * u), 2.2 * u, 2.2 * u)
+        p.drawLine(QPointF(4.7 * u, divisao * u), QPointF(19.3 * u, divisao * u))
+    return _nav(color, size, desenho)
+
+
+def preview_collapse(color: str, size: int = _NAV) -> QIcon:
+    """Retrair a prévia: o quadro e, embaixo, a faixa que passa a ocupar a janela."""
+    return _painel(color, size, 10)
+
+
+def preview_expand(color: str, size: int = _NAV) -> QIcon:
+    """Expandir a prévia: a divisão desce, a imagem volta a crescer."""
+    return _painel(color, size, 15)
+
+
+def fullscreen(color: str, size: int = _NAV) -> QIcon:
+    """Tela cheia: os quatro cantos."""
+    def desenho(p: QPainter, u: float) -> None:
+        for sx, sy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+            x, y = (4.8 if sx > 0 else 19.2), (4.8 if sy > 0 else 19.2)
+            p.drawPolyline(QPolygonF([QPointF(x * u, (y + 4.2 * sy) * u), QPointF(x * u, y * u), QPointF((x + 4.2 * sx) * u, y * u)]))
+    return _nav(color, size, desenho)
+
+
 def chevron_right(color: str, size: int = _SIZE) -> QIcon:
     """Recolher a gaveta, que fica à direita."""
     pixmap, painter = _canvas(size)

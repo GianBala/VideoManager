@@ -158,6 +158,8 @@ def inventariar() -> dict:
     # Propriedades nasce solta (só entra na janela quando um bloco abre a aba): inventário à parte.
     mapa_prop = _mapa_de_atributos([janela._edit._properties_widget])
     controles += _controles("editar:propriedades", janela._edit._properties_widget, mapa_prop)
+    # O painel do seletor de tela só abre ao clique e é uma janela própria: inventário à parte, como o das Propriedades.
+    controles += _controles("editar:tela", janela._edit._canvas_popup, _mapa_de_atributos([janela._edit]))
     # Fila: vive fora das abas.
     controles += _controles("fila", janela._queue_panel, _mapa_de_atributos([janela._queue_panel]))
 
