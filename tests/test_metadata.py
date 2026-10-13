@@ -491,16 +491,18 @@ def test_so_os_campos_de_varias_linhas_tem_alca(painel_visivel) -> None:
 def test_arrastar_a_alca_amplia_so_o_campo_dela(painel_visivel, desktop_app) -> None:
     campos, alcas = painel_visivel._fields, painel_visivel._grips
     descricao, comentario = campos["description"].height(), campos["comment"].height()
+    rotulo = painel_visivel._labels[list(campos).index("description")]
+    topo_do_rotulo = rotulo.mapTo(painel_visivel, rotulo.rect().topLeft()).y()
     _arrastar(alcas["description"], 120)
     _assentar(desktop_app)
     assert campos["description"].height() == descricao + 120
     assert campos["comment"].height() == comentario  # o irmão não se mexe
-    # A alça fica colada ao campo, na largura dele, e o rótulo continua no topo da linha:
+    # A alça fica colada ao campo, na largura dele, e o rótulo continua onde estava, em cima do campo:
     topo = lambda w: w.mapTo(painel_visivel, w.rect().topLeft())  # noqa: E731
     assert topo(alcas["description"]).y() == topo(campos["description"]).y() + campos["description"].height()
     assert alcas["description"].width() == campos["description"].width()
-    rotulo = painel_visivel._labels[list(campos).index("description")]
-    assert topo(rotulo).y() == topo(campos["description"]).y()
+    assert topo(rotulo).y() == topo_do_rotulo
+    assert topo(rotulo).y() + rotulo.height() <= topo(campos["description"]).y()
 
     _arrastar(alcas["comment"], 40)
     _assentar(desktop_app)

@@ -161,6 +161,14 @@ QTabBar[role="underline"]::tab:selected {{ background: transparent; color: {acce
 QTabBar[role="underline"]::tab:focus {{ border: 1px solid {focus}; border-bottom: 2px solid {accent}; }}
 QLabel[role="group-heading"] {{ color: {t3}; font-size: 11px; font-weight: 700; padding-top: 6px; }}
 
+/* Aba Metadados: o ícone do arquivo e os botões que só pedem atenção quando se chega a eles. */
+QLabel[role="tile"] {{ background: {raised2}; border-radius: 12px; }}
+QLabel[role="cover"] {{ background: {raised}; color: {t2}; border-radius: 12px; padding: 8px; }}
+QPushButton[role="flat"] {{ background: transparent; border: 1px solid transparent; color: {t2}; }}
+QPushButton[role="flat"]:hover {{ background: {raised}; border-color: {raised}; color: {text}; }}
+QPushButton[role="flat"]:disabled {{ color: {t3}; }}
+QPushButton[role="flat"]:focus {{ border-color: {focus}; }}
+
 /* Gaveta de tarefas: coluna à direita, no tom do menu lateral, separada do conteúdo por um fio. */
 QFrame[role="drawer"] {{ background: {panel}; border: none; border-left: 1px solid {raised}; }}
 QLabel[role="drawer-title"] {{ font-size: 16px; font-weight: 600; color: {text}; background: transparent; }}
