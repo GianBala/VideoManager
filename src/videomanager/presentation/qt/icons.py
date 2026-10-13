@@ -460,3 +460,13 @@ def task_list(color: str, size: int = _NAV) -> QIcon:
             p.drawPoint(QPointF(5.5 * u, y * u))
             p.drawLine(QPointF(9 * u, y * u), QPointF(19 * u, y * u))
     return _nav(color, size, desenho)
+
+
+def chevron_right(color: str, size: int = _SIZE) -> QIcon:
+    """Recolher a gaveta, que fica à direita."""
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color, _STROKE * 1.1))
+    u = size / 18.0
+    painter.drawPolyline(QPolygonF([QPointF(6.8 * u, 3.8 * u), QPointF(12.0 * u, 9.0 * u), QPointF(6.8 * u, 14.2 * u)]))
+    painter.end()
+    return QIcon(pixmap)

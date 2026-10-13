@@ -425,7 +425,6 @@ class EditPanel(QWidget):
     """Monta um projeto de várias trilhas e entrega a exportação para a fila."""
 
     jobs_ready = Signal(list)  # list[Job]
-    changed = Signal()
 
     @property
     def desktop_runtime(self):
@@ -2736,7 +2735,6 @@ class EditPanel(QWidget):
         else:
             self._pose_settle_timer.stop()
         self._request_frame(force=True)
-        self.changed.emit()
 
     @staticmethod
     def _act(
@@ -2806,7 +2804,6 @@ class EditPanel(QWidget):
         self._update_preview_overlay_clips()
         self._update_project_label()
         self._schedule_scrub_fill()
-        self.changed.emit()
 
     def _on_clip_moved(self, clip_id: int, track_index: int, start: float) -> None:
         self._project = self._session.edit_origin.moved(clip_id, track_index, start)
@@ -3165,7 +3162,6 @@ class EditPanel(QWidget):
             self._properties_widget.update_transform_fields(x, y, sx, sy, rotation)
         self._timeline.set_project(self._project, refit=False)
         self._request_frame(force=True)
-        self.changed.emit()
 
     def _on_overlay_transform_finished(self, clip_id: int) -> None:
         self._session.commit_edit()
@@ -3691,7 +3687,6 @@ class EditPanel(QWidget):
         bind(self._collapse, "setText", lambda: strings.EDIT_EXPAND if collapsed else strings.EDIT_COLLAPSE)
         self._preview.update()
         self._resize_timer.start()
-        self.changed.emit()
 
     # ------------------------------------------------------------------
     # Miniaturas e onda, por bloco
@@ -4949,6 +4944,10 @@ class EditPanel(QWidget):
 
     def _settle_columns(self) -> None:
         """Depois de os layouts assentarem com os textos novos (ver ``_retranslate``)."""
+        # Os pedidos de layout da troca ainda estão na fila, e entregues depois de restaurar as colunas elas
+        # voltavam a ser apertadas pelo mínimo do inglês (a de Adicionais ficava em 260 px em vez de 307). Quem
+        # os entregava antes era a conta de altura da janela, que saiu com a gaveta: a ordem agora é daqui.
+        QApplication.sendPostedEvents(None, int(QEvent.Type.LayoutRequest))
         self._transport_bar.rewrap()
         self._top_splitter.restore_columns()
 

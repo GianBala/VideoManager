@@ -155,7 +155,13 @@ ADD_TO_QUEUE = "Add to Queue"
 ADD_TO_QUEUE_TIP = "Analyze a URL before adding it to the queue"
 
 # --- fila --------------------------------------------------------------------
-QUEUE_GROUP = "Queue"
+QUEUE_GROUP = "Tasks"
+QUEUE_HIDE = "Hide tasks"
+# (singular, plural) de cada selo do cabeçalho das tarefas.
+QUEUE_CHIP_ACTIVE = ("{count} active", "{count} active")
+QUEUE_CHIP_PENDING = ("{count} queued", "{count} queued")
+QUEUE_CHIP_FAILED = ("{count} failed", "{count} failed")
+QUEUE_CHIP_CANCELLED = ("{count} cancelled", "{count} cancelled")
 QUEUE_COLUMNS = ("Title", "Output", "Status", "Progress", "Speed")
 QUEUE_EMPTY = "The queue is empty."
 QUEUE_ETA = "{eta} left"
@@ -179,10 +185,16 @@ QUEUE_LOG_CLOSE = "Close"
 
 # --- status bar --------------------------------------------------------------
 STATUS_COUNTS = "{active} in progress · {pending} queued · {done} completed"
-STATUS_FFMPEG = "ffmpeg: {source}"
-FFMPEG_SOURCES = {"empacotado": "bundled", "gerenciado": "managed", "sistema": "system"}
+FFMPEG_SOURCES = {
+    "empacotado": "Bundled — ships with the app",
+    "gerenciado": "Managed — downloaded by the app",
+    "sistema": "System — installed on this computer",
+}
+SETTINGS_FFMPEG = "FFmpeg"
+SETTINGS_FFMPEG_UNKNOWN = "Not located yet"
 TOAST_CLOSE = "Dismiss notice"
-STATUS_ENQUEUED = "{count} task(s) added to the queue — follow them in the Download tab"
+STATUS_ENQUEUED = "{count} task(s) added to the queue"
+TOAST_VIEW_TASKS = "View tasks"
 STATUS_SETTINGS_FAILED = "Could not save the preferences: {error}"
 
 # --- playlist ----------------------------------------------------------------
@@ -255,6 +267,7 @@ CONVERT_COMPRESS_NO_GAIN = (
 # --- metadados ---------------------------------------------------------------
 TAB_METADATA = "Metadata"
 NAV_SETTINGS = "Settings"
+NAV_TASKS = "Tasks"
 ACTION_META_OPEN = "Open File…"
 ACTION_META_SAVE = "Save Copy"
 META_FILE_GROUP = "File"

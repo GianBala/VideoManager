@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QUrl, Slot
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -84,7 +84,7 @@ _TAB_METADATA = 3
 # fora das abas. Em cima, só o respiro que separa da barra de abas.
 _TAB_MARGINS = (0, 10, 0, 0)
 _TAB_SPACING = 10
-# Quanto tempo o aviso de "adicionado à fila" fica na barra de status.
+# Quanto tempo o aviso de "adicionado à fila" fica na tela.
 _ENQUEUED_MS = 5000
 
 # Espera antes de sondar a placa. A janela aparece primeiro: a sondagem abre
@@ -135,33 +135,30 @@ class MainWindow(QMainWindow):
         # A sondagem da placa é uma vez por execução (ver
         # :meth:`_warm_hardware_probe`).
         self._probed_hardware = False
-        self._split_by_user = False
-        self._balancing = False
+        # Se o usuário quer a gaveta de tarefas aberta. Vale nas abas que produzem tarefas; o editor e os Metadados
+        # a recolhem, porque o espaço vale mais como área de trabalho (ver :meth:`_apply_drawer`).
+        self._drawer_open = True
         self.setWindowTitle(APP_TITLE)
-        # Altura escolhida para caber a aba inteira sem rolagem — barra de abas,
-        # cabeçalho e controles — com a fila mostrando quatro linhas. Quem manda
-        # na conta é a aba de edição, a mais alta das três: cada pixel a mais
-        # aqui vira prévia maior lá (ver :meth:`_balance_panes`), e abaixo disto
-        # o editor nasceria com o botão de exportar fora da vista. O teto é a
-        # tela de 1080p com barra de tarefas. Em telas mais baixas o painel
-        # rola, que é para isso que ele está numa área de rolagem.
+        # Altura escolhida para caber a aba inteira sem rolagem. Quem manda na
+        # conta é a aba de edição, a mais alta das quatro: cada pixel a mais
+        # aqui vira prévia maior lá, e abaixo disto o editor nasceria com o
+        # botão de exportar fora da vista. O teto é a tela de 1080p com barra de
+        # tarefas. Em telas mais baixas o painel rola, que é para isso que ele
+        # está numa área de rolagem.
         # 1180 px é o que o conteúdo sempre teve; o menu lateral é largura que não pode sair dele, senão o editor
         # (que pede 1191) nascia com 87 px de rolagem horizontal em vez dos 11 de antes.
         self.resize(1180 + LARGURA_DO_MENU, 1000)
 
         self._queue = self._runtime.queue(settings, self)
-        self._queue.counts_changed.connect(self._update_status)
+        self._queue.counts_changed.connect(self._update_tasks_badge)
 
         self._build_ui()
         self._toasts = ToastHost(self)
         self._build_menu()
         self._update_menu_scope(_TAB_DOWNLOAD)
-        self._update_status()
+        self._update_tasks_badge()
         on_language_change(self._retranslate)
         name_controls(self)
-        # Rótulos e avisos mudam de altura com o texto: a altura que as abas
-        # pedem também, medida depois de todos os layouts assentarem.
-        on_language_change(self._balance_panes, after_layout=True)
         # Depois de a janela aparecer, e não durante a montagem: o que se ganha
         # é tempo na primeira exportação, e não vale pagá-lo na abertura.
         QTimer.singleShot(_PROBE_DELAY_MS, self._warm_hardware_probe)
@@ -183,18 +180,16 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
-        # A fila fica fora das abas, embaixo: todas alimentam a mesma fila, e
-        # trocar de aba não pode esconder o que está em andamento — salvo no
-        # editor, onde ela dá lugar à prévia (ver :meth:`_on_tab_changed`).
+        # As tarefas ficam fora das abas, numa gaveta à direita: todas as abas alimentam a mesma fila, e trocar
+        # de aba não pode esconder o que está em andamento — salvo no editor e nos Metadados, onde a gaveta dá
+        # lugar à área de trabalho (ver :meth:`_apply_drawer`).
         self._tabs = Paginas()
         self._tabs.addTab(self._build_download_tab(), strings.TAB_DOWNLOAD)
         self._convert = ConvertPanel(self._settings, self._tools_for_convert, processing=self._processing, runtime=self._runtime)
         self._convert.jobs_ready.connect(self._submit_jobs)
-        self._convert.changed.connect(self._balance_panes)
         self._tabs.addTab(self._wrap_tab(self._convert), strings.TAB_CONVERT)
         self._edit = EditPanel(self._settings, self._tools_for_convert, editor=self._editor_service, processing=self._processing, runtime=self._runtime)
         self._edit.jobs_ready.connect(self._submit_jobs)
-        self._edit.changed.connect(self._balance_panes)
         self._tabs.addTab(self._wrap_tab(self._edit, horizontal=True), strings.TAB_EDIT)
         # A aba nasce vazia e o painel entra na primeira visita: montado com a
         # janela, ele somava ~55 ms à abertura e ~6 ms a toda troca de idioma
@@ -205,28 +200,18 @@ class MainWindow(QMainWindow):
         self._metadata_page.layout().setContentsMargins(0, 0, 0, 0)
         self._tabs.addTab(self._metadata_page, strings.TAB_METADATA)
 
-        self._vertical = QSplitter(Qt.Orientation.Vertical)
-        self._vertical.addWidget(self._tabs)
         self._queue_panel = QueuePanel(self._queue, runtime=self._runtime)
-        self._vertical.addWidget(self._queue_panel)
-        # Os controles têm altura natural — passar disso só deixa espaço vazio.
-        # A fila, ao contrário, aproveita cada pixel: é o painel que o usuário
-        # fica olhando depois de enfileirar. Por isso a sobra vai toda para
-        # baixo, e a divisão é refeita a cada mudança de tamanho enquanto o
-        # usuário não assumir o divisor (ver :meth:`_balance_panes`).
-        self._vertical.setStretchFactor(0, 0)
-        self._vertical.setStretchFactor(1, 1)
-        self._vertical.setChildrenCollapsible(False)
-        self._vertical.installEventFilter(self)
-        self._vertical.splitterMoved.connect(self._on_split_moved)
-        # A divisão do editor é diferente da das outras abas (ver
-        # :meth:`_balance_panes`), então trocar de aba pede um novo cálculo.
+        self._queue_panel.hide_requested.connect(lambda: self._set_drawer(False))
         self._tabs.currentChanged.connect(self._on_tab_changed)
-        root.addWidget(self._vertical, 1)
-        # Ajustes não é uma página: abre o diálogo, e por isso mora no pé do menu, longe dos itens que trocam de aba.
+        root.addWidget(self._tabs, 1)
+        # Tarefas e Ajustes não são páginas: o primeiro liga e desliga a gaveta, o segundo abre o diálogo. Moram
+        # no pé do menu, longe dos itens que trocam de aba.
+        self._nav_tasks = self._tabs.rail.add_toggle(icons.task_list, strings.NAV_TASKS, self._set_drawer)
         self._nav_settings = self._tabs.rail.add_action(icons.nav_settings, strings.NAV_SETTINGS, self._open_settings)
         moldura.addWidget(self._tabs.rail)
         moldura.addWidget(conteudo, 1)
+        moldura.addWidget(self._queue_panel)
+        self._apply_drawer()
         # Sem foco inicial, o Qt entrega o foco ao primeiro da ordem de Tab — a
         # barra de abas —, e a aba Download abria com a borda de foco, como se
         # Tab já tivesse sido apertado. O foco nasce no widget central, que não
@@ -272,12 +257,10 @@ class MainWindow(QMainWindow):
                                       strings.TAB_METADATA)):
             self._tabs.setTabText(index, text)
         self._nav_settings.set_text(strings.NAV_SETTINGS)
-        self._update_status()
+        self._nav_tasks.set_text(strings.NAV_TASKS)
+        self._update_tasks_badge()
         # Os nomes acessíveis tirados das dicas acompanham as dicas novas.
         name_controls(self)
-
-    def _on_split_moved(self, *_: int) -> None:
-        self._split_by_user = not self._balancing
 
     def _metadata_panel(self) -> MetadataPanel:
         """O painel da aba Metadados, criado na primeira vez que alguém o pede."""
@@ -288,111 +271,33 @@ class MainWindow(QMainWindow):
         return self._metadata
 
     def _on_tab_changed(self, index: int) -> None:
-        """A fila sai de cena no editor, e a janela inteira vira área de trabalho.
-
-        A regra da fila sempre à vista existe para as duas abas que **produzem**
-        tarefas e vão embora: quem manda baixar quer acompanhar. O editor é o
-        contrário — é onde se fica, e cada pixel que a fila ocupa lá sai da
-        imagem que está sendo cortada.
-
-        Nada se perde: a barra de status continua contando o que está em
-        andamento, na fila e concluído, e a fila volta inteira em qualquer outra
-        aba, com as tarefas que entraram enquanto ela estava escondida.
-        """
-        # Na aba Metadados também: salvar lá não passa pela fila, e o espaço
-        # vale mais como formulário.
+        # Na aba Metadados o painel nasce na primeira visita.
         if index == _TAB_METADATA:
             self._metadata_panel()
-        self._queue_panel.setVisible(index not in (_TAB_EDIT, _TAB_METADATA))
-        self._balance_panes()
+        self._apply_drawer()
         self._update_menu_scope(index)
 
-    def _tabs_height(self) -> int:
-        """Altura pedida pelas abas: a maior de todas, para todas caberem.
+    def _apply_drawer(self, *, force: bool = False) -> None:
+        """A gaveta de tarefas à vista, ou não, conforme a aba e a vontade do usuário.
 
-        É a mesma para todas de propósito. A fila fica sempre na mesma linha, o
-        divisor não pula ao trocar de aba, e nenhuma delas nasce cortada — que
-        era o que acontecia quando a altura vinha só da aba de download e a de
-        conversão precisava de mais. Quem quiser outra divisão arrasta o
-        divisor; a partir daí a escolha é do usuário.
+        A regra da fila sempre à vista existe para as abas que **produzem** tarefas e vão embora: quem manda
+        baixar quer acompanhar. O editor é o contrário — é onde se fica, e cada pixel que a gaveta ocupa lá sai
+        da imagem que está sendo cortada. Na aba Metadados também: salvar lá não passa pela fila, e o espaço
+        vale mais como formulário. Nada se perde: o selo do item Tarefas continua contando, e a gaveta volta
+        inteira em qualquer outra aba, com as tarefas que entraram enquanto ela estava recolhida.
 
-        A aba de edição pede mais que as outras, e é ela quem manda quando cabe:
-        o teto continua sendo a altura mínima da fila (ver :meth:`_balance_panes`),
-        então em tela baixa ninguém fica sem espaço — o editor é que passa a
-        rolar.
+        ``force`` é o usuário pedindo a gaveta onde ela estaria recolhida (o aviso "Ver tarefas" no editor).
         """
-        page = self._tabs.widget(_TAB_DOWNLOAD)
-        # O que o divisor reparte é a própria página: o menu lateral tirou a
-        # barra de abas de cima, e com ela os 33 px que esta conta somava.
-        margins = page.layout().contentsMargins()
-        inner = margins.top() + margins.bottom()
+        workspace = self._tabs.currentIndex() in (_TAB_EDIT, _TAB_METADATA)
+        visible = force or (self._drawer_open and not workspace)
+        self._queue_panel.setVisible(visible)
+        blocked = self._nav_tasks.blockSignals(True)
+        self._nav_tasks.setChecked(visible)
+        self._nav_tasks.blockSignals(blocked)
 
-        controls = max(
-            self._pane_height(self._left_pane),
-            self._pane_height(self._right_pane),
-        )
-        download = inner + self._header.sizeHint().height() + _TAB_SPACING + controls
-        convert = inner + self._pane_height(self._convert)
-        edit = inner + self._pane_height(self._edit)
-        return max(download, convert, edit)
-
-    @staticmethod
-    def _pane_height(pane: QWidget) -> int:
-        """Altura de que o painel precisa na largura que ele tem agora.
-
-        O ``sizeHint`` de um painel com texto que quebra linha é calculado numa
-        largura estreita, e sobra altura: o título do card cabe numa linha só na
-        largura real. Perguntar pela largura de agora evita reservar espaço em
-        cima que a fila usaria melhor.
-        """
-        layout = pane.layout()
-        if layout is not None and layout.hasHeightForWidth() and pane.width() > 0:
-            return layout.heightForWidth(pane.width())
-        return pane.sizeHint().height()
-
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802
-        # A geometria de verdade do divisor só existe no primeiro redimensiona-
-        # mento — nem no showEvent, nem num timer logo depois dele.
-        if watched is self._vertical and event.type() == QEvent.Type.Resize:
-            self._balance_panes()
-        return super().eventFilter(watched, event)
-
-    def _balance_panes(self) -> None:
-        """Dá aos controles a altura que eles pedem e a sobra para a fila.
-
-        O ``QSplitter`` reparte o espaço em proporção ao tamanho corrente de
-        cada painel, e não ao que cada um pede: sem esta correção os controles
-        nasciam cortados no meio de uma linha, com a fila vazia logo abaixo.
-        Quando a janela é baixa demais para os dois, a fila fica com o mínimo
-        dela e os controles passam a rolar.
-
-        **Na aba de edição não há divisão**: a fila fica escondida (ver
-        :meth:`_on_tab_changed`) e a janela inteira é do editor, onde toda
-        altura sobrando vira prévia maior. Nas outras duas, sobra vira espaço
-        vazio — os controles têm tamanho natural e param de crescer.
-
-        Vale enquanto o usuário não arrastar o divisor: a partir daí a divisão é
-        escolha dele e não se mexe mais.
-        """
-        if self._split_by_user or self._balancing:
-            return
-        self._balancing = True
-        try:
-            # Mostrar ou esconder uma linha (a trilha de áudio, um aviso) só
-            # muda a altura pedida quando o pedido de layout é entregue. Sem
-            # entregá-lo aqui, mede-se o painel de antes da mudança.
-            QApplication.sendPostedEvents(None, int(QEvent.Type.LayoutRequest))
-            if not self._queue_panel.isVisible():
-                # Fila escondida (aba de edição): não há divisão a fazer, o
-                # painel de cima recebe a janela toda.
-                self._vertical.setSizes([self._vertical.height(), 0])
-                return
-            total = self._vertical.height() - self._vertical.handleWidth()
-            available = total - self._queue_panel.minimumSizeHint().height()
-            top = max(0, min(self._tabs_height(), available))
-            self._vertical.setSizes([top, total - top])
-        finally:
-            self._balancing = False
+    def _set_drawer(self, open_: bool) -> None:
+        self._drawer_open = open_
+        self._apply_drawer(force=open_)
 
     @staticmethod
     def _wrap_scrollable(inner: QWidget, *, horizontal: bool = False) -> QScrollArea:
@@ -468,9 +373,6 @@ class MainWindow(QMainWindow):
 
         self._quality = QualityPanel(self._settings)
         self._quality.changed.connect(self._update_add_button)
-        # Trocar de modo ou fazer aparecer um aviso muda a altura do painel; a
-        # divisão da janela acompanha, para nada ficar cortado.
-        self._quality.changed.connect(self._balance_panes)
         layout.addWidget(self._quality)
 
         layout.addStretch(1)
@@ -664,7 +566,6 @@ class MainWindow(QMainWindow):
     def bootstrap(self) -> None:
         """Garante o ffmpeg. Chamado depois de a janela aparecer."""
         self._tools = ensure_ffmpeg(self, runtime=self._runtime)
-        self._update_status()
 
     # ------------------------------------------------------------------
     # Análise
@@ -718,9 +619,6 @@ class MainWindow(QMainWindow):
         self._quality.set_matrix(result.matrix, duration=result.duration)
         self._profiles.set_enabled(True)
         self._update_add_button()
-        # A análise pode acrescentar a linha de trilha de áudio; a divisão da
-        # janela é refeita para o painel continuar inteiro.
-        self._balance_panes()
 
     def _on_probe_failed(self, message: object) -> None:
         self._probe_worker = None
@@ -778,7 +676,6 @@ class MainWindow(QMainWindow):
         if self._tools is not None:
             return True
         self._tools = ensure_ffmpeg(self, runtime=self._runtime)
-        self._update_status()
         # O ffmpeg acabou de aparecer: a sondagem da placa, que na abertura não
         # tinha o que sondar, passa a ter.
         self._warm_hardware_probe()
@@ -858,15 +755,12 @@ class MainWindow(QMainWindow):
             self._queue.submit(job)
         if not jobs:
             return
-        # Aviso na barra de status porque na aba de edição a fila está
-        # escondida: sem ele, clicar em "Adicionar à fila" não teria resposta
-        # nenhuma na tela. O texto sai depois de alguns segundos e a barra volta
-        # a mostrar as contagens.
-        self.statusBar().showMessage(
-            strings.STATUS_ENQUEUED.format(count=len(jobs)), _ENQUEUED_MS
+        # Aviso na tela porque no editor a gaveta está recolhida: sem ele, clicar em "Adicionar à fila" não teria
+        # resposta nenhuma. "Ver tarefas" abre a gaveta onde quer que o usuário esteja.
+        self._toasts.mostrar(
+            strings.STATUS_ENQUEUED.format(count=len(jobs)), ms=_ENQUEUED_MS,
+            acao=(strings.TOAST_VIEW_TASKS, lambda: self._set_drawer(True)),
         )
-        self._toasts.mostrar(strings.STATUS_ENQUEUED.format(count=len(jobs)), ms=_ENQUEUED_MS)
-        QTimer.singleShot(_ENQUEUED_MS + 100, self._update_status)
 
     # ------------------------------------------------------------------
     # Configurações e engine
@@ -885,7 +779,7 @@ class MainWindow(QMainWindow):
         self._save_settings()
 
     def _open_settings(self) -> None:
-        dialog = SettingsDialog(self._settings, self, runtime=self._runtime)
+        dialog = SettingsDialog(self._settings, self, runtime=self._runtime, tools=self._tools)
         if dialog.exec() != SettingsDialog.DialogCode.Accepted:
             return
         previous_theme, previous_palette = self._settings.theme, self._settings.palette
@@ -902,7 +796,6 @@ class MainWindow(QMainWindow):
             if app is not None:
                 aplicar_tema(app, self._settings.theme, self._settings.palette)
         apply_language(self._settings.language)
-        self._update_status()
 
     def _update_engine(self) -> None:
         if self._runtime.is_packaged():
@@ -971,15 +864,16 @@ class MainWindow(QMainWindow):
     # Status e encerramento
     # ------------------------------------------------------------------
 
-    def _update_status(self) -> None:
+    def _update_tasks_badge(self) -> None:
+        """O número de tarefas em aberto no item Tarefas, e a contagem completa na dica.
+
+        É o que sobrou da barra de status, que contava as tarefas mas só aparecia nas abas onde a fila já estava
+        à vista. O selo vale nas quatro, inclusive no editor e nos Metadados, onde a gaveta está recolhida.
+        """
         active = self._queue.count_by_status(JobStatus.RUNNING, JobStatus.PROCESSING)
         pending = self._queue.count_by_status(JobStatus.PENDING)
         done = self._queue.count_by_status(JobStatus.DONE)
-        parts = [strings.STATUS_COUNTS.format(active=active, pending=pending, done=done)]
-        if self._tools is not None:
-            source = strings.FFMPEG_SOURCES.get(self._tools.source, self._tools.source)
-            parts.append(strings.STATUS_FFMPEG.format(source=source))
-        self.statusBar().showMessage("  |  ".join(parts))
+        self._nav_tasks.set_selo(active + pending, strings.STATUS_COUNTS.format(active=active, pending=pending, done=done))
 
     def _new_project(self) -> None:
         self._tabs.setCurrentIndex(_TAB_EDIT)
@@ -1052,7 +946,4 @@ class MainWindow(QMainWindow):
         try:
             self._runtime.save_settings(self._settings)
         except OSError as exc:
-            self.statusBar().showMessage(
-                strings.STATUS_SETTINGS_FAILED.format(error=exc), _ENQUEUED_MS
-            )
             self._toasts.mostrar(strings.STATUS_SETTINGS_FAILED.format(error=exc), tipo="error", ms=_ENQUEUED_MS)

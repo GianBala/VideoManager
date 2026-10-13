@@ -355,7 +355,7 @@ def _textos_do_widget(w) -> list[tuple[str, object]]:
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QComboBox, QDialogButtonBox, QDoubleSpinBox,
                                    QGroupBox, QLabel, QLineEdit, QListWidget, QMenu, QPlainTextEdit, QSpinBox,
-                                   QStatusBar, QTableView, QTabWidget, QTextEdit)
+                                   QTableView, QTabWidget, QTextEdit)
     saida: list[tuple[str, object]] = []
     if isinstance(w, QLabel):
         saida.append(("texto", w.text()))
@@ -393,8 +393,6 @@ def _textos_do_widget(w) -> list[tuple[str, object]]:
                 valores = [modelo.data(indice, papel) for papel in (Qt.ItemDataRole.DisplayRole,
                                                                      Qt.ItemDataRole.ToolTipRole)]
                 saida.append((f"celula{linha},{coluna}", [None if v is None else str(v) for v in valores]))
-    if isinstance(w, QStatusBar):
-        saida.append(("mensagem", w.currentMessage()))
     if isinstance(w, QMenu):
         saida.append(("titulo", w.title()))
     saida.append(("dica", w.toolTip()))
