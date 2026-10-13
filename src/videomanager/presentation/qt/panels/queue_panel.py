@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QRect, QRectF, QSize, Qt, QUrl
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QRect, QRectF, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -22,13 +22,15 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QDialog,
-    QGroupBox,
+    QFrame,
     QHBoxLayout,
+    QLabel,
     QListView,
     QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QToolButton,
     QToolTip,
     QVBoxLayout,
     QWidget,
@@ -40,7 +42,7 @@ from videomanager.application.jobs.models import Job
 from videomanager.application.jobs.models import JobStatus
 from videomanager.presentation.qt import icons, strings, theme
 from videomanager.presentation.qt.i18n import bind, on_language_change
-from videomanager.presentation.qt.panels.queue_cards import REGIOES_CLICAVEIS, TaskDelegate, velocidade_e_tempo
+from videomanager.presentation.qt.panels.queue_cards import REGIOES_CLICAVEIS, TaskDelegate, situacao, velocidade_e_tempo
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
 _COL_TITLE, _COL_OUTPUT, _COL_STATUS, _COL_PROGRESS, _COL_SPEED = range(5)
@@ -110,6 +112,10 @@ class QueueModel(QAbstractTableModel):
                 return job.percent
             if column == _COL_SPEED:
                 return self._speed_text(job)
+
+        if role == Qt.ItemDataRole.AccessibleTextRole and column == _COL_TITLE:
+            # O cartão é pintado: o leitor de tela só tem o que o modelo diz dele.
+            return f"{job.title}. {situacao(job)}" + (f". {job.error}" if job.error else "")
 
         if role == Qt.ItemDataRole.ToolTipRole:
             if column == _COL_STATUS and job.error:
@@ -303,8 +309,22 @@ class QueueView(QListView):
         painter.end()
 
 
-class QueuePanel(QGroupBox):
-    """A fila, com barra de ações e menu de contexto."""
+# Largura da gaveta: cabe o cartão com o texto do tempo restante e o botão de cancelar sem quebrar linha.
+DRAWER_WIDTH = 344
+
+# (nome, papel de cor, situações que contam) de cada selo do cabeçalho, na ordem em que aparecem.
+_CHIPS = (
+    ("active", "accent", (JobStatus.RUNNING, JobStatus.PROCESSING), "QUEUE_CHIP_ACTIVE"),
+    ("pending", "dim", (JobStatus.PENDING,), "QUEUE_CHIP_PENDING"),
+    ("failed", "err", (JobStatus.FAILED,), "QUEUE_CHIP_FAILED"),
+    ("cancelled", "dim", (JobStatus.CANCELLED,), "QUEUE_CHIP_CANCELLED"),
+)
+
+
+class QueuePanel(QFrame):
+    """A gaveta de tarefas: cabeçalho com a contagem, a lista de cartões, ações em lote e menu de contexto."""
+
+    hide_requested = Signal()
 
     def __init__(
         self,
@@ -314,15 +334,51 @@ class QueuePanel(QGroupBox):
         runtime: DesktopRuntimePort,
     ) -> None:
         super().__init__(parent)
-        bind(self, "setTitle", lambda: strings.QUEUE_GROUP)
+        self.setProperty("role", "drawer")
+        self.setFixedWidth(DRAWER_WIDTH)
         self._runtime = runtime
         self._queue = queue
+        self._counts = {name: 0 for name, *_ in _CHIPS}
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 14, 12, 12)
+        layout.setSpacing(10)
+
+        header = QHBoxLayout()
+        title = bind(QLabel(), "setText", lambda: strings.QUEUE_GROUP)
+        title.setProperty("role", "drawer-title")
+        header.addWidget(title)
+        header.addStretch(1)
+        self._hide_button = QToolButton()
+        self._hide_button.setProperty("role", "icon")
+        self._hide_button.setIconSize(QSize(18, 18))
+        bind(self._hide_button, "setToolTip", lambda: strings.QUEUE_HIDE)
+        self._hide_button.clicked.connect(self.hide_requested)
+        header.addWidget(self._hide_button)
+        layout.addLayout(header)
+
+        # Os selos ficam numa linha própria: com os quatro à vista (ativas, na fila, falharam, canceladas) não
+        # cabem ao lado do título nos 344 px da gaveta.
+        self._chip_row = QWidget()
+        self._chip_row.setProperty("role", "plain")
+        chips = QHBoxLayout(self._chip_row)
+        chips.setContentsMargins(0, 0, 0, 0)
+        chips.setSpacing(6)
+        self._chips: dict[str, QLabel] = {}
+        for name, tone, _statuses, _key in _CHIPS:
+            chip = QLabel()
+            chip.setProperty("role", "chip")
+            chip.setProperty("tone", tone)
+            self._chips[name] = chip
+            chips.addWidget(chip)
+        chips.addStretch(1)
+        layout.addWidget(self._chip_row)
+        theme.on_theme_change(self._retheme)
+        self._retheme()
 
         self._model = QueueModel(queue, self)
         self._list = QueueView()
+        bind(self._list, "setAccessibleName", lambda: strings.QUEUE_GROUP)
         self._list.setModel(self._model)
         self._list.customContextMenuRequested.connect(self._show_context_menu)
         self._list.doubleClicked.connect(self._open_selected_file)
@@ -333,23 +389,52 @@ class QueuePanel(QGroupBox):
         layout.addWidget(self._list, 1)
 
         actions = QHBoxLayout()
-        actions.addStretch(1)
         self._cancel_all = bind(QPushButton(), "setText", lambda: strings.QUEUE_CANCEL_ALL)
         self._cancel_all.clicked.connect(self._confirm_cancel_all)
-        actions.addWidget(self._cancel_all)
+        actions.addWidget(self._cancel_all, 1)
         self._clear = bind(QPushButton(), "setText", lambda: strings.QUEUE_CLEAR_FINISHED)
         self._clear.clicked.connect(self._clear_finished)
-        actions.addWidget(self._clear)
+        actions.addWidget(self._clear, 1)
         layout.addLayout(actions)
-        queue.job_added.connect(self._sync_buttons)
-        queue.job_changed.connect(self._sync_buttons)
-        self._sync_buttons()
+        queue.job_added.connect(self._sync_state)
+        queue.job_changed.connect(self._sync_state)
+        on_language_change(self._retext_chips)
+        # Os selos nascem com texto (escondidos): o que a troca de idioma reescreve tem de existir antes dela.
+        self._retext_chips()
+        self._sync_state()
 
-    def _sync_buttons(self, *_) -> None:
-        """Os dois botões só ficam à mão quando têm o que fazer; antes eles respondiam sem fazer nada."""
-        jobs = self._queue.jobs
-        self._cancel_all.setEnabled(any(not job.status.is_final for job in jobs))
-        self._clear.setEnabled(any(job.status.is_final for job in jobs))
+    def _retheme(self) -> None:
+        self._hide_button.setIcon(icons.chevron_right(theme.papeis(*theme.atual())["t2"]))
+
+    def _sync_state(self, *_) -> None:
+        """Os botões de baixo e os selos do cabeçalho acompanham as tarefas.
+
+        Os botões só ficam à mão quando têm o que fazer (antes respondiam sem fazer nada). Uma passada só pelas
+        tarefas, que o progresso chama várias vezes por segundo: os selos só são reescritos quando uma contagem muda.
+        """
+        counts = {name: 0 for name, *_ in _CHIPS}
+        unfinished = finished = False
+        for job in self._queue.jobs:
+            if job.status.is_final:
+                finished = True
+            else:
+                unfinished = True
+            for name, _tone, statuses, _key in _CHIPS:
+                if job.status in statuses:
+                    counts[name] += 1
+        self._cancel_all.setEnabled(unfinished)
+        self._clear.setEnabled(finished)
+        if counts != self._counts:
+            self._counts = counts
+            self._retext_chips()
+
+    def _retext_chips(self) -> None:
+        for name, _tone, _statuses, key in _CHIPS:
+            count = self._counts[name]
+            singular, plural = getattr(strings, key)
+            self._chips[name].setText((singular if count == 1 else plural).format(count=count))
+            self._chips[name].setVisible(count > 0)
+        self._chip_row.setVisible(any(self._counts.values()))
 
     def _on_card_action(self, job: Job, region: str) -> None:
         if region == "cancelar":
@@ -392,7 +477,7 @@ class QueuePanel(QGroupBox):
     def _clear_finished(self) -> None:
         self._queue.remove_finished()
         self._model.reload()
-        self._sync_buttons()
+        self._sync_state()
 
     def _show_context_menu(self, position) -> None:
         jobs = self._selected_jobs()

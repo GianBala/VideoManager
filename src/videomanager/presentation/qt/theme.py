@@ -139,6 +139,15 @@ QPushButton[role="profile"]:hover {{ background: {raised2}; border-color: {raise
    o cartão marcado não crescer e empurrar os vizinhos. */
 QPushButton[role="palette"] {{ background: {raised}; border: 2px solid {raised}; border-radius: 10px; padding: 0px; text-align: left; }}
 QPushButton[role="palette"]:hover {{ border-color: {raised2}; }}
+/* Gaveta de tarefas: coluna à direita, no tom do menu lateral, separada do conteúdo por um fio. */
+QFrame[role="drawer"] {{ background: {panel}; border: none; border-left: 1px solid {raised}; }}
+QLabel[role="drawer-title"] {{ font-size: 16px; font-weight: 600; color: {text}; background: transparent; }}
+QLabel[role="chip"] {{ background: {raised2}; color: {t2}; border-radius: 8px; padding: 2px 8px; font-size: 11px; font-weight: 600; }}
+QLabel[role="chip"][tone="accent"] {{ background: {soft16}; color: {accent}; }}
+QLabel[role="chip"][tone="err"] {{ background: {err16}; color: {err}; }}
+QToolButton[role="icon"] {{ background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 4px; }}
+QToolButton[role="icon"]:hover {{ background: {raised}; }}
+QToolButton[role="icon"]:focus {{ border-color: {focus}; }}
 /* Fila de tarefas: os cartões se pintam sozinhos, sobre o fundo do painel. */
 QListView[role="queue"] {{ background: transparent; border: none; }}
 /* Menu lateral: itens de ícone e texto embaixo; o marcado leva o tom do acento e uma faixa na borda. A
@@ -427,6 +436,8 @@ def _cores_do_estilo(theme: str, nome: str) -> dict[str, str]:
     cores = {**papeis(theme, nome), **{k: palette(theme, nome)[k] for k in ("focus", "live")}}
     vermelho, verde, azul = (int(cores["soft"][i:i + 2], 16) for i in (1, 3, 5))
     cores["soft16"] = f"rgba({vermelho}, {verde}, {azul}, 0.16)"
+    erro_r, erro_g, erro_b = (int(cores["err"][i:i + 2], 16) for i in (1, 3, 5))
+    cores["err16"] = f"rgba({erro_r}, {erro_g}, {erro_b}, 0.16)"
     # O selo "ao vivo" tem fundo vermelho fixo nos dois modos; o texto dele é sempre branco, e não o
     # texto do botão primário, que nas paletas de botão claro ou âmbar é escuro.
     cores["live_text"] = "#ffffff"

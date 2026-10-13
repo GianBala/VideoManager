@@ -167,7 +167,7 @@ def test_o_foco_do_teclado_se_ve_no_item_marcado_e_no_desmarcado(janela, desktop
     assert not fracos, fracos
 
 
-def test_tab_visita_so_o_item_marcado_e_depois_os_ajustes(janela, desktop_app):
+def test_tab_visita_so_o_item_marcado_e_depois_tarefas_e_ajustes(janela, desktop_app):
     # Como num grupo de rádio: setas dentro do menu, Tab para fora dele. Quatro paradas para chegar ao conteúdo
     # seriam quatro Tab a mais em toda volta pela janela.
     menu = janela._tabs.tabBar()
@@ -175,6 +175,7 @@ def test_tab_visita_so_o_item_marcado_e_depois_os_ajustes(janela, desktop_app):
     QTest.keyClick(desktop_app.focusWidget(), Qt.Key.Key_Tab)
     desktop_app.processEvents()
     assert desktop_app.focusWidget() is menu._itens[_TAB_EDIT]
-    QTest.keyClick(desktop_app.focusWidget(), Qt.Key.Key_Tab)
-    desktop_app.processEvents()
-    assert desktop_app.focusWidget() is janela._nav_settings
+    for esperado in (janela._nav_tasks, janela._nav_settings):
+        QTest.keyClick(desktop_app.focusWidget(), Qt.Key.Key_Tab)
+        desktop_app.processEvents()
+        assert desktop_app.focusWidget() is esperado

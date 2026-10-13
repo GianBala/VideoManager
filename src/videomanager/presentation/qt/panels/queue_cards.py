@@ -474,8 +474,14 @@ class TaskDelegate(QStyledItemDelegate):
 
 
 def _linhas(painter: QPainter, metricas: QFontMetrics, linhas: list[str], area: QRect) -> None:
-    for posicao, linha in enumerate(linhas):
-        painter.drawText(QPoint(area.x(), area.y() + posicao * metricas.lineSpacing() + metricas.ascent()), linha)
+    """Desenha as linhas já quebradas como um texto só, e não uma chamada por linha.
+
+    O texto pintado à mão é conferido inteiro (``validate_language.py``): em pedaços, cada linha de um
+    texto traduzido perdia as marcas do começo ou do fim e parecia texto fora do catálogo.
+    """
+    painter.drawText(QRect(area.x(), area.y(), area.width(), len(linhas) * metricas.lineSpacing()),
+                     int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextDontClip),
+                     "\n".join(linhas))
 
 
 def _com_alfa(cor: str, alfa: int) -> str:

@@ -122,10 +122,6 @@ class ConvertPanel(QWidget):
     """Escolhe arquivos e o alvo, e entrega as tarefas prontas para a fila."""
 
     jobs_ready = Signal(list)  # list[Job]
-    # Emitido quando o painel muda de tamanho preferido — o plano aparece, as
-    # linhas do modo vídeo entram no lugar das de áudio. A janela redivide o
-    # espaço para o painel não ficar cortado.
-    changed = Signal()
 
     def __init__(
         self,
@@ -676,14 +672,12 @@ class ConvertPanel(QWidget):
         if self._inspection_worker is not None:
             self._plan.setText(strings.CONVERT_INSPECTING.format(count=len(self._inspection_paths)))
             self._plan.setVisible(True)
-            self.changed.emit()
             return
         if not self._media:
             # Escondido, e não só vazio: um rótulo em branco deixava uma faixa
             # de altura sem explicação no meio do grupo.
             self._plan.clear()
             self._plan.setVisible(False)
-            self.changed.emit()
             return
 
         targets = [self._build_target(m) for m in self._media]
@@ -717,7 +711,6 @@ class ConvertPanel(QWidget):
             )
         self._plan.setText(f"{plan_str}\n• {size_info}")
         self._plan.setVisible(True)
-        self.changed.emit()
         if self._to_compress.isChecked():
             self._request_samples()
 

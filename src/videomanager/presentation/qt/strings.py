@@ -146,7 +146,13 @@ ADD_TO_QUEUE = "Adicionar à fila"
 ADD_TO_QUEUE_TIP = "Analise um endereço antes de adicionar à fila"
 
 # --- fila --------------------------------------------------------------------
-QUEUE_GROUP = "Fila"
+QUEUE_GROUP = "Tarefas"
+QUEUE_HIDE = "Recolher as tarefas"
+# (singular, plural) de cada selo do cabeçalho das tarefas.
+QUEUE_CHIP_ACTIVE = ("{count} ativa", "{count} ativas")
+QUEUE_CHIP_PENDING = ("{count} na fila", "{count} na fila")
+QUEUE_CHIP_FAILED = ("{count} falhou", "{count} falharam")
+QUEUE_CHIP_CANCELLED = ("{count} cancelada", "{count} canceladas")
 QUEUE_COLUMNS = ("Título", "Saída", "Situação", "Progresso", "Velocidade")
 QUEUE_EMPTY = "A fila está vazia."
 QUEUE_ETA = "faltam {eta}"
@@ -170,11 +176,17 @@ QUEUE_LOG_CLOSE = "Fechar"
 
 # --- status bar --------------------------------------------------------------
 STATUS_COUNTS = "{active} em andamento · {pending} na fila · {done} concluídos"
-STATUS_FFMPEG = "ffmpeg: {source}"
 # De onde veio o ffmpeg em uso, pelo identificador que o localizador devolve.
-FFMPEG_SOURCES = {"empacotado": "empacotado", "gerenciado": "gerenciado", "sistema": "sistema"}
+FFMPEG_SOURCES = {
+    "empacotado": "Empacotado — vem junto com o aplicativo",
+    "gerenciado": "Gerenciado — baixado pelo aplicativo",
+    "sistema": "Sistema — instalado no computador",
+}
+SETTINGS_FFMPEG = "FFmpeg"
+SETTINGS_FFMPEG_UNKNOWN = "Ainda não localizado"
 TOAST_CLOSE = "Fechar aviso"
-STATUS_ENQUEUED = "{count} tarefa(s) adicionada(s) à fila — acompanhe na aba Download"
+STATUS_ENQUEUED = "{count} tarefa(s) adicionada(s) à fila"
+TOAST_VIEW_TASKS = "Ver tarefas"
 # Na barra de status, e não num diálogo: não poder gravar as preferências não
 # interrompe nada do que está em andamento.
 STATUS_SETTINGS_FAILED = "Não foi possível gravar as preferências: {error}"
@@ -249,6 +261,7 @@ CONVERT_COMPRESS_NO_GAIN = (
 # --- metadados ---------------------------------------------------------------
 TAB_METADATA = "Metadados"
 NAV_SETTINGS = "Ajustes"
+NAV_TASKS = "Tarefas"
 ACTION_META_OPEN = "Abrir arquivo…"
 ACTION_META_SAVE = "Salvar cópia"
 META_FILE_GROUP = "Arquivo"

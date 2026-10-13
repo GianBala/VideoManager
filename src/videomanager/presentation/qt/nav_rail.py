@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter
 from PySide6.QtWidgets import QApplication, QLabel, QStackedWidget, QToolButton, QVBoxLayout, QWidget
 
 from videomanager.presentation.qt import icons, theme
@@ -33,6 +34,7 @@ class _Item(QToolButton):
         # Só Tab alcança o item (clicar não deixa o anel de foco no que se acabou de abrir), e quem decide quais
         # entram na ordem é o menu: ver ``NavRail._sincronizar_foco``.
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._selo = 0
         self.set_text(texto)
         self.repintar()
 
@@ -40,6 +42,38 @@ class _Item(QToolButton):
         self.setText(texto)
         self.setAccessibleName(texto)
         self.setToolTip(texto)
+
+    def set_selo(self, contagem: int, dica: str = "") -> None:
+        """O número de coisas pendentes no canto do ícone; zero some. ``dica`` diz o que o número conta."""
+        self._selo = contagem
+        if dica:
+            self.setToolTip(dica)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        if self._selo <= 0:
+            return
+        cores = theme.papeis(*theme.atual())
+        texto = str(self._selo) if self._selo < 10 else "9+"
+        fonte = QFont(self.font())
+        fonte.setBold(True)
+        fonte.setPixelSize(10)
+        diametro = 16
+        # No canto de cima e à direita do ícone, que fica no meio da largura do item.
+        caixa = QRectF(self.width() / 2 + 3, 3, diametro + (4 if len(texto) > 1 else 0), diametro)
+        pintor = QPainter(self)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        degrade = QLinearGradient(caixa.topLeft(), caixa.bottomRight())
+        degrade.setColorAt(0, QColor(cores["fill_a"]))
+        degrade.setColorAt(1, QColor(cores["fill_b"]))
+        pintor.setPen(Qt.PenStyle.NoPen)
+        pintor.setBrush(degrade)
+        pintor.drawRoundedRect(caixa, diametro / 2, diametro / 2)
+        pintor.setFont(fonte)
+        pintor.setPen(QColor(cores["on_fill"]))
+        pintor.drawText(caixa, Qt.AlignmentFlag.AlignCenter, texto)
+        pintor.end()
 
     def repintar(self) -> None:
         cores = theme.papeis(*theme.atual())
@@ -104,6 +138,16 @@ class NavRail(QWidget):
         item = _Item(desenho, texto, self)
         item.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         item.clicked.connect(lambda _marcado=False: chamada())
+        self._topo.addWidget(item)
+        self._acoes.append(item)
+        return item
+
+    def add_toggle(self, desenho, texto: str, chamada: Callable[[bool], None]) -> _Item:
+        """Item que liga e desliga algo (a gaveta de tarefas), sem fazer parte do grupo das páginas."""
+        item = _Item(desenho, texto, self)
+        item.setCheckable(True)
+        item.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        item.toggled.connect(chamada)
         self._topo.addWidget(item)
         self._acoes.append(item)
         return item
