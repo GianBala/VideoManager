@@ -37,8 +37,10 @@ que só o layout novo tem: um vermelho de erro sobre uma superfície elevada med
 
 from __future__ import annotations
 
-PADRAO = "atual"
-MODOS = ("dark", "light")
+from videomanager.domain.appearance import DEFAULT_PALETTE, THEMES
+
+PADRAO = DEFAULT_PALETTE
+MODOS = THEMES
 PAPEIS = ("canvas", "panel", "card", "raised", "raised2", "text", "t2", "t3", "accent", "soft",
           "fill_a", "fill_b", "on_fill", "ok", "warn", "err", "screen")
 

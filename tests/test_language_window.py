@@ -281,13 +281,13 @@ class _SemFerramentas:
         return None
 
 
-def test_idioma_nas_configuracoes_logo_abaixo_do_tema(desktop_app):
+def test_idioma_nas_configuracoes_com_a_mesma_largura_do_modo_do_tema(desktop_app):
     from videomanager.presentation.qt.settings_dialog import SettingsDialog
     dialogo = SettingsDialog(Settings(language=i18n.ENGLISH),
                              runtime=_SemFerramentas(build_desktop_runtime(audio_enabled=False)))
     try:
-        formulario = dialogo._theme.parentWidget().layout()
-        assert formulario.getWidgetPosition(dialogo._language)[0] == formulario.getWidgetPosition(dialogo._theme)[0] + 1
+        # O modo do tema mudou para a aba própria (Tema), então os dois combos já não são linhas
+        # vizinhas do mesmo formulário: o que continua valendo é a largura igual.
         assert dialogo._language.maximumWidth() == dialogo._theme.maximumWidth()
         # Cada idioma no próprio nome, qualquer que seja o de agora.
         assert [dialogo._language.itemText(i) for i in range(dialogo._language.count())] == [
