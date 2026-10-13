@@ -455,6 +455,14 @@ def folder(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+def clipboard(color: str, size: int = _NAV) -> QIcon:
+    """Colar: a prancheta, com a presilha de cima."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawRoundedRect(QRectF(6 * u, 5.5 * u, 12 * u, 14.5 * u), 2.2 * u, 2.2 * u)
+        p.drawRoundedRect(QRectF(9 * u, 3.5 * u, 6 * u, 3.8 * u), 1.4 * u, 1.4 * u)
+    return _nav(color, size, desenho)
+
+
 def task_list(color: str, size: int = _NAV) -> QIcon:
     """A fila vazia: três linhas com marcador."""
     def desenho(p: QPainter, u: float) -> None:
