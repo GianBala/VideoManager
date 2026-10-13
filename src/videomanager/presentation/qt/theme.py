@@ -162,6 +162,10 @@ QTabBar[role="underline"]::tab:focus {{ border: 1px solid {focus}; border-bottom
 /* Abas estreitas (a coluna de adicionais do editor): sem margem entre elas e com o preenchimento menor. */
 QTabBar[role="underline"][compact="true"]::tab {{ padding: 8px 5px; margin-right: 0px; font-size: 11px; }}
 QPushButton[compact="true"] {{ padding-left: 8px; padding-right: 8px; }}
+/* Aba Propriedades: seções separadas por um fio, cabeçalho menor e o × que fica vermelho ao passar o mouse. */
+QFrame[role="prop-section"] {{ background: transparent; border: none; border-top: 1px solid {raised}; }}
+QToolButton[role="section-header"][compact="true"] {{ font-size: 13px; }}
+QToolButton[role="icon"][danger="true"]:hover {{ background: {err16}; }}
 QLabel[role="group-heading"] {{ color: {t3}; font-size: 11px; font-weight: 700; padding-top: 6px; }}
 
 /* Aba Metadados: o ícone do arquivo e os botões que só pedem atenção quando se chega a eles. */
