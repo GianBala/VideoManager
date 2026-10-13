@@ -139,6 +139,13 @@ QPushButton[role="profile"]:hover {{ background: {raised2}; border-color: {raise
    o cartão marcado não crescer e empurrar os vizinhos. */
 QPushButton[role="palette"] {{ background: {raised}; border: 2px solid {raised}; border-radius: 10px; padding: 0px; text-align: left; }}
 QPushButton[role="palette"]:hover {{ border-color: {raised2}; }}
+/* Aviso flutuante: sobre a janela, no plano elevado, com a ação e o fechar sem moldura. */
+QFrame[role="toast"] {{ background: {raised2}; border: 1px solid {raised2}; border-radius: 13px; }}
+QFrame[role="toast"] QLabel {{ background: transparent; }}
+QPushButton[role="toast-action"] {{ background: transparent; border: 1px solid transparent; color: {accent}; font-weight: 600; padding: 4px 10px; }}
+QPushButton[role="toast-action"]:hover {{ background: {raised}; border-color: {raised}; }}
+QPushButton[role="toast-close"] {{ background: transparent; border: 1px solid transparent; padding: 4px; }}
+QPushButton[role="toast-close"]:hover {{ background: {raised}; border-color: {raised}; }}
 QPushButton[role="palette"]:checked {{ background: {soft16}; border-color: {accent}; }}
 
 QPushButton[role="transport"] {{

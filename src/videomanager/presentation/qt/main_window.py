@@ -69,6 +69,7 @@ from videomanager.presentation.qt.panels.queue_panel import QueuePanel
 from videomanager.presentation.qt.playlist_dialog import PlaylistDialog
 from videomanager.presentation.qt.settings_dialog import SettingsDialog
 from videomanager.presentation.qt.theme import apply as aplicar_tema
+from videomanager.presentation.qt.toast import ToastHost
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
 # Índices das abas, na ordem em que são criadas.
@@ -149,6 +150,7 @@ class MainWindow(QMainWindow):
         self._queue.counts_changed.connect(self._update_status)
 
         self._build_ui()
+        self._toasts = ToastHost(self)
         self._build_menu()
         self._update_menu_scope(_TAB_DOWNLOAD)
         self._update_status()
@@ -855,6 +857,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             strings.STATUS_ENQUEUED.format(count=len(jobs)), _ENQUEUED_MS
         )
+        self._toasts.mostrar(strings.STATUS_ENQUEUED.format(count=len(jobs)), ms=_ENQUEUED_MS)
         QTimer.singleShot(_ENQUEUED_MS + 100, self._update_status)
 
     # ------------------------------------------------------------------
@@ -1044,3 +1047,4 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 strings.STATUS_SETTINGS_FAILED.format(error=exc), _ENQUEUED_MS
             )
+            self._toasts.mostrar(strings.STATUS_SETTINGS_FAILED.format(error=exc), tipo="error", ms=_ENQUEUED_MS)
