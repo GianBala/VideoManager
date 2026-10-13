@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -32,7 +33,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -54,7 +54,7 @@ from videomanager.domain.selection import AudioRequest
 from videomanager.domain.selection import VideoRequest
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt.tasks import WorkerRunner
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import icons, strings
 from videomanager.presentation.qt.accessibility import name_controls
 from videomanager.presentation.qt.i18n import apply_language, bind, on_language_change
 from videomanager.presentation.qt.ffmpeg_setup import ensure_ffmpeg
@@ -68,6 +68,7 @@ from videomanager.presentation.qt.panels.quality_panel import QualityPanel
 from videomanager.presentation.qt.panels.queue_panel import QueuePanel
 from videomanager.presentation.qt.playlist_dialog import PlaylistDialog
 from videomanager.presentation.qt.settings_dialog import SettingsDialog
+from videomanager.presentation.qt.nav_rail import LARGURA as LARGURA_DO_MENU, Paginas
 from videomanager.presentation.qt.theme import apply as aplicar_tema
 from videomanager.presentation.qt.toast import ToastHost
 from videomanager.presentation.qt.ports import DesktopRuntimePort
@@ -144,7 +145,9 @@ class MainWindow(QMainWindow):
         # o editor nasceria com o botão de exportar fora da vista. O teto é a
         # tela de 1080p com barra de tarefas. Em telas mais baixas o painel
         # rola, que é para isso que ele está numa área de rolagem.
-        self.resize(1180, 1000)
+        # 1180 px é o que o conteúdo sempre teve; o menu lateral é largura que não pode sair dele, senão o editor
+        # (que pede 1191) nascia com 87 px de rolagem horizontal em vez dos 11 de antes.
+        self.resize(1180 + LARGURA_DO_MENU, 1000)
 
         self._queue = self._runtime.queue(settings, self)
         self._queue.counts_changed.connect(self._update_status)
@@ -170,14 +173,20 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
-        root = QVBoxLayout(central)
+        # O menu lateral fica à esquerda de tudo; a coluna do conteúdo (abas e fila) é a de sempre.
+        moldura = QHBoxLayout(central)
+        moldura.setContentsMargins(0, 0, 0, 0)
+        moldura.setSpacing(0)
+        conteudo = QWidget()
+        conteudo.setProperty("role", "plain")
+        root = QVBoxLayout(conteudo)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
         # A fila fica fora das abas, embaixo: todas alimentam a mesma fila, e
         # trocar de aba não pode esconder o que está em andamento — salvo no
         # editor, onde ela dá lugar à prévia (ver :meth:`_on_tab_changed`).
-        self._tabs = QTabWidget()
+        self._tabs = Paginas()
         self._tabs.addTab(self._build_download_tab(), strings.TAB_DOWNLOAD)
         self._convert = ConvertPanel(self._settings, self._tools_for_convert, processing=self._processing, runtime=self._runtime)
         self._convert.jobs_ready.connect(self._submit_jobs)
@@ -214,6 +223,10 @@ class MainWindow(QMainWindow):
         # :meth:`_balance_panes`), então trocar de aba pede um novo cálculo.
         self._tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self._vertical, 1)
+        # Ajustes não é uma página: abre o diálogo, e por isso mora no pé do menu, longe dos itens que trocam de aba.
+        self._nav_settings = self._tabs.rail.add_action(icons.nav_settings, strings.NAV_SETTINGS, self._open_settings)
+        moldura.addWidget(self._tabs.rail)
+        moldura.addWidget(conteudo, 1)
         # Sem foco inicial, o Qt entrega o foco ao primeiro da ordem de Tab — a
         # barra de abas —, e a aba Download abria com a borda de foco, como se
         # Tab já tivesse sido apertado. O foco nasce no widget central, que não
@@ -258,6 +271,7 @@ class MainWindow(QMainWindow):
         for index, text in enumerate((strings.TAB_DOWNLOAD, strings.TAB_CONVERT, strings.TAB_EDIT,
                                       strings.TAB_METADATA)):
             self._tabs.setTabText(index, text)
+        self._nav_settings.set_text(strings.NAV_SETTINGS)
         self._update_status()
         # Os nomes acessíveis tirados das dicas acompanham as dicas novas.
         name_controls(self)
@@ -308,14 +322,8 @@ class MainWindow(QMainWindow):
         rolar.
         """
         page = self._tabs.widget(_TAB_DOWNLOAD)
-        # A barra de abas entra na conta: o que o divisor reparte é o QTabWidget
-        # inteiro, não a página. A medida sai da página **visível** — a escondida
-        # guarda a geometria de antes do último redimensionamento, e a diferença
-        # ia crescendo a cada troca de aba.
-        visible = self._tabs.currentWidget()
-        chrome = (
-            max(0, self._tabs.height() - visible.height()) if visible.height() else 0
-        )
+        # O que o divisor reparte é a própria página: o menu lateral tirou a
+        # barra de abas de cima, e com ela os 33 px que esta conta somava.
         margins = page.layout().contentsMargins()
         inner = margins.top() + margins.bottom()
 
@@ -326,7 +334,7 @@ class MainWindow(QMainWindow):
         download = inner + self._header.sizeHint().height() + _TAB_SPACING + controls
         convert = inner + self._pane_height(self._convert)
         edit = inner + self._pane_height(self._edit)
-        return chrome + max(download, convert, edit)
+        return max(download, convert, edit)
 
     @staticmethod
     def _pane_height(pane: QWidget) -> int:
