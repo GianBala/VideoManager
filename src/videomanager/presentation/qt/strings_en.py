@@ -892,6 +892,7 @@ EDIT_EASINGS = {
 PROP_TITLE = "Properties"
 PROP_TITLE_CLIP = "Properties: {name}"
 PROP_CLOSE_TIP = "Close the Properties tab"
+PROP_NO_SETTINGS = "This block has no settings besides its duration and its position on the timeline."
 PROP_CLIP_ID = "ID #{id} · {kind}"
 PROP_KINDS = {"none": "Media", "image": "Image", "text": "Text", "filter": "Filter", "transition": "Transition"}
 PROP_TRANSFORM = "Transform"
