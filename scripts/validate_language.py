@@ -86,7 +86,7 @@ _LISTAS_DE_DADO = ("_FontSelectorWidget",)
 # traduz: navegadores de onde ler cookies, placas de vídeo, códigos de idioma
 # e o nome de cada idioma, escrito nele mesmo.
 _DADOS_DA_CENA = re.compile(
-    r"^(Big Buck Bunny.*|Blender( · .*)?|Vídeo [AB]|Olá|Trilha da câmera|\d+\. Item \d+.*"
+    r"^(Big Buck Bunny.*|Blender( · .*)?|Vídeo [AB]|Olá|Trilha da c(â(m(e(ra?)?)?)?)?|\d+\. Item \d+.*"
     r"|Português \(Brasil\)|English"
     r"|\d+ kbps · \w+ · [\d.,]+ \w?B"
     # O que a aba Metadados mostra do próprio arquivo: codec, idioma da trilha
@@ -539,7 +539,9 @@ def _portugues() -> re.Pattern:
 # traduzem.
 _DADO_EMBUTIDO = re.compile(
     r"\S*\.(mp4|mkv|webm|mov|m4a|mp3|png|jpg|vmp|json|wav|flac|ogg|opus|gif|avi)\b|\bOlá\b|\bVídeo [AB]\b"
-    r"|\bTrilha da câmera\b",
+    # O nome da trilha chega cortado na linha do tempo (``Trilha da câm…``): vale qualquer prefixo dele a partir de
+    # "Trilha da c", e não a palavra "trilha" solta, que é de catálogo.
+    r"|\bTrilha da c(â(m(e(ra?)?)?)?)?",
     re.IGNORECASE,
 )
 

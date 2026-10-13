@@ -43,7 +43,6 @@ from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
     QDropEvent,
-    QFontDatabase,
     QFontMetrics,
     QIcon,
     QImage,
@@ -121,7 +120,7 @@ from videomanager.domain.timing import frame_step
 from videomanager.domain.timing import keyframe_after
 from videomanager.domain.timing import keyframe_at_or_before
 from videomanager.presentation.qt.tasks import WorkerRunner
-from videomanager.presentation.qt import icons
+from videomanager.presentation.qt import fonts, icons
 from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.i18n import bind, on_language_change, release, retext_items, switching
 from videomanager.presentation.qt.editor_project import EditorProject
@@ -1755,7 +1754,7 @@ class EditPanel(QWidget):
         return box
 
     def _build_transport(self) -> QWidget:
-        mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        mono = fonts.mono()
         self._time_label = QLabel(
             strings.EDIT_POSITION.format(
                 current=format_timecode(0, milliseconds=False),

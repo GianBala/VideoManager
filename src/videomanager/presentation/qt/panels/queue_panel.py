@@ -14,7 +14,6 @@ from PySide6.QtGui import (
     QAction,
     QColor,
     QDesktopServices,
-    QFontDatabase,
     QPainter,
     QPalette,
 )
@@ -40,7 +39,7 @@ from videomanager.application.formatting import DASH
 from videomanager.application.formatting import format_size
 from videomanager.application.jobs.models import Job
 from videomanager.application.jobs.models import JobStatus
-from videomanager.presentation.qt import icons, strings, theme
+from videomanager.presentation.qt import fonts, icons, strings, theme
 from videomanager.presentation.qt.i18n import bind, on_language_change
 from videomanager.presentation.qt.panels.queue_cards import REGIOES_CLICAVEIS, TaskDelegate, situacao, velocidade_e_tempo
 from videomanager.presentation.qt.ports import DesktopRuntimePort
@@ -547,7 +546,7 @@ class QueuePanel(QFrame):
         text.setReadOnly(True)
         # Monoespaçada: é saída de ferramenta, com colunas e caminhos que só
         # ficam legíveis alinhados.
-        text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        text.setFont(fonts.mono())
         text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         text.setPlainText("\n".join(job.log))
         box.addWidget(text)

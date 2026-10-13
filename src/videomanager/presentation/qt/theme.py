@@ -17,11 +17,32 @@ from __future__ import annotations
 import logging
 import weakref
 from collections.abc import Callable
+from pathlib import Path
 
 import shiboken6
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import QPointF, QStandardPaths, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPalette, QPen, QPolygonF
+from PySide6.QtWidgets import QProxyStyle, QStyle
 
 from videomanager.presentation.qt import paletas
+
+
+
+class EstiloDaAplicacao(QProxyStyle):
+    """O Fusion, que é o único estilo idêntico no Windows e no Linux, sem o sublinhado fixo dos atalhos.
+
+    O Qt sublinha a letra de atalho ("A̲rquivo") sempre que o estilo manda; com a dica desligada ela só aparece
+    enquanto Alt está apertado, e o atalho continua funcionando. Os protótipos têm a barra de menus sem sublinhado.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Fusion")
+
+    def styleHint(self, hint, option=None, widget=None, returnData=None) -> int:  # noqa: N802
+        if hint == QStyle.StyleHint.SH_UnderlineShortcut:
+            return 0
+        return super().styleHint(hint, option, widget, returnData)
+
 
 # Largura dos campos de escolha, igual nas duas abas. Sem o teto, um formulário
 # estica o combo por toda a coluna: 800 px para escolher "1080p" fica
@@ -38,7 +59,7 @@ _QSS = """
 QWidget {{
     background: {canvas};
     color: {text};
-    font-size: 10pt;
+    font-size: 13px;
 }}
 /* O título fica dentro da moldura, e não montado sobre ela.
    Fora, a linha da borda cortava as letras — o texto é mais alto que a margem
@@ -96,7 +117,9 @@ QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QListWidget, QTreeWidget {{
 }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {accent}; }}
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{ color: {t2}; }}
-QComboBox::drop-down {{ border: none; width: 20px; }}
+QComboBox::drop-down {{ border: none; width: 26px; }}
+QComboBox::down-arrow {{ image: url("{img_chevron}"); width: 12px; height: 12px; }}
+QComboBox::down-arrow:disabled {{ image: url("{img_chevron_dim}"); }}
 QComboBox QAbstractItemView {{
     background: {raised};
     border: 1px solid {raised2};
@@ -196,14 +219,17 @@ QFrame[role="popover"] QLabel {{ background: transparent; }}
 QLabel[role="dirty-dot"] {{ background: {warn}; border-radius: 4px; }}
 /* Fila de tarefas: os cartões se pintam sozinhos, sobre o fundo do painel. */
 QListView[role="queue"] {{ background: transparent; border: none; }}
-/* Menu lateral: itens de ícone e texto embaixo; o marcado leva o tom do acento e uma faixa na borda. A
-   borda existe sempre (transparente) para o item marcado ou focado não mudar de medida: 1 px em volta, 3 px à esquerda. */
+/* Menu lateral: itens de ícone e texto embaixo; o marcado leva o tom do acento, e a faixa de seleção é pintada pelo
+   próprio menu rente à borda da janela (``NavRail.paintEvent``), fora do item. A borda existe sempre (transparente)
+   para o item focado não mudar de medida. O item que só liga e desliga (a gaveta) não ganha fundo: aberto, só o ícone
+   vai para o acento. */
 QWidget[role="rail"] {{ background: {panel}; }}
-QToolButton[role="rail-item"] {{ background: transparent; color: {t2}; border: 1px solid transparent; border-left: 3px solid transparent; border-radius: 11px; padding: 8px 0px 6px 0px; font-size: 11px; font-weight: 500; }}
+QToolButton[role="rail-item"] {{ background: transparent; color: {t2}; border: 1px solid transparent; border-radius: 11px; padding: 6px 0px 5px 0px; font-size: 11px; font-weight: 500; }}
 QToolButton[role="rail-item"]:hover {{ background: {raised}; color: {text}; }}
-QToolButton[role="rail-item"]:checked {{ background: {soft16}; color: {text}; border-left-color: {accent}; }}
+QToolButton[role="rail-item"]:checked {{ background: {soft16}; color: {text}; }}
+QToolButton[role="rail-item"][toggle="true"]:checked {{ background: transparent; color: {t2}; }}
+QToolButton[role="rail-item"][toggle="true"]:checked:hover {{ background: {raised}; color: {text}; }}
 QToolButton[role="rail-item"]:focus {{ border-color: {focus}; }}
-QToolButton[role="rail-item"]:checked:focus {{ border-left-color: {accent}; }}
 /* Aviso flutuante: sobre a janela, no plano elevado, com a ação e o fechar sem moldura. */
 QFrame[role="toast"] {{ background: {raised2}; border: 1px solid {raised2}; border-radius: 13px; }}
 QFrame[role="toast"] QLabel {{ background: transparent; }}
@@ -272,7 +298,7 @@ QRadioButton::indicator, QCheckBox::indicator {{
     border: 1px solid {t2};
 }}
 QRadioButton::indicator {{ border-radius: 8px; }}
-QCheckBox::indicator {{ border-radius: 4px; }}
+QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 5px; }}
 /* Foco do teclado: anel de 2 px na cor de foco, com o miolo 2 px menor — os
    mesmos 16 px. Mudar só a cor da borda fina não chegava a 3:1 contra o
    cinza do indicador sem foco. Fica antes de :checked, que manda no tamanho
@@ -288,7 +314,7 @@ QRadioButton::indicator:checked {{
     background: {raised};
     border: 4px solid {accent};
 }}
-QCheckBox::indicator:checked {{ background: {accent}; border-color: {accent}; }}
+QCheckBox::indicator:checked {{ background: {accent}; border-color: {accent}; image: url("{img_check}"); }}
 QRadioButton::indicator:hover, QCheckBox::indicator:hover {{ border-color: {accent}; }}
 QRadioButton::indicator:checked:focus, QCheckBox::indicator:checked:focus {{ border-color: {focus}; }}
 QRadioButton:disabled, QCheckBox:disabled {{ color: {t2}; }}
@@ -363,7 +389,11 @@ QSplitter::handle:vertical {{ height: 8px; }}
 QSplitter::handle:hover {{ background: {raised2}; }}
 
 QMenuBar, QMenu {{ background: {panel}; }}
-QMenuBar::item:selected, QMenu::item:selected {{
+/* Barra de menus: 28 px, com um fio embaixo, e texto discreto de 12 px. */
+QMenuBar {{ border-bottom: 1px solid {raised}; padding: 0px 8px; }}
+QMenuBar::item {{ background: transparent; color: {t2}; font-size: 12px; padding: 6px 10px; border-radius: 6px; }}
+QMenuBar::item:selected {{ background: {raised}; color: {text}; }}
+QMenu::item:selected {{
     background: {fill_a}; color: {on_fill};
 }}
 QMenu {{ border: 1px solid {raised2}; padding: 4px; }}
@@ -486,6 +516,45 @@ def papeis(theme: str, nome: str = paletas.PADRAO) -> dict[str, str]:
     return paletas.papeis(nome, theme)
 
 
+def _chevron(p: QPainter, lado: float) -> None:
+    u = lado / 12.0
+    p.drawPolyline(QPolygonF([QPointF(2.6 * u, 4.4 * u), QPointF(6 * u, 7.8 * u), QPointF(9.4 * u, 4.4 * u)]))
+
+
+def _visto(p: QPainter, lado: float) -> None:
+    u = lado / 12.0
+    p.drawPolyline(QPolygonF([QPointF(2.6 * u, 6.4 * u), QPointF(5 * u, 8.8 * u), QPointF(9.4 * u, 3.6 * u)]))
+
+
+def _imagem(nome: str, cor: str, desenho, espessura: float = 1.6) -> str:
+    """O PNG de ``desenho`` na ``cor``, escrito uma vez na pasta de cache, e o caminho para o ``url()`` do QSS.
+
+    O QSS só aceita arquivo de imagem, e o ícone desenhado à mão (``icons``) não é arquivo: a seta do combo e o
+    visto da caixa de seleção saem daqui, em 12 px e em 24 px (``@2x``, que o Qt escolhe sozinho em tela densa).
+    O nome leva a cor, então trocar de paleta não reaproveita a imagem da outra.
+    """
+    pasta = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)) / "estilo"
+    pasta.mkdir(parents=True, exist_ok=True)
+    base = pasta / f"{nome}-{cor.lstrip('#')}"
+    for escala, sufixo in ((1, ""), (2, "@2x")):
+        alvo = Path(f"{base}{sufixo}.png")
+        if alvo.exists():
+            continue
+        lado = 12 * escala
+        imagem = QImage(lado, lado, QImage.Format.Format_ARGB32)
+        imagem.fill(Qt.GlobalColor.transparent)
+        pintor = QPainter(imagem)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        caneta = QPen(QColor(cor), espessura * escala)
+        caneta.setCapStyle(Qt.PenCapStyle.RoundCap)
+        caneta.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        pintor.setPen(caneta)
+        desenho(pintor, lado)
+        pintor.end()
+        imagem.save(str(alvo))
+    return f"{base}.png".replace("\\", "/")
+
+
 def _cores_do_estilo(theme: str, nome: str) -> dict[str, str]:
     """O que o QSS interpola: os papéis, o foco e o selo, e o acento a 16% de opacidade."""
     cores = {**papeis(theme, nome), **{k: palette(theme, nome)[k] for k in ("focus", "live")}}
@@ -498,6 +567,10 @@ def _cores_do_estilo(theme: str, nome: str) -> dict[str, str]:
     # O selo "ao vivo" tem fundo vermelho fixo nos dois modos; o texto dele é sempre branco, e não o
     # texto do botão primário, que nas paletas de botão claro ou âmbar é escuro.
     cores["live_text"] = "#ffffff"
+    # As imagens do QSS (o QSS não desenha): seta do combo, na cor do texto discreto, e o visto sobre o acento.
+    cores["img_chevron"] = _imagem("chevron", cores["t2"], _chevron)
+    cores["img_chevron_dim"] = _imagem("chevron", cores["t3"], _chevron)
+    cores["img_check"] = _imagem("check", cores["canvas"], _visto, 1.9)
     return cores
 
 

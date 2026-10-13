@@ -71,7 +71,7 @@ from videomanager.domain.project import MediaRef
 from videomanager.presentation.qt.panels.section import Section
 from videomanager.presentation.qt.panels.timeline import MEDIA_MIME
 
-from videomanager.presentation.qt import icons, strings, theme
+from videomanager.presentation.qt import fonts, icons, strings, theme
 from videomanager.presentation.qt.theme import TIPOS_DE_BLOCO
 from videomanager.presentation.qt.i18n import bind, on_language_change, retext_items
 from videomanager.domain.i18n import decimal
@@ -1273,9 +1273,8 @@ class _ClipPropertiesWidget(QWidget):
         self._title_lbl = QLabel(strings.PROP_TITLE)
         self._title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._title_lbl.setMinimumWidth(0)
-        f_title = self._title_lbl.font()
+        f_title = fonts.resized(self._title_lbl.font(), delta=1)
         f_title.setBold(True)
-        f_title.setPointSize(f_title.pointSize() + 1)
         self._title_lbl.setFont(f_title)
         names.addWidget(self._title_lbl)
         # O mesmo que o cabeçalho mostra sem bloco (ver _refresh_header): vazio,

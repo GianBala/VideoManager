@@ -59,7 +59,7 @@ from videomanager.domain.project import accepts
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_step
-from videomanager.presentation.qt import icons, strings
+from videomanager.presentation.qt import fonts, icons, strings
 from videomanager.presentation.qt.theme import TIPOS_DE_BLOCO
 
 # Mídia do acervo sendo arrastada: lista JSON de {"path", "kind", "duration"}.
@@ -657,8 +657,7 @@ class Timeline(QWidget):
         painter.end()
 
     def _paint_ruler(self, painter: QPainter) -> None:
-        font = QFont(self.font())
-        font.setPointSizeF(max(7.0, font.pointSizeF() - 2))
+        font = fonts.resized(self.font(), delta=-2, minimum=9)
         painter.setFont(font)
         step = next(
             (s for s in _RULER_STEPS if s / self._seconds_per_pixel() >= _RULER_LABEL_SPACE),
@@ -698,8 +697,7 @@ class Timeline(QWidget):
             painter.setBrush(self._color("surface"))
         painter.drawRoundedRect(rect, 5, 5)
 
-        font = QFont(self.font())
-        font.setPointSizeF(max(7.5, font.pointSizeF() - 1.5))
+        font = fonts.resized(self.font(), delta=-2, minimum=9)
         painter.setFont(font)
         painter.setPen(
             self._color("accent_text") if is_dragged else self._color("text_dim")
@@ -997,8 +995,7 @@ class Timeline(QWidget):
     def _paint_clip_label(
         self, painter: QPainter, clip: Clip, rect: QRectF, track
     ) -> None:
-        font = QFont(self.font())
-        font.setPointSizeF(max(7.0, font.pointSizeF() - 2))
+        font = fonts.resized(self.font(), delta=-2, minimum=9)
         painter.setFont(font)
 
         strip = QRectF(rect.left(), rect.top() + _FAIXA_DO_BLOCO, rect.width(), 13)
