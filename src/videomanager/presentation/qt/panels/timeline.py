@@ -33,6 +33,7 @@ from PySide6.QtCore import QEvent, QMimeData, QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QIcon,
     QFontMetrics,
     QHelpEvent,
     QImage,
@@ -58,7 +59,8 @@ from videomanager.domain.project import accepts
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_step
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import icons, strings
+from videomanager.presentation.qt.theme import TIPOS_DE_BLOCO
 
 # Mídia do acervo sendo arrastada: lista JSON de {"path", "kind", "duration"}.
 # Leva espécie e duração para a linha do tempo desenhar o bloco fantasma antes
@@ -74,6 +76,19 @@ TRACK_GAP = 4
 
 # Miniatura de bloco de vídeo: 16:9 sobre a altura útil da trilha.
 FILM_CELL_WIDTH = int((VIDEO_TRACK_HEIGHT - 14) * 16 / 9)
+
+_TIPOS = TIPOS_DE_BLOCO
+_ICONES_DO_TIPO = {
+    "video": icons.nav_edit, "audio": icons.music, "text": icons.type_text, "image": icons.type_image,
+    "filter": icons.type_filter, "transition": icons.nav_convert,
+}
+_TIPO_DA_TRILHA = {TrackKind.VIDEO: "video", TrackKind.AUDIO: "audio", TrackKind.ADDITIONAL: "text"}
+# Ladrilho do ícone no cabeçalho da trilha e no rótulo do bloco, em pixels.
+_TILE_CABECALHO = 18
+_ICONE_CABECALHO = 12
+_ICONE_ROTULO = 11
+# Faixa de cor no topo de cada bloco.
+_FAIXA_DO_BLOCO = 3
 
 _HANDLE_GRAB = 8
 _HANDLE_WIDTH = 5
@@ -252,6 +267,7 @@ class Timeline(QWidget):
     def __init__(self, colors: dict[str, str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._c = colors
+        self._icones: dict[tuple[str, int], QIcon] = {}
         self._project = Project()
         self._position = 0.0
         self._selected = -1
@@ -585,6 +601,33 @@ class Timeline(QWidget):
         color.setAlpha(alpha)
         return color
 
+    @staticmethod
+    def _color_of_type(tipo: str, alpha: int = 255) -> QColor:
+        color = QColor(_TIPOS[tipo])
+        color.setAlpha(alpha)
+        return color
+
+    @staticmethod
+    def _tipo(clip: Clip, track) -> str:
+        """A espécie do bloco: ela é do bloco, e não da mídia dele (o áudio separado de um vídeo é áudio)."""
+        if clip.is_transition:
+            return "transition"
+        if track.kind is TrackKind.ADDITIONAL:
+            if clip.overlay_type is OverlayType.FILTER:
+                return "filter"
+            if clip.is_image or clip.overlay_type is OverlayType.IMAGE:
+                return "image"
+            return "text"
+        if track.kind is TrackKind.AUDIO or clip.audio_only:
+            return "audio"
+        return "image" if clip.is_image else "video"
+
+    def _icone(self, tipo: str, tamanho: int) -> QIcon:
+        chave = (tipo, tamanho)
+        if chave not in self._icones:
+            self._icones[chave] = _ICONES_DO_TIPO[tipo](_TIPOS[tipo], tamanho)
+        return self._icones[chave]
+
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -667,10 +710,21 @@ class Timeline(QWidget):
         right_margin = -28
         if track.kind is TrackKind.VIDEO:
             right_margin = -54
+        # O ícone da espécie da trilha, num ladrilho na cor dela: achar a trilha de áudio é achar o verde.
+        tipo = _TIPO_DA_TRILHA[track.kind]
+        tile = QRectF(rect.left() + 6, rect.center().y() - _TILE_CABECALHO / 2, _TILE_CABECALHO, _TILE_CABECALHO)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._color_of_type(tipo, 46))
+        painter.drawRoundedRect(tile, 5, 5)
+        offset = (_TILE_CABECALHO - _ICONE_CABECALHO) / 2
+        self._icone(tipo, _ICONE_CABECALHO).paint(
+            painter, QRect(int(tile.left() + offset), int(tile.top() + offset), _ICONE_CABECALHO, _ICONE_CABECALHO))
+        painter.setPen(self._color("accent_text") if is_dragged else self._color("text_dim"))
+        area = rect.adjusted(6 + _TILE_CABECALHO + 6, 0, right_margin, 0)
         painter.drawText(
-            rect.adjusted(10, 0, right_margin, 0),
+            area,
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            track.title,
+            QFontMetrics(font).elidedText(track.title, Qt.TextElideMode.ElideRight, int(area.width())),
         )
 
         # Botão de visibilidade (olho): para vídeo e adicionais
@@ -824,6 +878,8 @@ class Timeline(QWidget):
         elif track.kind is TrackKind.AUDIO:
             self._paint_wave(painter, clip, rect)
         self._paint_clip_label(painter, clip, rect, track)
+        tipo = self._tipo(clip, track)
+        painter.fillRect(QRectF(rect.left(), rect.top(), rect.width(), _FAIXA_DO_BLOCO), self._color_of_type(tipo))
         painter.restore()
 
         selected = clip.clip_id == self._selected
@@ -847,7 +903,7 @@ class Timeline(QWidget):
             else:
                 border_pen = QPen(QColor(186, 104, 200), 1)
         else:
-            border_pen = QPen(self._color("border"), 1)
+            border_pen = QPen(self._color_of_type(tipo, 160), 1)
         painter.setPen(border_pen)
         painter.drawPath(path)
         if selected:
@@ -948,7 +1004,7 @@ class Timeline(QWidget):
         font.setPointSizeF(max(7.0, font.pointSizeF() - 2))
         painter.setFont(font)
 
-        strip = QRectF(rect.left(), rect.top(), rect.width(), 13)
+        strip = QRectF(rect.left(), rect.top() + _FAIXA_DO_BLOCO, rect.width(), 13)
         painter.fillRect(strip, self._color("bg", 190))
         silenced = clip.muted or track.muted
         painter.setPen(
@@ -964,27 +1020,30 @@ class Timeline(QWidget):
             badges.append(clip.gain_label)
 
         if clip.overlay_type is OverlayType.TEXT:
-            text = f"🔤 {clip.text_content or strings.EDIT_CLIP_TEXT}"
+            text = clip.text_content or strings.EDIT_CLIP_TEXT
         elif clip.overlay_type is OverlayType.FILTER:
-            name = strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
-            text = f"🎨 {name}"
+            text = strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
         elif clip.overlay_type is OverlayType.TRANSITION:
-            name = strings.EDIT_TRANSITIONS.get(clip.transition_name,
+            text = strings.EDIT_TRANSITIONS.get(clip.transition_name,
                                                 ("", clip.transition_name or strings.EDIT_CLIP_TRANSITION))[1]
-            text = f"⏳ {name}"
-        elif clip.overlay_type is OverlayType.IMAGE or clip.is_image:
-            text = f"🖼️ {clip.media.name}"
         else:
             text = clip.media.name
 
         if badges:
             text = f"{text}   {' · '.join(badges)}"
 
+        # O ícone da espécie no lugar do emoji: o sistema o desenhava colorido e do tamanho dele.
+        left = 6.0
+        if rect.width() >= 3 * _ICONE_ROTULO:
+            self._icone(self._tipo(clip, track), _ICONE_ROTULO).paint(
+                painter, QRect(int(rect.left() + 6), int(strip.top() + (strip.height() - _ICONE_ROTULO) / 2),
+                               _ICONE_ROTULO, _ICONE_ROTULO))
+            left += _ICONE_ROTULO + 4
         painter.drawText(
-            strip.adjusted(6, 0, -4, 0),
+            strip.adjusted(left, 0, -4, 0),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             QFontMetrics(font).elidedText(
-                text, Qt.TextElideMode.ElideRight, int(rect.width()) - 10
+                text, Qt.TextElideMode.ElideRight, int(rect.width() - left - 4)
             ),
         )
 
