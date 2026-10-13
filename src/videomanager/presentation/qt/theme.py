@@ -149,7 +149,17 @@ QPushButton[role="palette"]:hover {{ border-color: {raised2}; }}
 QListWidget[role="files"] {{ background: transparent; border: none; padding: 0px; }}
 QFrame[role="segments"] {{ background: {raised}; border: 1px solid {raised}; border-radius: 10px; }}
 QFrame[role="callout"] {{ background: {soft16}; border: 1px solid {soft16}; border-radius: 10px; }}
+QFrame[role="callout-warn"] {{ background: {warn16}; border: 1px solid {warn16}; border-radius: 10px; }}
 QLabel[role="callout-title"] {{ color: {accent}; font-size: 11px; font-weight: 700; }}
+
+/* Janela de configurações: abas sublinhadas e títulos de grupo em caixa alta. */
+QTabBar[role="underline"]::tab {{ background: transparent; color: {t2}; padding: 9px 12px; margin-right: 8px;
+    border: none; border-bottom: 2px solid transparent; border-radius: 0px; }}
+QTabBar[role="underline"]::tab:hover {{ color: {text}; }}
+QTabBar[role="underline"]::tab:selected {{ background: transparent; color: {accent}; font-weight: 600;
+    border-bottom: 2px solid {accent}; }}
+QTabBar[role="underline"]::tab:focus {{ border: 1px solid {focus}; border-bottom: 2px solid {accent}; }}
+QLabel[role="group-heading"] {{ color: {t3}; font-size: 11px; font-weight: 700; padding-top: 6px; }}
 
 /* Gaveta de tarefas: coluna à direita, no tom do menu lateral, separada do conteúdo por um fio. */
 QFrame[role="drawer"] {{ background: {panel}; border: none; border-left: 1px solid {raised}; }}
@@ -450,6 +460,8 @@ def _cores_do_estilo(theme: str, nome: str) -> dict[str, str]:
     cores["soft16"] = f"rgba({vermelho}, {verde}, {azul}, 0.16)"
     erro_r, erro_g, erro_b = (int(cores["err"][i:i + 2], 16) for i in (1, 3, 5))
     cores["err16"] = f"rgba({erro_r}, {erro_g}, {erro_b}, 0.16)"
+    aviso_r, aviso_g, aviso_b = (int(cores["warn"][i:i + 2], 16) for i in (1, 3, 5))
+    cores["warn16"] = f"rgba({aviso_r}, {aviso_g}, {aviso_b}, 0.16)"
     # O selo "ao vivo" tem fundo vermelho fixo nos dois modos; o texto dele é sempre branco, e não o
     # texto do botão primário, que nas paletas de botão claro ou âmbar é escuro.
     cores["live_text"] = "#ffffff"

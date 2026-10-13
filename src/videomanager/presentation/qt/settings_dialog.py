@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -28,6 +27,7 @@ from videomanager.application.preferences import Preferences as Settings
 from videomanager.application.preferences import RANGES
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
+from videomanager.presentation.qt.arrow_spin import ArrowSpinBox
 from videomanager.presentation.qt.i18n import align_label_column
 from videomanager.presentation.qt.palette_picker import SeletorDePaleta
 from videomanager.presentation.qt.theme import FIELD_WIDTH
@@ -66,6 +66,7 @@ class SettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
+        tabs.tabBar().setProperty("role", "underline")
         tabs.addTab(self._build_general(), strings.SETTINGS_TAB_GENERAL)
         tabs.addTab(self._build_theme(), strings.SETTINGS_TAB_THEME)
         tabs.addTab(self._build_network(), strings.SETTINGS_TAB_NETWORK)
@@ -78,6 +79,7 @@ class SettingsDialog(QDialog):
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setProperty("role", "primary")
         layout.addWidget(buttons)
 
     # ------------------------------------------------------------------
@@ -92,6 +94,13 @@ class SettingsDialog(QDialog):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
         return page, form
+
+    @staticmethod
+    def _add_heading(form: QFormLayout, text: str) -> None:
+        """Título de um grupo de campos: "DOWNLOADS", "VÍDEO"… Só agrupa, não guarda nada."""
+        heading = QLabel(text.upper())
+        heading.setProperty("role", "group-heading")
+        form.addRow(heading)
 
     def _add_row(self, form: QFormLayout, text: str, field: QWidget | QHBoxLayout) -> None:
         label = QLabel(text)
@@ -145,6 +154,7 @@ class SettingsDialog(QDialog):
     def _build_general(self) -> QWidget:
         page, form = self._make_page()
 
+        self._add_heading(form, strings.SETTINGS_GROUP_DOWNLOADS)
         row = QHBoxLayout()
         # Sem margem própria: com ela a linha do destino terminava antes das
         # outras da mesma coluna.
@@ -160,6 +170,7 @@ class SettingsDialog(QDialog):
         self._separate.setChecked(self._settings.separate_by_site)
         self._add_check(form, self._separate)
 
+        self._add_heading(form, strings.SETTINGS_GROUP_LANGUAGE)
         self._language = QComboBox()
         for code, name in strings.LANGUAGE_NAMES.items():
             self._language.addItem(name, code)
@@ -167,6 +178,7 @@ class SettingsDialog(QDialog):
         self._language.setFixedWidth(FIELD_WIDTH)
         self._add_row(form, strings.SETTINGS_LANGUAGE, self._language)
 
+        self._add_heading(form, strings.SETTINGS_GROUP_VIDEO)
         self._encoder = QComboBox()
         for value, label in hwaccel.choices():
             self._encoder.addItem(label, value)
@@ -234,7 +246,7 @@ class SettingsDialog(QDialog):
         self._theme.setFixedWidth(FIELD_WIDTH)
         self._add_row(form, strings.SETTINGS_THEME_MODE, self._theme)
 
-        form.addRow(QLabel(strings.SETTINGS_PALETTE))
+        self._add_heading(form, strings.SETTINGS_PALETTE)
         self._palette_picker = SeletorDePaleta(self._settings.palette, self._settings.theme)
         form.addRow(self._palette_picker)
         hint = QLabel(strings.SETTINGS_PALETTE_HINT)
@@ -249,17 +261,18 @@ class SettingsDialog(QDialog):
     def _build_network(self) -> QWidget:
         page, form = self._make_page()
 
-        self._concurrent = QSpinBox()
+        self._add_heading(form, strings.SETTINGS_GROUP_SPEED)
+        self._concurrent = ArrowSpinBox()
         self._concurrent.setRange(*RANGES["max_concurrent_jobs"])
         self._concurrent.setValue(self._settings.max_concurrent_jobs)
         self._add_row(form, strings.SETTINGS_CONCURRENT, self._concurrent)
 
-        self._fragments = QSpinBox()
+        self._fragments = ArrowSpinBox()
         self._fragments.setRange(*RANGES["concurrent_fragments"])
         self._fragments.setValue(self._settings.concurrent_fragments)
         self._add_row(form, strings.SETTINGS_FRAGMENTS, self._fragments)
 
-        self._rate = QSpinBox()
+        self._rate = ArrowSpinBox()
         self._rate.setRange(*RANGES["rate_limit_kbps"])
         self._rate.setSingleStep(256)
         self._rate.setValue(self._settings.rate_limit_kbps)
@@ -268,6 +281,7 @@ class SettingsDialog(QDialog):
         for spin in (self._concurrent, self._fragments, self._rate):
             spin.setFixedWidth(_NUMBER_WIDTH)
 
+        self._add_heading(form, strings.SETTINGS_GROUP_COOKIES)
         self._cookies = QComboBox()
         self._cookies.addItem(strings.SETTINGS_COOKIES_NONE, "")
         for browser in sorted(self._runtime.cookie_browsers):
@@ -295,6 +309,7 @@ class SettingsDialog(QDialog):
     def _build_subs(self) -> QWidget:
         page, form = self._make_page()
 
+        self._add_heading(form, strings.SETTINGS_GROUP_FILE)
         self._embed_thumb = QCheckBox(strings.SETTINGS_EMBED_THUMB)
         self._embed_thumb.setChecked(self._settings.embed_thumbnail)
         self._add_check(form, self._embed_thumb)
@@ -303,6 +318,7 @@ class SettingsDialog(QDialog):
         self._embed_meta.setChecked(self._settings.embed_metadata)
         self._add_check(form, self._embed_meta)
 
+        self._add_heading(form, strings.SETTINGS_GROUP_SUBS)
         self._write_subs = QCheckBox(strings.SETTINGS_WRITE_SUBS)
         self._write_subs.setChecked(self._settings.write_subtitles)
         self._add_check(form, self._write_subs)

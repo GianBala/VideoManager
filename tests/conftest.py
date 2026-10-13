@@ -214,3 +214,32 @@ def pytest_collection_modifyitems(config, items):
     ficam, fora = fatiar(items, indice, total)
     items[:] = ficam
     config.hook.pytest_deselected(items=fora)
+
+
+@pytest.fixture
+def dialogo_de_exportacao(desktop_app, tmp_path):
+    """O diálogo de exportação de um projeto de um clipe só — o único caso em que o "Corte rápido" é permitido."""
+    from videomanager.application.capabilities import FFmpegTools
+    from videomanager.bootstrap import build_desktop_runtime, build_processing_service
+    from videomanager.domain.media import LocalMedia, LocalStream
+    from videomanager.domain.project import Clip, MediaKind, MediaRef, TrackKind, new_project
+    from videomanager.infrastructure.storage.settings import Settings
+    from videomanager.presentation.qt.export_dialog import ExportDialog
+    ffmpeg, ffprobe = tmp_path / "ffmpeg", tmp_path / "ffprobe"
+    for arquivo in (ffmpeg, ffprobe):
+        arquivo.write_text("#!/bin/sh\nexit 0\n")
+        arquivo.chmod(0o755)
+    ferramentas = FFmpegTools(ffmpeg=ffmpeg, ffprobe=ffprobe, source="sistema")
+    caminho = tmp_path / "video.mp4"
+    caminho.write_bytes(b"x")
+    ref = MediaRef(path=caminho, kind=MediaKind.VIDEO, duration=60.0, width=1920, height=1080, fps=30.0,
+                   has_audio=True)
+    local = LocalMedia(path=caminho, duration=60.0, format_name="mov,mp4", size=1024, streams=(
+        LocalStream(index=0, kind="video", codec="h264", width=1920, height=1080, fps=30.0),
+        LocalStream(index=1, kind="audio", codec="aac", channels=2)))
+    projeto = new_project().with_track(TrackKind.VIDEO).with_clip(0, Clip(media=ref, start=0.0, duration=30.0))
+    instancia = ExportDialog(project=projeto, settings=Settings(), pool=[ref], probed={ref.path: local},
+                             keyframes=(0.0, 5.0, 10.0), ensure_tools=lambda: ferramentas,
+                             processing=build_processing_service(), runtime=build_desktop_runtime())
+    yield instancia
+    instancia.deleteLater()
