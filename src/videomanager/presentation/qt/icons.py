@@ -526,3 +526,34 @@ def chevron_down(color: str, size: int = _SIZE) -> QIcon:
     painter.drawPolyline(QPolygonF([QPointF(3.8 * u, 6.8 * u), QPointF(9.0 * u, 12.0 * u), QPointF(14.2 * u, 6.8 * u)]))
     painter.end()
     return QIcon(pixmap)
+
+
+# ---------------------------------------------------------------------------
+# Espécies de bloco da linha do tempo
+# ---------------------------------------------------------------------------
+
+def type_text(color: str, size: int = _NAV) -> QIcon:
+    """Bloco de texto: a letra T."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawLine(QPointF(6 * u, 6.5 * u), QPointF(18 * u, 6.5 * u))
+        p.drawLine(QPointF(12 * u, 6.5 * u), QPointF(12 * u, 18.5 * u))
+        p.drawLine(QPointF(9.5 * u, 18.5 * u), QPointF(14.5 * u, 18.5 * u))
+    return _nav(color, size, desenho)
+
+
+def type_filter(color: str, size: int = _NAV) -> QIcon:
+    """Bloco de filtro: dois círculos que se sobrepõem."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawEllipse(QPointF(9.5 * u, 12 * u), 5.5 * u, 5.5 * u)
+        p.drawEllipse(QPointF(14.5 * u, 12 * u), 5.5 * u, 5.5 * u)
+    return _nav(color, size, desenho)
+
+
+def type_image(color: str, size: int = _NAV) -> QIcon:
+    """Bloco de imagem: moldura com o sol e a montanha."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawRoundedRect(QRectF(4.5 * u, 5.5 * u, 15 * u, 13 * u), 2 * u, 2 * u)
+        p.drawEllipse(QPointF(9.2 * u, 10 * u), 1.6 * u, 1.6 * u)
+        p.drawPolyline(QPolygonF([QPointF(5 * u, 17 * u), QPointF(10.5 * u, 12.5 * u), QPointF(14 * u, 15.5 * u),
+                                  QPointF(16.5 * u, 13.5 * u), QPointF(19 * u, 16.5 * u)]))
+    return _nav(color, size, desenho)
