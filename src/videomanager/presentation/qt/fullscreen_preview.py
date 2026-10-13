@@ -25,7 +25,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QFontDatabase, QFontMetrics, QPixmap
+from PySide6.QtGui import QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QHBoxLayout,
@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager.domain.timing import format_timecode
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import fonts, strings
 from videomanager.presentation.qt.i18n import bind, on_language_change
 
 # Inatividade até a barra sumir. Curto o bastante para a imagem ficar limpa
@@ -187,7 +187,7 @@ class FullscreenPreview(QWidget):
         # Mesmo tratamento dos números da aba: fonte monoespaçada e largura
         # travada em set_state(), senão o tempo corrente empurraria a barra de
         # posição para os lados a cada quadro.
-        mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        mono = fonts.mono()
         self._elapsed = QLabel(format_timecode(0))
         self._elapsed.setFont(mono)
         row.addWidget(self._elapsed)

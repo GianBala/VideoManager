@@ -21,6 +21,7 @@ dos arquivos do programa (no AppImage, `usr/bin/_internal/licenses/`).
 | **Qt 6**, **PySide6** e **Shiboken6** | LGPL-3.0-only | `licenses/LGPL-3.0.txt` e `licenses/LICENSE` (a GPL-3.0, que a LGPL complementa) | [download.qt.io/official_releases/QtForPython](https://download.qt.io/official_releases/QtForPython/) e [code.qt.io](https://code.qt.io/) |
 | **Python** (interpretador e biblioteca padrão) | PSF-2.0 | `licenses/python/LICENSE.txt` | [python.org/downloads/source](https://www.python.org/downloads/source/) |
 | **Deno** v2.9.6 | MIT | `licenses/Deno-MIT.txt` | [denoland/deno@v2.9.6](https://github.com/denoland/deno/tree/v2.9.6) |
+| **Inter**, **JetBrains Mono** e **Carlito** (a fonte da interface, a dos números que mudam sozinhos e a do bloco de texto do editor) | SIL OFL-1.1 | `licenses/OFL-1.1.txt` | [rsms/inter](https://github.com/rsms/inter), [JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) e [googlefonts/carlito](https://github.com/googlefonts/carlito) |
 | **yt-dlp** e **yt-dlp-ejs** | Unlicense (yt-dlp-ejs: Unlicense, MIT e ISC) | `licenses/<pacote>/` | [PyPI](https://pypi.org/project/yt-dlp/) |
 | **mutagen** | GPL-2.0-or-later | `licenses/mutagen/` | [PyPI](https://pypi.org/project/mutagen/) |
 | **certifi** | MPL-2.0 | `licenses/certifi/` | [PyPI](https://pypi.org/project/certifi/) |

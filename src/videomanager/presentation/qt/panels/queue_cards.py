@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QStyle, QStyledItemDelegate
 from videomanager.application.formatting import DASH, format_eta, format_size, format_speed
 from videomanager.application.jobs.models import Job, JobKind, JobStatus
 from videomanager.domain import i18n
-from videomanager.presentation.qt import icons, strings, theme
+from videomanager.presentation.qt import fonts, icons, strings, theme
 
 _PAD = 14
 _TILE = 40
@@ -134,12 +134,7 @@ def fontes(base: QFont) -> tuple[QFont, QFont]:
     """Título em negrito no tamanho do texto; o resto, um pouco menor."""
     titulo = QFont(base)
     titulo.setBold(True)
-    normal = QFont(base)
-    if base.pointSizeF() > 0:
-        normal.setPointSizeF(base.pointSizeF() * 0.93)
-    elif base.pixelSize() > 0:
-        normal.setPixelSize(max(1, round(base.pixelSize() * 0.93)))
-    return titulo, normal
+    return titulo, fonts.resized(base, factor=0.93)
 
 
 def _largura_do_botao(metricas: QFontMetrics, texto: str, com_icone: bool) -> int:

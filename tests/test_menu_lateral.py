@@ -92,9 +92,10 @@ def test_a_troca_de_idioma_retraduz_o_menu_e_mantem_a_selecao(janela):
 
 
 @pytest.mark.parametrize("idioma", ["pt-BR", "en"])
-def test_o_texto_de_cada_item_cabe_na_largura_do_menu(janela, desktop_app, idioma):
+def test_o_texto_de_cada_item_cabe_na_largura_do_menu(tema_do_app, janela, desktop_app, idioma):
     # O menu tem largura fixa: um rótulo mais largo que o item seria cortado nas duas pontas, e "Metadados" é o
     # maior. As bordas (3 px à esquerda, 1 px à direita) existem sempre, então entram na conta.
+    # O tamanho do rótulo (11 px) vem do QSS: sem o tema aplicado o item mede com os 13 px do texto corrente.
     apply_language(idioma)
     for _ in range(3):
         desktop_app.processEvents()
@@ -179,3 +180,66 @@ def test_tab_visita_so_o_item_marcado_e_depois_tarefas_e_ajustes(janela, desktop
         QTest.keyClick(desktop_app.focusWidget(), Qt.Key.Key_Tab)
         desktop_app.processEvents()
         assert desktop_app.focusWidget() is esperado
+
+
+# -- o desenho do menu (protótipo: logo em degradê, faixa na borda, medidas) --------------------------------------
+
+def _cor(imagem: QImage, x: int, y: int) -> str:
+    return imagem.pixelColor(x, y).name()
+
+
+def test_as_medidas_do_menu_sao_as_do_prototipo(tema_do_app, janela, desktop_app):
+    menu = janela._tabs.tabBar()
+    assert menu.width() == LARGURA == 76
+    alturas = {item.height() for item in menu._itens}
+    assert alturas == {54}, alturas
+    # O passo entre itens é a altura do item mais 4 px de respiro.
+    topos = [item.y() for item in menu._itens]
+    assert {b - a for a, b in zip(topos, topos[1:])} == {58}
+
+
+def test_a_marca_e_um_quadrado_em_degrade_com_o_triangulo_de_reproduzir(tema_do_app, janela, desktop_app):
+    marca = janela._tabs.tabBar().findChild(type(janela._tabs.tabBar()._topo.itemAt(0).widget()))
+    assert (marca.width(), marca.height()) == (38, 38)
+    imagem = marca.grab().toImage()
+    cores = theme.papeis("dark", "grafite")
+    # O canto é arredondado (não é do degradê), o meio do lado esquerdo é a primeira cor do degradê e o triângulo é a cor
+    # do texto sobre o preenchimento.
+    assert _cor(imagem, 0, 0).lower() != cores["fill_a"].lower()
+    assert imagem.pixelColor(19, 19).name().lower() == cores["on_fill"].lower()
+    assert imagem.pixelColor(4, 4).name() != imagem.pixelColor(33, 33).name()
+
+
+def test_a_faixa_de_selecao_fica_rente_a_borda_e_acompanha_o_item_marcado(tema_do_app, janela, desktop_app):
+    menu = janela._tabs.tabBar()
+    accent = theme.papeis("dark", "grafite")["accent"].lower()
+    for indice in (_TAB_DOWNLOAD, _TAB_EDIT):
+        janela._tabs.setCurrentIndex(indice)
+        for _ in range(3):
+            desktop_app.processEvents()
+        imagem = menu.grab().toImage()
+        for outro, item in enumerate(menu._itens):
+            meio = item.y() + item.height() // 2
+            assert (_cor(imagem, 1, meio).lower() == accent) == (outro == indice), (indice, outro)
+
+
+def test_o_item_da_gaveta_aberto_so_leva_o_icone_no_acento_sem_fundo(tema_do_app, janela, desktop_app):
+    menu = janela._tabs.tabBar()
+    tarefas = janela._nav_tasks
+    tarefas.setChecked(True)
+    for _ in range(3):
+        desktop_app.processEvents()
+    imagem = menu.grab().toImage()
+    cores = theme.papeis("dark", "grafite")
+    canto = (tarefas.x() + 6, tarefas.y() + 4)
+    assert _cor(imagem, *canto).lower() == cores["panel"].lower()  # sem o fundo de seleção
+    # E o item marcado de uma página, ao contrário, leva o fundo suave.
+    marcado = menu._itens[janela._tabs.currentIndex()]
+    assert _cor(imagem, marcado.x() + 6, marcado.y() + 4).lower() != cores["panel"].lower()
+
+
+def test_a_barra_de_menus_tem_28_px_e_nao_sublinha_os_atalhos(tema_do_app, janela, desktop_app):
+    from PySide6.QtWidgets import QStyle
+    assert janela.menuBar().height() == 28
+    from videomanager.presentation.qt.theme import EstiloDaAplicacao
+    assert EstiloDaAplicacao().styleHint(QStyle.StyleHint.SH_UnderlineShortcut) == 0

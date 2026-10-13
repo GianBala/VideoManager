@@ -15,7 +15,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from videomanager.domain.formats import Mode
-from videomanager.presentation.qt import icons, strings, theme
+from videomanager.presentation.qt import fonts, icons, strings, theme
 from videomanager.presentation.qt.i18n import bind
 
 _PAD = 14
@@ -106,10 +106,7 @@ class ProfileCard(QPushButton):
     def _fontes(self) -> tuple[QFont, QFont]:
         titulo = QFont(self.font())
         titulo.setBold(True)
-        normal = QFont(self.font())
-        if normal.pointSizeF() > 0:
-            normal.setPointSizeF(normal.pointSizeF() * 0.93)
-        return titulo, normal
+        return titulo, fonts.resized(self.font(), factor=0.93)
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(170, self._altura())

@@ -968,7 +968,7 @@ def test_coluna_de_adicionais_nasce_com_a_aba_propriedades_inteira(panel, deskto
         panel.hide()
 
 
-def test_abrir_propriedades_devolve_a_largura_da_aba_a_coluna_estreitada(panel, desktop_app):
+def test_abrir_propriedades_devolve_a_largura_da_aba_a_coluna_estreitada(panel, desktop_app, tema_do_app):
     clip = _image_clip_shown(panel, desktop_app)
     try:
         sizes = panel._top_splitter.sizes()

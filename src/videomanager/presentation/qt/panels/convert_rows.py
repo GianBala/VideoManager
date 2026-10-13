@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QStyle, QStyledItemDelegate
 
 from videomanager.application.formatting import DASH, format_duration, format_size
 from videomanager.domain.media import LocalMedia
-from videomanager.presentation.qt import icons, strings, theme
+from videomanager.presentation.qt import fonts, icons, strings, theme
 
 ROLE_MEDIA = Qt.ItemDataRole.UserRole
 # ``{"size": bytes | None}`` com o tamanho que o arquivo terá (``None`` enquanto a amostra não chega). Item sem
@@ -104,9 +104,7 @@ class RowDelegate(QStyledItemDelegate):
         passando = index.row() == self._hover or bool(option.state & QStyle.StateFlag.State_MouseOver)
         titulo = QFont(option.font)
         titulo.setBold(True)
-        pequeno = QFont(option.font)
-        if pequeno.pointSizeF() > 0:
-            pequeno.setPointSizeF(pequeno.pointSizeF() * 0.9)
+        pequeno = fonts.resized(option.font, factor=0.9)
         mt, mp = QFontMetrics(titulo), QFontMetrics(pequeno)
 
         painter.save()
