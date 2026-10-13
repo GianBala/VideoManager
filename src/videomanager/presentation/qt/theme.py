@@ -408,6 +408,15 @@ _ouvintes: list[Callable[[], Callable[[], None] | None]] = []
 _registro = logging.getLogger(__name__)
 
 
+# Cor de cada espécie de bloco da linha do tempo. É semântica e não muda com a paleta: o que o olho procura
+# (o áudio, o texto, a transição) tem de ter a mesma cor em qualquer tema. Mora aqui, a casa das cores, e não
+# na linha do tempo.
+TIPOS_DE_BLOCO = {
+    "video": "#4f8ef7", "audio": "#34b27b", "text": "#8b6df5", "image": "#22b8cf", "filter": "#6c7bf0",
+    "transition": "#f59e0b",
+}
+
+
 def atual() -> tuple[str, str]:
     """``(modo, paleta)`` em vigor, na forma que :func:`palette` e :func:`papeis` aceitam."""
     return _atual
