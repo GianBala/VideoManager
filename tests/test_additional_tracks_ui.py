@@ -592,18 +592,18 @@ def test_filter_selection_highlight_style(qapp: QApplication, dummy_tools: FFmpe
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
-        # A opção marcada ganha a borda de destaque do tema, sem pintar o
-        # fundo inteiro — e sem cores fixas, que no tema claro deixavam os
-        # botões pretos.
-        from videomanager.presentation.qt.theme import DARK, LIGHT, stylesheet
+        # A opção marcada ganha a borda do papel de destaque do tema e um tom do próprio acento
+        # (16% de opacidade) — e nunca uma cor sólida fixa, que no tema claro deixava os botões
+        # pretos. O tom translúcido não tem esse defeito: deriva do papel e deixa ver o que há embaixo.
+        from videomanager.presentation.qt.theme import papeis, stylesheet
         for btn in panel._filter_buttons:
             assert btn.property("role") == "option"
             assert btn.styleSheet() == ""
-        for tema, cores in (("dark", DARK), ("light", LIGHT)):
+        for tema in ("dark", "light"):
             regra = next(linha for linha in stylesheet(tema).splitlines()
                          if linha.startswith('QPushButton[role="option"]:checked'))
-            assert f"border: 2px solid {cores['accent']}" in regra
-            assert "background" not in regra
+            assert f"border: 2px solid {papeis(tema)['accent']}" in regra
+            assert "background: rgba(" in regra and "background: #" not in regra
     finally:
         panel.shutdown()
 
