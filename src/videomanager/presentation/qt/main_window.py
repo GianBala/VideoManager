@@ -68,8 +68,7 @@ from videomanager.presentation.qt.panels.quality_panel import QualityPanel
 from videomanager.presentation.qt.panels.queue_panel import QueuePanel
 from videomanager.presentation.qt.playlist_dialog import PlaylistDialog
 from videomanager.presentation.qt.settings_dialog import SettingsDialog
-from videomanager.presentation.qt.theme import qpalette
-from videomanager.presentation.qt.theme import stylesheet
+from videomanager.presentation.qt.theme import apply as aplicar_tema
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
 # Índices das abas, na ordem em que são criadas.
@@ -890,8 +889,7 @@ class MainWindow(QMainWindow):
         if self._settings.theme != previous_theme:
             app = QApplication.instance()
             if app is not None:
-                app.setPalette(qpalette(self._settings.theme))
-                app.setStyleSheet(stylesheet(self._settings.theme))
+                aplicar_tema(app, self._settings.theme)
         apply_language(self._settings.language)
         self._update_status()
 

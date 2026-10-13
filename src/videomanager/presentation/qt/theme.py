@@ -14,6 +14,11 @@ do tema escuro.
 
 from __future__ import annotations
 
+import logging
+import weakref
+from collections.abc import Callable
+
+import shiboken6
 from PySide6.QtGui import QColor, QPalette
 
 from videomanager.presentation.qt import paletas
@@ -328,6 +333,53 @@ QTabBar::tab:focus {{ border-color: {focus}; }}
 QPushButton:focus, QPushButton[role="primary"]:focus, QPushButton[role="transport"]:focus,
 QPushButton[role="profile"]:focus, QPushButton[role="spin-tool"]:focus {{ border-color: {focus}; }}
 """
+
+
+# O modo e a paleta em vigor, e quem quer saber quando mudarem. Fica aqui, e não em cada painel,
+# porque a troca com a janela aberta precisa alcançar quem pintou uma cor na construção — o
+# dicionário da linha do tempo, os ícones da barra, a onda sonora já renderizada — e ``setStyleSheet``
+# não chega a nenhum deles.
+_atual: tuple[str, str] = ("dark", paletas.PADRAO)
+_ouvintes: list[Callable[[], Callable[[], None] | None]] = []
+_registro = logging.getLogger(__name__)
+
+
+def atual() -> tuple[str, str]:
+    """``(modo, paleta)`` em vigor, na forma que :func:`palette` e :func:`papeis` aceitam."""
+    return _atual
+
+
+def on_theme_change(callback: Callable[[], None]) -> None:
+    """Chama ``callback`` sempre que :func:`apply` trocar o modo ou a paleta.
+
+    Método de objeto fica por referência **fraca** (como em ``on_language_change``): o painel
+    que se registra pode ser fechado sem avisar ninguém, e o registro não o segura vivo.
+    O ``callback`` lê o que precisa de :func:`atual`.
+    """
+    if hasattr(callback, "__self__"):
+        _ouvintes.append(weakref.WeakMethod(callback))
+    else:
+        _ouvintes.append(lambda: callback)
+
+
+def apply(app, theme: str, nome: str = paletas.PADRAO) -> None:
+    """Aplica o modo e a paleta à aplicação e avisa quem pintou cor por conta própria."""
+    global _atual
+    _atual = (theme, nome)
+    app.setPalette(qpalette(theme, nome))
+    app.setStyleSheet(stylesheet(theme, nome))
+    for ouvinte in list(_ouvintes):
+        funcao = ouvinte()
+        dono = getattr(funcao, "__self__", None)
+        # Fechar uma janela destrói o objeto C++ e deixa o Python vivo enquanto algo o referencia:
+        # chamá-lo levanta "Internal C++ object already deleted" (mesma regra de ``i18n``).
+        if funcao is None or (dono is not None and not shiboken6.isValid(dono)):
+            _ouvintes.remove(ouvinte)
+            continue
+        try:
+            funcao()
+        except Exception:  # um painel com defeito não pode deixar o resto na paleta antiga
+            _registro.exception("falha ao aplicar o tema em %s", getattr(funcao, "__qualname__", "?"))
 
 
 def palette(theme: str, nome: str = paletas.PADRAO) -> dict[str, str]:

@@ -442,6 +442,16 @@ class Timeline(QWidget):
         strip.thumbs[moment] = image
         self.update()
 
+    def forget_waves(self) -> None:
+        """Esquece as ondas sonoras já geradas, para o painel pedi-las de novo.
+
+        A onda sai do ffmpeg como imagem **já pintada** na cor de destaque do tema. Trocar de
+        tema sem refazê-la deixaria a antiga na tela até alguém dar zoom ou rolar a linha do tempo.
+        """
+        for clip_id in [i for i, strip in self._strips.items() if strip.wave is not None]:
+            del self._strips[clip_id]
+        self.update()
+
     def set_wave(self, clip_id: int, in_point: float, out_point: float, image: QImage) -> None:
         strip = self._strips.setdefault(clip_id, _Strip(in_point, out_point, 0, {}))
         strip.in_point, strip.out_point, strip.wave = in_point, out_point, image

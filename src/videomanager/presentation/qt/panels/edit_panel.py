@@ -126,7 +126,7 @@ from videomanager.presentation.qt.editor_project import EditorProject
 from videomanager.presentation.qt.export_dialog import ExportDialog, canvas_options
 from videomanager.application.editor.canvas import aspect_of, canvas_for_aspect, output_canvas
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
-from videomanager.presentation.qt.theme import palette
+from videomanager.presentation.qt.theme import atual, on_theme_change, palette
 from videomanager.presentation.qt.panels.timeline import AUDIO_TRACK_HEIGHT
 from videomanager.presentation.qt.panels.timeline import FILM_CELL_WIDTH
 from videomanager.presentation.qt.panels.timeline import VIDEO_TRACK_HEIGHT
@@ -560,6 +560,7 @@ class EditPanel(QWidget):
         # Instante do quadro guardado que está na tela, enquanto o exato não vem.
         self._cache_shown_for: float | None = None
         self._colors = palette(settings.theme)
+        on_theme_change(self._retheme)
 
         self._processing = processing
         self.editor = editor
@@ -1927,12 +1928,10 @@ class EditPanel(QWidget):
         self._split_button = self._tool(
             row, "", "S", self._split_here, lambda: strings.EDIT_SPLIT, 40
         )
-        self._split_button.setIcon(icons.scissors(self._colors["text"]))
         self._trim_left_button = self._tool(
             row, "", "Q", lambda: self._trim_to_cursor("inicio"),
             lambda: strings.EDIT_TRIM_LEFT, 40,
         )
-        self._trim_left_button.setIcon(icons.trim_left(self._colors["text"]))
         # Dica maior que a dos outros três: tesoura e lixeira se explicam
         # sozinhas, "apagar à esquerda" não diz de onde nem até onde.
         bind(self._trim_left_button, "setToolTip",
@@ -1941,13 +1940,12 @@ class EditPanel(QWidget):
             row, "", "W", lambda: self._trim_to_cursor("fim"),
             lambda: strings.EDIT_TRIM_RIGHT, 40,
         )
-        self._trim_right_button.setIcon(icons.trim_right(self._colors["text"]))
         bind(self._trim_right_button, "setToolTip",
              lambda: f"{strings.EDIT_TRIM_RIGHT}  (W)\n{strings.EDIT_TRIM_RIGHT_TIP}")
         self._delete_button = self._tool(
             row, "", "Del", self._delete_selected, lambda: strings.EDIT_DELETE, 40
         )
-        self._delete_button.setIcon(icons.trash(self._colors["text"]))
+        self._set_toolbar_icons()
 
         row.addSpacing(_TOOL_GROUP_GAP)
         self._add_video_button = bind(QPushButton(), "setText", lambda: strings.EDIT_ADD_VIDEO_TRACK)
@@ -4852,6 +4850,31 @@ class EditPanel(QWidget):
                         # Clique fora das trilhas e de controles interativos: desseleciona
                         self._timeline.select(-1)
         return super().eventFilter(obj, event)
+
+    def _set_toolbar_icons(self) -> None:
+        """Pinta os ícones da barra com a cor do texto do tema em vigor."""
+        cor = self._colors["text"]
+        self._split_button.setIcon(icons.scissors(cor))
+        self._trim_left_button.setIcon(icons.trim_left(cor))
+        self._trim_right_button.setIcon(icons.trim_right(cor))
+        self._delete_button.setIcon(icons.trash(cor))
+
+    def _retheme(self) -> None:
+        """Acompanha a troca de tema e de paleta com o editor aberto.
+
+        ``setStyleSheet`` da aplicação não alcança o que foi pintado na construção. O dicionário
+        de cores é atualizado **no lugar**, porque a linha do tempo guarda este mesmo objeto e
+        lê as cores a cada pintura. Os ícones da barra saem pintados com a cor do texto e as ondas
+        sonoras com a de destaque: os dois são refeitos.
+        """
+        self._colors.clear()
+        self._colors.update(palette(*atual()))
+        self._set_toolbar_icons()
+        self._timeline.forget_waves()
+        if not self._project.is_empty:  # sem projeto não há onda a pedir, nem motivo de procurar o ffmpeg
+            self._refresh_backdrop()
+        self._timeline.update()
+        self._preview.update()
 
     def apply_settings(self, settings: Settings) -> None:
         """Adota as preferências recém-salvas pelo diálogo de configurações."""
