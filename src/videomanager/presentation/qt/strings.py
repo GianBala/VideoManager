@@ -766,13 +766,26 @@ SETTINGS_ENCODER_TEST_TIP = (
     "Manda a placa codificar um quadro de verdade. É o único jeito de saber: "
     "o ffmpeg lista encoders que não abrem nesta máquina."
 )
-SETTINGS_THEME = "Tema"
+SETTINGS_TAB_THEME = "Tema"
+SETTINGS_THEME_MODE = "Modo"
+SETTINGS_PALETTE = "Paleta"
+SETTINGS_PALETTE_HINT = "As cores mudam ao confirmar com OK."
 SETTINGS_LANGUAGE = "Idioma"
 # Cada idioma no próprio nome, nos dois catálogos: é assim que quem não lê o
 # idioma de agora encontra o seu na lista.
 LANGUAGE_NAMES = {"pt-BR": "Português (Brasil)", "en": "English"}
 THEME_DARK = "Escuro"
 THEME_LIGHT = "Claro"
+# Nome e uma linha de cada paleta, pelo identificador de videomanager.domain.appearance.
+PALETTE_NAMES = {
+    "atual": "Atual", "grafite": "Grafite e índigo", "estudio": "Estúdio",
+    "mare": "Maré", "aurora": "Aurora", "cinema": "Cinema",
+}
+PALETTE_TAGLINES = {
+    "atual": "As cores originais", "grafite": "Cinza azulado e índigo",
+    "estudio": "Cinza neutro, sem cor de marca", "mare": "Azul-marinho e ciano",
+    "aurora": "Ameixa, violeta e magenta", "cinema": "Carvão quente e âmbar",
+}
 
 # --- diálogos e erros --------------------------------------------------------
 DIALOG_ERROR_TITLE = "Não foi possível continuar"

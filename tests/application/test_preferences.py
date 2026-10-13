@@ -31,6 +31,7 @@ def test_ida_e_volta_de_todos_os_campos():
     e é aqui que isso aparece."""
     from dataclasses import asdict, fields
 
+    from videomanager.domain.appearance import PALETTES
     from videomanager.domain.i18n import LANGUAGES
 
     padrao = Preferences()
@@ -39,6 +40,9 @@ def test_ida_e_volta_de_todos_os_campos():
         atual = getattr(padrao, campo.name)
         if campo.name == "language":
             valores[campo.name] = next(lang for lang in LANGUAGES if lang != atual)
+        elif campo.name == "palette":
+            # Validada na leitura, como o idioma: um valor inventado voltaria ao padrão.
+            valores[campo.name] = next(nome for nome in PALETTES if nome != atual)
         elif isinstance(atual, bool):
             valores[campo.name] = not atual
         elif isinstance(atual, int):

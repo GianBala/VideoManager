@@ -193,7 +193,7 @@ def build_app(argv: list[str] | None = None, *, audio_enabled: bool = True) -> t
     app.setStyle("Fusion")
 
     settings = load_preferences()
-    aplicar_tema(app, settings.theme)
+    aplicar_tema(app, settings.theme, settings.palette)
     # Antes da janela: abrir em inglês é já nascer em inglês, sem troca nenhuma.
     apply_language(settings.language)
 

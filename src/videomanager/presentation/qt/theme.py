@@ -135,6 +135,11 @@ QPushButton[role="profile"] {{
     text-align: left;
 }}
 QPushButton[role="profile"]:hover {{ border-color: {accent}; background: {surface}; }}
+/* Cartão de paleta (aba Tema): miniatura e nome dentro do botão. A borda é sempre de 2 px, para
+   o cartão marcado não crescer e empurrar os vizinhos. */
+QPushButton[role="palette"] {{ background: {surface_alt}; border: 2px solid {surface_alt}; border-radius: 10px; padding: 0px; text-align: left; }}
+QPushButton[role="palette"]:hover {{ border-color: {border}; }}
+QPushButton[role="palette"]:checked {{ border-color: {accent}; }}
 
 QPushButton[role="transport"] {{
     background: {surface_alt};
@@ -331,7 +336,7 @@ QTabBar::tab:focus {{ border-color: {focus}; }}
    por Tab não sabia em que botão o Enter ia cair. No fim do estilo para
    valer sobre o :hover e os papéis. */
 QPushButton:focus, QPushButton[role="primary"]:focus, QPushButton[role="transport"]:focus,
-QPushButton[role="profile"]:focus, QPushButton[role="spin-tool"]:focus {{ border-color: {focus}; }}
+QPushButton[role="profile"]:focus, QPushButton[role="spin-tool"]:focus, QPushButton[role="palette"]:focus {{ border-color: {focus}; }}
 """
 
 

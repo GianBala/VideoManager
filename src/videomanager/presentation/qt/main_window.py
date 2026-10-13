@@ -877,7 +877,7 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self._settings, self, runtime=self._runtime)
         if dialog.exec() != SettingsDialog.DialogCode.Accepted:
             return
-        previous_theme = self._settings.theme
+        previous_theme, previous_palette = self._settings.theme, self._settings.palette
         self._settings = dialog.result_settings()
         self._save_settings()
         self._queue.apply_settings(self._settings)
@@ -886,10 +886,10 @@ class MainWindow(QMainWindow):
         if self._metadata is not None:
             self._metadata.apply_settings(self._settings)
         self._dest.setText(self._settings.download_dir)
-        if self._settings.theme != previous_theme:
+        if (self._settings.theme, self._settings.palette) != (previous_theme, previous_palette):
             app = QApplication.instance()
             if app is not None:
-                aplicar_tema(app, self._settings.theme)
+                aplicar_tema(app, self._settings.theme, self._settings.palette)
         apply_language(self._settings.language)
         self._update_status()
 
