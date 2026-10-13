@@ -148,21 +148,22 @@ def test_edit_panel_top_project_controls_and_label(qapp: QApplication, dummy_too
         assert hasattr(panel, "_save_btn")
         assert hasattr(panel, "_project_label")
 
-        # Rótulo inicial
+        # Rótulo inicial: o nome, e a marca de "não salvo" escondida
         assert strings.EDIT_UNTITLED in panel._project_label.text()
-        assert "*" not in panel._project_label.text()
+        assert not panel._dirty_mark.isVisibleTo(panel)
 
-        # Altera projeto para sujo e verifica atualização do rótulo
+        # Altera projeto para sujo e verifica a marca
         panel._apply(panel._project.with_track(TrackKind.VIDEO))
         panel._update_project_label()
         # Uma trilha nova também faz parte do conteúdo persistido.
-        assert "*" in panel._project_label.text()
+        assert panel._dirty_mark.isVisibleTo(panel)
 
         # Simula salvar
         panel._project_path = Path("/tmp/teste_video.vmp")
         panel._session.mark_saved()
         panel._update_project_label()
         assert "teste_video.vmp" in panel._project_label.text()
+        assert not panel._dirty_mark.isVisibleTo(panel)
     finally:
         panel.shutdown()
 

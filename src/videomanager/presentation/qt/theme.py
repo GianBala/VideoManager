@@ -185,6 +185,15 @@ QLabel[role="chip"][tone="err"] {{ background: {err16}; color: {err}; }}
 QToolButton[role="icon"] {{ background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 4px; }}
 QToolButton[role="icon"]:hover {{ background: {raised}; }}
 QToolButton[role="icon"]:focus {{ border-color: {focus}; }}
+/* Barra superior do editor: o seletor de tela é um botão no tom dos campos, com a seta pintada à direita (a reserva
+   do ``padding`` é a de ``canvas_selector._RESERVE``); o painel que ele abre é um menu de campos, sem canto
+   arredondado porque é uma janela própria e o canto cairia sobre o fundo da janela. */
+QToolButton[role="selector"] {{ background: {raised}; border: 1px solid {raised}; border-radius: 8px; padding: 7px 34px 7px 12px; color: {text}; }}
+QToolButton[role="selector"]:hover {{ background: {raised2}; border-color: {raised2}; }}
+QToolButton[role="selector"]:focus {{ border-color: {accent}; }}
+QFrame[role="popover"] {{ background: {panel}; border: 1px solid {raised2}; }}
+QFrame[role="popover"] QLabel {{ background: transparent; }}
+QLabel[role="dirty-dot"] {{ background: {warn}; border-radius: 4px; }}
 /* Fila de tarefas: os cartões se pintam sozinhos, sobre o fundo do painel. */
 QListView[role="queue"] {{ background: transparent; border: none; }}
 /* Menu lateral: itens de ícone e texto embaixo; o marcado leva o tom do acento e uma faixa na borda. A
