@@ -139,6 +139,8 @@ QPushButton[role="profile"]:hover {{ background: {raised2}; border-color: {raise
    o cartão marcado não crescer e empurrar os vizinhos. */
 QPushButton[role="palette"] {{ background: {raised}; border: 2px solid {raised}; border-radius: 10px; padding: 0px; text-align: left; }}
 QPushButton[role="palette"]:hover {{ border-color: {raised2}; }}
+/* Fila de tarefas: os cartões se pintam sozinhos, sobre o fundo do painel. */
+QListView[role="queue"] {{ background: transparent; border: none; }}
 /* Menu lateral: itens de ícone e texto embaixo; o marcado leva o tom do acento e uma faixa na borda. A
    borda existe sempre (transparente) para o item marcado ou focado não mudar de medida: 1 px em volta, 3 px à esquerda. */
 QWidget[role="rail"] {{ background: {panel}; }}
