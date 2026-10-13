@@ -159,6 +159,9 @@ QTabBar[role="underline"]::tab:hover {{ color: {text}; }}
 QTabBar[role="underline"]::tab:selected {{ background: transparent; color: {accent}; font-weight: 600;
     border-bottom: 2px solid {accent}; }}
 QTabBar[role="underline"]::tab:focus {{ border: 1px solid {focus}; border-bottom: 2px solid {accent}; }}
+/* Abas estreitas (a coluna de adicionais do editor): sem margem entre elas e com o preenchimento menor. */
+QTabBar[role="underline"][compact="true"]::tab {{ padding: 8px 5px; margin-right: 0px; font-size: 11px; }}
+QPushButton[compact="true"] {{ padding-left: 8px; padding-right: 8px; }}
 QLabel[role="group-heading"] {{ color: {t3}; font-size: 11px; font-weight: 700; padding-top: 6px; }}
 
 /* Aba Metadados: o ícone do arquivo e os botões que só pedem atenção quando se chega a eles. */
