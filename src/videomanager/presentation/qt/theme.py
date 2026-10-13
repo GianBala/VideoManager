@@ -4,9 +4,9 @@ O QSS fica embutido como string em vez de num arquivo ``.qss`` separado para nã
 precisar empacotar arquivo de dados: o PyInstaller exigiria uma regra extra e uma
 resolução de caminho que falha silenciosamente quando o app roda congelado.
 
-As cores estão declaradas uma vez no dicionário de paleta e interpoladas no QSS,
-para que trocar de tema não implique reescrever o estilo inteiro. O mesmo
-dicionário alimenta a ``QPalette`` da aplicação (ver :func:`qpalette`), porque o
+As cores estão declaradas uma vez, em ``paletas`` (seis paletas, cada uma em escuro e
+claro), e interpoladas no QSS, para que trocar de tema não implique reescrever o estilo
+inteiro. O mesmo dicionário alimenta a ``QPalette`` da aplicação (ver :func:`qpalette`), porque o
 QSS não cobre tudo: o que é desenhado por um delegate — como a barra de progresso
 da fila — pergunta a cor à paleta, e sem isso aparece um retângulo branco no meio
 do tema escuro.
@@ -16,61 +16,18 @@ from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
 
+from videomanager.presentation.qt import paletas
+
 # Largura dos campos de escolha, igual nas duas abas. Sem o teto, um formulário
 # estica o combo por toda a coluna: 800 px para escolher "1080p" fica
 # desproporcional e joga o rótulo para longe do campo que ele descreve.
 FIELD_WIDTH = 280
 
-DARK = {
-    "bg": "#1e2128",
-    "surface": "#272b34",
-    "surface_alt": "#2f3440",
-    "border": "#3a404e",
-    "text": "#e6e8ec",
-    "text_dim": "#9aa3b2",
-    "accent": "#4c8bf5",
-    "accent_hover": "#6ba0f7",
-    "accent_text": "#ffffff",
-    # Preenchimento que leva texto branco (botão primário, seleções) e destaque
-    # usado como texto: separados porque o mesmo azul não serve aos dois. Com
-    # "accent" nos dois papéis, o texto do botão primário ficava em 3,32:1, o
-    # primário sob o mouse em 2,63:1 e a aba selecionada em 4,27:1 — a
-    # referência para texto é 4,5:1.
-    "accent_fill": "#3170dc",
-    "accent_fill_hover": "#2b64c8",
-    "accent_fg": "#6ba0f7",
-    # Fundo do selo "ao vivo": o vermelho de erro deixava o texto branco em 3,7:1.
-    "live": "#c0392f",
-    "ok": "#3fb950",
-    "warn": "#d99b28",
-    "error": "#e5534b",
-    "track": "#353b47",
-    # Borda de foco do teclado: pelo menos 3:1 contra a borda sem foco e contra
-    # o preenchimento do botão primário.
-    "focus": "#ffffff",
-}
-
-LIGHT = {
-    "bg": "#f4f5f7",
-    "surface": "#ffffff",
-    "surface_alt": "#eceef2",
-    "border": "#d3d7de",
-    "text": "#1d2128",
-    "text_dim": "#616b7a",
-    "accent": "#2f6fd0",
-    "accent_hover": "#3f80e0",
-    "accent_text": "#ffffff",
-    "accent_fill": "#2860b8",
-    "accent_fill_hover": "#255aad",
-    "accent_fg": "#2f6fd0",
-    "live": "#cf222e",
-    "ok": "#1a7f37",
-    # 4,46:1 com o "#9a6700" anterior sobre o fundo da janela.
-    "warn": "#8f6000",
-    "error": "#cf222e",
-    "track": "#dfe3e9",
-    "focus": "#000000",
-}
+# As chaves antigas da paleta "atual": o que o QSS e os painéis que se pintam sozinhos ainda leem
+# (e vários testes importam). Os valores moram em ``paletas``; estes nomes continuam existindo até
+# nenhum código precisar deles.
+DARK = paletas.legado(paletas.PADRAO, "dark")
+LIGHT = paletas.legado(paletas.PADRAO, "light")
 
 _QSS = """
 QWidget {{
@@ -373,22 +330,33 @@ QPushButton[role="profile"]:focus, QPushButton[role="spin-tool"]:focus {{ border
 """
 
 
-def palette(theme: str) -> dict[str, str]:
-    return LIGHT if theme == "light" else DARK
+def palette(theme: str, nome: str = paletas.PADRAO) -> dict[str, str]:
+    """As chaves antigas do tema (``bg``, ``surface``...) da paleta ``nome`` no modo ``theme``.
+
+    Um dicionário novo a cada chamada. Os papéis novos (``canvas``, ``card``...) saem de
+    :func:`papeis`; os dois não se fundem porque ``accent``, ``ok`` e ``warn`` existem nos
+    dois com valores diferentes na paleta ``atual`` (ver ``paletas``).
+    """
+    return paletas.legado(nome, theme)
 
 
-def stylesheet(theme: str) -> str:
-    return _QSS.format(**palette(theme))
+def papeis(theme: str, nome: str = paletas.PADRAO) -> dict[str, str]:
+    """Os papéis de cor da paleta ``nome`` no modo ``theme``."""
+    return paletas.papeis(nome, theme)
 
 
-def qpalette(theme: str) -> QPalette:
+def stylesheet(theme: str, nome: str = paletas.PADRAO) -> str:
+    return _QSS.format(**palette(theme, nome))
+
+
+def qpalette(theme: str, nome: str = paletas.PADRAO) -> QPalette:
     """Paleta Qt equivalente ao QSS, para o que o QSS não alcança.
 
     Um ``QStyledItemDelegate`` desenha pelo estilo, que consulta a paleta e não a
     folha de estilo. Sem esta paleta a barra de progresso da fila sai com as
     cores padrão — branca sobre o tema escuro.
     """
-    colors = palette(theme)
+    colors = palette(theme, nome)
     result = QPalette()
     groups = (
         QPalette.ColorGroup.Active,
