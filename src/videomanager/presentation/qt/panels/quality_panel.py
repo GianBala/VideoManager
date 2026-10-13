@@ -13,16 +13,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
-    QFormLayout,
     QFrame,
-    QHBoxLayout,
+    QGridLayout,
     QLabel,
-    QLayout,
-    QRadioButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -50,20 +47,21 @@ from videomanager.domain.selection import VideoRequest
 from videomanager.application.media.download_policy import audio_quality_warning
 from videomanager.application.media.download_policy import plan_container
 from videomanager.application.preferences import Preferences as Settings
-from videomanager.presentation.qt import strings
-from videomanager.presentation.qt.i18n import align_label_column, bind, on_language_change, retext_items
-from videomanager.presentation.qt.theme import FIELD_WIDTH
+from videomanager.presentation.qt import icons, strings
+from videomanager.presentation.qt.i18n import bind, on_language_change, retext_items
+from videomanager.presentation.qt.panels.segmented import SegmentButton, segmented
 from videomanager.application.format_labels import resolution_label
 from videomanager.application.format_labels import choice_label
 
-def _make_form(parent: QWidget | None = None) -> QFormLayout:
-    form = QFormLayout(parent)
-    form.setContentsMargins(0, 0, 0, 0)
-    form.setHorizontalSpacing(10)
-    form.setVerticalSpacing(6)
-    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
-    form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-    return form
+def _make_grid(parent: QWidget | None = None) -> QGridLayout:
+    """Três colunas iguais, com 14 px entre elas e 16 entre as fileiras de campos."""
+    grid = QGridLayout(parent)
+    grid.setContentsMargins(0, 0, 0, 0)
+    grid.setHorizontalSpacing(14)
+    grid.setVerticalSpacing(16)
+    for coluna in range(3):
+        grid.setColumnStretch(coluna, 1)
+    return grid
 
 
 class QualityPanel(QWidget):
@@ -78,10 +76,6 @@ class QualityPanel(QWidget):
         # Evita reentrância: repopular um combo emite currentIndexChanged, que
         # dispararia a repopulação de novo em cascata.
         self._loading = False
-        # Todos os rótulos de formulário do painel. Recebem no fim a mesma
-        # largura mínima: sem isso cada formulário calcula a sua própria coluna
-        # de rótulos, e trocar de vídeo para áudio desloca os campos de lado.
-        self._labels: list[QLabel] = []
         # O que o usuário pediu, e não o que o combo mostra agora: o combo é
         # repopulado a cada troca de resolução e perde a escolha quando ela não
         # existe na resolução nova. Guardar o pedido é o que permite repô-lo
@@ -96,7 +90,6 @@ class QualityPanel(QWidget):
         layout.addWidget(self._build_group())
         layout.addStretch(1)
 
-        self._align_label_column()
         self.set_matrix(FormatMatrix())
         on_language_change(self._retranslate)
 
@@ -119,12 +112,10 @@ class QualityPanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(8)
 
-        mode_form = _make_form()
-        box = QHBoxLayout()
-        box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(18)
-        self._radio_video = bind(QRadioButton(), "setText", lambda: strings.MODE_VIDEO)
-        self._radio_audio = bind(QRadioButton(), "setText", lambda: strings.MODE_AUDIO)
+        # O seletor de modo não mora aqui: ele vai para o cabeçalho do cartão (``PersonalizeCard``), à direita do
+        # título, como no protótipo. Os dois botões continuam sendo daqui, no mesmo grupo exclusivo.
+        self._radio_video = bind(SegmentButton(glyph=icons.nav_edit), "setText", lambda: strings.MODE_VIDEO)
+        self._radio_audio = bind(SegmentButton(glyph=icons.music), "setText", lambda: strings.MODE_AUDIO)
         # Grupo explícito: a exclusividade entre botões de rádio vale por widget
         # pai, e depender do pai quebraria calado se outro rádio aparecesse
         # neste mesmo grupo um dia.
@@ -133,11 +124,8 @@ class QualityPanel(QWidget):
         self._modes.addButton(self._radio_audio)
         self._radio_video.setChecked(True)
         self._radio_video.toggled.connect(self._on_mode_changed)
-        box.addWidget(self._radio_video)
-        box.addWidget(self._radio_audio)
-        box.addStretch(1)
-        self._add_row(mode_form, lambda: strings.MODE_LABEL, box)
-        outer.addLayout(mode_form)
+        self.mode_selector = segmented([self._radio_video, self._radio_audio])
+        bind(self.mode_selector, "setAccessibleName", lambda: strings.MODE_LABEL)
 
         self._stack = QStackedWidget()
         self._stack.setProperty("role", "plain")
@@ -153,17 +141,25 @@ class QualityPanel(QWidget):
 
         return group
 
-    def _add_row(
-        self, form: QFormLayout, text: Callable[[], str] | None, field: QWidget | QLayout
-    ) -> QLabel:
-        """Adiciona uma linha guardando o rótulo, para alinhá-lo depois."""
-        label = bind(QLabel(), "setText", text) if text else QLabel()
-        self._labels.append(label)
-        form.addRow(label, field)
-        return label
-
-    def _align_label_column(self) -> None:
-        align_label_column(self._labels)
+    @staticmethod
+    def _field(caption: Callable[[], str], widget: QWidget) -> QWidget:
+        """A legenda em cima e o campo embaixo, num bloco só: esconder o campo esconde a legenda junto."""
+        box = QWidget()
+        box.setProperty("role", "plain")
+        column = QVBoxLayout(box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(6)
+        label = bind(QLabel(), "setText", caption)
+        label.setProperty("role", "caption")
+        column.addWidget(label)
+        widget.setProperty("role", "field")
+        if isinstance(widget, QComboBox):
+            # O tamanho que o combo pede não pode decidir a largura da coluna: três colunas iguais, e o texto
+            # mais longo se corta com reticências em vez de empurrar as vizinhas.
+            widget.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            widget.setMinimumContentsLength(6)
+        column.addWidget(widget)
+        return box
 
     def _retranslate(self) -> None:
         # Os itens que vêm do catálogo trocam de texto; o dado e a escolha
@@ -176,7 +172,6 @@ class QualityPanel(QWidget):
         retext_items(self._audio_codec, lambda data: strings.AUDIO_CODEC_BEST if data == "best" else None)
         retext_items(self._audio_track, lambda data: strings.QUALITY_BEST_AVAILABLE if data is None
                      else choice_label(data))
-        self._align_label_column()
         self._update_audio_source_hint()
         self._refresh_warnings()
         self._update_estimated_size()
@@ -184,19 +179,19 @@ class QualityPanel(QWidget):
     def _build_video_page(self) -> QWidget:
         page = QWidget()
         page.setProperty("role", "plain")
-        form = _make_form(page)
+        grid = _make_grid(page)
 
         self._resolution = bind(QComboBox(), "setToolTip", lambda: strings.TIP_RESOLUTION)
         self._resolution.currentIndexChanged.connect(self._on_resolution_changed)
-        self._add_row(form, lambda: strings.LABEL_RESOLUTION, self._resolution)
+        grid.addWidget(self._field(lambda: strings.LABEL_RESOLUTION, self._resolution), 0, 0)
 
         self._fps = QComboBox()
         self._fps.currentIndexChanged.connect(self._on_fps_changed)
-        self._add_row(form, lambda: strings.LABEL_FPS, self._fps)
+        grid.addWidget(self._field(lambda: strings.LABEL_FPS, self._fps), 0, 1)
 
         self._codec = bind(QComboBox(), "setToolTip", lambda: strings.TIP_CODEC)
         self._codec.currentIndexChanged.connect(self._on_codec_changed)
-        self._add_row(form, lambda: strings.LABEL_CODEC, self._codec)
+        grid.addWidget(self._field(lambda: strings.LABEL_CODEC, self._codec), 0, 2)
 
         self._container = bind(QComboBox(), "setToolTip", lambda: strings.TIP_CONTAINER)
         for value in CONTAINERS:
@@ -205,26 +200,21 @@ class QualityPanel(QWidget):
         index = self._container.findData(self._settings.default_container)
         self._container.setCurrentIndex(max(0, index))
         self._container.currentIndexChanged.connect(self._emit_changed)
-        self._add_row(form, lambda: strings.LABEL_CONTAINER, self._container)
+        grid.addWidget(self._field(lambda: strings.LABEL_CONTAINER, self._container), 1, 0)
 
         self._audio_track = QComboBox()
         self._audio_track.currentIndexChanged.connect(self._emit_changed)
-        self._audio_track_label = self._add_row(
-            form, lambda: strings.LABEL_AUDIO_TRACK, self._audio_track
-        )
+        self._audio_track_box = self._field(lambda: strings.LABEL_AUDIO_TRACK, self._audio_track)
+        grid.addWidget(self._audio_track_box, 1, 1, 1, 2)
 
+        # O tamanho estimado já aparece no rodapé da aba; o texto daqui só guarda o número (``estimated_size``).
         self._video_size_label = QLabel("—")
-        self._video_size_label.setProperty("role", "dim")
-        self._add_row(form, lambda: strings.LABEL_ESTIMATED_SIZE, self._video_size_label)
-
-        for combo in (self._resolution, self._fps, self._codec, self._container, self._audio_track):
-            combo.setFixedWidth(FIELD_WIDTH)
         return page
 
     def _build_audio_page(self) -> QWidget:
         page = QWidget()
         page.setProperty("role", "plain")
-        form = _make_form(page)
+        grid = _make_grid(page)
 
         self._audio_codec = bind(QComboBox(), "setToolTip", lambda: strings.TIP_AUDIO_FORMAT)
         for codec in AUDIO_CODECS:
@@ -233,7 +223,7 @@ class QualityPanel(QWidget):
         index = self._audio_codec.findData(self._settings.default_audio_format)
         self._audio_codec.setCurrentIndex(max(0, index))
         self._audio_codec.currentIndexChanged.connect(self._on_audio_codec_changed)
-        self._add_row(form, lambda: strings.LABEL_AUDIO_FORMAT, self._audio_codec)
+        grid.addWidget(self._field(lambda: strings.LABEL_AUDIO_FORMAT, self._audio_codec), 0, 0)
 
         self._audio_quality = QComboBox()
         for value in AUDIO_BITRATES:
@@ -241,20 +231,14 @@ class QualityPanel(QWidget):
         index = self._audio_quality.findData(self._settings.default_audio_quality)
         self._audio_quality.setCurrentIndex(max(0, index))
         self._audio_quality.currentIndexChanged.connect(self._emit_changed)
-        self._add_row(form, lambda: strings.LABEL_AUDIO_QUALITY, self._audio_quality)
+        grid.addWidget(self._field(lambda: strings.LABEL_AUDIO_QUALITY, self._audio_quality), 0, 1)
 
         self._audio_size_label = QLabel("—")
-        self._audio_size_label.setProperty("role", "dim")
-        self._add_row(form, lambda: strings.LABEL_ESTIMATED_SIZE, self._audio_size_label)
 
-        # Sem rótulo, mas na coluna dos campos: é uma nota sobre o campo de cima.
+        # Uma nota sobre o campo de cima, na largura toda.
         self._audio_source = QLabel("")
-        self._audio_source.setProperty("role", "dim")
-        self._audio_source.setMinimumWidth(FIELD_WIDTH)
-        self._add_row(form, None, self._audio_source)
-
-        for combo in (self._audio_codec, self._audio_quality):
-            combo.setFixedWidth(FIELD_WIDTH)
+        self._audio_source.setProperty("role", "hint")
+        grid.addWidget(self._audio_source, 1, 0, 1, 3)
         return page
 
     # ------------------------------------------------------------------
@@ -318,7 +302,7 @@ class QualityPanel(QWidget):
 
         separate = matrix.needs_muxing
         self._audio_track.setVisible(separate)
-        self._audio_track_label.setVisible(separate)
+        self._audio_track_box.setVisible(separate)
 
         self._update_audio_source_hint()
         self._refresh_warnings()

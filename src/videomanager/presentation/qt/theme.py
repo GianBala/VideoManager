@@ -87,10 +87,11 @@ QGroupBox::title {{
    para que a miniatura comece na mesma coluna dos rótulos abaixo dela. */
 QFrame#mediaCard {{
     background: {card};
-    border: 1px solid {card};
-    border-radius: 12px;
-    padding: 10px;
+    border: none;
+    border-radius: 14px;
 }}
+QLabel[role="media-title"] {{ font-size: 19px; font-weight: 600; }}
+QLabel[role="media-meta"], QLabel[role="media-empty"] {{ font-size: 13px; color: {t2}; }}
 
 /* Contêiner que só agrupa outros widgets, sem pintura própria. Sem isto ele
    herda o fundo da janela e desenha um retângulo escuro por cima da superfície
@@ -152,16 +153,35 @@ QPushButton[role="primary"]:disabled {{
 }}
 /* Aba Download: o endereço é o que ela pede primeiro (campo, "Colar e analisar" e "Analisar" na mesma altura,
    por isso o ``min-height``), as seções são cartões, e o rodapé leva o resultado e a ação. */
-QLineEdit[role="address"] {{ padding: 10px 12px; font-size: 14px; border-radius: 10px; min-height: 20px; }}
-QPushButton[role="address-action"] {{ padding: 10px 14px; min-height: 20px; }}
-QPushButton[role="primary"][emphasis="large"] {{ padding: 10px 18px; font-size: 14px; min-height: 20px; }}
+/* A barra de endereço é um quadro só (``AddressBar``): o campo de dentro perde a moldura, e o anel de foco é do quadro. */
+QFrame[role="address-bar"] {{ background: {card}; border: 1px solid {raised}; border-radius: 12px; }}
+QFrame[role="address-bar"][focused="true"] {{ border: 1px solid {ring}; }}
+QLineEdit[role="address-edit"], QLineEdit[role="address-edit"]:focus {{ background: transparent; border: none; border-radius: 0px; padding: 0px; font-size: 15px; min-height: 26px; }}
+QPushButton[role="ghost"] {{ background: transparent; border: 1px solid transparent; color: {t2}; padding: 9px 12px; }}
+QPushButton[role="ghost"]:hover {{ background: {raised}; border-color: {raised}; color: {text}; }}
+QPushButton[role="ghost"]:focus {{ border-color: {focus}; }}
+QComboBox[role="field"], QLineEdit[role="field"] {{ min-height: 36px; padding: 0px 12px; border-radius: 9px; }}
+QLabel[role="caption"] {{ font-size: 12px; font-weight: 500; color: {t2}; }}
+QPushButton[role="primary"][emphasis="field"] {{ padding: 0px 22px; min-height: 36px; border-radius: 9px; font-size: 14px; }}
+/* Destino em linha corrida: o caminho é um campo sem moldura, e "Alterar" é um link no tom do acento. */
+QLineEdit[role="path"], QLineEdit[role="path"]:focus {{ background: transparent; border: none; border-radius: 0px; padding: 0px; }}
+QPushButton[role="link"] {{ background: transparent; border: none; color: {accent}; padding: 0px 2px; }}
+QPushButton[role="link"]:hover {{ background: transparent; border: none; color: {text}; }}
+QPushButton[role="link"]:focus {{ text-decoration: underline; }}
+QPushButton[role="primary"][emphasis="large"] {{ padding: 0px 22px; font-size: 14px; min-height: 42px; border-radius: 11px; }}
 QLabel[role="section-title"] {{ font-size: 15px; font-weight: 600; color: {text}; }}
-QFrame[role="section"], QFrame[role="footer"] {{ background: {card}; border: 1px solid {card}; border-radius: 12px; }}
+QLabel[role="hint"] {{ font-size: 12px; color: {t3}; }}
+/* O cartão de seção é o plano do cartão; o rodapé, que carrega a ação, é um plano acima. */
+QFrame[role="section"] {{ background: {card}; border: none; border-radius: 14px; }}
+QFrame[role="footer"] {{ background: {raised}; border: none; border-radius: 14px; }}
 QToolButton[role="section-header"] {{ background: transparent; border: 1px solid transparent; border-radius: 8px;
     padding: 2px 8px 2px 2px; font-size: 15px; font-weight: 600; color: {text}; }}
+QToolButton[role="section-header"][tight="true"] {{ padding: 0px 0px 0px 0px; background: transparent; }}
 QToolButton[role="section-header"]:hover {{ background: {raised}; }}
+QToolButton[role="section-header"][tight="true"]:hover {{ background: transparent; }}
 QToolButton[role="section-header"]:focus {{ border-color: {focus}; }}
-QLabel[role="result"] {{ font-size: 13px; font-weight: 600; color: {text}; }}
+QLabel[role="result"] {{ font-size: 13px; font-weight: 500; color: {text}; }}
+QLabel[role="micro"] {{ font-size: 11px; color: {t3}; }}
 QLabel[role="result-size"] {{ font-size: 22px; font-weight: 700; color: {text}; }}
 /* Cartão de paleta (aba Tema): miniatura e nome dentro do botão. A borda é sempre de 2 px, para
    o cartão marcado não crescer e empurrar os vizinhos. */
@@ -170,7 +190,7 @@ QPushButton[role="palette"]:hover {{ border-color: {raised2}; }}
 /* Aba Convert: a lista de arquivos se pinta sozinha sobre o cartão; os três modos são um controle segmentado
    (três botões de rádio de desenho próprio, ver ``segmented.py``); o resumo é um destaque com moldura no tom do acento. */
 QListWidget[role="files"] {{ background: transparent; border: none; padding: 0px; }}
-QFrame[role="segments"] {{ background: {raised}; border: 1px solid {raised}; border-radius: 10px; }}
+QFrame[role="segments"] {{ background: {raised}; border: none; border-radius: 11px; }}
 QFrame[role="callout"] {{ background: {soft16}; border: 1px solid {soft16}; border-radius: 10px; }}
 QFrame[role="callout-warn"] {{ background: {warn16}; border: 1px solid {warn16}; border-radius: 10px; }}
 QLabel[role="callout-title"] {{ color: {accent}; font-size: 11px; font-weight: 700; }}
@@ -202,7 +222,7 @@ QPushButton[role="flat"]:focus {{ border-color: {focus}; }}
 /* Gaveta de tarefas: coluna à direita, no tom do menu lateral, separada do conteúdo por um fio. */
 QFrame[role="drawer"] {{ background: {panel}; border: none; border-left: 1px solid {raised}; }}
 QLabel[role="drawer-title"] {{ font-size: 16px; font-weight: 600; color: {text}; background: transparent; }}
-QLabel[role="chip"] {{ background: {raised2}; color: {t2}; border-radius: 8px; padding: 2px 8px; font-size: 11px; font-weight: 600; }}
+QLabel[role="chip"] {{ background: {raised2}; color: {t2}; border-radius: 11px; padding: 2px 9px; min-height: 18px; font-size: 11px; font-weight: 500; }}
 QLabel[role="chip"][tone="accent"] {{ background: {soft16}; color: {accent}; }}
 QLabel[role="chip"][tone="err"] {{ background: {err16}; color: {err}; }}
 QToolButton[role="icon"] {{ background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 4px; }}
@@ -516,6 +536,28 @@ def papeis(theme: str, nome: str = paletas.PADRAO) -> dict[str, str]:
     return paletas.papeis(nome, theme)
 
 
+def _misturar(frente: str, fundo: str, peso: float) -> str:
+    """``frente`` com ``peso`` de presença sobre ``fundo``, como cor opaca."""
+    a, b = QColor(frente), QColor(fundo)
+    canal = lambda x, y: round(x * peso + y * (1 - peso))  # noqa: E731
+    return QColor(canal(a.red(), b.red()), canal(a.green(), b.green()), canal(a.blue(), b.blue())).name()
+
+
+def derivadas(cores: dict[str, str]) -> dict[str, str]:
+    """Os tons que o protótipo usa e nenhum papel guarda: o anel de foco, o cartão sob o mouse e o segmento marcado.
+
+    O anel é o acento a 50% sobre o cartão; o cartão "quente" é o cartão com 4% do tom suave.
+    """
+    seg_on = _misturar(cores["soft"], cores["raised"], 0.15)
+    return {
+        "ring": _misturar(cores["accent"], cores["card"], 0.5),
+        "hot": _misturar(cores["soft"], cores["card"], 0.04),
+        # O botão marcado de um controle segmentado: o tom suave sobre o fundo elevado, com um anel de metade do acento.
+        "seg_on": seg_on,
+        "seg_ring": _misturar(cores["accent"], seg_on, 0.5),
+    }
+
+
 def _chevron(p: QPainter, lado: float) -> None:
     u = lado / 12.0
     p.drawPolyline(QPolygonF([QPointF(2.6 * u, 4.4 * u), QPointF(6 * u, 7.8 * u), QPointF(9.4 * u, 4.4 * u)]))
@@ -567,6 +609,9 @@ def _cores_do_estilo(theme: str, nome: str) -> dict[str, str]:
     # O selo "ao vivo" tem fundo vermelho fixo nos dois modos; o texto dele é sempre branco, e não o
     # texto do botão primário, que nas paletas de botão claro ou âmbar é escuro.
     cores["live_text"] = "#ffffff"
+    # O anel de foco do protótipo é o acento a 50% sobre o cartão, e o cartão "quente" (sob o mouse) é o cartão com 4%
+    # do tom suave: nenhum dos dois é um papel, são derivados.
+    cores.update(derivadas(cores))
     # As imagens do QSS (o QSS não desenha): seta do combo, na cor do texto discreto, e o visto sobre o acento.
     cores["img_chevron"] = _imagem("chevron", cores["t2"], _chevron)
     cores["img_chevron_dim"] = _imagem("chevron", cores["t3"], _chevron)

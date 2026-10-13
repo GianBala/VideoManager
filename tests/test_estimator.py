@@ -154,6 +154,40 @@ class TestDownloadSizeEstimation:
         assert size == int((320 * 1000 / 8) * 100.0)
 
 
+class TestProfileSizeEstimation:
+    """O tamanho de um perfil rápido é a conta do rodapé aplicada ao perfil: mesmo vídeo, mesma trilha de áudio."""
+
+    @staticmethod
+    def _matrix() -> FormatMatrix:
+        def video(fid: str, height: int, mb: int) -> VideoChoice:
+            fmt = Fmt(format_id=fid, ext="mp4", kind=Kind.VIDEO_ONLY, height=height, filesize=mb * 1024 * 1024)
+            return VideoChoice(height=height, fps=30, family="h264", dynamic_range=None, formats=(fmt,))
+
+        a_fmt = Fmt(format_id="140", ext="m4a", kind=Kind.AUDIO_ONLY, abr=128.0, filesize=5 * 1024 * 1024)
+        audio = AudioChoice(family="aac", bitrate=128.0, language=None, formats=(a_fmt,))
+        # Da melhor para a pior, como a matriz de verdade.
+        return FormatMatrix(video=(video("313", 2160, 400), video("137", 1080, 50), video("135", 480, 12)), audio=(audio,))
+
+    def test_o_limite_de_altura_escolhe_o_melhor_video_que_o_respeita(self) -> None:
+        from videomanager.domain.estimator import estimate_profile_size
+        matrix = self._matrix()
+        assert estimate_profile_size(matrix, Mode.VIDEO, max_height=1080, duration=60.0) == (50 + 5) * 1024 * 1024
+        assert estimate_profile_size(matrix, Mode.VIDEO, max_height=None, duration=60.0) == (400 + 5) * 1024 * 1024
+        assert estimate_profile_size(matrix, Mode.VIDEO, max_height=500, duration=60.0) == (12 + 5) * 1024 * 1024
+
+    def test_o_perfil_de_audio_usa_o_codec_e_a_qualidade_do_perfil(self) -> None:
+        from videomanager.domain.estimator import estimate_profile_size
+        matrix = self._matrix()
+        mp3 = estimate_profile_size(matrix, Mode.AUDIO_ONLY, audio_codec="mp3", audio_quality="320", duration=100.0)
+        assert mp3 == int((320 * 1000 / 8) * 100.0)
+        # "Áudio original" copia a trilha: o tamanho é o dela, e não o de uma conta por bitrate.
+        assert estimate_profile_size(matrix, Mode.AUDIO_ONLY, audio_codec="best", duration=100.0) == 5 * 1024 * 1024
+
+    def test_sem_formato_nao_ha_o_que_estimar(self) -> None:
+        from videomanager.domain.estimator import estimate_profile_size
+        assert estimate_profile_size(FormatMatrix(), Mode.VIDEO, max_height=1080, duration=60.0) is None
+
+
 class TestConvertSizeEstimation:
     def test_convert_copy_preserves_size(self, tmp_path: Path) -> None:
         media = LocalMedia(

@@ -10,18 +10,21 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
+from videomanager.application.formatting import format_size_compact
 from videomanager.domain.formats import Mode
 from videomanager.presentation.qt import fonts, icons, strings, theme
 from videomanager.presentation.qt.i18n import bind
 
 _PAD = 14
-_TILE = 36
+_TILE = 38
 _ICON = 20
 _DOWNLOAD_TILE = 28
+# O espaço entre o ladrilho, o texto e o pé do cartão.
+_GAP = 10
 
 
 @dataclass(frozen=True)
@@ -79,15 +82,17 @@ PROFILES = (
 
 
 class ProfileCard(QPushButton):
-    """Cartão de um perfil, pintado: ladrilho com ícone, nome, descrição e o botão de baixar.
+    """Cartão de um perfil, pintado: ladrilho com ícone, nome, descrição, tamanho estimado e o botão de baixar.
 
     É um ``QPushButton`` de verdade (foco, Enter, Espaço, desabilitado até haver mídia), com o texto
-    ``"título\\nsubtítulo"`` para quem lê o botão sem vê-lo; só o desenho é próprio.
+    ``"título\nsubtítulo"`` para quem lê o botão sem vê-lo; só o desenho é próprio. Sob o mouse (ou com o foco) o
+    cartão "esquenta": o fundo ganha um tom, o ladrilho e o botão viram o degradê do botão primário e um anel o cerca.
     """
 
     def __init__(self, profile: Profile, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._profile = profile
+        self._size_text = ""
         bind(self, "setText", lambda: f"{profile.title()}\n{profile.subtitle()}")
         self.setProperty("role", "profile-card")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -96,63 +101,91 @@ class ProfileCard(QPushButton):
         self.setMaximumHeight(self._altura())
         theme.on_theme_change(self._retheme)
 
+    def set_size_text(self, text: str) -> None:
+        """O tamanho estimado deste perfil para a mídia analisada ("" enquanto não há análise)."""
+        self._size_text = text
+        self.update()
+
+    def size_text(self) -> str:
+        return self._size_text
+
     def _retheme(self) -> None:
         self.update()
 
+    @staticmethod
+    def _linha(fonte: QFont) -> int:
+        """A altura de uma linha de texto, com o espaçamento de 1,4 do protótipo."""
+        return round(fonte.pixelSize() * 1.4)
+
     def _altura(self) -> int:
         titulo, normal = self._fontes()
-        return _PAD + _TILE + 10 + QFontMetrics(titulo).lineSpacing() + 2 + QFontMetrics(normal).lineSpacing() + _PAD
+        return _PAD + _TILE + _GAP + self._linha(titulo) + 1 + self._linha(normal) + _GAP + _DOWNLOAD_TILE + _PAD
 
     def _fontes(self) -> tuple[QFont, QFont]:
-        titulo = QFont(self.font())
-        titulo.setBold(True)
-        return titulo, fonts.resized(self.font(), factor=0.93)
+        titulo = fonts.resized(self.font(), delta=1)
+        titulo.setWeight(QFont.Weight.DemiBold)
+        return titulo, fonts.resized(self.font(), delta=-1)
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(170, self._altura())
 
     def paintEvent(self, event) -> None:  # noqa: N802
         c = theme.papeis(*theme.atual())
+        derivadas = theme.derivadas(c)
         cor_foco = theme.palette(*theme.atual())["focus"]
         ativo = self.isEnabled()
-        passando = ativo and self.underMouse()
         foco = ativo and self.hasFocus()
+        quente = ativo and (self.underMouse() or foco)
         titulo, normal = self._fontes()
-        mt, mn = QFontMetrics(titulo), QFontMetrics(normal)
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if not ativo:
             p.setOpacity(0.55)
-        corpo = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
-        p.setBrush(QColor(c["raised2"] if passando else c["raised"]))
-        p.setPen(QPen(QColor(cor_foco), 1.5) if foco else Qt.PenStyle.NoPen)
+        corpo = QRectF(0.75, 0.75, self.width() - 1.5, self.height() - 1.5)
+        p.setBrush(QColor(derivadas["hot"] if quente else c["card"]))
+        p.setPen(QPen(QColor(cor_foco if foco else derivadas["ring"]), 1.5) if quente else Qt.PenStyle.NoPen)
         p.drawRoundedRect(corpo, 12, 12)
+
+        def degrade(caixa: QRectF) -> QLinearGradient:
+            g = QLinearGradient(caixa.topLeft(), caixa.bottomRight())
+            g.setColorAt(0, QColor(c["fill_a"]))
+            g.setColorAt(1, QColor(c["fill_b"]))
+            return g
+
         # Ladrilho do ícone.
-        tile = QRect(_PAD, _PAD, _TILE, _TILE)
+        tile = QRectF(_PAD, _PAD, _TILE, _TILE)
         p.setPen(Qt.PenStyle.NoPen)
-        fundo = QColor(c["accent"])
-        fundo.setAlpha(38 if ativo else 0)
-        p.setBrush(fundo if ativo else QColor(c["raised2"]))
-        p.drawRoundedRect(QRectF(tile), 10, 10)
-        icone = self._profile.icon(c["accent"] if ativo else c["t3"], _ICON)
-        icone.paint(p, QRect(tile.x() + (_TILE - _ICON) // 2, tile.y() + (_TILE - _ICON) // 2, _ICON, _ICON))
-        # Botão de baixar, no canto: diz que o clique faz alguma coisa já.
-        if ativo:
-            baixar = QRect(self.width() - _PAD - _DOWNLOAD_TILE, _PAD, _DOWNLOAD_TILE, _DOWNLOAD_TILE)
-            p.setBrush(QColor(c["accent"] if passando else c["raised2"]))
-            p.drawRoundedRect(QRectF(baixar), 8, 8)
-            lado = 16
-            icons.nav_download(c["on_fill"] if passando else c["t2"], lado).paint(
-                p, QRect(baixar.x() + (_DOWNLOAD_TILE - lado) // 2, baixar.y() + (_DOWNLOAD_TILE - lado) // 2, lado, lado))
+        p.setBrush(degrade(tile) if quente else QColor(c["raised"]))
+        p.drawRoundedRect(tile, 10, 10)
+        icone = self._profile.icon(c["on_fill"] if quente else c["t2"], _ICON)
+        icone.paint(p, QRect(int(tile.x()) + (_TILE - _ICON) // 2, int(tile.y()) + (_TILE - _ICON) // 2, _ICON, _ICON))
+
         largura = self.width() - 2 * _PAD
-        y = _PAD + _TILE + 10
+        y = _PAD + _TILE + _GAP
+        mt, mn = QFontMetrics(titulo), QFontMetrics(normal)
         p.setFont(titulo)
         p.setPen(QColor(c["text"]))
-        p.drawText(QPoint(_PAD, y + mt.ascent()), mt.elidedText(self._profile.title(), Qt.TextElideMode.ElideRight, largura))
-        y += mt.lineSpacing() + 2
+        linha = self._linha(titulo)
+        p.drawText(QPointF(_PAD, y + (linha + mt.ascent() - mt.descent()) / 2), mt.elidedText(self._profile.title(), Qt.TextElideMode.ElideRight, largura))
+        y += linha + 1
         p.setFont(normal)
-        p.setPen(QColor(c["t2"]))
-        p.drawText(QPoint(_PAD, y + mn.ascent()), mn.elidedText(self._profile.subtitle(), Qt.TextElideMode.ElideRight, largura))
+        p.setPen(QColor(c["t3"]))
+        linha = self._linha(normal)
+        p.drawText(QPointF(_PAD, y + (linha + mn.ascent() - mn.descent()) / 2), mn.elidedText(self._profile.subtitle(), Qt.TextElideMode.ElideRight, largura))
+
+        # O pé: o tamanho estimado à esquerda e, à direita, o botão de baixar — que diz que o clique faz algo já.
+        if ativo:
+            baixar = QRectF(self.width() - _PAD - _DOWNLOAD_TILE, self.height() - _PAD - _DOWNLOAD_TILE, _DOWNLOAD_TILE, _DOWNLOAD_TILE)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(degrade(baixar) if quente else QColor(c["raised"]))
+            p.drawRoundedRect(baixar, 8, 8)
+            lado = 16
+            icons.nav_download(c["on_fill"] if quente else c["t2"], lado).paint(
+                p, QRect(int(baixar.x()) + (_DOWNLOAD_TILE - lado) // 2, int(baixar.y()) + (_DOWNLOAD_TILE - lado) // 2, lado, lado))
+            if self._size_text:
+                p.setFont(normal)
+                p.setPen(QColor(c["t2"]))
+                p.drawText(QPointF(_PAD, baixar.center().y() + (mn.ascent() - mn.descent()) / 2), self._size_text)
         p.end()
 
 
@@ -172,10 +205,10 @@ class ProfilesPanel(QWidget):
         header.setSpacing(10)
         title = bind(QLabel(), "setText", lambda: strings.PROFILES_GROUP)
         title.setProperty("role", "section-title")
-        header.addWidget(title)
+        header.addWidget(title, 0, Qt.AlignmentFlag.AlignBaseline)
         hint = bind(QLabel(), "setText", lambda: strings.PROFILE_HINT)
-        hint.setProperty("role", "dim")
-        header.addWidget(hint, 1)
+        hint.setProperty("role", "hint")
+        header.addWidget(hint, 1, Qt.AlignmentFlag.AlignBaseline)
         layout.addLayout(header)
 
         row = QHBoxLayout()
@@ -192,3 +225,11 @@ class ProfilesPanel(QWidget):
     def set_enabled(self, enabled: bool) -> None:
         for button in self._buttons:
             button.setEnabled(enabled)
+        if not enabled:
+            self.set_estimates([])
+
+    def set_estimates(self, sizes: list[int | None]) -> None:
+        """O tamanho estimado de cada perfil, na ordem de ``PROFILES`` (vazio apaga todos)."""
+        for index, button in enumerate(self._buttons):
+            size = sizes[index] if index < len(sizes) else None
+            button.set_size_text(format_size_compact(size, estimated=True) if size is not None else "")
