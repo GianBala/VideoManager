@@ -246,6 +246,23 @@ def dialogo_de_exportacao(desktop_app, tmp_path):
 
 
 @pytest.fixture
+def tema_do_app(desktop_app):
+    """O tema real aplicado ao ``QApplication`` durante o teste, e o estado de antes devolvido no fim.
+
+    O aplicativo sempre roda com o QSS: o que o QSS muda (tamanho de rótulo, recuo de aba, altura de campo) não existe
+    num teste que não o aplica. Aplicar sem devolver deixaria estilo e paleta trocados para os testes de geometria
+    seguintes, que medem com o que estava antes.
+    """
+    from videomanager.presentation.qt import theme
+    antes = (desktop_app.palette(), desktop_app.styleSheet(), theme.atual())
+    theme.apply(desktop_app, "dark", "grafite")
+    yield desktop_app
+    desktop_app.setPalette(antes[0])
+    desktop_app.setStyleSheet(antes[1])
+    theme._atual = antes[2]
+
+
+@pytest.fixture
 def painel_de_edicao(desktop_app, monkeypatch):
     """O painel de edição de verdade, vazio, sem diálogos que travem o teste."""
     from PySide6.QtWidgets import QMessageBox

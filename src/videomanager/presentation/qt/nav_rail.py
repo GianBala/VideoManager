@@ -13,23 +13,51 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter
-from PySide6.QtWidgets import QApplication, QLabel, QStackedWidget, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPolygonF
+from PySide6.QtWidgets import QStackedWidget, QToolButton, QVBoxLayout, QWidget
 
 from videomanager.presentation.qt import icons, theme
 
-LARGURA = 80
+LARGURA = 76
 _ICONES = (icons.nav_download, icons.nav_convert, icons.nav_edit, icons.nav_metadata)
 
 
+class _Marca(QWidget):
+    """O logotipo do topo: o quadrado em degradê com o triângulo de reproduzir."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(38, 38)
+        theme.on_theme_change(self._retheme)
+
+    def _retheme(self) -> None:
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        cores = theme.papeis(*theme.atual())
+        pintor = QPainter(self)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        degrade = QLinearGradient(0, 0, self.width(), self.height())
+        degrade.setColorAt(0, QColor(cores["fill_a"]))
+        degrade.setColorAt(1, QColor(cores["fill_b"]))
+        pintor.setPen(Qt.PenStyle.NoPen)
+        pintor.setBrush(degrade)
+        pintor.drawRoundedRect(QRectF(self.rect()), 11, 11)
+        pintor.setBrush(QColor(cores["on_fill"]))
+        pintor.setPen(QColor(cores["on_fill"]))
+        pintor.drawPolygon(QPolygonF([QPointF(15, 12), QPointF(15, 26), QPointF(27, 19)]))
+        pintor.end()
+
+
 class _Item(QToolButton):
-    def __init__(self, desenho, texto: str, parent: QWidget) -> None:
+    def __init__(self, desenho, texto: str, parent: QWidget, *, toggle: bool = False) -> None:
         super().__init__(parent)
         self._desenho = desenho
         self.setProperty("role", "rail-item")
+        self.setProperty("toggle", "true" if toggle else "false")
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self.setIconSize(QSize(22, 22))
+        self.setIconSize(QSize(20, 20))
         self.setFixedWidth(LARGURA - 10)
         # Só Tab alcança o item (clicar não deixa o anel de foco no que se acabou de abrir), e quem decide quais
         # entram na ordem é o menu: ver ``NavRail._sincronizar_foco``.
@@ -96,14 +124,8 @@ class NavRail(QWidget):
         coluna.setContentsMargins(5, 14, 5, 14)
         coluna.setSpacing(4)
         coluna.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        marca = QLabel()
-        marca.setProperty("role", "plain")
-        icone = QApplication.windowIcon()
-        if not icone.isNull():
-            marca.setPixmap(icone.pixmap(QSize(38, 38)))
-        marca.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        coluna.addWidget(marca)
-        coluna.addSpacing(12)
+        coluna.addWidget(_Marca(), 0, Qt.AlignmentFlag.AlignHCenter)
+        coluna.addSpacing(14)
         self._topo = coluna
         coluna.addStretch(1)
         theme.on_theme_change(self._retheme)
@@ -123,6 +145,7 @@ class NavRail(QWidget):
         if marcado:
             self._sincronizar_foco()
             self.currentChanged.emit(indice)
+            self.update()
 
     def _sincronizar_foco(self) -> None:
         """Como num grupo de rádio: Tab para no item marcado e segue adiante; entre os itens, as setas.
@@ -144,7 +167,7 @@ class NavRail(QWidget):
 
     def add_toggle(self, desenho, texto: str, chamada: Callable[[bool], None]) -> _Item:
         """Item que liga e desliga algo (a gaveta de tarefas), sem fazer parte do grupo das páginas."""
-        item = _Item(desenho, texto, self)
+        item = _Item(desenho, texto, self, toggle=True)
         item.setCheckable(True)
         item.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         item.toggled.connect(chamada)
@@ -172,9 +195,23 @@ class NavRail(QWidget):
         """Alguma das teclas do menu tem o foco: é o que "a barra de navegação tem foco" quer dizer."""
         return any(item.hasFocus() for item in (*self._itens, *self._acoes)) or super().hasFocus()
 
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """A faixa de seleção: rente à borda da janela, com a ponta de dentro arredondada, na altura do item marcado."""
+        super().paintEvent(event)
+        marcado = next((item for item in self._itens if item.isChecked()), None)
+        if marcado is None:
+            return
+        pintor = QPainter(self)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pintor.setPen(Qt.PenStyle.NoPen)
+        pintor.setBrush(QColor(theme.papeis(*theme.atual())["accent"]))
+        pintor.drawRoundedRect(QRectF(-3, marcado.y() + 11, 6, marcado.height() - 22), 3, 3)
+        pintor.end()
+
     def _retheme(self) -> None:
         for item in (*self._itens, *self._acoes):
             item.repintar()
+        self.update()
 
 
 class Paginas(QStackedWidget):
