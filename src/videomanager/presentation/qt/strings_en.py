@@ -180,6 +180,7 @@ QUEUE_LOG_CLOSE = "Close"
 STATUS_COUNTS = "{active} in progress · {pending} queued · {done} completed"
 STATUS_FFMPEG = "ffmpeg: {source}"
 FFMPEG_SOURCES = {"empacotado": "bundled", "gerenciado": "managed", "sistema": "system"}
+TOAST_CLOSE = "Dismiss notice"
 STATUS_ENQUEUED = "{count} task(s) added to the queue — follow them in the Download tab"
 STATUS_SETTINGS_FAILED = "Could not save the preferences: {error}"
 

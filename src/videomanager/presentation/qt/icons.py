@@ -295,3 +295,36 @@ def minus(color: str, size: int = _SIZE) -> QIcon:
     painter.drawLine(QPointF(4.0 * u, 9.0 * u), QPointF(14.0 * u, 9.0 * u))
     painter.end()
     return QIcon(pixmap)
+
+
+def check(color: str, size: int = _SIZE) -> QIcon:
+    """Confirmação: o tique."""
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color, _STROKE * 1.15))
+    u = size / 18.0
+    painter.drawPolyline(QPolygonF([QPointF(3.8 * u, 9.6 * u), QPointF(7.4 * u, 13.2 * u), QPointF(14.4 * u, 5.4 * u)]))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def warn(color: str, size: int = _SIZE) -> QIcon:
+    """Aviso: triângulo com ponto de exclamação."""
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    u = size / 18.0
+    painter.drawPolygon(QPolygonF([QPointF(9.0 * u, 2.8 * u), QPointF(15.8 * u, 14.6 * u), QPointF(2.2 * u, 14.6 * u)]))
+    painter.drawLine(QPointF(9.0 * u, 7.0 * u), QPointF(9.0 * u, 10.4 * u))
+    painter.drawPoint(QPointF(9.0 * u, 12.5 * u))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def close(color: str, size: int = _SIZE) -> QIcon:
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color))
+    u = size / 18.0
+    painter.drawLine(QPointF(4.6 * u, 4.6 * u), QPointF(13.4 * u, 13.4 * u))
+    painter.drawLine(QPointF(13.4 * u, 4.6 * u), QPointF(4.6 * u, 13.4 * u))
+    painter.end()
+    return QIcon(pixmap)
