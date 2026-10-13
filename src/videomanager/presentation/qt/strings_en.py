@@ -758,11 +758,23 @@ SETTINGS_ENCODER_TEST_TIP = (
     "Has the GPU encode a real frame. It's the only way to know: ffmpeg lists "
     "encoders that don't open on this machine."
 )
-SETTINGS_THEME = "Theme"
+SETTINGS_TAB_THEME = "Theme"
+SETTINGS_THEME_MODE = "Mode"
+SETTINGS_PALETTE = "Palette"
+SETTINGS_PALETTE_HINT = "Colors change when you confirm with OK."
 SETTINGS_LANGUAGE = "Language"
 LANGUAGE_NAMES = {"pt-BR": "Português (Brasil)", "en": "English"}
 THEME_DARK = "Dark"
 THEME_LIGHT = "Light"
+PALETTE_NAMES = {
+    "atual": "Current", "grafite": "Graphite and indigo", "estudio": "Studio",
+    "mare": "Tide", "aurora": "Aurora", "cinema": "Cinema",
+}
+PALETTE_TAGLINES = {
+    "atual": "The original colors", "grafite": "Blue-gray and indigo",
+    "estudio": "Neutral gray, no brand color", "mare": "Navy and cyan",
+    "aurora": "Plum, violet and magenta", "cinema": "Warm charcoal and amber",
+}
 
 # --- diálogos e erros --------------------------------------------------------
 DIALOG_ERROR_TITLE = "Unable to Continue"

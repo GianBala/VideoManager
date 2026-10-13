@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from videomanager.presentation.qt import paletas
+from videomanager.domain.appearance import PALETTES, THEMES
+from videomanager.presentation.qt import paletas, strings
 from videomanager.presentation.qt.theme import palette, qpalette, stylesheet
 
 # As chaves antigas do tema, como eram antes da renovação (cópia do dicionário que existia em
@@ -63,6 +64,20 @@ def _sobre(frente: str, fundo: str, opacidade: float) -> tuple[int, int, int]:
 def test_as_seis_paletas_estao_registradas_na_ordem():
     assert paletas.nomes() == ("atual", "grafite", "estudio", "mare", "aurora", "cinema")
     assert paletas.PADRAO == "atual"
+
+
+def test_o_registro_de_cores_e_a_lista_do_dominio_nao_divergem():
+    # A preferência valida o nome contra o domínio; as cores moram aqui. Se uma lista ganhar uma
+    # paleta e a outra não, o nome passaria na validação e não teria cor, ou o contrário.
+    assert paletas.nomes() == PALETTES
+    assert paletas.MODOS == THEMES
+
+
+def test_toda_paleta_tem_nome_e_linha_nos_dois_idiomas():
+    from videomanager.presentation.qt import strings_en
+    for catalogo in (strings, strings_en):
+        assert tuple(catalogo.PALETTE_NAMES) == PALETTES
+        assert tuple(catalogo.PALETTE_TAGLINES) == PALETTES
 
 
 @pytest.mark.parametrize("nome, modo", _COMBINACOES)

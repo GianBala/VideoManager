@@ -559,7 +559,7 @@ class EditPanel(QWidget):
         self._scrub_job: tuple[int, object, list] | None = None
         # Instante do quadro guardado que está na tela, enquanto o exato não vem.
         self._cache_shown_for: float | None = None
-        self._colors = palette(settings.theme)
+        self._colors = palette(settings.theme, settings.palette)
         on_theme_change(self._retheme)
 
         self._processing = processing

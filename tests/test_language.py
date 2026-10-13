@@ -258,6 +258,8 @@ _IGUAIS = {
     "EDIT_TRACK_MUTED_BADGE",
     # "Volume" é a mesma palavra nas duas línguas.
     "PROP_VOLUME",
+    # "Aurora" e "Cinema" são o nome da paleta nas duas línguas.
+    "PALETTE_NAMES",
 }
 
 

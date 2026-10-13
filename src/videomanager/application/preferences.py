@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 from typing import Any
 
+from videomanager.domain.appearance import DEFAULT_PALETTE, PALETTES
 from videomanager.domain.i18n import LANGUAGES, PORTUGUESE
 
 # Faixas dos campos numéricos: as mesmas da tela de configurações, que as lê
@@ -68,6 +69,8 @@ class Preferences:
 
     # --- interface ---
     theme: str = "dark"
+    # Paleta de cores (ver videomanager.domain.appearance); o modo, escuro ou claro, é o ``theme``.
+    palette: str = DEFAULT_PALETTE
     # Idioma da interface, pelo código de videomanager.domain.i18n.
     language: str = PORTUGUESE
     # Volume da prévia da aba de edição, de 0 a 100. Guardado porque é ajustado
@@ -106,4 +109,8 @@ class Preferences:
         # uma versão futura) volta ao padrão: aplicá-lo recusaria abrir.
         if kwargs.get("language", PORTUGUESE) not in LANGUAGES:
             del kwargs["language"]
+        # Idem para a paleta: um nome que esta versão não conhece (de uma versão futura, ou editado
+        # à mão) volta ao padrão em vez de deixar a aplicação sem cores.
+        if kwargs.get("palette", DEFAULT_PALETTE) not in PALETTES:
+            del kwargs["palette"]
         return cls(**kwargs)

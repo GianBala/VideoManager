@@ -28,6 +28,7 @@ from videomanager.application.preferences import RANGES
 from videomanager.presentation.qt.tasks import WorkerRunner
 from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.i18n import align_label_column
+from videomanager.presentation.qt.palette_picker import SeletorDePaleta
 from videomanager.presentation.qt.theme import FIELD_WIDTH
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
@@ -63,6 +64,7 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
         tabs.addTab(self._build_general(), strings.SETTINGS_TAB_GENERAL)
+        tabs.addTab(self._build_theme(), strings.SETTINGS_TAB_THEME)
         tabs.addTab(self._build_network(), strings.SETTINGS_TAB_NETWORK)
         tabs.addTab(self._build_subs(), strings.SETTINGS_TAB_SUBS)
         self._align_label_column()
@@ -155,13 +157,6 @@ class SettingsDialog(QDialog):
         self._separate.setChecked(self._settings.separate_by_site)
         self._add_check(form, self._separate)
 
-        self._theme = QComboBox()
-        self._theme.addItem(strings.THEME_DARK, "dark")
-        self._theme.addItem(strings.THEME_LIGHT, "light")
-        self._theme.setCurrentIndex(max(0, self._theme.findData(self._settings.theme)))
-        self._theme.setFixedWidth(FIELD_WIDTH)
-        self._add_row(form, strings.SETTINGS_THEME, self._theme)
-
         self._language = QComboBox()
         for code, name in strings.LANGUAGE_NAMES.items():
             self._language.addItem(name, code)
@@ -196,6 +191,29 @@ class SettingsDialog(QDialog):
         form.addRow(row)
         self._describe_encoder()
 
+        return page
+
+    def _build_theme(self) -> QWidget:
+        """Modo (escuro ou claro) e paleta: as duas escolhas que definem as cores do aplicativo."""
+        page, form = self._make_page()
+
+        self._theme = QComboBox()
+        self._theme.addItem(strings.THEME_DARK, "dark")
+        self._theme.addItem(strings.THEME_LIGHT, "light")
+        self._theme.setCurrentIndex(max(0, self._theme.findData(self._settings.theme)))
+        self._theme.setFixedWidth(FIELD_WIDTH)
+        self._add_row(form, strings.SETTINGS_THEME_MODE, self._theme)
+
+        form.addRow(QLabel(strings.SETTINGS_PALETTE))
+        self._palette_picker = SeletorDePaleta(self._settings.palette, self._settings.theme)
+        form.addRow(self._palette_picker)
+        hint = QLabel(strings.SETTINGS_PALETTE_HINT)
+        hint.setProperty("role", "dim")
+        hint.setWordWrap(True)
+        form.addRow(hint)
+        # As miniaturas mostram a paleta no modo escolhido, antes de confirmar.
+        self._theme.currentIndexChanged.connect(
+            lambda _index: self._palette_picker.set_mode(self._theme.currentData() or "dark"))
         return page
 
     def _build_network(self) -> QWidget:
@@ -302,6 +320,7 @@ class SettingsDialog(QDialog):
         updated.download_dir = self._dest.text().strip() or self._settings.download_dir
         updated.separate_by_site = self._separate.isChecked()
         updated.theme = self._theme.currentData() or "dark"
+        updated.palette = self._palette_picker.palette()
         updated.language = self._language.currentData() or self._settings.language
         updated.hardware_encoder = (
             self._encoder.currentData() or hwaccel.SOFTWARE
