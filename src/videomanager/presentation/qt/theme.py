@@ -144,6 +144,13 @@ QLabel[role="result-size"] {{ font-size: 22px; font-weight: 700; color: {text}; 
    o cartão marcado não crescer e empurrar os vizinhos. */
 QPushButton[role="palette"] {{ background: {raised}; border: 2px solid {raised}; border-radius: 10px; padding: 0px; text-align: left; }}
 QPushButton[role="palette"]:hover {{ border-color: {raised2}; }}
+/* Aba Convert: a lista de arquivos se pinta sozinha sobre o cartão; os três modos são um controle segmentado
+   (três botões de rádio de desenho próprio, ver ``segmented.py``); o resumo é um destaque com moldura no tom do acento. */
+QListWidget[role="files"] {{ background: transparent; border: none; padding: 0px; }}
+QFrame[role="segments"] {{ background: {raised}; border: 1px solid {raised}; border-radius: 10px; }}
+QFrame[role="callout"] {{ background: {soft16}; border: 1px solid {soft16}; border-radius: 10px; }}
+QLabel[role="callout-title"] {{ color: {accent}; font-size: 11px; font-weight: 700; }}
+
 /* Gaveta de tarefas: coluna à direita, no tom do menu lateral, separada do conteúdo por um fio. */
 QFrame[role="drawer"] {{ background: {panel}; border: none; border-left: 1px solid {raised}; }}
 QLabel[role="drawer-title"] {{ font-size: 16px; font-weight: 600; color: {text}; background: transparent; }}
