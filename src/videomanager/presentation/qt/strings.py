@@ -72,7 +72,10 @@ MODE_VIDEO = "Vídeo (com áudio)"
 MODE_AUDIO = "Somente áudio"
 
 # --- controles de vídeo ------------------------------------------------------
-QUALITY_GROUP = "Qualidade"
+PERSONALIZE_TITLE = "Personalizar"
+PERSONALIZE_HINT = "ajuste cada detalhe antes de enfileirar"
+RESULT_LABEL = "Resultado"
+RESULT_ESTIMATED = "estimado"
 LABEL_RESOLUTION = "Resolução"
 LABEL_FPS = "Framerate"
 LABEL_CODEC = "Codec de vídeo"
@@ -125,12 +128,12 @@ TIP_AUDIO_FORMAT = (
 )
 
 # --- destino -----------------------------------------------------------------
-DEST_LABEL = "Destino"
+DEST_LABEL = "Salvar em"
 DEST_BROWSE = "Escolher…"
 DEST_TOOLTIP = "Pasta onde os arquivos concluídos são salvos"
 
 # --- perfis ------------------------------------------------------------------
-PROFILES_GROUP = "Perfis rápidos"
+PROFILES_GROUP = "Baixar com um clique"
 PROFILE_HINT = "Um clique configura tudo e adiciona à fila."
 PROFILE_MP4_1080 = "MP4 1080p"
 PROFILE_MP4_1080_SUB = "compatível com tudo"
