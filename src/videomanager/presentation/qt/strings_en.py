@@ -81,7 +81,10 @@ MODE_VIDEO = "Video (with audio)"
 MODE_AUDIO = "Audio only"
 
 # --- controles de vídeo ------------------------------------------------------
-QUALITY_GROUP = "Quality"
+PERSONALIZE_TITLE = "Customize"
+PERSONALIZE_HINT = "adjust every detail before queueing"
+RESULT_LABEL = "Result"
+RESULT_ESTIMATED = "estimated"
 LABEL_RESOLUTION = "Resolution"
 LABEL_FPS = "Frame rate"
 LABEL_CODEC = "Video codec"
@@ -134,12 +137,12 @@ TIP_AUDIO_FORMAT = (
 )
 
 # --- destino -----------------------------------------------------------------
-DEST_LABEL = "Destination"
+DEST_LABEL = "Save to"
 DEST_BROWSE = "Browse…"
 DEST_TOOLTIP = "Folder where finished files are saved"
 
 # --- perfis ------------------------------------------------------------------
-PROFILES_GROUP = "Quick profiles"
+PROFILES_GROUP = "Download in one click"
 PROFILE_HINT = "One click sets everything up and adds it to the queue."
 PROFILE_MP4_1080 = "MP4 1080p"
 PROFILE_MP4_1080_SUB = "plays everywhere"
