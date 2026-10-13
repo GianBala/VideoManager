@@ -78,10 +78,7 @@ TRACK_GAP = 4
 FILM_CELL_WIDTH = int((VIDEO_TRACK_HEIGHT - 14) * 16 / 9)
 
 _TIPOS = TIPOS_DE_BLOCO
-_ICONES_DO_TIPO = {
-    "video": icons.nav_edit, "audio": icons.music, "text": icons.type_text, "image": icons.type_image,
-    "filter": icons.type_filter, "transition": icons.nav_convert,
-}
+_ICONES_DO_TIPO = icons.TYPE_ICONS
 _TIPO_DA_TRILHA = {TrackKind.VIDEO: "video", TrackKind.AUDIO: "audio", TrackKind.ADDITIONAL: "text"}
 # Ladrilho do ícone no cabeçalho da trilha e no rótulo do bloco, em pixels.
 _TILE_CABECALHO = 18

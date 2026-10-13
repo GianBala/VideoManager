@@ -31,7 +31,7 @@ _LIVRES = {"qt/theme.py", "qt/paletas.py"}
 _ORCAMENTO = {
     "qt/fullscreen_preview.py": 2,
     "qt/panels/edit_panel.py": 19,
-    "qt/panels/edit_widgets.py": 22,
+    "qt/panels/edit_widgets.py": 18,
     "qt/panels/timeline.py": 29,
     "qt/strings.py": 3,
     "qt/strings_en.py": 3,

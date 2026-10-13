@@ -12,13 +12,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QMessageBox
 
-from videomanager.bootstrap import build_desktop_runtime, build_editor_service, build_processing_service
-from videomanager.domain.project import Clip, MediaKind, MediaRef, Project, Track, TrackKind
-from videomanager.infrastructure.storage.settings import Settings
+from videomanager.domain.project import MediaKind, MediaRef
 from videomanager.presentation.qt import strings
-from videomanager.presentation.qt.panels.edit_panel import EditPanel
 
 # Atributo do ``_ClipPropertiesWidget`` -> nome da seção, na ordem em que aparecem na tela.
 _SECOES = {
@@ -49,43 +45,14 @@ def _midia(nome: str, tipo: MediaKind, duracao: float = 6.0, **extra) -> MediaRe
 
 
 @pytest.fixture
-def painel(desktop_app, monkeypatch):
-    monkeypatch.setattr(QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Ok)
-    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Discard)
-    instancia = EditPanel(Settings(), ensure_tools=lambda: None, editor=build_editor_service(),
-                          processing=build_processing_service(), runtime=build_desktop_runtime())
-    yield instancia
-    instancia.shutdown()
+def painel(painel_de_edicao):
+    return painel_de_edicao
 
 
 @pytest.fixture
-def blocos(painel):
+def blocos(blocos_de_edicao):
     """Um bloco de cada tipo, num projeto só, aplicado ao painel."""
-    com_som = Clip(_midia("a.mp4", MediaKind.VIDEO, has_audio=True), start=0.0, duration=6.0)
-    com_som_2 = Clip(_midia("b.mp4", MediaKind.VIDEO, has_audio=True), start=6.0, duration=6.0)
-    sem_som = Clip(_midia("c.mp4", MediaKind.VIDEO, has_audio=False), start=0.0, duration=6.0)
-    imagem = Clip(_midia("i.png", MediaKind.IMAGE, 4.0), start=1.0, duration=4.0)
-    audio = Clip(_midia("m.mp3", MediaKind.AUDIO, 15.0, has_audio=True), start=0.0, duration=15.0)
-    texto = Clip(MediaRef(Path("Texto_Video Manager"), MediaKind.IMAGE, duration=5.0), start=0.5, duration=5.0,
-                 overlay_type="text", text_content="Video Manager", font_family="Sans Serif", font_size=110)
-    filtro = Clip(MediaRef(Path("Filtro_Vinheta"), MediaKind.IMAGE, duration=3.0), start=6.0, duration=6.0,
-                  overlay_type="filter", filter_name="vinheta")
-    transicao = Clip(MediaRef(Path("Transicao"), MediaKind.IMAGE, duration=1.0), start=5.5, duration=1.0,
-                     overlay_type="transition", transition_name="dissolve",
-                     transition_left_id=com_som.clip_id, transition_right_id=com_som_2.clip_id)
-    projeto = Project(
-        tracks=(
-            Track(TrackKind.ADDITIONAL, clips=(texto, filtro), name="Adicionais 1"),
-            Track(TrackKind.VIDEO, clips=(imagem,), name="Vídeo 3"),
-            Track(TrackKind.VIDEO, clips=(sem_som,), name="Vídeo 2"),
-            Track(TrackKind.VIDEO, clips=(com_som, transicao, com_som_2), name="Vídeo 1"),
-            Track(TrackKind.AUDIO, clips=(audio,), name="Áudio 1"),
-        ),
-        width=1280, height=720, fps=30.0,
-    )
-    painel._apply(projeto)
-    return {"video com som": com_som, "video sem som": sem_som, "imagem": imagem, "audio": audio,
-            "texto": texto, "filtro": filtro, "transicao": transicao}
+    return blocos_de_edicao
 
 
 def _secoes_visiveis(painel) -> set[str]:

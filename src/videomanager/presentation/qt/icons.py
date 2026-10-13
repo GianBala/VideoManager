@@ -672,3 +672,10 @@ TRANSITION_ICONS = {
     "fade": dashed_circle, "fadeblack": square_filled, "fadewhite": square_outline, "dissolve": type_filter,
     "wipeleft": wipe_left, "wiperight": wipe_right, "slideleft": slide_left, "slideright": slide_right,
 }
+
+
+# Qual desenho acompanha cada espécie de bloco: a linha do tempo e o cabeçalho da aba Propriedades usam o mesmo.
+TYPE_ICONS = {
+    "video": nav_edit, "audio": music, "text": type_text, "image": type_image, "filter": type_filter,
+    "transition": nav_convert,
+}

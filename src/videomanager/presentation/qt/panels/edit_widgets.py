@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFrame,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -48,6 +47,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -66,10 +66,13 @@ from videomanager.domain.project import MAX_GAIN_DB
 from videomanager.domain.project import OverlayType
 from videomanager.domain.project import MIN_GAIN_DB
 from videomanager.domain.project import Clip
+from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
+from videomanager.presentation.qt.panels.section import Section
 from videomanager.presentation.qt.panels.timeline import MEDIA_MIME
 
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import icons, strings, theme
+from videomanager.presentation.qt.theme import TIPOS_DE_BLOCO
 from videomanager.presentation.qt.i18n import bind, on_language_change, retext_items
 from videomanager.domain.i18n import decimal
 
@@ -86,6 +89,23 @@ def _transition_label(transition: object) -> str | None:
     """Ícone e nome da transição, lidos na hora: o nome muda com o idioma."""
     entry = strings.EDIT_TRANSITIONS.get(transition)
     return f"{entry[0]} {entry[1]}" if entry else None
+
+
+def _kind_of(clip: Clip) -> str:
+    """A espécie do bloco para o ícone e a cor do cabeçalho: a mesma que a linha do tempo desenha."""
+    if clip.is_transition:
+        return "transition"
+    if clip.overlay_type is OverlayType.FILTER:
+        return "filter"
+    if clip.overlay_type is OverlayType.TEXT:
+        return "text"
+    if clip.overlay_type is OverlayType.IMAGE:
+        return "image"
+    # Um arquivo de som (mp3, wav) não é "audio_only" — essa marca é do bloco que nasce de "separar áudio" —,
+    # mas também é áudio: sem a mídia aqui, o cabeçalho mostrava o ícone de vídeo no bloco da trilha de áudio.
+    if clip.audio_only or (clip.media is not None and clip.media.kind is MediaKind.AUDIO):
+        return "audio"
+    return "image" if clip.is_image else "video"
 
 
 def _filter_name(filter_name: object) -> str | None:
@@ -1200,9 +1220,33 @@ class _ClipPropertiesWidget(QWidget):
         self._refresh_keyframe_controls()
         self._lbl_blur.setText(self._blur_note())
 
+    def _retheme(self) -> None:
+        self._btn_close.setIcon(icons.close(theme.papeis(*theme.atual())["t2"]))
+        self._paint_kind_tile()
+
+    def _paint_kind_tile(self) -> None:
+        """O ladrilho do cabeçalho: o ícone da espécie do bloco na cor dela, como na linha do tempo."""
+        if self._clip is None:
+            self._kind_tile.clear()
+            return
+        kind = _kind_of(self._clip)
+        side = 36
+        tile = QPixmap(side, side)
+        tile.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(tile)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(TIPOS_DE_BLOCO[kind]))
+        painter.drawRoundedRect(QRectF(0, 0, side, side), 10, 10)
+        glyph = icons.TYPE_ICONS[kind](QColor(Qt.GlobalColor.white).name(), 20)
+        glyph.paint(painter, QRect(8, 8, 20, 20))
+        painter.end()
+        self._kind_tile.setPixmap(tile)
+
     def _refresh_header(self) -> None:
         """Título, dica e espécie do bloco carregado, no idioma de agora."""
         clip = self._clip
+        self._paint_kind_tile()
         if clip is None:
             self._title_lbl.setText(strings.PROP_TITLE)
             self._title_lbl.setToolTip("")
@@ -1216,9 +1260,16 @@ class _ClipPropertiesWidget(QWidget):
         self._lbl_clip_type.setText(strings.PROP_CLIP_ID.format(id=clip.clip_id, kind=kind))
 
     def _build_ui(self) -> None:
-        # Header com título e botão fechar
+        # Cabeçalho: o ícone da espécie do bloco, o nome, "ID · espécie" e o botão de fechar.
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(10)
+        self._kind_tile = QLabel()
+        self._kind_tile.setFixedSize(36, 36)
+        self._kind_tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.addWidget(self._kind_tile)
+        names = QVBoxLayout()
+        names.setSpacing(1)
         self._title_lbl = QLabel(strings.PROP_TITLE)
         self._title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._title_lbl.setMinimumWidth(0)
@@ -1226,30 +1277,37 @@ class _ClipPropertiesWidget(QWidget):
         f_title.setBold(True)
         f_title.setPointSize(f_title.pointSize() + 1)
         self._title_lbl.setFont(f_title)
-        header.addWidget(self._title_lbl, 1)
-
-        btn_close = QPushButton("✕")
-        bind(btn_close, "setToolTip", lambda: strings.PROP_CLOSE_TIP)
-        btn_close.setFixedSize(24, 24)
-        btn_close.setStyleSheet(
-            "QPushButton { border: none; background: transparent; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Ubuntu', sans-serif; font-size: 14px; font-weight: bold; border-radius: 4px; padding: 0px; margin: 0px; min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px; text-align: center; } "
-            "QPushButton:hover { background: #e11d48; color: #ffffff; } "
-            "QPushButton:pressed { background: #be123c; color: #ffffff; }"
-        )
-        btn_close.clicked.connect(self.close_requested.emit)
-        header.addWidget(btn_close, 0)
-        self._layout.addLayout(header)
-
+        names.addWidget(self._title_lbl)
         # O mesmo que o cabeçalho mostra sem bloco (ver _refresh_header): vazio,
         # a troca de idioma o preenchia e a janela trocada divergia da nova.
         self._lbl_clip_type = QLabel(strings.EDIT_CLIP_NONE)
         self._lbl_clip_type.setProperty("role", "dim")
-        self._layout.addWidget(self._lbl_clip_type)
+        names.addWidget(self._lbl_clip_type)
+        header.addLayout(names, 1)
+
+        self._btn_close = QToolButton()
+        self._btn_close.setProperty("role", "icon")
+        self._btn_close.setProperty("danger", "true")
+        self._btn_close.setIconSize(QSize(16, 16))
+        bind(self._btn_close, "setToolTip", lambda: strings.PROP_CLOSE_TIP)
+        self._btn_close.clicked.connect(self.close_requested.emit)
+        header.addWidget(self._btn_close, 0, Qt.AlignmentFlag.AlignTop)
+        self._layout.addLayout(header)
+        theme.on_theme_change(self._retheme)
+        self._retheme()
+
+        # Bloco sem nenhuma seção (o filtro só tem duração e posição, que se ajustam na linha do tempo): diz isso,
+        # em vez de mostrar uma aba vazia.
+        self._lbl_no_settings = bind(QLabel(), "setText", lambda: strings.PROP_NO_SETTINGS)
+        self._lbl_no_settings.setProperty("role", "dim")
+        self._lbl_no_settings.setWordWrap(True)
+        self._lbl_no_settings.setVisible(False)
+        self._layout.addWidget(self._lbl_no_settings)
 
         # Grupo Transformação (Posição, Tamanho, Travar proporção, Escala, Rotação)
-        self._transform_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_TRANSFORM)
-        grid = QGridLayout(self._transform_group)
-        grid.setContentsMargins(6, 8, 6, 6)
+        self._transform_group = Section(lambda: strings.PROP_TRANSFORM)
+        grid = QGridLayout(self._transform_group.body)
+        grid.setContentsMargins(0, 2, 0, 2)
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(6)
 
@@ -1363,9 +1421,9 @@ class _ClipPropertiesWidget(QWidget):
         # também aqui — num bloco de áudio a aba abria vazia. A velocidade fica **fora** do grupo de
         # Animação de propósito: ela muda a duração do bloco, e uma curva de velocidade mudaria o
         # tamanho da trilha ao longo do próprio arrasto.
-        self._speed_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_SPEED)
-        speed_layout = QVBoxLayout(self._speed_group)
-        speed_layout.setContentsMargins(6, 8, 6, 6)
+        self._speed_group = Section(lambda: strings.PROP_SPEED)
+        speed_layout = QVBoxLayout(self._speed_group.body)
+        speed_layout.setContentsMargins(0, 2, 0, 2)
         speed_layout.setSpacing(6)
         self._spin_speed = QDoubleSpinBox()
         self._spin_speed.setRange(0.1, 10.0)
@@ -1380,9 +1438,9 @@ class _ClipPropertiesWidget(QWidget):
         speed_layout.addWidget(self._spin_speed)
         self._layout.addWidget(self._speed_group)
 
-        self._volume_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_VOLUME)
-        volume_layout = QVBoxLayout(self._volume_group)
-        volume_layout.setContentsMargins(6, 8, 6, 6)
+        self._volume_group = Section(lambda: strings.PROP_VOLUME)
+        volume_layout = QVBoxLayout(self._volume_group.body)
+        volume_layout.setContentsMargins(0, 2, 0, 2)
         volume_layout.setSpacing(6)
         self._spin_gain = QDoubleSpinBox()
         self._spin_gain.setRange(MIN_GAIN_DB, MAX_GAIN_DB)
@@ -1400,9 +1458,9 @@ class _ClipPropertiesWidget(QWidget):
         self._layout.addWidget(self._volume_group)
 
         # Grupo Animação / Quadros-chave
-        self._animation_group = bind(QGroupBox(), "setTitle", lambda: strings.EDIT_KEYFRAME_TITLE)
-        anim_layout = QVBoxLayout(self._animation_group)
-        anim_layout.setContentsMargins(6, 8, 6, 6)
+        self._animation_group = Section(lambda: strings.EDIT_KEYFRAME_TITLE)
+        anim_layout = QVBoxLayout(self._animation_group.body)
+        anim_layout.setContentsMargins(0, 2, 0, 2)
         anim_layout.setSpacing(6)
         self._whole_animation = bind(QCheckBox(), "setText", lambda: strings.EDIT_ANIMATION_GLOBAL)
         bind(self._whole_animation, "setToolTip", lambda: strings.EDIT_ANIMATION_GLOBAL_TIP)
@@ -1464,9 +1522,9 @@ class _ClipPropertiesWidget(QWidget):
         self._layout.addWidget(self._animation_group)
 
         # Grupo Chroma Key (Fundo Verde)
-        self._chromakey_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_CHROMA)
-        ck_layout = QVBoxLayout(self._chromakey_group)
-        ck_layout.setContentsMargins(6, 8, 6, 6)
+        self._chromakey_group = Section(lambda: strings.PROP_CHROMA)
+        ck_layout = QVBoxLayout(self._chromakey_group.body)
+        ck_layout.setContentsMargins(0, 2, 0, 2)
         ck_layout.setSpacing(6)
 
         self._chk_chroma = bind(QCheckBox(), "setText", lambda: strings.PROP_CHROMA_ENABLE)
@@ -1535,9 +1593,9 @@ class _ClipPropertiesWidget(QWidget):
         self._layout.addWidget(self._chromakey_group)
 
         # Grupo Fundo Desfocado
-        self._blur_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_BLUR)
-        blur_layout = QVBoxLayout(self._blur_group)
-        blur_layout.setContentsMargins(6, 8, 6, 6)
+        self._blur_group = Section(lambda: strings.PROP_BLUR)
+        blur_layout = QVBoxLayout(self._blur_group.body)
+        blur_layout.setContentsMargins(0, 2, 0, 2)
         blur_layout.setSpacing(6)
 
         self._chk_blur = bind(QCheckBox(), "setText", lambda: strings.PROP_BLUR_ENABLE)
@@ -1558,9 +1616,9 @@ class _ClipPropertiesWidget(QWidget):
         self._layout.addWidget(self._blur_group)
 
         # Grupo Transição (quando um clipe de transição é selecionado)
-        self._transition_group = bind(QGroupBox(), "setTitle", lambda: strings.PROP_TRANSITION)
-        t_layout = QVBoxLayout(self._transition_group)
-        t_layout.setContentsMargins(6, 8, 6, 6)
+        self._transition_group = Section(lambda: strings.PROP_TRANSITION)
+        t_layout = QVBoxLayout(self._transition_group.body)
+        t_layout.setContentsMargins(0, 2, 0, 2)
         t_layout.setSpacing(6)
 
         t_layout.addWidget(bind(QLabel(), "setText", lambda: strings.PROP_TRANSITION_EFFECT))
@@ -1603,6 +1661,11 @@ class _ClipPropertiesWidget(QWidget):
         self._chromakey_group.setVisible(False)
         self._blur_group.setVisible(False)
         self._transition_group.setVisible(False)
+        self._lbl_no_settings.setVisible(False)
+
+    def _groups(self) -> tuple[Section, ...]:
+        return (self._transform_group, self._speed_group, self._volume_group, self._animation_group,
+                self._chromakey_group, self._blur_group, self._transition_group)
 
     def load_clip(self, clip: Clip, proj_w: int, proj_h: int, fps: float = 30.0, text_ratio: float = 1.0) -> None:
         self._updating = True
@@ -1681,6 +1744,7 @@ class _ClipPropertiesWidget(QWidget):
             has_sound = clip.can_adjust_sound or clip.detached
             self._speed_group.setVisible(has_speed)
             self._volume_group.setVisible(has_sound)
+            self._lbl_no_settings.setVisible(not any(not group.isHidden() for group in self._groups()))
             if has_speed:
                 self._spin_speed.setValue(clip.speed)
             if has_sound:
