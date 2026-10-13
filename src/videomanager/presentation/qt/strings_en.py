@@ -194,6 +194,13 @@ FFMPEG_SOURCES = {
     "sistema": "System — installed on this computer",
 }
 SETTINGS_FFMPEG = "FFmpeg"
+SETTINGS_GROUP_DOWNLOADS = "Downloads"
+SETTINGS_GROUP_LANGUAGE = "Language"
+SETTINGS_GROUP_VIDEO = "Video"
+SETTINGS_GROUP_SPEED = "Speed"
+SETTINGS_GROUP_COOKIES = "Cookies"
+SETTINGS_GROUP_FILE = "In the file"
+SETTINGS_GROUP_SUBS = "Subtitles"
 SETTINGS_FFMPEG_UNKNOWN = "Not located yet"
 TOAST_CLOSE = "Dismiss notice"
 STATUS_ENQUEUED = "{count} task(s) added to the queue"
@@ -704,7 +711,7 @@ EDIT_MODE_TIP = (
     "A fast cut copies the data as is: it's done in seconds with no loss at "
     "all, but starts at the keyframe before the marked point."
 )
-EDIT_PLAN = "What will happen: {plan}"
+EXPORT_PLAN_TITLE = "What will happen"
 EDIT_PLAN_FAST = ".{container} · direct copy (no re-encode) · {duration}"
 EDIT_FAST_UNAVAILABLE = (
     "Fast cut works while the edit is a trim of a single file, at its own canvas "
