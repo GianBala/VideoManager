@@ -26,8 +26,7 @@ from videomanager.bootstrap import build_editor_service
 from videomanager.bootstrap import build_processing_service
 from videomanager.bootstrap import build_download_service
 from videomanager.bootstrap import load_preferences
-from videomanager.presentation.qt.theme import qpalette
-from videomanager.presentation.qt.theme import stylesheet
+from videomanager.presentation.qt.theme import apply as aplicar_tema
 
 
 def _icon_path() -> Path:
@@ -194,8 +193,7 @@ def build_app(argv: list[str] | None = None, *, audio_enabled: bool = True) -> t
     app.setStyle("Fusion")
 
     settings = load_preferences()
-    app.setPalette(qpalette(settings.theme))
-    app.setStyleSheet(stylesheet(settings.theme))
+    aplicar_tema(app, settings.theme)
     # Antes da janela: abrir em inglês é já nascer em inglês, sem troca nenhuma.
     apply_language(settings.language)
 
