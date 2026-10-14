@@ -296,7 +296,9 @@ class _TransportBar(QWidget):
         self.setProperty("role", "plain")
         self._groups = (readouts, controls, extras)
         column = QVBoxLayout(self)
-        column.setContentsMargins(4, 4, 4, 0)
+        # Sem margem à esquerda: o cronômetro encosta na borda esquerda da prévia, que está logo acima. A da direita fica, e o
+        # volume termina um pouco antes da borda.
+        column.setContentsMargins(0, 4, 4, 0)
         column.setSpacing(4)
         self._first, self._second = QHBoxLayout(), QHBoxLayout()
         for row in (self._first, self._second):

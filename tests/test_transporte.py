@@ -95,6 +95,17 @@ def test_o_tempo_e_mono_de_22_px_com_o_total_e_o_quadro_menores_na_mesma_linha(t
     assert (painel._time_label.width(), painel._total_label.width(), painel._frame_label.width()) == antes
 
 
+def test_o_cronometro_fica_abaixo_da_previa_encostado_na_borda_esquerda_dela(tema_do_app, painel_de_edicao, blocos_de_edicao):
+    painel = painel_de_edicao
+    for largura in (1700, 1280):  # numa linha só e com os extras descidos para a segunda
+        _mostrar(painel, largura)
+        previa = painel._preview_frame
+        esquerda = lambda w: w.mapTo(painel, w.rect().topLeft()).x()
+        assert esquerda(painel._time_label) == esquerda(previa), largura
+        assert painel._time_label.mapTo(painel, painel._time_label.rect().topLeft()).y() >= \
+            previa.mapTo(painel, previa.rect().bottomLeft()).y(), largura
+
+
 def test_os_extras_so_tem_icone_e_o_ligado_leva_o_tom_suave_com_o_icone_no_acento(tema_do_app, painel_de_edicao):
     painel = painel_de_edicao
     _mostrar(painel)
