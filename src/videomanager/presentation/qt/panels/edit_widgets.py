@@ -75,6 +75,7 @@ from videomanager.domain.project import MediaRef
 from videomanager.presentation.qt.panels.field_box import FieldBox, WrapCheck
 from videomanager.presentation.qt.panels.section import Section
 from videomanager.presentation.qt.panels.segmented import SegmentButton, segmented
+from videomanager.presentation.qt.panels.swatch import Swatch
 from videomanager.presentation.qt.panels.timeline import MEDIA_MIME
 
 from videomanager.presentation.qt import fonts, icons, strings, theme
@@ -153,6 +154,16 @@ def _clip_name(clip: Clip) -> str:
         tname = clip.transition_name or "fade"
         return strings.EDIT_TRANSITION_TITLE.format(name=strings.EDIT_TRANSITIONS.get(tname, ("", tname))[1])
     return clip.media.name if clip.media else strings.PROP_KINDS.get(clip.overlay_type, clip.overlay_type)
+
+
+def _shrinkable(combo: QComboBox) -> None:
+    """A lista pode ser mais estreita que o item mais comprido: o nome é cortado, e a coluna não passa a pedir mais.
+
+    Por padrão o mínimo de um ``QComboBox`` é a largura do maior item, e na coluna de 304 px o "Efeito Rápido" pedia 261
+    sozinho: a seção de animação ficava com 353 px de mínimo e a aba Propriedades rolava para o lado.
+    """
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(10)
 
 
 def index_of(box: QComboBox, value: object) -> int:
@@ -1252,7 +1263,6 @@ class _ClipPropertiesWidget(QWidget):
             desenho = icons.TRANSITION_ICONS.get(self._combo_trans_type.itemData(index))
             if desenho is not None:
                 self._combo_trans_type.setItemIcon(index, desenho(cores["t2"], 16))
-        self._paint_chroma_swatches()
 
     def _paint_kind_tile(self) -> None:
         """O ladrilho do cabeçalho: o ícone da espécie do bloco na cor dela, como na linha do tempo."""
@@ -1546,6 +1556,7 @@ class _ClipPropertiesWidget(QWidget):
             lists.addWidget(name, row, 0)
             combo.setProperty("role", "field")
             combo.setProperty("compact", "true")
+            _shrinkable(combo)
             bind(combo, "setAccessibleName", label)
             lists.addWidget(combo, row, 1)
         anim_layout.addLayout(lists)
@@ -1568,19 +1579,17 @@ class _ClipPropertiesWidget(QWidget):
         name_color = bind(QLabel(), "setText", lambda: strings.PROP_CHROMA_COLOR)
         name_color.setProperty("role", "dim")
         row_color.addWidget(name_color)
-        self._btn_chroma_color = QPushButton()
-        self._btn_chroma_color.setFixedSize(34, 24)
+        self._btn_chroma_color = Swatch("#00FF00", width=34, height=24, ring=False)
         bind(self._btn_chroma_color, "setToolTip", lambda: strings.PROP_CHROMA_COLOR_TIP)
         bind(self._btn_chroma_color, "setAccessibleName", lambda: strings.PROP_CHROMA_COLOR)
         self._btn_chroma_color.clicked.connect(self._choose_chroma_color)
         row_color.addWidget(self._btn_chroma_color)
         row_color.addStretch(1)
 
-        self._chroma_presets: list[tuple[QPushButton, str]] = []
+        self._chroma_presets: list[tuple[Swatch, str]] = []
         row_color.setSpacing(6)
         for hex_col in strings.PROP_CHROMA_PRESETS:
-            btn_preset = QPushButton()
-            btn_preset.setFixedSize(24, 24)
+            btn_preset = Swatch(hex_col, width=24, ring=False)
             tip = lambda c=hex_col: strings.PROP_CHROMA_PRESET_TIP.format(name=strings.PROP_CHROMA_PRESETS[c], color=c)
             bind(btn_preset, "setToolTip", tip)
             bind(btn_preset, "setAccessibleName", tip)
@@ -1667,6 +1676,7 @@ class _ClipPropertiesWidget(QWidget):
         self._combo_trans_type = QComboBox()
         self._combo_trans_type.setProperty("role", "field")
         self._combo_trans_type.setProperty("compact", "true")
+        _shrinkable(self._combo_trans_type)
         bind(self._combo_trans_type, "setAccessibleName", lambda: strings.PROP_TRANSITION_EFFECT)
         for tid in strings.EDIT_TRANSITIONS:
             self._combo_trans_type.addItem(_transition_name(tid), tid)
@@ -1921,21 +1931,9 @@ class _ClipPropertiesWidget(QWidget):
         if chosen.isValid():
             self._set_chroma_color(chosen.name().upper())
 
-    def _paint_chroma_swatches(self) -> None:
-        """A cor é do bloco; a borda e o realce do mouse são do tema, e por isso se refazem na troca de paleta."""
-        cores = theme.papeis(*theme.atual())
-
-        def swatch(color: str) -> str:
-            return (f"QPushButton {{ background: {color}; border: 1px solid {cores['raised2']}; border-radius: 8px; padding: 0px; }} "
-                    f"QPushButton:hover {{ border: 2px solid {cores['text']}; }}")
-
-        self._btn_chroma_color.setStyleSheet(swatch(getattr(self, "_current_chroma_color", "#00FF00")))
-        for button, color in self._chroma_presets:
-            button.setStyleSheet(swatch(color))
-
     def _set_chroma_color(self, hex_color: str) -> None:
         self._current_chroma_color = hex_color
-        self._paint_chroma_swatches()
+        self._btn_chroma_color.set_color(hex_color)
         if self._updating or self._clip_id < 0:
             return
         self.property_changed.emit(self._clip_id, {"chromakey_color": hex_color})
@@ -2436,6 +2434,11 @@ class _MediaListWidget(QListWidget):
     files_dropped = Signal(list)  # list[Path]
     delete_requested = Signal()
 
+    def sizeHint(self) -> QSize:  # noqa: N802
+        # O palpite de 256 px de largura do Qt (o de qualquer área de rolagem) fazia a coluna de mídia nascer com 284: a
+        # lista pede as duas miniaturas e o vão, 224 px, e as margens do cartão somam o resto até os 252 do protótipo.
+        return QSize(224, super().sizeHint().height())
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAcceptDrops(True)
@@ -2531,6 +2534,42 @@ class _MediaListWidget(QListWidget):
             event.ignore()
 
 
+class _FontButton(QPushButton):
+    """O botão do seletor de fonte: o "Aα" apagado à esquerda, o nome da fonte e a seta à direita.
+
+    O QSS não põe um glifo de cada lado do texto, então o botão pinta os dois por cima do que o estilo já desenhou
+    (fundo, borda e o nome, que ele afasta dos dois lados pelo ``padding``). A seta gira quando a lista está aberta.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setProperty("role", "select")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._open = False
+
+    def set_open(self, aberta: bool) -> None:
+        self._open = aberta
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        cores = theme.papeis(*theme.atual())
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # O "Aα" é um símbolo, e não texto de interface: vai como contorno, e não por ``drawText``, que é por onde o
+        # que se lê na tela passa e o que o validador de idioma confere contra o catálogo.
+        fonte = self.font()
+        contorno = QPainterPath()
+        contorno.addText(12, (self.height() + QFontMetrics(fonte).ascent() - QFontMetrics(fonte).descent()) / 2, fonte, "Aα")
+        p.fillPath(contorno, QColor(cores["t3"]))
+        lado = 14
+        p.translate(self.width() - 12 - lado / 2, self.height() / 2)
+        if self._open:
+            p.rotate(180)
+        icons.chevron_down(cores["t2"], lado).paint(p, QRect(-lado // 2, -lado // 2, lado, lado))
+        p.end()
+
+
 class _FontSelectorWidget(QWidget):
     """Seletor de fonte expansível com lista retrátil, busca e prévia tipográfica."""
 
@@ -2548,8 +2587,8 @@ class _FontSelectorWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        self._toggle_btn = QPushButton(f"🔤 {initial_family}  ▾")
-        self._toggle_btn.setProperty("role", "option")
+        self._toggle_btn = _FontButton()
+        self._toggle_btn.setText(initial_family)
         self._toggle_btn.clicked.connect(self._toggle_list)
         layout.addWidget(self._toggle_btn)
 
@@ -2603,8 +2642,7 @@ class _FontSelectorWidget(QWidget):
     def _toggle_list(self) -> None:
         self._expanded = not self._expanded
         self._list_container.setVisible(self._expanded)
-        arrow = "▴" if self._expanded else "▾"
-        self._toggle_btn.setText(f"🔤 {self._current_family}  {arrow}")
+        self._toggle_btn.set_open(self._expanded)
         if self._expanded:
             self._search_input.clear()
             self._search_input.setFocus()
@@ -2622,8 +2660,7 @@ class _FontSelectorWidget(QWidget):
 
     def set_family(self, family: str) -> None:
         self._current_family = family
-        arrow = "▴" if self._expanded else "▾"
-        self._toggle_btn.setText(f"🔤 {family}  {arrow}")
+        self._toggle_btn.setText(family)
         items = self._font_list.findItems(family, Qt.MatchFlag.MatchExactly)
         if items:
             self._font_list.setCurrentItem(items[0])

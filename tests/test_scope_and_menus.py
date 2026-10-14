@@ -235,12 +235,18 @@ def test_edit_panel_abas_roladas_nao_encolhem_a_previa(qapp: QApplication, dummy
     try:
         # As abas de Adicionais rolam sem pedir menos altura que o conteúdo: o
         # divisor vertical reparte pela dica, e com o teto de 24 linhas do
-        # QScrollArea a prévia nascia mais baixa que antes de a aba rolar.
+        # QScrollArea a prévia nascia mais baixa que antes de a aba rolar. O teto
+        # que há hoje é o da página mais alta de antes (471 px), e só alcança a que
+        # passa dele (a de Transições, de oito opções de 36 px).
+        from PySide6.QtCore import QSize
+        from videomanager.presentation.qt.panels.edit_panel import _PAGE_HEIGHT_MAX
         paginas = [panel._extras_tabs.widget(i) for i in range(panel._extras_tabs.count())]
         roladas = [p for p in paginas if isinstance(p, QScrollArea)]
         assert roladas
         for pagina in roladas:
-            assert pagina.sizeHint() == pagina.widget().sizeHint()
+            conteudo = pagina.widget().sizeHint()
+            assert pagina.sizeHint() == QSize(conteudo.width(), min(conteudo.height(), _PAGE_HEIGHT_MAX))
+        assert any(p.sizeHint() == p.widget().sizeHint() for p in roladas), "as que cabem no teto pedem o conteúdo inteiro"
     finally:
         panel.shutdown()
 

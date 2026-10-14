@@ -233,10 +233,16 @@ def test_as_amostras_de_cor_levam_a_cor_do_bloco_e_a_borda_do_tema(propriedades)
     assert (widget._btn_chroma_color.width(), widget._btn_chroma_color.height()) == (34, 24)
     assert [(b.width(), b.height()) for b, _ in widget._chroma_presets] == [(24, 24)] * 3
     cores = theme.papeis("dark", "grafite")
-    folha = widget._btn_chroma_color.styleSheet().lower()
-    assert cores["raised2"].lower() in folha and "#888" not in folha and "#fff" not in folha
-    for botao, cor in widget._chroma_presets:
-        assert cor.lower() in botao.styleSheet().lower()
+    # Desligado o fundo verde, as amostras ficam esmaecidas (os controles dele estão desligados): a cor pura é a de ligado.
+    widget._chk_chroma.setChecked(True)
+    # A cor é a do bloco e a borda é do tema: nada de folha de estilo com cor escrita à mão.
+    for botao, cor in [(widget._btn_chroma_color, "#00ff00"), *[(b, c.lower()) for b, c in widget._chroma_presets]]:
+        assert botao.styleSheet() == "" and botao.color().lower() == cor
+        imagem = botao.grab().toImage()
+        assert imagem.pixelColor(botao.width() // 2, botao.height() // 2).name().lower() == cor
+        assert imagem.pixelColor(botao.width() // 2, 0).name().lower() == cores["raised2"].lower()
+    widget._set_chroma_color("#112233")
+    assert widget._btn_chroma_color.grab().toImage().pixelColor(17, 12).name() == "#112233"
 
 
 def test_a_troca_de_idioma_refaz_os_rotulos_das_caixas(propriedades):
@@ -273,3 +279,13 @@ def test_o_bloco_sem_ajustes_diz_isso_com_ar_embaixo_do_cabecalho(tema_do_app, p
     vao = _origem(aviso, widget).y() - (_origem(cabecalho, widget).y() + cabecalho.height())
     # O ar é a margem de cima do próprio rótulo, e o texto começa depois dela.
     assert vao + aviso.contentsMargins().top() >= 14
+
+
+@pytest.mark.parametrize("bloco", ["video com som", "transicao"])
+def test_o_conteudo_da_aba_cabe_na_coluna_de_304_px_sem_rolar_para_o_lado(tema_do_app, painel_de_edicao, blocos_de_edicao, bloco):
+    widget = _abrir(painel_de_edicao, blocos_de_edicao[bloco])
+    # A coluna tem 304 px e a barra de rolagem vertical leva 10: o que a aba pede no mínimo tem de caber nos 294. As
+    # listas de animação pediam o tamanho do maior nome ("Efeito Rápido": 261 px) e a seção passava de 350.
+    assert widget._container.minimumSizeHint().width() <= 294
+    for lista in (widget._combo_easing, widget._combo_presets, widget._combo_trans_type):
+        assert lista.minimumSizeHint().width() < 200

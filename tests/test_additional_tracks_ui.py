@@ -537,13 +537,16 @@ def test_font_size_controls_and_presets(qapp: QApplication, dummy_tools: FFmpegT
         assert panel._font_size_spin.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
 
         # Check increment and decrement buttons
-        dec_btns = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.text() == "-"]
-        inc_btns = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.text() == "+"]
+        # Botões quadrados com ícone (sem texto, que o protótipo não tem): quem os distingue é a dica.
+        from videomanager.presentation.qt import strings
+        dec_btns = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.toolTip() == strings.EDIT_FONT_SMALLER]
+        inc_btns = [b for b in text_tab.findChildren(type(panel._bold_btn)) if b.toolTip() == strings.EDIT_FONT_LARGER]
         assert len(dec_btns) == 1
         assert len(inc_btns) == 1
         # Estilo do tema (legível no claro e no escuro), e não cores fixas.
         for botao in (dec_btns[0], inc_btns[0]):
-            assert botao.property("role") == "spin-tool"
+            assert botao.property("role") == "tile" and not botao.icon().isNull()
+            assert (botao.width(), botao.height()) == (34, 34)
             assert botao.styleSheet() == ""
 
         # Step is 1 pt
@@ -599,18 +602,20 @@ def test_filter_selection_highlight_style(qapp: QApplication, dummy_tools: FFmpe
     settings = Settings()
     panel = EditPanel(settings=settings, ensure_tools=lambda: dummy_tools, editor=build_editor_service(), processing=build_processing_service(), runtime=build_desktop_runtime())
     try:
-        # A opção marcada ganha a borda do papel de destaque do tema e um tom do próprio acento
-        # (16% de opacidade) — e nunca uma cor sólida fixa, que no tema claro deixava os botões
-        # pretos. O tom translúcido não tem esse defeito: deriva do papel e deixa ver o que há embaixo.
-        from videomanager.presentation.qt.theme import papeis, stylesheet
+        # A opção marcada ganha o tom do segmento marcado e o anel de metade do acento (os dois derivados dos papéis do
+        # tema), e nunca uma cor escrita à mão, que no tema claro deixava os botões pretos. A borda é de 1 px nos
+        # dois estados, para a linha não mudar de medida ao ser marcada.
+        from videomanager.presentation.qt.theme import derivadas, papeis, stylesheet
         for btn in panel._filter_buttons:
             assert btn.property("role") == "option"
             assert btn.styleSheet() == ""
         for tema in ("dark", "light"):
             regra = next(linha for linha in stylesheet(tema).splitlines()
                          if linha.startswith('QPushButton[role="option"]:checked'))
-            assert f"border: 2px solid {papeis(tema)['accent']}" in regra
-            assert "background: rgba(" in regra and "background: #" not in regra
+            derivado = derivadas(papeis(tema))
+            assert f"border: 1px solid {derivado['seg_ring']}" in regra
+            assert f"background: {derivado['seg_on']}" in regra
+            assert derivado["seg_ring"] != papeis(tema)["accent"], "o anel é metade do acento, e não o acento"
     finally:
         panel.shutdown()
 
@@ -2350,9 +2355,9 @@ pytestmark = pytest.mark.usefixtures("desktop_app", "isolated_audio")
 
 def test_opcao_escolhida_nas_abas_de_adicionais_tem_a_medida_de_marcada(qapp: QApplication,
                                                                        dummy_tools: FFmpegTools) -> None:
-    """O estado marcado muda borda e peso da fonte, e o QPushButton não refaz a
-    dica de tamanho ao ser marcado: a opção escolhida ficava com a altura da
-    desmarcada, e a anterior com a da marcada."""
+    """O estado marcado muda a cor, a borda e o peso da fonte, e o QPushButton não refaz a dica de tamanho
+    ao ser marcado. A borda é de 1 px nos dois estados e o peso só engorda o texto: marcar não pode mexer na
+    altura da linha (36 px, a do protótipo), nem a da escolhida nem a da anterior."""
     from videomanager.presentation.qt.theme import stylesheet
     anterior = qapp.styleSheet()
     qapp.setStyleSheet(stylesheet("dark"))
@@ -2362,11 +2367,9 @@ def test_opcao_escolhida_nas_abas_de_adicionais_tem_a_medida_de_marcada(qapp: QA
         panel.show()
         qapp.processEvents()
         panel._select_filter("sepia")
-        alturas = dict(zip(panel._filter_specs, (b.sizeHint().height() for b in panel._filter_buttons)))
-        assert alturas["sepia"] > alturas["pb"]
+        assert {b.sizeHint().height() for b in panel._filter_buttons} == {36}
         panel._select_transition("wipeleft")
-        alturas = dict(zip(panel._trans_specs, (b.sizeHint().height() for b in panel._trans_buttons)))
-        assert alturas["wipeleft"] > alturas["fade"]
+        assert {b.sizeHint().height() for b in panel._trans_buttons} == {36}
     finally:
         panel.shutdown()
         qapp.setStyleSheet(anterior)
