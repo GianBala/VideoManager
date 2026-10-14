@@ -1339,6 +1339,9 @@ class _ClipPropertiesWidget(QWidget):
         self._btn_close.setProperty("danger", "true")
         self._btn_close.setIconSize(QSize(16, 16))
         bind(self._btn_close, "setToolTip", lambda: strings.PROP_CLOSE_TIP)
+        # Só ícone: o nome acessível é o da dica. Este painel nasce solto, fora da janela, e o ``name_controls`` da
+        # construção não o alcança.
+        bind(self._btn_close, "setAccessibleName", lambda: strings.PROP_CLOSE_TIP)
         self._btn_close.clicked.connect(self.close_requested.emit)
         header.addWidget(self._btn_close, 0, Qt.AlignmentFlag.AlignTop)
         self._layout.addLayout(header)
