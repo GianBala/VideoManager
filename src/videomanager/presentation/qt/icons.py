@@ -455,6 +455,25 @@ def folder(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+def info(color: str, size: int = _NAV) -> QIcon:
+    """Aviso informativo: o círculo com o "i"."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawEllipse(QPointF(12 * u, 12 * u), 8.2 * u, 8.2 * u)
+        p.drawLine(QPointF(12 * u, 11 * u), QPointF(12 * u, 16.4 * u))
+        p.drawPoint(QPointF(12 * u, 7.9 * u))
+    return _nav(color, size, desenho)
+
+
+def compress(color: str, size: int = _NAV) -> QIcon:
+    """Comprimir: duas setas de pontas opostas que se encontram no meio."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawPolyline(QPolygonF([QPointF(5 * u, 9.6 * u), QPointF(9.6 * u, 9.6 * u), QPointF(9.6 * u, 5 * u)]))
+        p.drawLine(QPointF(9.6 * u, 9.6 * u), QPointF(4.4 * u, 4.4 * u))
+        p.drawPolyline(QPolygonF([QPointF(19 * u, 14.4 * u), QPointF(14.4 * u, 14.4 * u), QPointF(14.4 * u, 19 * u)]))
+        p.drawLine(QPointF(14.4 * u, 14.4 * u), QPointF(19.6 * u, 19.6 * u))
+    return _nav(color, size, desenho)
+
+
 def clipboard(color: str, size: int = _NAV) -> QIcon:
     """Colar: a prancheta, com a presilha de cima."""
     def desenho(p: QPainter, u: float) -> None:

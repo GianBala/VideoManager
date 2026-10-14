@@ -192,9 +192,10 @@ QPushButton[role="palette"]:hover {{ border-color: {raised2}; }}
    (três botões de rádio de desenho próprio, ver ``segmented.py``); o resumo é um destaque com moldura no tom do acento. */
 QListWidget[role="files"] {{ background: transparent; border: none; padding: 0px; }}
 QFrame[role="segments"] {{ background: {raised}; border: none; border-radius: 11px; }}
-QFrame[role="callout"] {{ background: {soft16}; border: 1px solid {soft16}; border-radius: 10px; }}
+QFrame[role="callout"] {{ background: {soft16}; border: 1px solid {soft16}; border-radius: 12px; }}
 QFrame[role="callout-warn"] {{ background: {warn16}; border: 1px solid {warn16}; border-radius: 10px; }}
 QLabel[role="callout-title"] {{ color: {accent}; font-size: 11px; font-weight: 700; }}
+QLabel[role="plan"] {{ font-size: 13px; font-weight: 500; color: {text}; }}
 
 /* Janela de configurações: abas sublinhadas e títulos de grupo em caixa alta. */
 QTabBar[role="underline"]::tab {{ background: transparent; color: {t2}; padding: 9px 12px; margin-right: 8px;

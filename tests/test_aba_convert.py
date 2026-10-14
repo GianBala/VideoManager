@@ -208,3 +208,98 @@ def test_o_rodape_mostra_o_mesmo_tamanho_que_o_resumo(painel, desktop_app):
 def test_salvar_na_mesma_pasta_continua_no_rodape_e_marcado(painel):
     assert painel._same_folder.isChecked()
     assert painel._same_folder.parent() is painel._start.parent()
+
+
+# -- fidelidade ao protótipo: lista de altura natural, convite, modos com ícone, grade de campos, botão e destaque -------
+
+def _arquivos(n: int) -> list[LocalMedia]:
+    return [_video(f"v{i}.mp4") for i in range(n)]
+
+
+def test_a_lista_tem_a_altura_dos_arquivos_e_o_convite_sob_ela_so_aparece_com_arquivos(tema_do_app, painel, desktop_app):
+    from videomanager.presentation.qt.panels import convert_panel
+    passo = convert_rows.ALTURA + convert_rows.ENTRE_LINHAS
+    assert painel._list.height() == convert_panel._LIST_MIN_HEIGHT and not painel._drop_hint.isVisibleTo(painel)
+    _inspecionado(painel, desktop_app, *_arquivos(2))
+    assert painel._list.height() == 2 * passo and painel._drop_hint.isVisibleTo(painel)
+    # Muitos arquivos não esticam a aba: a lista para de crescer e rola.
+    _inspecionado(painel, desktop_app, *_arquivos(10))
+    assert painel._list.height() == convert_panel._LIST_MAX_ROWS * passo
+    painel.clear_files()
+    assert painel._list.height() == convert_panel._LIST_MIN_HEIGHT and not painel._drop_hint.isVisibleTo(painel)
+
+
+def test_o_convite_sob_a_lista_e_um_botao_que_abre_o_seletor(painel, desktop_app, monkeypatch):
+    abertos = []
+    monkeypatch.setattr(painel, "_choose_files", lambda: abertos.append(1))
+    painel._drop_hint.clicked.disconnect()
+    painel._drop_hint.clicked.connect(lambda: painel._choose_files())
+    _inspecionado(painel, desktop_app, *_arquivos(1))
+    QTest.mouseClick(painel._drop_hint, Qt.MouseButton.LeftButton)
+    assert abertos == [1]
+    assert strings.CONVERT_DROP_BROWSE in painel._drop_hint.accessibleName()
+
+
+def test_adicionar_tem_icone_e_remover_so_aparece_com_selecao(tema_do_app, painel, desktop_app):
+    assert not painel._pick.icon().isNull() and painel._pick.text() == strings.CONVERT_PICK
+    assert painel._clear_btn.property("role") == painel._remove.property("role") == "ghost"
+    _inspecionado(painel, desktop_app, *_arquivos(3))
+    assert not painel._remove.isVisibleTo(painel)
+    painel._list.item(1).setSelected(True)
+    assert painel._remove.isVisibleTo(painel) and painel._remove.isEnabled()
+    painel._list.clearSelection()
+    assert not painel._remove.isVisibleTo(painel)
+
+
+def test_os_modos_tem_icone_e_rotulo_curto(painel):
+    assert [b.text() for b in (painel._to_audio, painel._to_video, painel._to_compress)] == [
+        strings.CONVERT_TO_AUDIO, strings.CONVERT_TO_VIDEO, strings.CONVERT_TO_COMPRESS]
+    assert all(b._glyph is not None for b in (painel._to_audio, painel._to_video, painel._to_compress))
+    assert max(len(b.text()) for b in (painel._to_audio, painel._to_video, painel._to_compress)) <= 10
+
+
+def test_os_campos_tem_a_legenda_em_cima_e_o_modo_decide_quais_blocos_aparecem(tema_do_app, painel, desktop_app):
+    blocos = painel._blocks
+    visiveis = lambda: {nome for nome, w in (("audio", painel._audio_codec), ("bitrate", painel._audio_bitrate),
+                                              ("container", painel._container), ("codec", painel._video_codec),
+                                              ("resize", painel._resize), ("compress", painel._compress_codec))
+                        if blocos[w].isVisibleTo(painel)}
+    assert visiveis() == {"audio", "bitrate"}
+    painel._to_video.click()
+    assert visiveis() == {"container", "codec", "resize"}
+    painel._to_compress.click()
+    assert visiveis() == {"compress"}
+    painel._to_video.click()
+    for widget in (painel._container, painel._video_codec, painel._resize):
+        legenda = blocos[widget].findChild(type(painel._plan))
+        assert legenda.geometry().bottom() < widget.geometry().top()
+    # Três colunas iguais, uma ao lado da outra.
+    larguras = [painel._container.width(), painel._video_codec.width(), painel._resize.width()]
+    assert max(larguras) - min(larguras) <= 1 and painel._container.height() >= 36
+
+
+def test_o_botao_diz_quantos_arquivos_e_acompanha_o_idioma(painel, desktop_app):
+    assert painel._start.text() == strings.CONVERT_START
+    _inspecionado(painel, desktop_app, *_arquivos(1))
+    assert painel._start.text() == strings.CONVERT_START_COUNT[0].format(count=1)
+    _inspecionado(painel, desktop_app, *_arquivos(3))
+    assert painel._start.text() == strings.CONVERT_START_COUNT[1].format(count=3)
+    apply_language(i18n.ENGLISH)
+    assert painel._start.text() == "Convert 3 files"
+    painel.clear_files()
+    assert painel._start.text() == "Convert"
+    assert not painel._start.icon().isNull()
+
+
+def test_o_destaque_tem_icone_e_a_linha_reserva_o_espaco_da_miniatura(tema_do_app, painel, desktop_app):
+    from videomanager.presentation.qt import theme
+    cores = theme.papeis(*theme.atual())
+    _inspecionado(painel, desktop_app, *_arquivos(1))
+    assert not painel._plan_icon.pixmap().isNull() and painel._plan_box.isVisibleTo(painel)
+    imagem = painel._list.viewport().grab().toImage()
+    # No espaço da miniatura (76×44) a linha pinta o ladrilho, e o nome começa depois dele.
+    # Medidas do protótipo, escritas por extenso: a miniatura vai de x=8 a x=84 (76 px) e de y=8 a y=52 (44 px).
+    cor = lambda x, y: imagem.pixelColor(x, y).name().lower()
+    assert cor(14, 30) == cores["raised2"].lower() and cor(80, 12) == cores["raised2"].lower()
+    assert cor(88, 30) != cores["raised2"].lower()  # depois da miniatura vem o espaço, e só então o nome
+    assert cor(40, 56) != cores["raised2"].lower()  # e abaixo dela, a linha acabou (60 px)

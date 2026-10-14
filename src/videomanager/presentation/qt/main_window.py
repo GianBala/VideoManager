@@ -195,7 +195,7 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._build_download_tab(), strings.TAB_DOWNLOAD)
         self._convert = ConvertPanel(self._settings, self._tools_for_convert, processing=self._processing, runtime=self._runtime)
         self._convert.jobs_ready.connect(self._submit_jobs)
-        self._tabs.addTab(self._wrap_tab(self._convert), strings.TAB_CONVERT)
+        self._tabs.addTab(self._wrap_tab(self._convert, page=True), strings.TAB_CONVERT)
         self._edit = EditPanel(self._settings, self._tools_for_convert, editor=self._editor_service, processing=self._processing, runtime=self._runtime)
         self._edit.jobs_ready.connect(self._submit_jobs)
         self._tabs.addTab(self._wrap_tab(self._edit, horizontal=True), strings.TAB_EDIT)
@@ -307,12 +307,12 @@ class MainWindow(QMainWindow):
         return footer
 
     @staticmethod
-    def _wrap_tab(inner: QWidget, *, horizontal: bool = False) -> QWidget:
-        """Dá à aba a mesma margem e a mesma rolagem da outra."""
+    def _wrap_tab(inner: QWidget, *, horizontal: bool = False, page: bool = False) -> QWidget:
+        """Dá à aba a mesma margem e a mesma rolagem da outra (``page``: a margem do protótipo, de 28 px)."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(*_TAB_MARGINS)
-        layout.setSpacing(_TAB_SPACING)
+        layout.setContentsMargins(*(_PAGE_MARGINS if page else _TAB_MARGINS))
+        layout.setSpacing(_PAGE_SPACING if page else _TAB_SPACING)
         layout.addWidget(MainWindow._wrap_scrollable(inner, horizontal=horizontal))
         return tab
 
