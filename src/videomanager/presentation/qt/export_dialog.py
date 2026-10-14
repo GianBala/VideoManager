@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -53,7 +53,7 @@ from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_step
 from videomanager.domain.timing import keyframe_at_or_before
 from videomanager.domain.i18n import Text
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import icons, strings, theme
 from videomanager.presentation.qt.panels.edit_widgets import index_of
 from videomanager.application.editor.canvas import CANVAS_PRESETS, aspect_of, canvas_for_aspect, output_canvas
 from videomanager.presentation.qt.ports import DesktopRuntimePort
@@ -241,6 +241,15 @@ class ExportDialog(QDialog):
         self._cells.append((cell, label, widget))
         return cell
 
+    @staticmethod
+    def _callout_icon(drawing, role: str) -> QLabel:
+        """O ícone à esquerda de um destaque (informação, aviso), no papel do tema que dá o tom do destaque."""
+        label = QLabel()
+        label.setProperty("role", "plain")
+        label.setFixedSize(20, 20)
+        label.setPixmap(drawing(theme.papeis(*theme.atual())[role], 20).pixmap(20, 20))
+        return label
+
     def _sync_cells(self) -> None:
         for cell, label, widget in self._cells:
             cell.setVisible(not label.isHidden() or not widget.isHidden())
@@ -254,13 +263,20 @@ class ExportDialog(QDialog):
         # 1. Resumo da edição
         summary_group, summary_box = self._card(strings.EXPORT_SUMMARY_GROUP)
         summary_box.setSpacing(6)
-        summary_text = strings.EXPORT_SUMMARY.format(
-            duration=format_span(self._project.export_duration),
-            tracks=len(self._project.tracks), clips=len(self._project.clips),
-        )
-        summary_label = QLabel(summary_text)
-        summary_label.setTextFormat(Qt.TextFormat.RichText)
-        summary_box.addWidget(summary_label)
+        # Três pastilhas, e não uma linha: a duração (com o valor em negrito), as trilhas e os blocos.
+        chips = QHBoxLayout()
+        chips.setSpacing(8)
+        for text in (
+            strings.EXPORT_SUMMARY_DURATION.format(duration=format_span(self._project.export_duration)),
+            strings.EXPORT_SUMMARY_TRACKS.format(tracks=len(self._project.tracks)),
+            strings.EXPORT_SUMMARY_CLIPS.format(clips=len(self._project.clips)),
+        ):
+            chip = QLabel(text)
+            chip.setProperty("role", "chip")
+            chip.setTextFormat(Qt.TextFormat.RichText)
+            chips.addWidget(chip)
+        chips.addStretch(1)
+        summary_box.addLayout(chips)
         layout.addWidget(summary_group)
 
         # 2. Configurações de saída
@@ -425,13 +441,17 @@ class ExportDialog(QDialog):
         self._plan.setWordWrap(True)
         plan_box = QFrame()
         plan_box.setProperty("role", "callout")
-        plan_column = QVBoxLayout(plan_box)
-        plan_column.setContentsMargins(14, 10, 14, 12)
+        plan_row = QHBoxLayout(plan_box)
+        plan_row.setContentsMargins(14, 12, 14, 12)
+        plan_row.setSpacing(12)
+        plan_row.addWidget(self._callout_icon(icons.info, "accent"), 0, Qt.AlignmentFlag.AlignTop)
+        plan_column = QVBoxLayout()
         plan_column.setSpacing(4)
         plan_title = QLabel(strings.EXPORT_PLAN_TITLE.upper())
         plan_title.setProperty("role", "callout-title")
         plan_column.addWidget(plan_title)
         plan_column.addWidget(self._plan)
+        plan_row.addLayout(plan_column, 1)
         layout.addWidget(plan_box)
 
         self._warning = QLabel("")
@@ -439,9 +459,11 @@ class ExportDialog(QDialog):
         self._warning.setWordWrap(True)
         self._warning_box = QFrame()
         self._warning_box.setProperty("role", "callout-warn")
-        warning_column = QVBoxLayout(self._warning_box)
-        warning_column.setContentsMargins(14, 10, 14, 10)
-        warning_column.addWidget(self._warning)
+        warning_row = QHBoxLayout(self._warning_box)
+        warning_row.setContentsMargins(14, 12, 14, 12)
+        warning_row.setSpacing(12)
+        warning_row.addWidget(self._callout_icon(icons.warn, "warn"), 0, Qt.AlignmentFlag.AlignTop)
+        warning_row.addWidget(self._warning, 1)
         self._warning.setVisible(False)
         self._warning_box.setVisible(False)
         layout.addWidget(self._warning_box)
@@ -462,11 +484,14 @@ class ExportDialog(QDialog):
         actions.addStretch(1)
 
         self._cancel_button = QPushButton(strings.EXPORT_ACTION_CANCEL)
+        self._cancel_button.setProperty("role", "ghost")
         self._cancel_button.clicked.connect(self.reject)
         actions.addWidget(self._cancel_button)
 
         self._enqueue_button = QPushButton(strings.EXPORT_ACTION_ENQUEUE)
         self._enqueue_button.setProperty("role", "primary")
+        self._enqueue_button.setIcon(icons.plus(theme.papeis(*theme.atual())["on_fill"], 16))
+        self._enqueue_button.setIconSize(QSize(16, 16))
         self._enqueue_button.setProperty("emphasis", "large")
         self._enqueue_button.setDefault(True)
         self._enqueue_button.clicked.connect(self._on_enqueue)

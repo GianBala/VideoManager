@@ -157,7 +157,7 @@ def test_cada_aba_agrupa_os_campos_sob_titulos(ajustes):
     abas = ajustes.findChild(QTabWidget)
     esperado = {
         0: [strings.SETTINGS_GROUP_DOWNLOADS, strings.SETTINGS_GROUP_LANGUAGE, strings.SETTINGS_GROUP_VIDEO],
-        1: [strings.SETTINGS_PALETTE],
+        1: [strings.SETTINGS_THEME_MODE, strings.SETTINGS_PALETTE],
         2: [strings.SETTINGS_GROUP_SPEED, strings.SETTINGS_GROUP_COOKIES],
         3: [strings.SETTINGS_GROUP_FILE, strings.SETTINGS_GROUP_SUBS],
     }
