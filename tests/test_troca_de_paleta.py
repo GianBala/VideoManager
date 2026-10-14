@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 
 from videomanager.bootstrap import build_desktop_runtime, build_editor_service, build_processing_service
@@ -82,13 +83,20 @@ def test_trocar_de_paleta_muda_o_destaque_que_a_linha_do_tempo_usa(painel, aplic
     assert painel._colors["accent"] != palette("dark")["accent"]
 
 
-def test_icones_da_barra_seguem_a_cor_do_texto(painel, aplicacao):
+def test_icones_da_barra_seguem_a_cor_secundaria_e_so_os_botoes_com_fundo_a_do_texto(painel, aplicacao):
     aplicar_tema(aplicacao, "dark")
     escuro = _cor_principal(painel._split_button.icon())
     aplicar_tema(aplicacao, "light")
     claro = _cor_principal(painel._split_button.icon())
-    assert escuro == palette("dark")["text"] and claro == palette("light")["text"]
-    for botao in (painel._trim_left_button, painel._trim_right_button, painel._delete_button):
+    assert escuro == palette("dark")["text_dim"] and claro == palette("light")["text_dim"]
+    # Os traços finos de alguns ícones saem 1 de diferença num canal depois da transparência: compara-se com tolerância.
+    alvo = QColor(palette("light")["text_dim"])
+    for botao in (painel._trim_left_button, painel._trim_right_button, painel._delete_button, painel._undo, painel._redo,
+                  painel._zoom_out_button, painel._zoom_in_button):
+        cor = QColor(_cor_principal(botao.icon()))
+        assert max(abs(cor.red() - alvo.red()), abs(cor.green() - alvo.green()), abs(cor.blue() - alvo.blue())) <= 2, botao
+    # "Ver tudo", volume e velocidade têm fundo (``.btn`` do protótipo, não ``.ghost``): ficam na cor do texto.
+    for botao in (painel._fit_button, painel._volume_btn, painel._speed_btn):
         assert _cor_principal(botao.icon()) == palette("light")["text"]
 
 

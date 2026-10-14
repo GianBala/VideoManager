@@ -4376,7 +4376,7 @@ class EditPanel(QWidget):
 
     def _refresh_volume_label(self) -> None:
         silent = self._mute.isChecked() or self._volume.value() == 0
-        self._mute.setIcon(icons.volume(self._colors["text"], 18, muted=silent))
+        self._mute.setIcon(icons.volume(self._colors["text_dim"], 18, muted=silent))
         tip = strings.EDIT_UNMUTE if self._mute.isChecked() else strings.EDIT_MUTE
         self._mute.setToolTip(tip)
         self._mute.setAccessibleName(tip)
@@ -5087,26 +5087,30 @@ class EditPanel(QWidget):
         return super().eventFilter(obj, event)
 
     def _set_toolbar_icons(self) -> None:
-        """Pinta os ícones da barra com a cor do texto do tema em vigor."""
-        cor = self._colors["text"]
-        self._split_button.setIcon(icons.scissors(cor))
-        self._trim_left_button.setIcon(icons.trim_left(cor))
-        self._trim_right_button.setIcon(icons.trim_right(cor))
-        self._delete_button.setIcon(icons.trash(cor))
-        self._undo.setIcon(icons.undo(cor))
-        self._redo.setIcon(icons.redo(cor))
-        self._zoom_out_button.setIcon(icons.minus(cor))
-        self._zoom_in_button.setIcon(icons.plus(cor))
+        """Pinta os ícones da barra com as cores do tema em vigor.
+
+        Botão de ícone sem fundo leva a cor secundária (``.btn.ghost`` do protótipo) e só o que tem fundo — "Ver tudo", volume
+        e velocidade — leva a do texto: pintar todos de branco tirava a hierarquia entre o comando e o que ele afeta.
+        """
+        cor, discreta = self._colors["text"], self._colors["text_dim"]
+        self._split_button.setIcon(icons.scissors(discreta))
+        self._trim_left_button.setIcon(icons.trim_left(discreta))
+        self._trim_right_button.setIcon(icons.trim_right(discreta))
+        self._delete_button.setIcon(icons.trash(discreta))
+        self._undo.setIcon(icons.undo(discreta))
+        self._redo.setIcon(icons.redo(discreta))
+        self._zoom_out_button.setIcon(icons.minus(discreta))
+        self._zoom_in_button.setIcon(icons.plus(discreta))
         self._fit_button.setIcon(icons.fit_width(cor, 16))
         self._volume_btn.setIcon(icons.volume(cor, 16))
         self._speed_btn.setIcon(icons.bolt(cor, 16))
         if hasattr(self, "_timeline"):
             self._paint_clip_chip(self._timeline.selected_clip)
-        self._new_btn.setIcon(icons.file_plus(cor))
-        self._open_btn.setIcon(icons.folder(cor))
-        self._save_btn.setIcon(icons.save(cor))
-        self._collapse.setIcon((icons.preview_expand if self._collapsed else icons.preview_collapse)(cor))
-        self._fullscreen_button.setIcon(icons.fullscreen(cor))
+        self._new_btn.setIcon(icons.file_plus(discreta))
+        self._open_btn.setIcon(icons.folder(discreta))
+        self._save_btn.setIcon(icons.save(discreta))
+        self._collapse.setIcon((icons.preview_expand if self._collapsed else icons.preview_collapse)(discreta))
+        self._fullscreen_button.setIcon(icons.fullscreen(discreta))
         self._export_button.setIcon(icons.upload(self._colors["accent_text"], 18))
         self._set_transport_icons()
 
@@ -5131,8 +5135,8 @@ class EditPanel(QWidget):
             self._extras_tabs.setTabIcon(properties, icons.two_states(icons.nav_settings, dim, accent, 20))
 
     def _set_transport_icons(self) -> None:
-        """Ícones da barra de transporte, na cor do texto; o do play é o do botão primário."""
-        cor, sobre_o_botao = self._colors["text"], self._colors["accent_text"]
+        """Ícones da barra de transporte, na cor secundária como no protótipo; o do play é o do botão primário."""
+        cor, sobre_o_botao = self._colors["text_dim"], self._colors["accent_text"]
         for botao, desenho in zip(self._buttons[:7], (icons.to_start, icons.rewind, icons.frame_back, None,
                                                        icons.frame_forward, icons.fast_forward, icons.to_end)):
             if desenho is not None:
