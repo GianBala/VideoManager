@@ -81,6 +81,11 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setProperty("role", "primary")
         layout.addWidget(buttons)
+        # Sem foco inicial, o Qt entrega o foco ao primeiro da ordem de Tab — a barra de abas — ao ativar o
+        # diálogo, e "Geral" abria com a borda de foco, como se Tab já tivesse sido apertado. O foco nasce no
+        # próprio diálogo, que não desenha nada: o Tab continua alcançando a barra (como em ``MainWindow``).
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setFocus()
 
     # ------------------------------------------------------------------
 
