@@ -52,7 +52,9 @@ from videomanager.presentation.qt.i18n import bind, on_language_change
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 from videomanager.presentation.qt.tasks import WorkerRunner
 
-_COVER_SIZE = 160
+_COVER_SIZE = 134
+# O espaço entre os cartões da aba: 14 px (o das outras abas é 18).
+_GAP = 14
 # Campos que costumam ter várias linhas (a descrição de um vídeo do YouTube é
 # um texto inteiro): numa linha só, as quebras viravam traços na tela.
 _MULTILINE = ("comment", "description")
@@ -89,6 +91,8 @@ class _Header(QHeaderView):
         # seção a seleciona. Um cabeçalho nosso nasce sem isso.
         self.setSectionsClickable(True)
         self.setHighlightSections(True)
+        # Os títulos das colunas começam onde começa o texto da coluna (o padrão do Qt os centraliza).
+        self.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         self.pressed = True
@@ -231,8 +235,11 @@ class _Table(QTableWidget):
         self._drag: tuple[int, int, int, int | None] | None = None
         self._hover_row = -1
         self.verticalHeader().setVisible(False)
+        self.setShowGrid(False)
         if adjustable:
             self.setHorizontalHeader(_Header(Qt.Orientation.Horizontal, self))
+        else:
+            self.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.setMinimumHeight(self.horizontalHeader().sizeHint().height()
                               + self.verticalHeader().defaultSectionSize() * _TABLE_ROWS + 2 * self.frameWidth())
         self._base_min = self.minimumHeight()  # o piso de nascença: é a esta altura que a alça da tabela volta
@@ -577,27 +584,30 @@ class MetadataPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(_GAP)
         layout.addWidget(self._build_file_group())
         # Duas colunas: as tags têm linhas curtas e muitas; capa, campos livres
         # e trilhas cabem ao lado, e tudo aparece sem rolar na janela padrão.
+        # O cartão das tags ocupa a altura toda (como no protótipo) e os da direita ficam na altura que têm, no alto: a
+        # sobra de uma janela alta é vão no pé da coluna, e o rodapé fica ancorado embaixo.
         middle = QHBoxLayout()
-        middle.setSpacing(10)
-        middle.addWidget(self._build_tags_group(), 1, Qt.AlignmentFlag.AlignTop)
+        middle.setSpacing(_GAP)
+        middle.addWidget(self._build_tags_group(), 108)
         right = QVBoxLayout()
-        right.setSpacing(10)
+        right.setSpacing(_GAP)
         right.addWidget(self._build_cover_group())
         right.addWidget(self._build_others_group())
         right.addWidget(self._build_tracks_group())
-        middle.addLayout(right, 1)
-        layout.addLayout(middle)
+        right.addStretch(1)
+        middle.addLayout(right, 100)
+        layout.addLayout(middle, 1)
 
         # O rodapé é um cartão: o resultado da gravação em linha própria (texto que quebra ao lado de botões nasce
         # cortado) e as ações embaixo.
         footer = QFrame()
         footer.setProperty("role", "footer")
         footer_box = QVBoxLayout(footer)
-        footer_box.setContentsMargins(16, 12, 12, 12)
+        footer_box.setContentsMargins(20, 10, 10, 10)
         footer_box.setSpacing(8)
         self._result = QLabel()
         self._result.setProperty("role", "dim")
@@ -626,11 +636,12 @@ class MetadataPanel(QWidget):
         actions.addWidget(self._save)
         footer_box.addLayout(actions)
         layout.addWidget(footer)
-        layout.addStretch(1)
 
         # Também põe os cabeçalhos das tabelas, que não passam por ``bind``.
         self._retranslate()
         on_language_change(self._retranslate)
+        self._retheme()
+        theme.on_theme_change(self._retheme)
 
     # ------------------------------------------------------------------
     # Construção
@@ -642,7 +653,7 @@ class MetadataPanel(QWidget):
         card = QFrame()
         card.setProperty("role", "section")
         box = QVBoxLayout(card)
-        box.setContentsMargins(16, 14, 16, 16)
+        box.setContentsMargins(18, 16, 18, 18)
         box.setSpacing(10)
         heading = bind(QLabel(), "setText", title)
         heading.setProperty("role", "section-title")
@@ -654,11 +665,12 @@ class MetadataPanel(QWidget):
         group = QFrame()
         group.setProperty("role", "section")
         row = QHBoxLayout(group)
-        row.setContentsMargins(16, 12, 16, 12)
+        row.setContentsMargins(18, 16, 18, 18)
         row.setSpacing(14)
         self._file_tile = QLabel()
         self._file_tile.setProperty("role", "tile")
-        self._file_tile.setFixedSize(52, 52)
+        self._file_tile.setFixedSize(44, 44)
+        self._file_kind = "video"
         self._file_tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._file_tile)
         names = QVBoxLayout()
@@ -682,10 +694,11 @@ class MetadataPanel(QWidget):
         self._info.setWordWrap(True)
         self._info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(self._info, 1)
-        pick = bind(QPushButton(), "setText", lambda: strings.META_OPEN)
-        bind(pick, "setToolTip", lambda: strings.META_OPEN_TIP.format(label=strings.META_OPEN))
-        pick.clicked.connect(self.choose_file)
-        row.addWidget(pick)
+        self._pick = bind(QPushButton(), "setText", lambda: strings.META_OPEN)
+        self._pick.setProperty("role", "btn")
+        bind(self._pick, "setToolTip", lambda: strings.META_OPEN_TIP.format(label=strings.META_OPEN))
+        self._pick.clicked.connect(self.choose_file)
+        row.addWidget(self._pick)
         return group
 
     def _build_tags_group(self) -> QFrame:
@@ -720,6 +733,8 @@ class MetadataPanel(QWidget):
                 column.addWidget(self._grips[key])
             else:
                 field = row = QLineEdit()
+                field.setProperty("role", "field")
+                field.setProperty("compact", "true")
                 field.textEdited.connect(self._refresh)
             # O rótulo fica em cima e não é o vizinho do campo num formulário: o nome acessível é posto no campo.
             bind(field, "setAccessibleName", lambda key=key: strings.META_FIELDS[key])
@@ -736,6 +751,7 @@ class MetadataPanel(QWidget):
             line, column_index, span = _TAG_CELLS[key]
             grid.addWidget(cell, line, column_index, 1, span, Qt.AlignmentFlag.AlignTop)
         box.addLayout(grid)
+        box.addStretch(1)
         return self._tags_group
 
     def _build_others_group(self) -> QFrame:
@@ -760,6 +776,7 @@ class MetadataPanel(QWidget):
         box.addWidget(holder)
         buttons = QHBoxLayout()
         self._add_field = bind(QPushButton(), "setText", lambda: strings.META_ADD_FIELD)
+        self._add_field.setProperty("role", "btn")
         self._add_field.clicked.connect(self._add_other)
         self._remove_field = bind(QPushButton(), "setText", lambda: strings.META_REMOVE_FIELD)
         self._remove_field.setProperty("role", "flat")
@@ -783,6 +800,7 @@ class MetadataPanel(QWidget):
         box.addWidget(self._cover_view)
         buttons = QVBoxLayout()
         self._change_cover = bind(QPushButton(), "setText", lambda: strings.META_COVER_CHANGE)
+        self._change_cover.setProperty("role", "btn")
         self._change_cover.clicked.connect(self._choose_cover)
         self._drop_cover = bind(QPushButton(), "setText", lambda: strings.META_COVER_REMOVE)
         self._drop_cover.setProperty("role", "flat")
@@ -809,6 +827,26 @@ class MetadataPanel(QWidget):
         self._tracks_note.setVisible(False)
         box.addWidget(self._tracks_note)
         return self._tracks_group
+
+    def _paint_tile(self) -> None:
+        """O ícone do arquivo no ladrilho, na cor da espécie dele (verde o áudio, acento o vídeo)."""
+        audio = self._file_kind == "audio"
+        self._file_tile.setProperty("kind", self._file_kind)
+        self._file_tile.style().unpolish(self._file_tile)
+        self._file_tile.style().polish(self._file_tile)
+        cor = theme.TIPOS_DE_BLOCO["audio"] if audio else theme.papeis(*theme.atual())["accent"]
+        self._file_tile.setPixmap((icons.music if audio else icons.nav_edit)(cor, 24).pixmap(24, 24))
+
+    def _retheme(self) -> None:
+        """Os ícones são pintados com a cor do texto de quando nasceram: na troca de tema, refeitos."""
+        cores = theme.papeis(*theme.atual())
+        self._pick.setIcon(icons.folder(cores["text"], 18))
+        self._change_cover.setIcon(icons.image(cores["text"], 18))
+        self._drop_cover.setIcon(icons.trash(cores["t2"], 18))
+        self._add_field.setIcon(icons.plus(cores["text"], 18))
+        self._save.setIcon(icons.save(cores["on_fill"], 18))
+        if self._file_tile.pixmap() is not None and not self._file_tile.pixmap().isNull():
+            self._paint_tile()
 
     def _retranslate(self) -> None:
         self._others.setHorizontalHeaderLabels([strings.META_FIELD_HEADER, strings.META_VALUE_HEADER])
@@ -1066,8 +1104,8 @@ class MetadataPanel(QWidget):
             self._chip_format.setText(meta.extension.upper())
             self._chip_duration.setText(format_duration(meta.duration))
             has_video = any(kind == "video" for kind, _codec in meta.streams)
-            self._file_tile.setPixmap((icons.nav_edit if has_video else icons.music)(
-                theme.papeis(*theme.atual())["accent"], 26).pixmap(26, 26))
+            self._file_kind = "video" if has_video else "audio"
+            self._paint_tile()
         self._info.setText(hint)
 
     def _update_cover_pixmap(self) -> None:

@@ -455,6 +455,16 @@ def folder(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+def image(color: str, size: int = _NAV) -> QIcon:
+    """Imagem: a moldura com o sol e a montanha."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawRoundedRect(QRectF(4.5 * u, 5.5 * u, 15 * u, 13 * u), 2.4 * u, 2.4 * u)
+        p.drawEllipse(QPointF(9.2 * u, 10 * u), 1.5 * u, 1.5 * u)
+        p.drawPolyline(QPolygonF([QPointF(5 * u, 17 * u), QPointF(10 * u, 12.6 * u), QPointF(13.2 * u, 15.4 * u),
+                                  QPointF(15.2 * u, 13.6 * u), QPointF(19 * u, 17 * u)]))
+    return _nav(color, size, desenho)
+
+
 def info(color: str, size: int = _NAV) -> QIcon:
     """Aviso informativo: o círculo com o "i"."""
     def desenho(p: QPainter, u: float) -> None:
