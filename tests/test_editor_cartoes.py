@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from PySide6.QtCore import QEvent, QObject, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QRegion
 from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
@@ -245,3 +247,63 @@ def test_a_barra_de_cima_tem_dois_fios_o_titulo_de_15_px_e_o_icone_da_tela(tema_
 def test_a_margem_do_editor_e_a_do_prototipo(tema_do_app, desktop_app, monkeypatch):
     from videomanager.presentation.qt.panels.edit_panel import _EDITOR_MARGINS
     assert _EDITOR_MARGINS == (14, 17, 14, 12)
+
+
+def _quadro_de(largura: int, altura: int, cor: str) -> QImage:
+    quadro = QImage(largura, altura, QImage.Format.Format_RGB888)
+    quadro.fill(QColor(cor))
+    return quadro
+
+
+def test_quadro_16_9_preenche_a_ficha_da_miniatura_sem_coluna_de_fundo(tema_do_app):
+    """O quadro 16:9 (224×126) é 0,3% mais estreito que a ficha de 214×120, e o ``KeepAspectRatio`` o levava a 213 colunas:
+    a que sobrava ficava com a cor do fundo, um pixel escuro junto do anel de seleção."""
+    from videomanager.presentation.qt.panels.edit_panel import _FRAME_H, _FRAME_W, _THUMB_H, _THUMB_W, _ficha_do_quadro
+    fundo = QColor("#101010")
+    for largura, altura in ((_FRAME_W, _FRAME_H), (212, 120), (214, 120), (213, 120), (214, 119)):
+        ficha = _ficha_do_quadro(_quadro_de(largura, altura, "#ff0000"), fundo).toImage()
+        assert (ficha.width(), ficha.height()) == (_THUMB_W, _THUMB_H)
+        pontas = [ficha.pixelColor(x, y).name() for x in (0, _THUMB_W - 1) for y in (0, _THUMB_H // 2, _THUMB_H - 1)]
+        assert set(pontas) == {"#ff0000"}, f"{largura}×{altura}: {pontas}"
+
+
+def test_quadro_de_outra_proporcao_continua_com_as_faixas_de_fundo(tema_do_app):
+    """Um 4:3 ou um vertical não é arredondamento: as faixas são conteúdo e não podem virar imagem esticada."""
+    from videomanager.presentation.qt.panels.edit_panel import _THUMB_H, _THUMB_W, _ficha_do_quadro
+    fundo = QColor("#101010")
+    quatro_tres = _ficha_do_quadro(_quadro_de(160, 120, "#ff0000"), fundo).toImage()
+    assert quatro_tres.pixelColor(2, _THUMB_H // 2).name() == fundo.name()
+    assert quatro_tres.pixelColor(_THUMB_W // 2, _THUMB_H // 2).name() == "#ff0000"
+    vertical = _ficha_do_quadro(_quadro_de(68, 120, "#ff0000"), fundo).toImage()
+    assert vertical.pixelColor(2, _THUMB_H // 2).name() == fundo.name() and vertical.pixelColor(_THUMB_W - 3, 5).name() == fundo.name()
+
+
+def test_o_quadro_pedido_ao_ffmpeg_e_16_9_exato_e_sem_preenchimento_dentro():
+    """A ficha é 214×120 (107:60), mas o quadro é pedido numa caixa 16:9 exata: pedido a 214×120, um 16:9 saía do
+    ``_fit_filter`` com 212 colunas de imagem e 2 de preto dentro dos dados, que nenhum ajuste do lado do Qt enxerga."""
+    from videomanager.presentation.qt.panels.edit_panel import _FRAME_H, _FRAME_W
+    assert _FRAME_W * 9 == _FRAME_H * 16 and _FRAME_W % 2 == 0 and _FRAME_H % 2 == 0
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("origem", [(1280, 720), (1920, 1080), (854, 480), (1366, 768), (3840, 2160)])
+def test_miniatura_de_video_16_9_chega_do_ffmpeg_sem_coluna_nem_linha_preta(tmp_path, origem):
+    import subprocess
+    from videomanager.infrastructure.ffmpeg.preview import filmstrip_frames
+    from videomanager.infrastructure.system import binaries
+    from videomanager.presentation.qt.panels.edit_panel import _FRAME_H, _FRAME_W
+    tools = binaries.find_tools()
+    if tools is None:
+        pytest.skip("ffmpeg não disponível")
+    arquivo = tmp_path / "v.mp4"
+    subprocess.run([tools.ffmpeg_str, "-v", "error", "-f", "lavfi", "-i", f"color=lime:s={origem[0]}x{origem[1]}:r=30:d=2",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(arquivo)], check=True)
+    quadro = next(iter(filmstrip_frames(arquivo, 0.0, 2.0, 1, (_FRAME_W, _FRAME_H), tools)))[1]
+    assert (quadro.width, quadro.height) == (_FRAME_W, _FRAME_H)
+
+    def preto(x: int, y: int) -> bool:
+        i = (y * quadro.width + x) * 3
+        return quadro.data[i + 1] < 100  # o verde da mídia sumiu: é fundo
+
+    assert not any(preto(x, y) for x in (0, quadro.width - 1) for y in range(quadro.height))
+    assert not any(preto(x, y) for y in (0, quadro.height - 1) for x in range(quadro.width))

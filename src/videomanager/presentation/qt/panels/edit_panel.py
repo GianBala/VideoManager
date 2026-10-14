@@ -269,6 +269,10 @@ _SCROLL_STEPS = 10
 # A miniatura do acervo é pedida e guardada com o dobro do tamanho em que aparece (107×60): em tela de densidade alta e
 # a 150% ela continua nítida, e o preço é um quadro de 214×120 por mídia.
 _THUMB_W, _THUMB_H = 214, 120
+# O quadro é pedido ao ffmpeg numa caixa 16:9 **exata** (a ficha, 214×120, é 0,3% mais larga). O ``_fit_filter`` completa o
+# que falta com ``pad``, e num 16:9 pedido a 214×120 o conteúdo sai com 212 colunas, alinhado à esquerda pela coordenada par
+# do yuv420p: duas colunas pretas dentro dos dados, junto do anel de seleção. Em 224×126 um 16:9 não precisa de ``pad``.
+_FRAME_W, _FRAME_H = 224, 126
 # A margem do editor, em volta de tudo: 14 nas laterais, 17 em cima (onde a barra de cima se assenta) e 12 embaixo.
 _EDITOR_MARGINS = (14, 17, 14, 12)
 
@@ -494,6 +498,30 @@ class _ZoomSlider(QSlider):
 
     def sizeHint(self) -> QSize:
         return QSize(_ZOOM_SLIDER_WIDTH, super().sizeHint().height())
+
+
+# Quanto o quadro pode ficar aquém da ficha da miniatura, por eixo, e ainda a preencher: o arredondamento para par do
+# ffmpeg (212 de 213,3) e o do ``scaled``. Mais que isso é outra proporção, e as faixas de fundo são conteúdo.
+_FOLGA_DA_FICHA = 3
+
+
+def _ficha_do_quadro(quadro: QImage, fundo: QColor) -> QPixmap:
+    """A ficha do acervo (``_THUMB_W`` × ``_THUMB_H``) com o quadro do vídeo.
+
+    Um 16:9 chega com 224×126 (``_FRAME_W`` × ``_FRAME_H``) e a ficha é 0,3% mais larga: encaixado por ``KeepAspectRatio``
+    ele ficava com 213 colunas e deixava uma de fundo, 1 px escuro junto do anel de seleção. Quando o que falta é só esse
+    arredondamento, o quadro preenche a ficha (a distorção é menor que 2%); quando é outra proporção (4:3, vertical),
+    mantém as faixas, que são conteúdo.
+    """
+    ficha = QPixmap(_THUMB_W, _THUMB_H)
+    ficha.fill(fundo)
+    escalado = quadro.scaled(_THUMB_W, _THUMB_H, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    if _THUMB_W - escalado.width() <= _FOLGA_DA_FICHA and _THUMB_H - escalado.height() <= _FOLGA_DA_FICHA:
+        escalado = quadro.scaled(_THUMB_W, _THUMB_H, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    pintor = QPainter(ficha)
+    pintor.drawImage((_THUMB_W - escalado.width()) // 2, (_THUMB_H - escalado.height()) // 2, escalado)
+    pintor.end()
+    return ficha
 
 
 def _bounded_pool(parent: QObject, threads: int) -> QThreadPool:
@@ -2492,7 +2520,7 @@ class EditPanel(QWidget):
                 # devolve quadro nenhum.
                 end = (reference.duration or 0.0) if reference.kind is MediaKind.VIDEO else 0.0
                 worker = self._runtime.filmstrip_worker(
-                    reference.path, 0.0, end, 1, (_THUMB_W, _THUMB_H), tools, token
+                    reference.path, 0.0, end, 1, (_FRAME_W, _FRAME_H), tools, token
                 )
                 worker.signals.strip.connect(
                     lambda tok, idx, frame, ref=reference: self._on_pool_thumb_ready(ref, frame, token=tok)
@@ -2510,18 +2538,7 @@ class EditPanel(QWidget):
             h = getattr(frame, "height", 54)
             if data:
                 img = image_from_frame(data, w, h)
-                card = QPixmap(_THUMB_W, _THUMB_H)
-                card.fill(QColor(self._colors["bg"]))
-                scaled = img.scaled(
-                    _THUMB_W,
-                    _THUMB_H,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                p = QPainter(card)
-                p.drawImage((_THUMB_W - scaled.width()) // 2, (_THUMB_H - scaled.height()) // 2, scaled)
-                p.end()
-                icon = QIcon(card)
+                icon = QIcon(_ficha_do_quadro(img, QColor(self._colors["bg"])))
                 self._pool_thumbnails[reference.path] = icon
                 for i in range(self._media_list.count()):
                     item = self._media_list.item(i)
