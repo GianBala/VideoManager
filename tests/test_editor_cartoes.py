@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
 
 from videomanager.domain.project import MediaKind, MediaRef
@@ -58,13 +58,36 @@ def test_a_grade_de_midia_tem_duas_colunas_que_dividem_a_largura_com_10_px_entre
     assert celulas[0].y() == celulas[1].y() < celulas[2].y() == celulas[3].y() < celulas[4].y()
     assert celulas[0].x() < celulas[1].x() and celulas[0].x() == celulas[2].x() == celulas[4].x()
     miniatura = _MediaCardDelegate.miniatura(largura)
-    # Esquerda encostada na borda esquerda, direita na direita: o que sobra no meio é o vão do protótipo.
-    esquerda_acaba = celulas[0].x() + miniatura.width()
+    # Esquerda e direita a uma margem das bordas (é onde cabe o anel da seleção): o que sobra no meio é o vão do protótipo.
+    margem = _MediaCardDelegate.MARGEM
+    esquerda_comeca = celulas[0].x() + margem
+    esquerda_acaba = esquerda_comeca + miniatura.width()
     sobra = largura - 2 * celulas[0].width()  # os pixels que sobram depois das duas células
-    direita_comeca = celulas[1].right() + 1 + sobra - miniatura.width()
+    direita_acaba = celulas[1].right() + 1 + sobra - margem
+    direita_comeca = direita_acaba - miniatura.width()
     assert celulas[0].x() == 0 and direita_comeca - esquerda_acaba == _MediaCardDelegate.ENTRE == 10
-    assert celulas[1].right() + 1 + sobra == largura  # a miniatura da direita termina na borda da lista
+    assert esquerda_comeca == margem and direita_acaba == largura - margem
     assert abs(miniatura.width() / miniatura.height() - 16 / 9) < 0.05
+
+
+def test_o_anel_da_selecao_aparece_inteiro_nas_duas_colunas_e_nao_e_cortado_pelas_bordas_da_lista(
+        tema_do_app, painel_de_edicao, desktop_app):
+    """O anel passa 2 px para fora da miniatura, e o viewport recorta o que sai dele: com as miniaturas coladas nas bordas, o
+    anel da coluna da esquerda e o da direita saíam sem a borda de fora (e a seleção parecia mais fina que a do protótipo)."""
+    lista = _com_midias(painel_de_edicao, 5)
+    acento = QColor(theme.papeis("dark", "grafite")["accent"])
+    largura = lista.viewport().width()
+
+    def anel(x: int, y: int) -> bool:
+        cor = lista.viewport().grab().toImage().pixelColor(x, y)
+        return abs(cor.red() - acento.red()) + abs(cor.green() - acento.green()) + abs(cor.blue() - acento.blue()) < 40
+
+    for linha, coluna in ((0, 0), (1, largura - 1)):
+        lista.setCurrentRow(linha)
+        desktop_app.processEvents()
+        meio = lista.visualItemRect(lista.item(linha)).y() + 3 + _MediaCardDelegate.miniatura(largura).height() // 2
+        assert anel(coluna, meio), f"o anel da linha {linha} está cortado na borda da lista"
+        assert anel(coluna + (1 if coluna == 0 else -1), meio)  # e tem os 2 px da espessura, não só 1
 
 
 def test_a_grade_acompanha_a_largura_e_nao_depende_da_barra_de_rolagem(tema_do_app, painel_de_edicao, desktop_app):
