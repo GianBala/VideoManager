@@ -57,17 +57,17 @@ def tools():
     return found
 
 
-def _video(tools, pasta: Path, nome: str, tamanho: tuple[int, int]) -> MediaRef:
+def _video(tools, pasta: Path, nome: str, tamanho: tuple[int, int], duracao: int = 2) -> MediaRef:
     arquivo = pasta / f"{nome}.mp4"
     subprocess.run([tools.ffmpeg_str, "-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i",
-                    f"color=lime:s={tamanho[0]}x{tamanho[1]}:r=30:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    f"color=lime:s={tamanho[0]}x{tamanho[1]}:r=30:d={duracao}", "-c:v", "libx264", "-pix_fmt", "yuv420p",
                     str(arquivo)], check=True, capture_output=True)
     return media_ref(probe_file(arquivo, tools))
 
 
-def _quadro(project: Project, caixa: tuple[int, int], tools) -> tuple[bytes, tuple[int, int]]:
+def _quadro(project: Project, caixa: tuple[int, int], tools, instante: float = 0.5) -> tuple[bytes, tuple[int, int]]:
     tamanho = fit_size(project.width, project.height, *caixa)
-    dados = subprocess.run(frame_command(project, 0.5, tamanho, tools), capture_output=True, check=True).stdout
+    dados = subprocess.run(frame_command(project, instante, tamanho, tools), capture_output=True, check=True).stdout
     assert len(dados) == tamanho[0] * tamanho[1] * 3
     return dados, tamanho
 
@@ -93,6 +93,27 @@ class TestQuadroDaPrevia:
             "base": not _verde(dados, (w, h), meio_x, h - 1),
         }
         assert not any(pretos.values()), f"borda preta no quadro {w}×{h}: {pretos}"
+
+    @pytest.mark.parametrize("caixa", CAIXAS)
+    @pytest.mark.parametrize("instante", [1.0, 3.0])
+    def test_o_meio_de_uma_transicao_tambem_encosta_nas_quatro_bordas(self, tools, tmp_path, caixa, instante) -> None:
+        """A transição monta as duas pontas por outro caminho do compositor, e o conserto do fio preto tinha ficado
+        só no caminho do bloco comum: dentro dela o quadro voltava a sair com 1 px preto em cima e embaixo."""
+        # A mídia tem de cobrir os blocos e as folgas da transição: depois do fim do arquivo o ``dissolve`` mistura com o
+        # vazio e o quadro sai salpicado de preto por razão nenhuma do encaixe.
+        midia = _video(tools, tmp_path, "v", (1920, 1080), duracao=4)
+        a, b = Clip(midia, 0, 3), Clip(midia, 3, 3)
+        transicao = Clip(MediaRef(Path("Transicao"), MediaKind.IMAGE, duration=1.0), 2.5, 1.0, overlay_type="transition",
+                         transition_name="dissolve", transition_left_id=a.clip_id, transition_right_id=b.clip_id)
+        projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=(a, transicao, b)),), width=1920, height=1080)
+        dados, (w, h) = _quadro(projeto, caixa, tools, instante)
+        pretos = {
+            "esquerda": not _verde(dados, (w, h), 0, h // 2),
+            "direita": not _verde(dados, (w, h), w - 1, h // 2),
+            "topo": not _verde(dados, (w, h), w // 2, 0),
+            "base": not _verde(dados, (w, h), w // 2, h - 1),
+        }
+        assert not any(pretos.values()), f"borda preta no quadro {w}×{h} em {instante} s: {pretos}"
 
     def test_proporcao_diferente_mantem_as_barras_pretas(self, tools, tmp_path) -> None:
         # O vão que se tira é o do arredondamento; a barra de um 4:3 numa tela 16:9 é conteúdo.
