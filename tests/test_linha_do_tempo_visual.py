@@ -147,6 +147,11 @@ def test_a_regua_usa_m_ss_com_o_decimo_so_quando_o_passo_e_menor_que_um_segundo(
     assert _ruler_label(59.99, 1) == "0:59"
 
 
+def test_as_cores_das_especies_sao_as_medidas_nas_faixas_do_prototipo():
+    assert TIPOS_DE_BLOCO["video"] == "#3b79e6" and TIPOS_DE_BLOCO["audio"] == "#2fa37a"
+    assert TIPOS_DE_BLOCO["text"] == "#8b5cf6" and TIPOS_DE_BLOCO["filter"] == "#6b78f0"
+
+
 def test_os_corpos_dos_blocos_sao_os_tons_medidos_no_prototipo():
     # Absolutos, medidos em editor.png (texto, filtro, áudio e transição); o corpo do vídeo só aparece sob a miniatura e o
     # da imagem é o plano escuro do protótipo.

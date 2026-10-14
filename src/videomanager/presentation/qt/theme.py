@@ -549,9 +549,10 @@ _registro = logging.getLogger(__name__)
 
 # Cor de cada espécie de bloco da linha do tempo. É semântica e não muda com a paleta: o que o olho procura
 # (o áudio, o texto, a transição) tem de ter a mesma cor em qualquer tema. Mora aqui, a casa das cores, e não
-# na linha do tempo.
+# na linha do tempo. Vídeo, áudio, texto e filtro são os tons medidos nas faixas e nos ladrilhos de ``editor.png``; a imagem e a
+# transição não têm faixa no protótipo e ficam como estavam.
 TIPOS_DE_BLOCO = {
-    "video": "#4f8ef7", "audio": "#34b27b", "text": "#8b6df5", "image": "#22b8cf", "filter": "#6c7bf0",
+    "video": "#3b79e6", "audio": "#2fa37a", "text": "#8b5cf6", "image": "#22b8cf", "filter": "#6b78f0",
     "transition": "#f59e0b",
 }
 
