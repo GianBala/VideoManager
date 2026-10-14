@@ -167,6 +167,33 @@ def test_nada_vaza_do_cartao_nem_se_sobrepoe(desktop_app, tmp_path):
                 assert cartao.repetir.right() < cartao.detalhes.left()
 
 
+def test_o_texto_com_caractere_de_fonte_de_reserva_cabe_no_espaco_reservado_e_nao_cobre_o_de_baixo(desktop_app, tmp_path):
+    """Título japonês (「」 e kanji) sobrepunha a linha de situação: o texto é pintado de uma vez, e uma linha com caractere que
+    a fonte do cartão não tem usa uma fonte de reserva mais alta (46 px em duas linhas, contra 32 da conta de ``lineSpacing``).
+    O teste acima mede a geometria pela mesma conta que o cartão usa e não vê isso; aqui se compara com a altura real."""
+    titulo = "「Creditless」Blue Box OP / Opening「UHD 60FPS」 【東方】ライブ映像 第二部「完全版」"
+    fonte_titulo, fonte = queue_cards.fontes(_fonte())
+
+    def real(f: QFont, linhas: list[str]) -> int:
+        caixa = QRect(0, 0, 100_000, 100_000)
+        return QFontMetrics(f).boundingRect(caixa, queue_cards._FLAGS_DO_TEXTO, "\n".join(linhas)).height()
+
+    for largura in (320, 520):
+        for nome, job in _estados(tmp_path).items():
+            job.title, job.description = titulo, "1080p60 · H.264 · 「AAC」"
+            if job.error:
+                job.error = "「失敗」 HTTP 403: Forbidden (vídeo privado ou com restrição de região) " * 2
+            cartao = medir(job, largura, _fonte())
+            assert real(fonte_titulo, cartao.titulo) <= cartao.titulo_em.height(), (nome, largura)
+            assert real(fonte, cartao.situacao) <= cartao.situacao_em.height(), (nome, largura)
+            assert cartao.situacao_em.top() >= cartao.titulo_em.bottom(), (nome, largura)
+            if cartao.erro is not None:
+                assert real(fonte, cartao.erro_linhas) + 2 * queue_cards._ERRO_PAD <= cartao.erro.height(), (nome, largura)
+    # O texto latino não muda de altura: o piso é a conta de antes.
+    latino = QFontMetrics(fonte_titulo)
+    assert queue_cards.altura_do_texto(latino, ["Episódio comum", "sem caracteres"]) == 2 * latino.lineSpacing()
+
+
 def test_um_cartao_com_barra_ou_erro_e_mais_alto_que_um_simples(desktop_app, tmp_path):
     e = _estados(tmp_path)
     altura = {nome: medir(job, 520, _fonte()).altura for nome, job in e.items()}

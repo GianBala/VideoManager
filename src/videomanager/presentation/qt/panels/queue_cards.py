@@ -101,6 +101,21 @@ def quebrar(metricas: QFontMetrics, texto: str, largura: int, max_linhas: int) -
     return [metricas.elidedText(linha, Qt.TextElideMode.ElideRight, largura) for linha in linhas]
 
 
+_FLAGS_DO_TEXTO = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextDontClip)
+
+
+def altura_do_texto(metricas: QFontMetrics, linhas: list[str]) -> int:
+    """A altura que o texto pintado de uma vez só (:func:`_linhas`) ocupa de verdade.
+
+    ``linhas * lineSpacing()`` supõe que toda linha tem a altura da fonte do cartão. Uma linha com caractere que a fonte
+    não tem — os 「」 e o kanji de um título japonês — usa uma fonte de reserva mais alta (46 px em vez de 32 em duas linhas),
+    e o título passava do espaço reservado e se pintava por cima da linha de situação. Medir pelo mesmo caminho da pintura
+    é o que as faz concordar; o piso é a conta antiga, para o texto latino não mudar de altura.
+    """
+    real = metricas.boundingRect(QRect(0, 0, 100_000, 100_000), _FLAGS_DO_TEXTO, "\n".join(linhas)).height()
+    return max(len(linhas) * metricas.lineSpacing(), real)
+
+
 def velocidade_e_tempo(job: Job) -> list[str]:
     """Os pedaços do lado direito do rodapé: velocidade e tempo restante, os que o extrator informou."""
     progresso = job.progress
@@ -161,8 +176,8 @@ def medir(job: Job, largura: int, base: QFont) -> Cartao:
     texto_largura = (acao.left() - _GAP if acao else largura - _PAD) - texto_x
     titulo = quebrar(mt, job.title, texto_largura, _LINHAS_TITULO)
     linhas_situacao = quebrar(mn, situacao(job), texto_largura, _LINHAS_SITUACAO)
-    altura_titulo = len(titulo) * mt.lineSpacing()
-    altura_situacao = len(linhas_situacao) * mn.lineSpacing()
+    altura_titulo = altura_do_texto(mt, titulo)
+    altura_situacao = altura_do_texto(mn, linhas_situacao)
     bloco = altura_titulo + _ENTRE_TEXTOS + altura_situacao
     # O texto se centraliza no ladrilho quando cabe nele; quando passa, o ladrilho fica no topo.
     topo = _PAD + max(0, (_TILE - bloco) // 2)
@@ -190,7 +205,7 @@ def medir(job: Job, largura: int, base: QFont) -> Cartao:
         y += _ENTRE
         interna = inteira - 2 * _ERRO_PAD
         cartao.erro_linhas = quebrar(mn, str(job.error), interna, _LINHAS_ERRO)
-        cartao.erro = QRect(_PAD, y, inteira, len(cartao.erro_linhas) * mn.lineSpacing() + 2 * _ERRO_PAD)
+        cartao.erro = QRect(_PAD, y, inteira, altura_do_texto(mn, cartao.erro_linhas) + 2 * _ERRO_PAD)
         y += cartao.erro.height()
 
     if job.status in (JobStatus.FAILED, JobStatus.CANCELLED):
@@ -480,9 +495,7 @@ def _linhas(painter: QPainter, metricas: QFontMetrics, linhas: list[str], area: 
     O texto pintado à mão é conferido inteiro (``validate_language.py``): em pedaços, cada linha de um
     texto traduzido perdia as marcas do começo ou do fim e parecia texto fora do catálogo.
     """
-    painter.drawText(QRect(area.x(), area.y(), area.width(), len(linhas) * metricas.lineSpacing()),
-                     int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextDontClip),
-                     "\n".join(linhas))
+    painter.drawText(QRect(area.x(), area.y(), area.width(), area.height()), _FLAGS_DO_TEXTO, "\n".join(linhas))
 
 
 def _com_alfa(cor: str, alfa: int) -> str:
