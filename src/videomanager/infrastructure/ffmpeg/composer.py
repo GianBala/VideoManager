@@ -1432,8 +1432,13 @@ def _transition_video_chain(
     project: Project,
     fps: float,
     label: str,
+    canonical_size: tuple[int, int] | None = None,
 ) -> list[str]:
-    """Produz uma fonte de tela inteira com duração exata para o ``xfade``."""
+    """Produz uma fonte de tela inteira com duração exata para o ``xfade``.
+
+    ``canonical_size`` é a tela de verdade quando a do projeto é a reduzida da prévia: sem ele, o encaixe das duas
+    pontas voltava a ser feito pelos pixels da tela reduzida e deixava 1 px preto dentro da transição.
+    """
     clip = side.clip
     steps = [
         f"trim=duration={max(0.001, side.source_duration - side.image_cut):.6f}",
@@ -1480,7 +1485,7 @@ def _transition_video_chain(
     transformed: list[str] = []
     piece = _Piece(local_clip, side.index, 0, 0, side.duration, -1)
     output = _compose_video_piece(transformed, base, piece, project, fps, False,
-                                  f"{label[1:-1]}_pose", hold_last=True)
+                                  f"{label[1:-1]}_pose", hold_last=True, canonical_size=canonical_size)
     filters.extend(part.replace(f"[{side.index}:v]", decoded) for part in transformed)
     filters.append(f"{output}format=gbrap,setsar=1,settb=AVTB{label}")
     return filters
@@ -1636,8 +1641,8 @@ def _compose_video_transition(
 ) -> str:
     left_label = f"[tr{number}a]"
     right_label = f"[tr{number}b]"
-    filters.extend(_transition_video_chain(render.left, project, fps, left_label))
-    filters.extend(_transition_video_chain(render.right, project, fps, right_label))
+    filters.extend(_transition_video_chain(render.left, project, fps, left_label, canonical_size))
+    filters.extend(_transition_video_chain(render.right, project, fps, right_label, canonical_size))
     visible_label = _transition_window(filters, left_label, right_label, render, fps, str(number), alpha=True)
     label = f"[to{number}]"
     filters.append(
