@@ -289,3 +289,18 @@ def test_o_conteudo_da_aba_cabe_na_coluna_de_304_px_sem_rolar_para_o_lado(tema_d
     assert widget._container.minimumSizeHint().width() <= 294
     for lista in (widget._combo_easing, widget._combo_presets, widget._combo_trans_type):
         assert lista.minimumSizeHint().width() < 200
+
+
+def test_o_x_da_aba_propriedades_tem_nome_acessivel_nos_dois_idiomas(tema_do_app, painel_de_edicao, blocos_de_edicao):
+    """Era um botão com o texto "✕" e virou só ícone: o nome acessível passa a ser o da dica, e acompanha o idioma.
+
+    O painel nasce solto (fora da janela), então o ``name_controls`` da construção não o alcança.
+    """
+    from PySide6.QtGui import QAccessible
+    painel = painel_de_edicao
+    propriedades = _abrir(painel, blocos_de_edicao["video com som"])
+    botao = propriedades._btn_close
+    nome = lambda: QAccessible.queryAccessibleInterface(botao).text(QAccessible.Text.Name)  # noqa: E731
+    assert nome() == strings.PROP_CLOSE_TIP and nome() != ""
+    apply_language(i18n.ENGLISH)
+    assert nome() == strings.PROP_CLOSE_TIP and botao.toolTip() == strings.PROP_CLOSE_TIP

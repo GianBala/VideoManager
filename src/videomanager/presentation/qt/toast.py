@@ -59,6 +59,9 @@ class _Aviso(QFrame):
         self.botao_fechar.setIcon(icons.close(cores["t2"]))
         self.botao_fechar.setIconSize(QSize(14, 14))
         self.botao_fechar.setToolTip(strings.TOAST_CLOSE)
+        # Só ícone: sem nome, o leitor de tela anuncia só "botão". O aviso nasce depois da janela, fora do alcance do
+        # ``name_controls``, e dura poucos segundos, então o texto de agora basta.
+        self.botao_fechar.setAccessibleName(strings.TOAST_CLOSE)
         self.botao_fechar.clicked.connect(self.fechar)
         linha.addWidget(self.botao_fechar)
         self._temporizador: QTimer | None = None
