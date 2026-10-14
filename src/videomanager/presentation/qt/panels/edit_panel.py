@@ -76,6 +76,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QScrollBar,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QSplitter,
@@ -129,7 +130,9 @@ from videomanager.application.editor.canvas import aspect_of, canvas_for_aspect,
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
 from videomanager.presentation.qt.theme import atual, on_theme_change, palette
 from videomanager.presentation.qt.panels.canvas_selector import CanvasPopup, CanvasSelector
+from videomanager.presentation.qt.panels.field_box import FieldBox, WrapCheck
 from videomanager.presentation.qt.panels.stacked_tabs import StackedTabs
+from videomanager.presentation.qt.panels.swatch import Swatch
 from videomanager.presentation.qt.panels.timeline import AUDIO_TRACK_HEIGHT
 from videomanager.presentation.qt.panels.timeline import FILM_CELL_WIDTH
 from videomanager.presentation.qt.panels.timeline import VIDEO_TRACK_HEIGHT
@@ -222,20 +225,15 @@ _WAVE_MAX_WIDTH = 1200
 # prévia que tem política de esticar e ela não abre mão sozinha.
 _TIMELINE_MIN_HEIGHT = 150
 
-# Largura com que a coluna de Adicionais nasce, e à qual volta ao abrir a aba
-# Propriedades se estiver mais estreita. É a da aba Propriedades, a mais larga
-# da coluna: medido no Windows com a fonte da aplicação, o conteúdo pede 370 px
-# e a moldura, a margem e a barra de rolagem vertical mais 18, e as quatro abas
-# pedem 367. Nascendo no mínimo (260) e crescendo a 340, a aba abria rolando
-# para o lado, com os campos cortados e a aba Texto escondida atrás das setas.
-# Numa tela de 1920 px a imagem da prévia continua do mesmo tamanho: a área dela
-# segue mais larga que a imagem 16:9 que cabe na altura.
-_EXTRAS_WIDTH = 400
+# Largura com que a coluna de Adicionais nasce, e à qual volta ao abrir a aba Propriedades se estiver mais estreita.
+# É a do protótipo (304 px): as quatro abas pedem uns 290, e os campos da aba Propriedades, que eram o que a fazia
+# nascer com 400, hoje são caixas de 134 px lado a lado e cabem nos 276 que sobram das margens. Mais estreita que isso
+# a aba Propriedades abria rolando para o lado, com a aba Texto escondida atrás das setas.
+_EXTRAS_WIDTH = 304
 
-# Largura com que a coluna de Mídia nasce. Era a da fileira de botões de baixo ("Limpar não usados" ao lado de
-# "Inserir no cursor"), que a coluna passou a empilhar: sem o número, a coluna nascia no mínimo e o editor perdia
-# 32 px de lista de mídias sem ninguém pedir.
-_MEDIA_WIDTH = 292
+# Largura com que a coluna de Mídia nasce: a do protótipo (252 px). Dá duas miniaturas de 107 px com 10 de vão e as
+# margens de 14, que é o tamanho em que as miniaturas são pedidas (ver ``_THUMB_W``).
+_MEDIA_WIDTH = 252
 
 # Largura que o monitor defende quando a janela estreita: até ela, quem cede
 # são as colunas laterais, até o mínimo delas. É a largura em que a barra de
@@ -266,6 +264,26 @@ _SCROLL_STEPS = 10
 _THUMB_W, _THUMB_H = 214, 120
 # A margem do editor, em volta de tudo: 14 nas laterais, 17 em cima (onde a barra de cima se assenta) e 12 embaixo.
 _EDITOR_MARGINS = (14, 17, 14, 12)
+
+
+# A margem e o espaço entre os controles das colunas de adicionais (Texto, Filtros, Transições): 14 px em volta e 10
+# entre os grupos, como no protótipo.
+_EXTRAS_MARGINS = (14, 14, 14, 14)
+_EXTRAS_SPACING = 10
+
+
+class _SwatchRow:
+    """Uma fileira de amostras em que no máximo uma está escolhida: a que tem a cor de agora, se houver."""
+
+    def __init__(self) -> None:
+        self._swatches: list[Swatch] = []
+
+    def add(self, swatch: Swatch) -> None:
+        self._swatches.append(swatch)
+
+    def select(self, color: str) -> None:
+        for swatch in self._swatches:
+            swatch.set_selected(swatch.color().lower() == color.lower())
 
 
 class _ExtrasColumn(QWidget):
@@ -410,6 +428,14 @@ class _TopSplitter(QSplitter):
         QSplitter.setSizes(self, [*columns, total - sum(columns)])
 
 
+# O teto do que uma aba de adicionais pede de altura: a página mais alta que a coluna pedia antes de as opções passarem
+# a ter 36 px (a de Transições, 471). A divisão vertical reparte pelo que as abas pedem, e com as opções do protótipo a
+# página de Transições chegou a 645 e a coluna a 707: a linha do tempo caía de 267 para 216 px numa janela de 1080. Um
+# teto menor deixaria a prévia mais baixa do que era; sobre ele, a aba rola, como a do protótipo ("a coluna rola quando
+# não cabe"). Acima do que cabe, nada se perde: o resto está na barra de rolagem.
+_PAGE_HEIGHT_MAX = 471
+
+
 class _ScrollPage(QScrollArea):
     """Aba de Adicionais que rola quando falta altura, sem pedir menos que antes.
 
@@ -428,7 +454,8 @@ class _ScrollPage(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
     def sizeHint(self) -> QSize:  # noqa: N802
-        return self.widget().sizeHint()
+        hint = self.widget().sizeHint()
+        return QSize(hint.width(), min(hint.height(), _PAGE_HEIGHT_MAX))
 
 
 def _bounded_pool(parent: QObject, threads: int) -> QThreadPool:
@@ -949,7 +976,8 @@ class EditPanel(QWidget):
         box = _MediaColumn()
         box.setProperty("role", "pane")
         box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        box.setMinimumWidth(260)
+        # A largura do protótipo é também o piso: duas miniaturas de 107 px com 10 de vão e as margens de 14.
+        box.setMinimumWidth(_MEDIA_WIDTH)
         layout = QVBoxLayout(box)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
@@ -1049,10 +1077,12 @@ class EditPanel(QWidget):
     def _build_text_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(4, 6, 4, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(*_EXTRAS_MARGINS)
+        layout.setSpacing(_EXTRAS_SPACING)
 
         self._text_input = QLineEdit()
+        self._text_input.setProperty("role", "field")
+        self._text_input.setProperty("compact", "true")
         bind(self._text_input, "setPlaceholderText", lambda: strings.EDIT_TEXT_PLACEHOLDER)
         # Enquanto ninguém digitar, o conteúdo inicial acompanha o idioma; a
         # primeira tecla o torna do usuário, e a troca não mexe mais nele.
@@ -1064,15 +1094,22 @@ class EditPanel(QWidget):
         self._font_selector.font_changed.connect(lambda _: self._on_text_style_changed())
         layout.addWidget(self._font_selector)
 
+        # Tamanho: menos, o valor no meio e mais. O rótulo "Tamanho" sai da tela (o campo diz "48 pt") e fica como
+        # nome acessível.
         row_size = QHBoxLayout()
         row_size.setSpacing(6)
-        lbl_size = bind(QLabel(), "setText", lambda: strings.EDIT_FONT_SIZE)
-        row_size.addWidget(lbl_size)
 
-        btn_dec = QPushButton("-")
-        btn_dec.setProperty("role", "spin-tool")
-        btn_dec.setFixedSize(30, 28)
-        bind(btn_dec, "setToolTip", lambda: strings.EDIT_FONT_SMALLER)
+        def step(tip) -> QPushButton:
+            button = QPushButton()
+            button.setProperty("role", "tile")
+            button.setFixedSize(34, 34)
+            button.setIconSize(QSize(16, 16))
+            bind(button, "setToolTip", tip)
+            bind(button, "setAccessibleName", tip)
+            return button
+
+        btn_dec = step(lambda: strings.EDIT_FONT_SMALLER)
+        self._action_icons[btn_dec] = (icons.minus, "text")
         btn_dec.clicked.connect(lambda: self._font_size_spin.setValue(max(8, self._font_size_spin.value() - 1)))
         row_size.addWidget(btn_dec)
 
@@ -1081,84 +1118,79 @@ class EditPanel(QWidget):
         self._font_size_spin.setValue(48)
         self._font_size_spin.setSingleStep(1)
         self._font_size_spin.setSuffix(" pt")
-        self._font_size_spin.setFixedHeight(28)
-        self._font_size_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self._font_size_spin.valueChanged.connect(lambda _: self._on_text_style_changed())
-        lbl_size.setBuddy(self._font_size_spin)
-        row_size.addWidget(self._font_size_spin, 1)
+        self._font_size_spin.valueChanged.connect(lambda _: self._sync_size_presets())
+        bind(self._font_size_spin, "setAccessibleName", lambda: strings.EDIT_FONT_SIZE)
+        row_size.addWidget(FieldBox(self._font_size_spin, align=Qt.AlignmentFlag.AlignHCenter), 1)
 
-        btn_inc = QPushButton("+")
-        btn_inc.setProperty("role", "spin-tool")
-        btn_inc.setFixedSize(30, 28)
-        bind(btn_inc, "setToolTip", lambda: strings.EDIT_FONT_LARGER)
+        btn_inc = step(lambda: strings.EDIT_FONT_LARGER)
+        self._action_icons[btn_inc] = (icons.plus, "text")
         btn_inc.clicked.connect(lambda: self._font_size_spin.setValue(min(200, self._font_size_spin.value() + 1)))
         row_size.addWidget(btn_inc)
         layout.addLayout(row_size)
 
+        # Tamanhos de sempre: seis células iguais, e a do valor de agora marcada.
         size_presets = QHBoxLayout()
-        size_presets.setSpacing(4)
+        size_presets.setSpacing(6)
+        self._size_presets: list[tuple[int, QPushButton]] = []
         for sz in (18, 24, 36, 48, 64, 72):
             btn_sz = QPushButton(f"{sz}")
-            btn_sz.setFixedHeight(24)
-            btn_sz.setProperty("role", "chip")
+            btn_sz.setProperty("role", "pill")
             bind(btn_sz, "setToolTip", lambda s=sz: strings.EDIT_FONT_SIZE_PRESET.format(size=s))
             btn_sz.clicked.connect(lambda _, s=sz: self._font_size_spin.setValue(s))
-            size_presets.addWidget(btn_sz)
+            size_presets.addWidget(btn_sz, 1)
+            self._size_presets.append((sz, btn_sz))
         layout.addLayout(size_presets)
+        self._sync_size_presets()
 
         row_style = QHBoxLayout()
-        row_style.setSpacing(4)
-        self._bold_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_FONT_BOLD)
-        self._bold_btn.setCheckable(True)
-        b_font = self._bold_btn.font()
-        b_font.setBold(True)
-        self._bold_btn.setFont(b_font)
-        self._bold_btn.setFixedWidth(36)
-        bind(self._bold_btn, "setToolTip", lambda: strings.EDIT_FONT_BOLD_TIP)
-        self._bold_btn.toggled.connect(lambda _: self._on_text_style_changed())
-        row_style.addWidget(self._bold_btn)
+        row_style.setSpacing(6)
 
-        self._italic_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_FONT_ITALIC)
-        self._italic_btn.setCheckable(True)
-        i_font = self._italic_btn.font()
-        i_font.setItalic(True)
-        self._italic_btn.setFont(i_font)
-        self._italic_btn.setFixedWidth(36)
-        bind(self._italic_btn, "setToolTip", lambda: strings.EDIT_FONT_ITALIC_TIP)
-        self._italic_btn.toggled.connect(lambda _: self._on_text_style_changed())
+        def style_tile(setter_text, tip, *, bold: bool = False, italic: bool = False) -> QPushButton:
+            button = bind(QPushButton(), "setText", setter_text)
+            button.setProperty("role", "tile")
+            button.setCheckable(True)
+            button.setFixedSize(34, 34)
+            fonte = button.font()
+            fonte.setBold(bold)
+            fonte.setItalic(italic)
+            button.setFont(fonte)
+            bind(button, "setToolTip", tip)
+            button.toggled.connect(lambda _: self._on_text_style_changed())
+            return button
+
+        self._bold_btn = style_tile(lambda: strings.EDIT_FONT_BOLD, lambda: strings.EDIT_FONT_BOLD_TIP, bold=True)
+        row_style.addWidget(self._bold_btn)
+        self._italic_btn = style_tile(lambda: strings.EDIT_FONT_ITALIC, lambda: strings.EDIT_FONT_ITALIC_TIP, italic=True)
         row_style.addWidget(self._italic_btn)
 
         row_style.addStretch(1)
+        color_label = bind(QLabel(), "setText", lambda: strings.EDIT_TEXT_COLOR_LABEL)
+        color_label.setProperty("role", "dim")
+        row_style.addWidget(color_label)
         self._text_color = "#ffffff"
-        self._color_indicator = QPushButton()
-        self._color_indicator.setFixedSize(28, 28)
-        self._color_indicator.setStyleSheet(
-            f"background: {self._text_color}; border: 1px solid #666; border-radius: 4px;"
-        )
+        self._color_indicator = Swatch(self._text_color, width=34, radius=10, ring=False)
         bind(self._color_indicator, "setToolTip", lambda: strings.EDIT_TEXT_COLOR_TIP)
         self._color_indicator.clicked.connect(self._choose_text_color)
         row_style.addWidget(self._color_indicator)
         layout.addLayout(row_style)
 
         # Paleta rápida
-        pal_row = QHBoxLayout()
-        pal_row.setSpacing(4)
-        for c in ("#ffffff", "#ffeb3b", "#f44336", "#00e5ff", "#00e676", "#e040fb"):
-            btn = QPushButton()
-            btn.setFixedSize(22, 22)
-            btn.setStyleSheet(f"background: {c}; border: 1px solid #444; border-radius: 3px;")
-            bind(btn, "setToolTip", lambda col=c: strings.EDIT_TEXT_SWATCH_TIP.format(color=col.upper()))
-            btn.clicked.connect(lambda _, col=c: self._set_text_color(col))
-            pal_row.addWidget(btn)
-        pal_row.addStretch(1)
-        layout.addLayout(pal_row)
+        self._text_swatches = self._swatch_row(
+            layout, ("#ffffff", "#ffeb3b", "#f44336", "#00e5ff", "#00e676", "#e040fb"),
+            lambda col: strings.EDIT_TEXT_SWATCH_TIP.format(color=col.upper()), self._set_text_color)
+        self._text_swatches.select(self._text_color)
 
         # Seção de Contorno
-        layout.addSpacing(6)
+        rule = QFrame()
+        rule.setProperty("role", "hline")
+        layout.addSpacing(3)
+        layout.addWidget(rule)
+        layout.addSpacing(3)
         row_stroke = QHBoxLayout()
-        row_stroke.setSpacing(6)
+        row_stroke.setSpacing(10)
 
-        self._stroke_checkbox = bind(QCheckBox(), "setText", lambda: strings.EDIT_STROKE)
+        self._stroke_checkbox = bind(WrapCheck(), "setText", lambda: strings.EDIT_STROKE)
         bind(self._stroke_checkbox, "setToolTip", lambda: strings.EDIT_STROKE_TIP)
         self._stroke_checkbox.toggled.connect(self._on_stroke_toggled)
         row_stroke.addWidget(self._stroke_checkbox)
@@ -1168,41 +1200,30 @@ class EditPanel(QWidget):
         self._stroke_spin.setValue(3)
         self._stroke_spin.setSingleStep(1)
         self._stroke_spin.setSuffix(" px")
-        self._stroke_spin.setFixedHeight(28)
-        self._stroke_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         bind(self._stroke_spin, "setToolTip", lambda: strings.EDIT_STROKE_WIDTH_TIP)
+        bind(self._stroke_spin, "setAccessibleName", lambda: strings.EDIT_STROKE_WIDTH_TIP)
         self._stroke_spin.setEnabled(False)
         self._stroke_spin.valueChanged.connect(lambda _: self._on_text_style_changed())
-        row_stroke.addWidget(self._stroke_spin, 1)
+        row_stroke.addWidget(FieldBox(self._stroke_spin, align=Qt.AlignmentFlag.AlignLeft), 1)
 
         self._stroke_color = "#000000"
-        self._stroke_color_indicator = QPushButton()
-        self._stroke_color_indicator.setFixedSize(28, 28)
-        self._stroke_color_indicator.setStyleSheet(
-            f"background: {self._stroke_color}; border: 1px solid #666; border-radius: 4px;"
-        )
+        self._stroke_color_indicator = Swatch(self._stroke_color, width=34, radius=10, ring=False)
         bind(self._stroke_color_indicator, "setToolTip", lambda: strings.EDIT_STROKE_COLOR_TIP)
         self._stroke_color_indicator.setEnabled(False)
         self._stroke_color_indicator.clicked.connect(self._choose_stroke_color)
         row_stroke.addWidget(self._stroke_color_indicator)
         layout.addLayout(row_stroke)
 
-        stroke_pal_row = QHBoxLayout()
-        stroke_pal_row.setSpacing(4)
-        for c in ("#000000", "#ffffff", "#1e293b", "#e11d48", "#facc15", "#0284c7"):
-            btn = QPushButton()
-            btn.setFixedSize(22, 22)
-            btn.setStyleSheet(f"background: {c}; border: 1px solid #444; border-radius: 3px;")
-            bind(btn, "setToolTip", lambda col=c: strings.EDIT_STROKE_SWATCH_TIP.format(color=col.upper()))
-            btn.clicked.connect(lambda _, col=c: self._set_stroke_color(col))
-            stroke_pal_row.addWidget(btn)
-        stroke_pal_row.addStretch(1)
-        layout.addLayout(stroke_pal_row)
+        self._stroke_swatches = self._swatch_row(
+            layout, ("#000000", "#ffffff", "#1e293b", "#e11d48", "#facc15", "#0284c7"),
+            lambda col: strings.EDIT_STROKE_SWATCH_TIP.format(color=col.upper()), self._set_stroke_color)
+        self._stroke_swatches.select(self._stroke_color)
 
         layout.addStretch(1)
 
         self._insert_text_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_INSERT_TEXT)
         self._insert_text_btn.setProperty("role", "primary")
+        self._insert_text_btn.setProperty("emphasis", "large")
         self._action_icons[self._insert_text_btn] = (icons.plus, "accent_text")
         self._insert_text_btn.clicked.connect(self._handle_insert_or_update_text)
         layout.addWidget(self._insert_text_btn)
@@ -1215,6 +1236,57 @@ class EditPanel(QWidget):
 
         return tab
 
+    @staticmethod
+    def _heading(text) -> QLabel:
+        """O título da escolha de uma coluna de adicionais ("Escolha um efeito visual")."""
+        label = bind(QLabel(), "setText", text)
+        label.setProperty("role", "heading")
+        label.setWordWrap(True)
+        return label
+
+    @staticmethod
+    def _duration_row(spin: QDoubleSpinBox) -> QHBoxLayout:
+        """"Duração" à esquerda e, à direita, a caixa de 110 px com o valor encostado na ponta."""
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        name = bind(QLabel(), "setText", lambda: strings.EDIT_EXTRA_DURATION)
+        name.setProperty("role", "dim")
+        row.addWidget(name, 1)
+        bind(spin, "setAccessibleName", lambda: strings.EDIT_EXTRA_DURATION)
+        box = FieldBox(spin)
+        box.setFixedWidth(110)
+        row.addWidget(box)
+        return row
+
+    def _swatch_row(self, layout: QVBoxLayout, colors: tuple[str, ...], tip, on_pick) -> "_SwatchRow":
+        """Seis amostras de 24 px de passo 32, a escolhida com o anel do acento."""
+        row = _SwatchRow()
+        line = QHBoxLayout()
+        # Passo de 32 px: 30 de amostra (24 de cor e 3 de ar para o anel de cada lado) e 2 de vão. A margem negativa que
+        # encostaria a primeira cor em x=14 como no protótipo o ``QLayout`` ignora (negativo vale "o padrão do estilo"),
+        # então a cor começa 3 px adiante.
+        line.setSpacing(2)
+        line.setContentsMargins(0, 0, 0, 0)
+        for color in colors:
+            swatch = Swatch(color, width=24, radius=8)
+            bind(swatch, "setToolTip", lambda c=color: tip(c))
+            swatch.clicked.connect(lambda _, c=color: on_pick(c))
+            line.addWidget(swatch)
+            row.add(swatch)
+        line.addStretch(1)
+        layout.addLayout(line)
+        return row
+
+    def _sync_size_presets(self) -> None:
+        """O atalho do tamanho que vale agora fica marcado; um tamanho que nenhum atalho tem, nenhum."""
+        current = self._font_size_spin.value()
+        for size, button in self._size_presets:
+            marked = "true" if size == current else "false"
+            if button.property("active") != marked:
+                button.setProperty("active", marked)
+                button.style().unpolish(button)
+                button.style().polish(button)
+
     def _choose_text_color(self) -> None:
         col = QColorDialog.getColor(QColor(self._text_color), self, strings.EDIT_TEXT_COLOR_TITLE)
         if col.isValid():
@@ -1222,9 +1294,8 @@ class EditPanel(QWidget):
 
     def _set_text_color(self, color_hex: str) -> None:
         self._text_color = color_hex
-        self._color_indicator.setStyleSheet(
-            f"background: {color_hex}; border: 1px solid #666; border-radius: 4px;"
-        )
+        self._color_indicator.set_color(color_hex)
+        self._text_swatches.select(color_hex)
         self._on_text_style_changed()
 
     def _choose_stroke_color(self) -> None:
@@ -1234,9 +1305,8 @@ class EditPanel(QWidget):
 
     def _set_stroke_color(self, color_hex: str) -> None:
         self._stroke_color = color_hex
-        self._stroke_color_indicator.setStyleSheet(
-            f"background: {color_hex}; border: 1px solid #666; border-radius: 4px;"
-        )
+        self._stroke_color_indicator.set_color(color_hex)
+        self._stroke_swatches.select(color_hex)
         if not self._stroke_checkbox.isChecked():
             self._stroke_checkbox.setChecked(True)
         else:
@@ -1250,10 +1320,10 @@ class EditPanel(QWidget):
     def _build_filters_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(4, 6, 4, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(*_EXTRAS_MARGINS)
+        layout.setSpacing(_EXTRAS_SPACING)
 
-        layout.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_CHOOSE_FILTER))
+        layout.addWidget(self._heading(lambda: strings.EDIT_CHOOSE_FILTER))
 
         # Só os identificadores: o rótulo vem do catálogo, a cada troca de idioma.
         self._filter_specs = tuple(strings.EDIT_FILTERS)
@@ -1272,21 +1342,19 @@ class EditPanel(QWidget):
             layout.addWidget(btn)
             self._filter_buttons.append(btn)
 
-        dur_row = QHBoxLayout()
-        dur_row.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_EXTRA_DURATION))
         self._filter_dur = QDoubleSpinBox()
         self._filter_dur.setRange(0.5, 3600.0)
         self._filter_dur.setValue(IMAGE_DURATION)
         self._filter_dur.setSingleStep(0.5)
         self._filter_dur.setSuffix(" s")
         self._filter_dur.valueChanged.connect(self._on_filter_dur_changed)
-        dur_row.addWidget(self._filter_dur)
-        layout.addLayout(dur_row)
+        layout.addLayout(self._duration_row(self._filter_dur))
 
         layout.addStretch(1)
 
         self._apply_filter_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_APPLY_FILTER)
         self._apply_filter_btn.setProperty("role", "primary")
+        self._apply_filter_btn.setProperty("emphasis", "large")
         self._action_icons[self._apply_filter_btn] = (icons.plus, "accent_text")
         self._apply_filter_btn.clicked.connect(self._handle_apply_or_update_filter)
         layout.addWidget(self._apply_filter_btn)
@@ -1462,10 +1530,10 @@ class EditPanel(QWidget):
     def _build_transitions_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(4, 6, 4, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(*_EXTRAS_MARGINS)
+        layout.setSpacing(_EXTRAS_SPACING)
 
-        layout.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_CHOOSE_TRANSITION))
+        layout.addWidget(self._heading(lambda: strings.EDIT_CHOOSE_TRANSITION))
 
         self._trans_specs = tuple(strings.EDIT_TRANSITIONS)
         self._selected_trans_name = "fade"
@@ -1484,8 +1552,6 @@ class EditPanel(QWidget):
             layout.addWidget(btn)
             self._trans_buttons.append(btn)
 
-        dur_row = QHBoxLayout()
-        dur_row.addWidget(bind(QLabel(), "setText", lambda: strings.EDIT_EXTRA_DURATION))
         self._trans_dur = QDoubleSpinBox()
         # Sem teto fixo: o limite é o da alça, o que cabe nos dois lados do
         # corte (``Project.transition_limit``), aplicado ao mudar o valor.
@@ -1494,10 +1560,9 @@ class EditPanel(QWidget):
         self._trans_dur.setSingleStep(0.1)
         self._trans_dur.setSuffix(" s")
         self._trans_dur.valueChanged.connect(self._on_transition_dur_changed)
-        dur_row.addWidget(self._trans_dur)
-        layout.addLayout(dur_row)
+        layout.addLayout(self._duration_row(self._trans_dur))
 
-        self._trans_affect_additionals = bind(QCheckBox(), "setText", lambda: strings.EDIT_TRANSITION_AFFECT_ADDITIONALS)
+        self._trans_affect_additionals = bind(WrapCheck(), "setText", lambda: strings.EDIT_TRANSITION_AFFECT_ADDITIONALS)
         bind(self._trans_affect_additionals, "setToolTip", lambda: strings.EDIT_TRANSITION_AFFECT_ADDITIONALS_TIP)
         self._trans_affect_additionals.toggled.connect(
             self._on_transition_affect_additionals_changed
@@ -1506,13 +1571,17 @@ class EditPanel(QWidget):
 
         hint = bind(QLabel(), "setText", lambda: strings.EDIT_TRANSITION_TRACK_HINT)
         hint.setWordWrap(True)
-        hint.setProperty("role", "note")
+        hint.setProperty("role", "hint")
+        # A largura que um rótulo que quebra linha "pede" é a do texto numa linha só (uns 300 px): ignorada, a coluna
+        # não passa a pedir isso, e o texto quebra na largura que tem (a altura vem do ``heightForWidth``).
+        hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         layout.addWidget(hint)
 
         layout.addStretch(1)
 
         self._apply_trans_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_INSERT_TRANSITION)
         self._apply_trans_btn.setProperty("role", "primary")
+        self._apply_trans_btn.setProperty("emphasis", "large")
         self._action_icons[self._apply_trans_btn] = (icons.plus, "accent_text")
         self._apply_trans_btn.clicked.connect(self._handle_apply_or_update_transition)
         layout.addWidget(self._apply_trans_btn)

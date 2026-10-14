@@ -234,6 +234,7 @@ QPushButton[role="tile"] {{ background: {raised}; border: 1px solid {raised}; bo
 QPushButton[role="tile"]:hover {{ background: {raised2}; border-color: {raised2}; }}
 QPushButton[role="tile"]:focus {{ border-color: {focus}; }}
 QPushButton[role="tile"][active="true"] {{ background: {soft16}; border-color: {accent}; }}
+QPushButton[role="tile"]:checked {{ background: {seg_on}; border-color: {seg_ring}; color: {accent}; }}
 QComboBox[role="field"][compact="true"] {{ min-height: 32px; border-radius: 10px; }}
 QFrame[role="segments"][compact="true"] {{ border-radius: 10px; }}
 QToolButton[role="icon"][danger="true"]:hover {{ background: {err16}; }}
@@ -319,8 +320,10 @@ QPushButton[role="spin-tool"]:pressed {{ background: {fill_a}; color: {on_fill};
 /* Escolha entre opções (filtros, transições, fonte): texto à esquerda e a
    marcada com a borda da cor de destaque. Letra de 12 px: com a do resto da
    aplicação, as oito transições pediam 18 px a mais, tirados da prévia. */
-QPushButton[role="option"] {{ text-align: left; padding: 6px 10px; font-size: 12px; }}
-QPushButton[role="option"]:checked {{ background: {soft16}; border: 2px solid {accent}; font-weight: 600; }}
+/* Opção de uma lista de escolha (filtro, transição): linha de 36 px, e a marcada leva o tom do segmento marcado com o
+   anel de metade do acento — a mesma borda de 1 px nos dois estados, para a linha não mudar de medida ao marcar. */
+QPushButton[role="option"] {{ text-align: left; padding: 0px 14px; min-height: 34px; border-radius: 10px; }}
+QPushButton[role="option"]:checked {{ background: {seg_on}; border: 1px solid {seg_ring}; font-weight: 600; }}
 /* Lista de escolha aberta dentro de um painel (fontes): sem moldura própria,
    a do painel já separa, e linhas com folga — sem o padding de item, a lista
    espremia oito nomes no espaço de cinco e a escolhida não se destacava. */
@@ -329,8 +332,17 @@ QListWidget[role="picker"]::item {{ padding: 4px 6px; border-radius: 3px; }}
 QListWidget[role="picker"]::item:hover {{ background: {raised}; }}
 QListWidget[role="picker"]::item:selected {{ background: {fill_a}; color: {on_fill}; }}
 QLineEdit[role="picker"] {{ padding: 4px 6px; font-size: 11px; }}
-/* Botão curto de atalho de valor (tamanhos de fonte, predefinições). */
+/* Botão curto de atalho de valor (predefinições dos pop-ups de volume e velocidade). */
 QPushButton[role="chip"] {{ padding: 2px 4px; font-size: 11px; }}
+/* Atalho de valor da coluna de texto (tamanhos de fonte): células iguais, e a do valor de agora marcada pelo painel. */
+QPushButton[role="pill"] {{ padding: 0px; min-height: 26px; border-radius: 8px; }}
+QPushButton[role="pill"][active="true"] {{ background: {seg_on}; border-color: {seg_ring}; color: {accent}; font-weight: 600; }}
+/* Título da escolha de uma coluna de adicionais, o seletor de fonte (com o desenho do "Aa" e da seta feito por ele
+   mesmo, ver ``FontButton``) e o fio horizontal entre os grupos. */
+QLabel[role="heading"] {{ font-size: 14px; font-weight: 600; color: {text}; }}
+QPushButton[role="select"] {{ text-align: left; padding: 0px 34px 0px 42px; min-height: 32px; border-radius: 10px; }}
+QFrame[role="hline"] {{ background: {raised}; border: none; min-height: 1px; max-height: 1px; }}
+QPushButton[role="primary"][emphasis="large"][compact="true"] {{ padding: 0px 10px; }}
 /* Painel suspenso sem moldura de janela (volume e velocidade do bloco). */
 QDialog[role="popup"] {{ background: {card}; border: 1px solid {raised2}; border-radius: 8px; }}
 

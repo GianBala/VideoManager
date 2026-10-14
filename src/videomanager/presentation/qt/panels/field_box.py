@@ -122,6 +122,9 @@ class WrapCheck(QCheckBox):
         painter.drawControl(QStyle.ControlElement.CE_CheckBox, option)
         painter.setPen(self.palette().color(QPalette.ColorGroup.Disabled if not self.isEnabled() else QPalette.ColorGroup.Active,
                                             QPalette.ColorRole.WindowText))
+        # Centrado na altura que o widget tem, como o indicador: numa linha mais alta que o texto (a do campo ao lado) os
+        # dois ficam no mesmo meio, e no texto de duas linhas o indicador fica entre elas, como no protótipo.
         rect = self._text_rect(self.width())
-        painter.drawText(rect, int(Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop), text)
+        rect.setHeight(self.height())
+        painter.drawText(rect, int(Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), text)
         painter.end()
