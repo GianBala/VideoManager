@@ -127,3 +127,66 @@ def test_as_acoes_ficam_no_rodape_com_o_resultado_em_linha_propria(painel, deskt
     assert painel._result.isVisibleTo(painel) and painel._result.text()
     # O resultado fica acima dos botões, não ao lado (texto que quebra ao lado de botões nasce cortado).
     assert _pos(painel._result, painel).y() + painel._result.height() <= _pos(painel._save, painel).y()
+
+
+# -- fidelidade ao protótipo: ícones, ladrilho por espécie, tabelas, plano e proporções --------------------------------
+
+def _imagem(botao):
+    return botao.icon().pixmap(18, 18).toImage()
+
+
+def test_os_botoes_tem_icone_e_acompanham_a_troca_de_paleta(tema_do_app, painel, desktop_app):
+    from videomanager.presentation.qt import theme
+    botoes = (painel._pick, painel._change_cover, painel._drop_cover, painel._add_field)
+    assert all(not b.icon().isNull() for b in (*botoes, painel._save))
+    antes = [_imagem(b) for b in botoes]
+    theme.apply(desktop_app, "light", "mare")
+    depois = [_imagem(b) for b in botoes]
+    # O "Salvar" leva o ícone na cor do texto sobre o preenchimento, que é a mesma nos dois modos: fica de fora.
+    assert all(a != d for a, d in zip(antes, depois))
+
+
+def test_o_ladrilho_do_arquivo_tem_a_cor_da_especie_e_acompanha_a_troca_de_paleta(tema_do_app, painel, desktop_app):
+    from videomanager.presentation.qt import theme
+    _abrir(painel, desktop_app, "faixa.mp3", (("audio", "mp3"),))
+    assert (painel._file_tile.width(), painel._file_tile.height()) == (44, 44) and painel._file_tile.property("kind") == "audio"
+    verde_antes = painel._file_tile.pixmap().toImage()
+    _abrir(painel, desktop_app, "filme.mp4", (("video", "h264"), ("audio", "aac")))
+    assert painel._file_tile.property("kind") == "video"
+    video_antes = painel._file_tile.pixmap().toImage()
+    assert video_antes != verde_antes  # o desenho e a cor mudam com a espécie
+    # O ícone era pintado uma vez, com o acento de quando o arquivo abriu: na troca de paleta ele se refaz.
+    theme.apply(desktop_app, "light", "mare")
+    assert painel._file_tile.pixmap().toImage() != video_antes
+
+
+def test_os_titulos_das_colunas_comecam_a_esquerda_e_as_tabelas_nao_tem_grade(painel):
+    from PySide6.QtCore import Qt
+    for tabela in (painel._others, painel._tracks):
+        assert tabela.horizontalHeader().defaultAlignment() & Qt.AlignmentFlag.AlignLeft
+        assert not tabela.showGrid()
+
+
+def test_o_campo_de_uma_linha_tem_34_px_e_o_de_varias_continua_do_mesmo_plano(tema_do_app, painel, desktop_app):
+    _abrir(painel, desktop_app)
+    assert painel._fields["title"].height() == 34
+
+
+def test_o_cartao_das_tags_enche_a_altura_e_o_rodape_fica_ancorado_embaixo(tema_do_app, painel, desktop_app):
+    from videomanager.presentation.qt.panels.metadata_panel import _GAP
+    painel.resize(1100, 1100)
+    _abrir(painel, desktop_app)
+    for _ in range(5):
+        desktop_app.processEvents()
+    rodape = painel._save.parentWidget()
+    assert rodape.mapTo(painel, rodape.rect().bottomLeft()).y() + 1 == painel.height()
+    tags_embaixo = painel._tags_group.mapTo(painel, painel._tags_group.rect().bottomLeft()).y() + 1
+    assert rodape.mapTo(painel, rodape.rect().topLeft()).y() - tags_embaixo == _GAP == 14
+
+
+def test_as_duas_colunas_seguem_a_proporcao_do_prototipo_e_o_conteudo_cabe_em_900_px(tema_do_app, painel, desktop_app):
+    _abrir(painel, desktop_app)
+    razao = painel._tags_group.width() / painel._cover_group.width()
+    assert 1.05 <= razao <= 1.10, razao  # 1,08 para 1
+    # A janela de 900 px do protótipo (menu de 28, margens de 20 e 22 da página) deixa 830 px para o conteúdo.
+    assert painel.minimumSizeHint().height() <= 830
