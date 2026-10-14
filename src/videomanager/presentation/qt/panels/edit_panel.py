@@ -76,6 +76,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QScrollBar,
     QSizePolicy,
+    QSpacerItem,
     QSlider,
     QSpinBox,
     QSplitter,
@@ -253,8 +254,13 @@ _BACKGROUND_WORKERS = 2  # tira, onda e keyframes, que podem esperar
 # leem como um grupo só, e o usuário procura em "desfazer" o alvo que "excluir"
 # tem. É mais que o espaçamento normal da barra, que é 6.
 _TOOL_GROUP_GAP = 22
-# Distância entre o volume do bloco e o grupo de zoom, na outra ponta da barra.
+# Passos do controle deslizante de zoom: o bastante para o curso ser suave sem que um passo seja menos que um pixel.
+_ZOOM_STEPS = 1000
+# Distância entre o volume do bloco e o grupo de zoom, na outra ponta da barra. É uma folga, não conteúdo: cede até zero
+# quando a janela estreita, senão o controle deslizante de zoom subia o mínimo da barra e cortava "Exportar" a 1280 px.
 _VOLUME_ZOOM_GAP = 72
+# Largura do controle deslizante de zoom: mínima e preferida (a do protótipo).
+_ZOOM_SLIDER_MIN, _ZOOM_SLIDER_WIDTH = 56, 110
 
 # Em quantos passos uma seta da barra de navegação atravessa a janela visível.
 # Dez dá um passo curto o bastante para ajustar e longo o bastante para andar.
@@ -472,6 +478,22 @@ class _ScrollPage(QScrollArea):
     def sizeHint(self) -> QSize:  # noqa: N802
         hint = self.widget().sizeHint()
         return QSize(hint.width(), min(hint.height(), _PAGE_HEIGHT_MAX))
+
+
+class _ZoomSlider(QSlider):
+    """Pede os 110 px do protótipo e aceita menos quando a barra aperta.
+
+    O ``sizeHint`` do ``QSlider`` é 84 px, e com esse palpite o layout o deixava no mínimo em janelas de 1600 px, que têm
+    espaço de sobra. Largura fixa também não serve: somava 116 px ao mínimo da barra e cortava "Exportar" a 1280 px.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(Qt.Orientation.Horizontal)
+        self.setMinimumWidth(_ZOOM_SLIDER_MIN)
+        self.setMaximumWidth(_ZOOM_SLIDER_WIDTH)
+
+    def sizeHint(self) -> QSize:
+        return QSize(_ZOOM_SLIDER_WIDTH, super().sizeHint().height())
 
 
 def _bounded_pool(parent: QObject, threads: int) -> QThreadPool:
@@ -2186,8 +2208,16 @@ class EditPanel(QWidget):
         row.addWidget(self._speed_btn)
         # Folga larga: o volume é do bloco escolhido, o zoom é da vista. Encostar
         # um no outro faria a barra terminar num amontoado de coisas sem relação.
-        row.addSpacing(_VOLUME_ZOOM_GAP)
+        row.addItem(QSpacerItem(_VOLUME_ZOOM_GAP, 0, QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum))
 
+        # Menos, o controle deslizante e mais: o controle fala com a linha do tempo pela mesma janela que a roda do mouse e os
+        # botões, e acompanha o que eles fazem (``_on_view_changed``).
+        self._zoom_slider = _ZoomSlider()
+        self._zoom_slider.setRange(0, _ZOOM_STEPS)
+        bind(self._zoom_slider, "setToolTip", lambda: strings.EDIT_ZOOM_SLIDER)
+        bind(self._zoom_slider, "setAccessibleName", lambda: strings.EDIT_ZOOM_SLIDER)
+        self._zoom_slider.valueChanged.connect(
+            lambda value: self._timeline.set_zoom_fraction(value / _ZOOM_STEPS, self._position))
         for atributo, tip, slot in (
             ("_zoom_out_button", lambda: strings.EDIT_ZOOM_OUT, lambda: self._zoom(1 / _ZOOM_FACTOR)),
             ("_zoom_in_button", lambda: strings.EDIT_ZOOM_IN, lambda: self._zoom(_ZOOM_FACTOR)),
@@ -2201,6 +2231,8 @@ class EditPanel(QWidget):
             button.clicked.connect(slot)
             row.addWidget(button)
             setattr(self, atributo, button)
+            if atributo == "_zoom_out_button":
+                row.addWidget(self._zoom_slider)
         fit = bind(QPushButton(), "setText", lambda: strings.EDIT_ZOOM_FIT)
         fit.setProperty("role", "btn")
         self._fit_button = fit
@@ -3920,6 +3952,7 @@ class EditPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _on_view_changed(self) -> None:
+        self._sync_zoom_slider()
         self._sync_scrollbar()
         self._view_timer.start()
 
@@ -4963,6 +4996,14 @@ class EditPanel(QWidget):
 
     def _zoom(self, factor: float) -> None:
         self._timeline.zoom(factor, self._position)
+
+    def _sync_zoom_slider(self) -> None:
+        """O controle de zoom acompanha a janela, qualquer que seja quem a mudou (roda, botões, ver tudo, ele mesmo)."""
+        position = round(self._timeline.zoom_fraction() * _ZOOM_STEPS)
+        if self._zoom_slider.value() != position:
+            blocked = self._zoom_slider.blockSignals(True)
+            self._zoom_slider.setValue(position)
+            self._zoom_slider.blockSignals(blocked)
 
     def _sync_scrollbar(self) -> None:
         """Põe a barra de navegação de acordo com a janela visível.

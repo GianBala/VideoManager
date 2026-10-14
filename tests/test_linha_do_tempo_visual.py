@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QApplication, QFrame
 
 from test_linha_do_tempo_tipos import _projeto
 from videomanager.domain.project import Clip, MediaKind, MediaRef
-from videomanager.presentation.qt import theme
+from videomanager.presentation.qt import strings, theme
 from videomanager.presentation.qt.panels import timeline as modulo
 from videomanager.presentation.qt.panels.timeline import (
     AUDIO_TRACK_HEIGHT, FILM_CELL_WIDTH, HEADER_WIDTH, THUMB_HEIGHT, TRACK_GAP, Timeline, VIDEO_TRACK_HEIGHT, WAVE_HEIGHT,
@@ -209,3 +209,112 @@ def test_a_linha_do_tempo_e_um_cartao_com_margem_de_14(tema_do_app, painel_de_ed
     assert caixa.property("role") == "pane"
     margens = caixa.layout().contentsMargins()
     assert (margens.left(), margens.top(), margens.right(), margens.bottom()) == (14, 12, 14, 8)
+
+
+# -- zoom -----------------------------------------------------------------------------------------------------
+
+def test_a_fracao_do_zoom_e_logaritmica_vai_de_zero_na_janela_mais_aberta_a_um_na_mais_fechada(linha):
+    timeline, _ = linha
+    largest = timeline._max_span
+    timeline.set_zoom_fraction(0.0)
+    assert timeline.view_span == pytest.approx(largest) and timeline.zoom_fraction() == pytest.approx(0.0, abs=1e-6)
+    timeline.set_zoom_fraction(1.0)
+    assert timeline.view_span == pytest.approx(modulo._MIN_VIEW) and timeline.zoom_fraction() == pytest.approx(1.0, abs=1e-6)
+    # Cada passo multiplica a janela pelo mesmo fator: a do meio é a média geométrica das duas pontas.
+    timeline.set_zoom_fraction(0.5)
+    assert timeline.view_span == pytest.approx((largest * modulo._MIN_VIEW) ** 0.5, rel=1e-3)
+    espans = []
+    for passo in range(0, 11):
+        timeline.set_zoom_fraction(passo / 10)
+        espans.append(timeline.view_span)
+    assert espans == sorted(espans, reverse=True)
+
+
+def test_o_zoom_pelo_controle_mantem_o_cursor_no_mesmo_lugar_da_tela(linha):
+    timeline, _ = linha
+    timeline.set_view(0.0, 8.0)
+    timeline.set_position(3.0)
+    antes = timeline._x_of(3.0)
+    timeline.set_zoom_fraction(0.8, anchor=3.0)
+    assert abs(timeline._x_of(3.0) - antes) < 1.0
+    assert timeline.view_span < 8.0
+
+
+def test_o_controle_de_zoom_fica_entre_menos_e_mais_e_acompanha_a_janela(tema_do_app, painel_de_edicao, blocos_de_edicao):
+    painel = painel_de_edicao
+    painel.resize(1700, 1000)
+    painel.show()
+    for _ in range(5):
+        QApplication.processEvents()
+    barra = painel._zoom_slider
+    assert barra.width() == 110 and barra.toolTip() == strings.EDIT_ZOOM_SLIDER and barra.accessibleName()
+    x = lambda w: w.mapTo(painel, w.rect().topLeft()).x()
+    assert x(painel._zoom_out_button) < x(barra) < x(painel._zoom_in_button)
+    # Ver tudo, aproximar pelo botão e pela roda: o controle vai junto, sem que ele mande de volta.
+    painel._timeline.fit()
+    fit = barra.value()
+    assert fit == round(painel._timeline.zoom_fraction() * 1000)
+    painel._zoom_in_button.click()
+    assert barra.value() > fit and barra.value() == round(painel._timeline.zoom_fraction() * 1000)
+    painel._zoom_out_button.click()
+    painel._zoom_out_button.click()
+    assert barra.value() < fit
+    # E arrastar o controle muda a janela: a mais fechada mostra o piso de 0,4 s; a mais aberta, a maior possível.
+    barra.setValue(1000)
+    assert painel._timeline.view_span == pytest.approx(modulo._MIN_VIEW, rel=1e-3)
+    barra.setValue(0)
+    assert painel._timeline.view_span == pytest.approx(painel._timeline._max_span, rel=1e-3)
+    assert barra.value() == 0
+
+
+def test_o_controle_de_zoom_ao_acompanhar_a_janela_nao_a_move_de_volta(tema_do_app, painel_de_edicao, blocos_de_edicao, monkeypatch):
+    # Se o ajuste do controle chegasse à linha do tempo, o arredondamento a cada passo (1/1000) faria a janela derivar
+    # sozinha a cada toque na roda ou no botão: o que o usuário pediu não é o que ele recebe.
+    painel = painel_de_edicao
+    painel.resize(1700, 1000)
+    painel.show()
+    for _ in range(5):
+        QApplication.processEvents()
+    chamadas = []
+    original = painel._timeline.set_zoom_fraction
+    monkeypatch.setattr(painel._timeline, "set_zoom_fraction", lambda *a, **k: (chamadas.append(a), original(*a, **k)))
+    painel._timeline.fit()
+    painel._zoom_in_button.click()
+    painel._zoom_in_button.click()
+    painel._timeline.zoom(0.7, 1.0)
+    assert chamadas == []
+
+
+def test_o_controle_de_zoom_so_soma_o_proprio_minimo_a_barra_e_o_vao_ate_o_zoom_encolhe(
+        tema_do_app, painel_de_edicao, blocos_de_edicao):
+    """O primeiro desenho tinha largura fixa de 110 e um vão fixo de 72: somavam 116 px ao mínimo do editor, que passou de
+    1141 para 1257 e cortou "Exportar" e "Ver tudo" numa janela de 1280 px. Folga e controle cedem antes de a barra crescer."""
+    painel = painel_de_edicao
+    barra = painel._zoom_slider
+    x = lambda w: w.mapTo(painel, w.rect().topLeft()).x()
+    vao = lambda: x(painel._zoom_out_button) - (x(painel._speed_btn) + painel._speed_btn.width())
+
+    def assentar(largura):
+        painel.resize(largura, 1000)
+        painel.show()
+        for _ in range(5):
+            QApplication.processEvents()
+
+    assentar(1700)
+    assert barra.width() == 110 and vao() >= 72
+    # Com o vão já inteiro, o controle também: ele pede os 110 e só cede junto com a folga (um fator de esticamento no
+    # ``addWidget`` o fazia dividir a sobra com os espaçadores e ficar em 56 numa janela de 1500 px).
+    inteiro = vao()
+    for largura in range(1300, 1700, 40):
+        assentar(largura)
+        assert vao() < inteiro or barra.width() == 110, (largura, vao(), barra.width())
+    com = painel.minimumSizeHint().width()
+    barra.hide()
+    QApplication.processEvents()
+    sem = painel.minimumSizeHint().width()
+    barra.show()
+    QApplication.processEvents()
+    assert com - sem <= 56 + 12, (com, sem)
+    assentar(com)
+    assert barra.width() < 110 and vao() < 72
+    assert x(painel._fit_button) + painel._fit_button.width() <= painel.width()
