@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import re
 import sys
 import tempfile
@@ -120,10 +121,18 @@ def _menus(escopo: str, janela) -> list[dict]:
 
 
 def inventariar() -> dict:
+    """O inventário, com o perfil temporário apagado no fim (a pasta ficava em ``/tmp`` a cada execução)."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    perfil = Path(tempfile.mkdtemp(prefix="vm-inventario-"))
+    try:
+        return _inventariar(perfil)
+    finally:
+        shutil.rmtree(perfil, ignore_errors=True)
+
+
+def _inventariar(perfil: Path) -> dict:
     from videomanager.infrastructure.storage import settings as armazenamento
 
-    perfil = Path(tempfile.mkdtemp(prefix="vm-inventario-"))
     armazenamento.config_dir = lambda: perfil
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QTabWidget
@@ -159,7 +168,10 @@ def inventariar() -> dict:
     mapa_prop = _mapa_de_atributos([janela._edit._properties_widget])
     controles += _controles("editar:propriedades", janela._edit._properties_widget, mapa_prop)
     # O painel do seletor de tela só abre ao clique e é uma janela própria: inventário à parte, como o das Propriedades.
-    controles += _controles("editar:tela", janela._edit._canvas_popup, _mapa_de_atributos([janela._edit]))
+    # Só existe da barra nova em diante: sem a guarda o script não rodava na árvore anterior, e a linha de base do
+    # inventário dependia de um arquivo guardado à parte.
+    if hasattr(janela._edit, "_canvas_popup"):
+        controles += _controles("editar:tela", janela._edit._canvas_popup, _mapa_de_atributos([janela._edit]))
     # Fila: vive fora das abas.
     controles += _controles("fila", janela._queue_panel, _mapa_de_atributos([janela._queue_panel]))
 
@@ -178,6 +190,11 @@ def inventariar() -> dict:
 
     chaves = Counter(c["chave"] for c in controles)
     repetidas = [k for k, n in chaves.items() if n > 1]
+    # Fecha o que abriu antes de o perfil ser apagado: uma gravação tardia de preferências o recriaria.
+    dialogo.close()
+    janela._edit.shutdown()
+    janela._edit._project_actions.confirm_replace = lambda: True
+    janela.close()
     return {"versao": _VERSAO, "controles": controles, "chaves_repetidas": repetidas}
 
 
