@@ -357,15 +357,22 @@ class MainWindow(QMainWindow):
 
         ``force`` é o usuário pedindo a gaveta onde ela estaria recolhida (o aviso "Ver tarefas" no editor).
         """
-        workspace = self._tabs.currentIndex() in (_TAB_EDIT, _TAB_METADATA)
-        visible = force or (self._drawer_open and not workspace)
+        visible = force or (self._drawer_open and not self._in_workspace())
         self._queue_panel.setVisible(visible)
         blocked = self._nav_tasks.blockSignals(True)
         self._nav_tasks.setChecked(visible)
         self._nav_tasks.blockSignals(blocked)
 
+    def _in_workspace(self) -> bool:
+        """Se a aba à vista é de trabalho (Editar, Metadados): onde a gaveta só aparece de passagem."""
+        return self._tabs.currentIndex() in (_TAB_EDIT, _TAB_METADATA)
+
     def _set_drawer(self, open_: bool) -> None:
-        self._drawer_open = open_
+        # A vontade do usuário de ter a gaveta à vista é a das abas que produzem tarefas. Nas de trabalho ela só vem
+        # de passagem, e abrir ou fechar ali não a revoga: gravar o fechamento fazia quem espiava as tarefas no
+        # editor voltar a Download e Convert sem a fila.
+        if not self._in_workspace():
+            self._drawer_open = open_
         self._apply_drawer(force=open_)
 
     @staticmethod

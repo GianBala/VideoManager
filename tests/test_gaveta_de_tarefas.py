@@ -78,6 +78,34 @@ def test_recolher_vale_nas_abas_que_a_mostram_e_volta_do_editor_como_estava(jane
     assert janela._queue_panel.isVisible()
 
 
+@pytest.mark.parametrize("aba_de_trabalho", [_TAB_EDIT, _TAB_METADATA])
+def test_recolher_numa_aba_de_trabalho_so_desfaz_a_abertura_de_passagem(janela, desktop_app, aba_de_trabalho):
+    """``REG-003``: espiar as tarefas no editor e fechar a gaveta ali não a tira de Download e Convert.
+
+    Nas abas de trabalho a gaveta só aparece de passagem; a vontade do usuário de tê-la à vista é a das abas que
+    produzem tarefas, e fechar a espiada não a revoga.
+    """
+    _ir(janela, desktop_app, aba_de_trabalho)
+    janela._nav_tasks.click()
+    assert janela._queue_panel.isVisible()
+    janela._queue_panel._hide_button.click()
+    assert not janela._queue_panel.isVisible() and not janela._nav_tasks.isChecked()
+    for indice in (_TAB_DOWNLOAD, _TAB_CONVERT):
+        _ir(janela, desktop_app, indice)
+        assert janela._queue_panel.isVisible() and janela._nav_tasks.isChecked(), indice
+
+
+def test_abrir_de_passagem_numa_aba_de_trabalho_nao_desfaz_o_recolher_de_download(janela, desktop_app):
+    """A regra é simétrica: quem recolheu a gaveta em Download e espia as tarefas no editor a recolheu para sempre."""
+    janela._queue_panel._hide_button.click()
+    assert not janela._queue_panel.isVisible()
+    _ir(janela, desktop_app, _TAB_EDIT)
+    janela._nav_tasks.click()
+    assert janela._queue_panel.isVisible()
+    _ir(janela, desktop_app, _TAB_DOWNLOAD)
+    assert not janela._queue_panel.isVisible() and not janela._nav_tasks.isChecked()
+
+
 def test_o_item_tarefas_abre_a_gaveta_no_editor(janela, desktop_app):
     _ir(janela, desktop_app, _TAB_EDIT)
     janela._nav_tasks.click()
