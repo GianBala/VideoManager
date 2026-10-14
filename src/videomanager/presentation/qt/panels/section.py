@@ -9,11 +9,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QEvent, QSize, Qt
+from PySide6.QtCore import QEvent, QRect, QSize, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QFrame, QToolButton, QVBoxLayout, QWidget
 
 from videomanager.presentation.qt import icons, theme
 from videomanager.presentation.qt.i18n import bind
+
+
+# O fio entre as seções: 15 px de ar acima dele, e 10 entre ele e o cabeçalho. A primeira seção visível não tem fio.
+_AR_ACIMA = 15
+_AR_ABAIXO = 10
+# O ícone tem 3 px de ar à direita da seta: é o que afasta o título dela, que o ``QToolButton`` não deixa regular.
+_ICONE = QSize(17, 14)
 
 
 class _Header(QToolButton):
@@ -30,15 +38,17 @@ class Section(QFrame):
     def __init__(self, title: Callable[[], str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setProperty("role", "prop-section")
-        column = QVBoxLayout(self)
-        column.setContentsMargins(0, 8, 0, 0)
-        column.setSpacing(6)
+        self._first = False
+        self._column = QVBoxLayout(self)
+        column = self._column
+        column.setSpacing(7)
+        self._apply_margins()
         self._header = _Header()
         self._header.setProperty("role", "section-header")
         self._header.setProperty("compact", "true")
         self._header.setCheckable(True)
         self._header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self._header.setIconSize(QSize(14, 14))
+        self._header.setIconSize(_ICONE)
         self._header.setCursor(Qt.CursorShape.PointingHandCursor)
         bind(self._header, "setText", title)
         column.addWidget(self._header, 0, Qt.AlignmentFlag.AlignLeft)
@@ -65,6 +75,29 @@ class Section(QFrame):
         self.body.setVisible(expanded)
         self._retheme()
 
+    def set_first(self, first: bool) -> None:
+        """A primeira seção visível não leva o fio de cima, e quem decide é o painel, que sabe quais aparecem."""
+        if first != self._first:
+            self._first = first
+            self._apply_margins()
+            self.update()
+
+    def _apply_margins(self) -> None:
+        self._column.setContentsMargins(0, _AR_ABAIXO if self._first else _AR_ACIMA + 1 + _AR_ABAIXO, 0, 0)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        if not self._first:
+            painter = QPainter(self)
+            painter.fillRect(0, _AR_ACIMA, self.width(), 1, QColor(theme.papeis(*theme.atual())["raised"]))
+            painter.end()
+
     def _retheme(self) -> None:
         desenho = icons.chevron_down if self._header.isChecked() else icons.chevron_right
-        self._header.setIcon(desenho(theme.papeis(*theme.atual())["text"]))
+        seta = desenho(theme.papeis(*theme.atual())["t2"], _ICONE.height())
+        quadro = QPixmap(_ICONE)
+        quadro.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(quadro)
+        seta.paint(painter, QRect(0, 0, _ICONE.height(), _ICONE.height()))
+        painter.end()
+        self._header.setIcon(QIcon(quadro))

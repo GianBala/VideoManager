@@ -469,21 +469,28 @@ def test_lista_de_fontes_tem_linhas_com_folga(qapp: QApplication) -> None:
         selector.deleteLater()
 
 
-def test_botao_de_quadro_chave_tem_a_mesma_letra_marcado_e_desmarcado(qapp: QApplication) -> None:
-    # O estado marcado tem letra própria; tirando só as cores do desmarcado, a
-    # letra saiu junto e o símbolo mudava de tamanho e de peso ao alternar.
+def test_botao_de_quadro_chave_tem_o_mesmo_tamanho_marcado_e_desmarcado(qapp: QApplication) -> None:
+    # O estado marcado é um losango cheio no acento; o desmarcado, um losango vazado. Tirar só as cores do
+    # desmarcado, como já aconteceu com a letra, fazia o símbolo mudar de tamanho ao alternar.
+    from PySide6.QtCore import QSize
     from videomanager.domain.keyframe import Keyframe
     from videomanager.presentation.qt.panels.edit_widgets import _ClipPropertiesWidget
     video = MediaRef(Path("/tmp/v.mp4"), MediaKind.VIDEO, duration=5.0, width=640, height=360, fps=30.0)
     widget = _ClipPropertiesWidget()
     widget.load_clip(Clip(video, 0.0, 5.0, keyframes=(Keyframe(1.0, opacity=0.5),)), 640, 360)
-    fontes = []
+    botao = widget._btn_kf_toggle
+    estados = []
     for instante in (1.0, 3.0):
         widget.set_playhead_position(instante)
-        botao = widget._btn_kf_toggle
         botao.ensurePolished()
-        fontes.append((botao.text(), botao.font().bold(), botao.font().pixelSize()))
-    assert fontes == [("◆", True, 14), ("◇", True, 14)]
+        icone = botao.icon().pixmap(QSize(16, 16)).toImage()
+        cheios = sum(1 for y in range(icone.height()) for x in range(icone.width()) if icone.pixelColor(x, y).alpha() > 128)
+        estados.append((botao.property("active"), botao.size().toTuple(), botao.iconSize().toTuple(), cheios, botao.toolTip()))
+    (marcado, tamanho_a, icone_a, cheios_a, dica_a), (vazio, tamanho_b, icone_b, cheios_b, dica_b) = estados
+    assert (marcado, vazio) == ("true", "false")
+    assert tamanho_a == tamanho_b == (30, 30) and icone_a == icone_b
+    assert cheios_a > cheios_b * 1.5, "o losango do quadro-chave aceso é cheio, e o apagado é só o contorno"
+    assert dica_a != dica_b
     widget.deleteLater()
 
 

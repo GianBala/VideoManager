@@ -779,6 +779,35 @@ def slide_right(color: str, size: int = _NAV) -> QIcon:
     return _slide(color, size, False)
 
 
+def _keyframe_step(color: str, size: int, previous: bool) -> QIcon:
+    def desenho(p: QPainter, u: float) -> None:
+        x = 6.5 if previous else 17.5
+        sentido = 1 if previous else -1
+        p.drawLine(QPointF(x * u, 6 * u), QPointF(x * u, 18 * u))
+        p.drawPolyline(QPolygonF([QPointF((x + sentido * 9) * u, 7 * u), QPointF((x + sentido * 3.5) * u, 12 * u),
+                                  QPointF((x + sentido * 9) * u, 17 * u)]))
+    return _nav(color, size, desenho)
+
+
+def keyframe_prev(color: str, size: int = _NAV) -> QIcon:
+    """Quadro-chave anterior: a barra e o ângulo que aponta para trás."""
+    return _keyframe_step(color, size, True)
+
+
+def keyframe_next(color: str, size: int = _NAV) -> QIcon:
+    return _keyframe_step(color, size, False)
+
+
+def diamond(color: str, size: int = _NAV, filled: bool = False) -> QIcon:
+    """O quadro-chave do cursor: losango vazado onde não há ponto, cheio onde há."""
+    def desenho(p: QPainter, u: float) -> None:
+        if filled:
+            p.setBrush(QColor(color))
+        p.drawPolygon(QPolygonF([QPointF(12 * u, 5 * u), QPointF(19 * u, 12 * u), QPointF(12 * u, 19 * u),
+                                 QPointF(5 * u, 12 * u)]))
+    return _nav(color, size, desenho)
+
+
 # Qual desenho acompanha cada opção, por identificador gravado no projeto.
 FILTER_ICONS = {"pb": half_circle, "sepia": cup, "contraste": bolt, "vinheta": target, "inverter": nav_convert}
 TRANSITION_ICONS = {
