@@ -92,6 +92,8 @@ _TAB_MARGINS = (12, 22, 12, 12)
 _TAB_SPACING = 10
 _PAGE_MARGINS = (28, 24, 28, 24)
 _PAGE_SPACING = 18
+# A aba Metadados tem a sua: 20 em cima e 22 embaixo, para o formulário e o rodapé caberem na janela padrão.
+_METADATA_MARGINS = (28, 20, 28, 22)
 # Quanto tempo o aviso de "adicionado à fila" fica na tela.
 _ENQUEUED_MS = 5000
 
@@ -307,11 +309,12 @@ class MainWindow(QMainWindow):
         return footer
 
     @staticmethod
-    def _wrap_tab(inner: QWidget, *, horizontal: bool = False, page: bool = False) -> QWidget:
+    def _wrap_tab(inner: QWidget, *, horizontal: bool = False, page: bool = False,
+                  margins: tuple[int, int, int, int] | None = None) -> QWidget:
         """Dá à aba a mesma margem e a mesma rolagem da outra (``page``: a margem do protótipo, de 28 px)."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(*(_PAGE_MARGINS if page else _TAB_MARGINS))
+        layout.setContentsMargins(*(margins or (_PAGE_MARGINS if page else _TAB_MARGINS)))
         layout.setSpacing(_PAGE_SPACING if page else _TAB_SPACING)
         layout.addWidget(MainWindow._wrap_scrollable(inner, horizontal=horizontal))
         return tab
@@ -331,7 +334,7 @@ class MainWindow(QMainWindow):
         """O painel da aba Metadados, criado na primeira vez que alguém o pede."""
         if self._metadata is None:
             self._metadata = MetadataPanel(self._settings, self._tools_for_convert, runtime=self._runtime)
-            self._metadata_page.layout().addWidget(self._wrap_tab(self._metadata))
+            self._metadata_page.layout().addWidget(self._wrap_tab(self._metadata, page=True, margins=_METADATA_MARGINS))
             name_controls(self._metadata)
         return self._metadata
 

@@ -165,6 +165,7 @@ QComboBox[role="field"], QLineEdit[role="field"] {{ min-height: 36px; padding: 0
 QLabel[role="caption"] {{ font-size: 12px; font-weight: 500; color: {t2}; }}
 QPushButton[role="primary"][emphasis="field"] {{ padding: 0px 22px; min-height: 36px; border-radius: 9px; font-size: 14px; }}
 /* Destino em linha corrida: o caminho é um campo sem moldura, e "Alterar" é um link no tom do acento. */
+QLineEdit[role="field"][compact="true"] {{ min-height: 32px; }}
 QLineEdit[role="path"], QLineEdit[role="path"]:focus {{ background: transparent; border: none; border-radius: 0px; padding: 0px; }}
 QPushButton[role="link"] {{ background: transparent; border: none; color: {accent}; padding: 0px 2px; }}
 QPushButton[role="link"]:hover {{ background: transparent; border: none; color: {text}; }}
@@ -214,7 +215,9 @@ QToolButton[role="icon"][danger="true"]:hover {{ background: {err16}; }}
 QLabel[role="group-heading"] {{ color: {t3}; font-size: 11px; font-weight: 700; padding-top: 6px; }}
 
 /* Aba Metadados: o ícone do arquivo e os botões que só pedem atenção quando se chega a eles. */
-QLabel[role="tile"] {{ background: {raised2}; border-radius: 12px; }}
+QLabel[role="tile"] {{ background: {raised2}; border-radius: 10px; }}
+QLabel[role="tile"][kind="video"] {{ background: {soft16}; }}
+QLabel[role="tile"][kind="audio"] {{ background: {audio16}; }}
 QLabel[role="cover"] {{ background: {raised}; color: {t2}; border-radius: 12px; padding: 8px; }}
 QPushButton[role="flat"] {{ background: transparent; border: 1px solid transparent; color: {t2}; }}
 QPushButton[role="flat"]:hover {{ background: {raised}; border-color: {raised}; color: {text}; }}
@@ -350,16 +353,17 @@ QTableView {{
     border: 1px solid {raised};
     border-radius: 8px;
     gridline-color: {raised};
-    selection-background-color: {fill_a};
-    selection-color: {on_fill};
+    selection-background-color: {soft16};
+    selection-color: {text};
 }}
 QHeaderView::section {{
     background: {raised};
     color: {t2};
     border: none;
     border-bottom: 1px solid {raised2};
-    padding: 7px;
-    font-weight: 600;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 500;
 }}
 QTableView::item {{ padding: 4px; }}
 
@@ -611,6 +615,9 @@ def _cores_do_estilo(theme: str, nome: str) -> dict[str, str]:
     # O selo "ao vivo" tem fundo vermelho fixo nos dois modos; o texto dele é sempre branco, e não o
     # texto do botão primário, que nas paletas de botão claro ou âmbar é escuro.
     cores["live_text"] = "#ffffff"
+    # O ladrilho do arquivo de áudio: o verde de áudio da linha do tempo, a 16%.
+    verde = QColor(TIPOS_DE_BLOCO["audio"])
+    cores["audio16"] = f"rgba({verde.red()}, {verde.green()}, {verde.blue()}, 0.16)"
     # O anel de foco do protótipo é o acento a 50% sobre o cartão, e o cartão "quente" (sob o mouse) é o cartão com 4%
     # do tom suave: nenhum dos dois é um papel, são derivados.
     cores.update(derivadas(cores))
