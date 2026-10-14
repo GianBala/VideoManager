@@ -748,8 +748,8 @@ def test_properties_widget_title_truncation_and_close(qapp: QApplication) -> Non
     # Deve conter até 45 caracteres do nome + '...' se exceder
     title_text = w._title_lbl.text()
     assert "..." in title_text
-    assert len(title_text) < len(long_name) + len("Propriedades: ")
-    assert w._title_lbl.toolTip() == f"Propriedades: {long_name}"
+    assert len(title_text) < len(long_name) and title_text == long_name[:29] + "..."
+    assert w._title_lbl.toolTip() == long_name
 
     # Botão fechar deve ter emitido sinal ao clicar
     closed = []
@@ -785,7 +785,7 @@ def test_bloco_sem_arquivo_aparece_pelo_conteudo_e_nao_pelo_identificador(pseudo
 
     w = _ClipPropertiesWidget()
     w.load_clip(filtro, 1920, 1080)
-    assert w._title_lbl.text() == "Propriedades: Sépia"
+    assert w._title_lbl.text() == "Sépia"
     apply_language(i18n.ENGLISH)
     assert "⟦Sépia⟧" in w._title_lbl.text()
     w.deleteLater()

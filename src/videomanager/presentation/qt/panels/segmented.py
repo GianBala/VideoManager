@@ -12,32 +12,40 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QRadioButton, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QRadioButton, QSizePolicy, QWidget
 
 from videomanager.presentation.qt import fonts, theme
 
 _PAD_H = 14
 _ALTURA = 29
+# A versão estreita (atalhos de rotação da aba Propriedades): células de 22 px que dividem a largura por igual.
+_ALTURA_COMPACTA = 22
 _ICONE = 15
 _ENTRE_ICONE_E_TEXTO = 7
 
 
-def segmented(buttons: list[SegmentButton], parent: QWidget | None = None) -> QFrame:
+def segmented(buttons: list[SegmentButton], parent: QWidget | None = None, *, compact: bool = False) -> QFrame:
     """O contêiner do controle: uma pílula de fundo elevado com 3 px de recuo em volta dos botões."""
     quadro = QFrame(parent)
     quadro.setProperty("role", "segments")
+    if compact:
+        quadro.setProperty("compact", "true")
     linha = QHBoxLayout(quadro)
     linha.setContentsMargins(3, 3, 3, 3)
     linha.setSpacing(2)
     for botao in buttons:
-        linha.addWidget(botao)
+        # Com estica, o ``QHBoxLayout`` reparte a largura por igual e ignora a dica de cada botão ("0°" e "270°").
+        linha.addWidget(botao, 1 if compact else 0)
     return quadro
 
 
 class SegmentButton(QRadioButton):
-    def __init__(self, parent: QWidget | None = None, *, glyph: Callable | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, glyph: Callable | None = None, compact: bool = False) -> None:
         super().__init__(parent)
         self._glyph = glyph
+        self._compact = compact
+        if compact:
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         theme.on_theme_change(self._retheme)
 
@@ -54,6 +62,8 @@ class SegmentButton(QRadioButton):
         return texto + (_ICONE + _ENTRE_ICONE_E_TEXTO if self._glyph is not None else 0)
 
     def sizeHint(self) -> QSize:  # noqa: N802
+        if self._compact:
+            return QSize(self._largura_do_conteudo() + 8, _ALTURA_COMPACTA)
         return QSize(self._largura_do_conteudo() + 2 * _PAD_H, _ALTURA)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802
