@@ -476,9 +476,7 @@ EDIT_PREV_KEY = (
     "Keyframe anterior — o ponto de corte rápido mais próximo antes do cursor"
 )
 EDIT_NEXT_KEY = "Próximo keyframe — o ponto de corte rápido logo à frente"
-EDIT_PREV_KEY_SHORT = "◁ keyframe"
-EDIT_NEXT_KEY_SHORT = "keyframe ▷"
-EDIT_POSITION = "{current}  /  {total}"
+EDIT_POSITION_TOTAL = "/ {total}"
 # Nome da tecla nas dicas ("Reproduzir  (Espaço)").
 EDIT_KEY_SPACE = "Espaço"
 EDIT_SHORTCUT = "{label}  ({key})"
@@ -491,7 +489,6 @@ EDIT_EXIT_FULLSCREEN_TIP = "Sair da tela cheia (Esc)"
 EDIT_VOLUME = "Volume da prévia"
 EDIT_LOOP = "Loop"
 EDIT_LOOP_TIP = "Reproduzir continuamente em loop ao chegar ao final"
-EDIT_SNAP = "🧲"
 EDIT_SNAP_TIP = "Alinhamento magnético às bordas e rotação (Auto-attach)"
 EDIT_PROPERTIES = "Propriedades"
 EDIT_PROPERTIES_TIP = "Abrir aba de propriedades com edição numérica precisa do item"
