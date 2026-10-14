@@ -63,7 +63,7 @@ def _sobre(frente: str, fundo: str, opacidade: float) -> tuple[int, int, int]:
 
 def test_as_seis_paletas_estao_registradas_na_ordem():
     assert paletas.nomes() == ("atual", "grafite", "estudio", "mare", "aurora", "cinema")
-    assert paletas.PADRAO == "atual"
+    assert paletas.PADRAO == "grafite"
 
 
 def test_o_registro_de_cores_e_a_lista_do_dominio_nao_divergem():
@@ -92,7 +92,7 @@ def test_toda_paleta_tem_todos_os_papeis_em_hexadecimal(nome, modo):
 @pytest.mark.parametrize("modo", paletas.MODOS)
 def test_atual_reproduz_as_cores_de_antes_chave_a_chave(modo):
     assert paletas.legado("atual", modo) == _ANTES[modo]
-    assert palette(modo) == _ANTES[modo]
+    assert palette(modo, "atual") == _ANTES[modo]
 
 
 @pytest.mark.parametrize("nome, modo", _COMBINACOES)
@@ -129,7 +129,7 @@ def test_estilo_e_paleta_do_qt_montam_em_todas_as_combinacoes(desktop_app, nome,
 
 
 def test_nome_desconhecido_volta_ao_padrao():
-    assert paletas.papeis("nao-existe", "dark") == paletas.papeis("atual", "dark")
+    assert paletas.papeis("nao-existe", "dark") == paletas.papeis("grafite", "dark")
     assert palette("dark", "nao-existe") == palette("dark")
     assert not paletas.existe("nao-existe") and paletas.existe("aurora")
 
