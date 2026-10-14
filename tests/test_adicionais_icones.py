@@ -118,7 +118,7 @@ def test_os_icones_seguem_a_troca_de_paleta(painel, desktop_app):
 
 
 def test_a_coluna_de_midia_tem_a_acao_em_largura_inteira_e_a_saida_discreta(painel):
-    assert painel._insert.property("role") != "flat" and painel._clear_unused_btn.property("role") == "flat"
+    assert painel._insert.property("role") != "ghost" and painel._clear_unused_btn.property("role") == "ghost"
     assert painel._insert.width() >= painel._media_list.width() - 2 or not painel._insert.isVisible()
     assert painel._pool_count_label.property("role") == "chip"
     assert not painel._import.icon().isNull() and not painel._insert.icon().isNull()

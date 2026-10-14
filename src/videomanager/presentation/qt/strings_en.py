@@ -365,7 +365,6 @@ EDIT_MEDIA_IN_USE_MSG = (
     "The media “{name}” is used by {count} clip(s) on the timeline and can't be removed. "
     "Remove its clips from the tracks first."
 )
-EDIT_MEDIA_COUNT = "{count} item(s)"
 EDIT_IMPORT_BUTTON = "Import"
 EDIT_CLEAR_UNUSED_BUTTON = "Clear Unused"
 EDIT_MEDIA_KINDS = {"VIDEO": "Video", "IMAGE": "Image", "AUDIO": "Audio"}

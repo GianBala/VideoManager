@@ -44,6 +44,9 @@ class CanvasSelector(QToolButton):
         self._popup = popup
         self._summary = ""
         self._chevron = icons.chevron_down(theme.papeis(*theme.atual())["t2"], _CHEVRON)
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.setIconSize(QSize(16, 16))
+        self.setIcon(icons.screen(theme.papeis(*theme.atual())["t2"], 16))
         theme.on_theme_change(self._retheme)
         self.clicked.connect(self.show_popup)
 
@@ -108,4 +111,5 @@ class CanvasSelector(QToolButton):
 
     def _retheme(self) -> None:
         self._chevron = icons.chevron_down(theme.papeis(*theme.atual())["t2"], _CHEVRON)
+        self.setIcon(icons.screen(theme.papeis(*theme.atual())["t2"], 16))
         self.update()

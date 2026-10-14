@@ -18,6 +18,7 @@ from PySide6.QtGui import (
     QFont,
     QFontDatabase,
     QFontMetrics,
+    QIcon,
     QKeyEvent,
     QMouseEvent,
     QPaintEvent,
@@ -47,11 +48,14 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QStyle,
+    QStyledItemDelegate,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from videomanager.application.formatting import format_duration
 from videomanager.domain.geometry import image_base_size
 from videomanager.domain.timing import last_frame_time
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
@@ -2246,6 +2250,84 @@ class _ClipPropertiesWidget(QWidget):
         self._spin_rot.setValue(angle)
 
 
+class _MediaCardDelegate(QStyledItemDelegate):
+    """Uma mídia do acervo: a miniatura de cantos arredondados com a duração no canto, e o nome embaixo.
+
+    Duas colunas dividem a largura da lista, com 10 px entre elas: a miniatura da esquerda encosta na borda esquerda, a da
+    direita na direita, e a proporção é 16:9. A seleção é um anel do acento em volta da miniatura, e não uma faixa sobre o
+    nome.
+    """
+
+    ENTRE = 10
+    NOME = 28  # a altura do nome, mais o respiro entre ele e a miniatura de baixo
+
+    @classmethod
+    def miniatura(cls, largura_da_lista: int) -> QSize:
+        """O tamanho da miniatura numa lista de ``largura_da_lista`` px."""
+        largura = max(60, (largura_da_lista - cls.ENTRE) // 2)
+        return QSize(largura, round(largura * 9 / 16))
+
+    @classmethod
+    def celula(cls, largura_da_lista: int) -> QSize:
+        # Dois pixels de folga: o Qt só põe duas colunas se elas couberem com sobra (232 px não comportam duas de 116).
+        return QSize((largura_da_lista - 2) // 2, cls.miniatura(largura_da_lista).height() + cls.NOME)
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802
+        return self.celula(option.widget.viewport().width() if option.widget is not None else 224)
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        referencia = index.data(Qt.ItemDataRole.UserRole)
+        cores = theme.papeis(*theme.atual())
+        selecionada = bool(option.state & QStyle.StateFlag.State_Selected)
+        caixa = option.rect
+        largura_da_lista = option.widget.viewport().width() if option.widget is not None else 2 * caixa.width() + 2
+        tamanho = self.miniatura(largura_da_lista)
+        # Coluna da esquerda encostada à esquerda, a da direita à direita (nos pixels que sobram depois das duas células):
+        # o vão entre as duas é o ``ENTRE``.
+        sobra = largura_da_lista - 2 * caixa.width()
+        esquerda = caixa.x() if index.row() % 2 == 0 else caixa.right() + 1 + sobra - tamanho.width()
+        miniatura = QRectF(esquerda, caixa.y() + 3, tamanho.width(), tamanho.height())
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        recorte = QPainterPath()
+        recorte.addRoundedRect(miniatura, 8, 8)
+        painter.save()
+        painter.setClipPath(recorte)
+        painter.fillRect(miniatura, QColor(cores["screen"]))
+        icone = index.data(Qt.ItemDataRole.DecorationRole)
+        if isinstance(icone, QIcon) and not icone.isNull():
+            painter.drawPixmap(miniatura.toRect(), icone.pixmap(QSize(214, 120)))
+        painter.restore()
+        if selecionada:
+            painter.setPen(QPen(QColor(cores["accent"]), 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(miniatura.adjusted(-1, -1, 1, 1), 9, 9)
+        # A duração, no canto de baixo da miniatura: só para o que tem tempo (a foto não tem).
+        if isinstance(referencia, MediaRef) and referencia.kind in (MediaKind.VIDEO, MediaKind.AUDIO):
+            texto = format_duration(referencia.natural_duration)
+            fonte = fonts.resized(option.font, delta=-2)
+            fonte.setWeight(QFont.Weight.DemiBold)
+            painter.setFont(fonte)
+            largura = QFontMetrics(fonte).horizontalAdvance(texto) + 12
+            selo = QRectF(miniatura.right() - 5 - largura, miniatura.bottom() - 5 - 17, largura, 17)
+            fundo = QColor(cores["screen"])
+            fundo.setAlpha(190)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(fundo)
+            painter.drawRoundedRect(selo, 5, 5)
+            painter.setPen(Qt.GlobalColor.white)
+            painter.drawText(selo, int(Qt.AlignmentFlag.AlignCenter), texto)
+        fonte = fonts.resized(option.font, delta=-1)
+        painter.setFont(fonte)
+        painter.setPen(QColor(cores["text"] if selecionada else cores["t2"]))
+        nome = QFontMetrics(fonte).elidedText(str(index.data(Qt.ItemDataRole.DisplayRole)), Qt.TextElideMode.ElideRight,
+                                              int(miniatura.width()))
+        painter.drawText(QRectF(miniatura.x(), miniatura.bottom() + 6, miniatura.width(), 18),
+                         int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop), nome)
+        painter.restore()
+
+
 class _MediaListWidget(QListWidget):
     """Lista de mídias importadas do projeto em grade de cartões com miniaturas."""
 
@@ -2255,9 +2337,16 @@ class _MediaListWidget(QListWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAcceptDrops(True)
+        self.setProperty("role", "media")
+        self.setFrameShape(QListView.Shape.NoFrame)
         self.setViewMode(QListView.ViewMode.IconMode)
-        self.setIconSize(QSize(96, 54))
-        self.setGridSize(QSize(116, 92))
+        self.setIconSize(QSize(107, 60))
+        self.setItemDelegate(_MediaCardDelegate(self))
+        self.setSpacing(0)
+        # Sem a barra: o Qt reserva a largura dela no cálculo das colunas, e duas colunas de 112 px não cabiam nos 224
+        # úteis. A roda do mouse, o arrastar e as setas rolam do mesmo jeito.
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
         self.setMovement(QListView.Movement.Static)
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setWordWrap(True)
@@ -2279,6 +2368,11 @@ class _MediaListWidget(QListWidget):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        # Duas colunas dividem a largura: a grade acompanha a lista.
+        self.setGridSize(_MediaCardDelegate.celula(self.viewport().width()))
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         super().paintEvent(event)
