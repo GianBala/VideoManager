@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QFrame,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -26,9 +27,10 @@ from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.application.preferences import RANGES
 from videomanager.presentation.qt.tasks import WorkerRunner
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import fonts, strings
 from videomanager.presentation.qt.arrow_spin import ArrowSpinBox
 from videomanager.presentation.qt.i18n import align_label_column
+from videomanager.presentation.qt.panels.segmented import SegmentButton, segmented
 from videomanager.presentation.qt.palette_picker import SeletorDePaleta
 from videomanager.presentation.qt.theme import FIELD_WIDTH
 from videomanager.presentation.qt.ports import DesktopRuntimePort
@@ -65,6 +67,8 @@ class SettingsDialog(QDialog):
         self._labels: list[QLabel] = []
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 18, 24, 20)
+        layout.setSpacing(16)
         tabs = QTabWidget()
         tabs.tabBar().setProperty("role", "underline")
         tabs.addTab(self._build_general(), strings.SETTINGS_TAB_GENERAL)
@@ -93,8 +97,9 @@ class SettingsDialog(QDialog):
         page = QWidget()
         page.setProperty("role", "plain")
         form = QFormLayout(page)
-        form.setHorizontalSpacing(10)
-        form.setVerticalSpacing(8)
+        form.setContentsMargins(0, 16, 0, 8)
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(12)
         form.setLabelAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
@@ -165,6 +170,7 @@ class SettingsDialog(QDialog):
         # outras da mesma coluna.
         row.setContentsMargins(0, 0, 0, 0)
         self._dest = QLineEdit(self._settings.download_dir)
+        self._dest.setProperty("role", "field")
         row.addWidget(self._dest, 1)
         browse = QPushButton(strings.DEST_BROWSE)
         browse.clicked.connect(self._choose_dir)
@@ -180,6 +186,7 @@ class SettingsDialog(QDialog):
         for code, name in strings.LANGUAGE_NAMES.items():
             self._language.addItem(name, code)
         self._language.setCurrentIndex(max(0, self._language.findData(self._settings.language)))
+        self._language.setProperty("role", "field")
         self._language.setFixedWidth(FIELD_WIDTH)
         self._add_row(form, strings.SETTINGS_LANGUAGE, self._language)
 
@@ -190,6 +197,7 @@ class SettingsDialog(QDialog):
         self._encoder.setCurrentIndex(
             max(0, self._encoder.findData(self._settings.hardware_encoder))
         )
+        self._encoder.setProperty("role", "field")
         self._encoder.setFixedWidth(FIELD_WIDTH)
         self._encoder.setToolTip(strings.SETTINGS_ENCODER_TIP)
         self._encoder.currentIndexChanged.connect(self._describe_encoder)
@@ -214,31 +222,43 @@ class SettingsDialog(QDialog):
 
         return page
 
-    def _build_ffmpeg_info(self) -> QVBoxLayout:
-        """De onde veio o ffmpeg em uso e onde ele está.
+    def _build_ffmpeg_info(self) -> QFrame:
+        """De onde veio o ffmpeg em uso e onde ele está, num destaque com a origem numa pastilha.
 
         Mora ao lado da codificação porque as duas linhas respondem à mesma pergunta: com o que este
         aplicativo vai codificar. Era a única coisa que a barra de status dizia só ali, em português de
         uma palavra ("ffmpeg: sistema"), e só enquanto a janela estava aberta.
         """
-        coluna = QVBoxLayout()
-        coluna.setContentsMargins(0, 0, 0, 0)
-        coluna.setSpacing(2)
+        destaque = QFrame()
+        destaque.setProperty("role", "callout")
+        coluna = QVBoxLayout(destaque)
+        coluna.setContentsMargins(14, 10, 14, 10)
+        coluna.setSpacing(6)
+        linha = QHBoxLayout()
+        linha.setSpacing(10)
         if self._tools is None:
-            origem, caminho = strings.SETTINGS_FFMPEG_UNKNOWN, ""
+            origem, nota, caminho = "", strings.SETTINGS_FFMPEG_UNKNOWN, ""
         else:
-            origem = strings.FFMPEG_SOURCES.get(self._tools.source, self._tools.source)
+            origem, nota = strings.FFMPEG_SOURCES.get(self._tools.source, (self._tools.source, ""))
             caminho = str(self._tools.ffmpeg)
         self._ffmpeg_source = QLabel(origem)
-        self._ffmpeg_source.setWordWrap(True)
-        coluna.addWidget(self._ffmpeg_source)
+        self._ffmpeg_source.setProperty("role", "chip")
+        self._ffmpeg_source.setProperty("tone", "accent")
+        self._ffmpeg_source.setVisible(bool(origem))
+        linha.addWidget(self._ffmpeg_source, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._ffmpeg_note = QLabel(nota)
+        self._ffmpeg_note.setProperty("role", "dim")
+        self._ffmpeg_note.setWordWrap(True)
+        linha.addWidget(self._ffmpeg_note, 1)
+        coluna.addLayout(linha)
         self._ffmpeg_path = QLabel(caminho)
         self._ffmpeg_path.setProperty("role", "dim")
+        self._ffmpeg_path.setFont(fonts.mono(12))
         self._ffmpeg_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._ffmpeg_path.setWordWrap(True)
         self._ffmpeg_path.setVisible(bool(caminho))
         coluna.addWidget(self._ffmpeg_path)
-        return coluna
+        return destaque
 
     def _build_theme(self) -> QWidget:
         """Modo (escuro ou claro) e paleta: as duas escolhas que definem as cores do aplicativo."""
@@ -249,7 +269,12 @@ class SettingsDialog(QDialog):
         self._theme.addItem(strings.THEME_LIGHT, "light")
         self._theme.setCurrentIndex(max(0, self._theme.findData(self._settings.theme)))
         self._theme.setFixedWidth(FIELD_WIDTH)
-        self._add_row(form, strings.SETTINGS_THEME_MODE, self._theme)
+        # O modo se escolhe nos dois botões segmentados; a lista continua sendo quem guarda o valor (``result_settings`` e a
+        # miniatura das paletas leem dela) e fica escondida, sempre de acordo com os botões.
+        self._theme.setParent(page)
+        self._theme.setVisible(False)
+        self._add_heading(form, strings.SETTINGS_THEME_MODE)
+        form.addRow(self._build_mode_selector())
 
         self._add_heading(form, strings.SETTINGS_PALETTE)
         self._palette_picker = SeletorDePaleta(self._settings.palette, self._settings.theme)
@@ -262,6 +287,25 @@ class SettingsDialog(QDialog):
         self._theme.currentIndexChanged.connect(
             lambda _index: self._palette_picker.set_mode(self._theme.currentData() or "dark"))
         return page
+
+    def _build_mode_selector(self) -> QWidget:
+        """Escuro | Claro como um controle segmentado, ligado à lista escondida ``_theme``."""
+        botoes = []
+        for index, (value, label) in enumerate((("dark", strings.THEME_DARK), ("light", strings.THEME_LIGHT))):
+            botao = SegmentButton()
+            botao.setText(label)
+            botao.setChecked(self._theme.currentIndex() == index)
+            botao.clicked.connect(lambda _, i=index: self._theme.setCurrentIndex(i))
+            botoes.append(botao)
+        # A lista manda: trocar por ela (um teste, um atalho) marca o botão certo.
+        self._theme.currentIndexChanged.connect(lambda i: botoes[i].setChecked(True) if 0 <= i < len(botoes) else None)
+        caixa = QWidget()
+        caixa.setProperty("role", "plain")
+        linha = QHBoxLayout(caixa)
+        linha.setContentsMargins(0, 0, 0, 0)
+        linha.addWidget(segmented(botoes), 0, Qt.AlignmentFlag.AlignLeft)
+        linha.addStretch(1)
+        return caixa
 
     def _build_network(self) -> QWidget:
         page, form = self._make_page()
@@ -295,12 +339,14 @@ class SettingsDialog(QDialog):
             max(0, self._cookies.findData(self._settings.cookies_browser))
         )
         self._cookies.setToolTip(strings.SETTINGS_COOKIES_TIP)
+        self._cookies.setProperty("role", "field")
         self._cookies.setFixedWidth(FIELD_WIDTH)
         self._add_row(form, strings.SETTINGS_COOKIES, self._cookies)
 
         cookie_file_row = QHBoxLayout()
         cookie_file_row.setContentsMargins(0, 0, 0, 0)
         self._cookies_file = QLineEdit(self._settings.cookies_file)
+        self._cookies_file.setProperty("role", "field")
         self._cookies_file.setPlaceholderText(strings.SETTINGS_COOKIES_FILE_PLACEHOLDER)
         self._cookies_file.setToolTip(strings.SETTINGS_COOKIES_FILE_TIP)
         cookie_file_row.addWidget(self._cookies_file, 1)
@@ -337,6 +383,7 @@ class SettingsDialog(QDialog):
         self._add_check(form, self._auto_subs)
 
         self._sub_langs = QLineEdit(", ".join(self._settings.subtitle_langs))
+        self._sub_langs.setProperty("role", "field")
         self._add_row(form, strings.SETTINGS_SUB_LANGS, self._sub_langs)
 
         return page

@@ -193,9 +193,9 @@ QUEUE_LOG_CLOSE = "Close"
 # --- status bar --------------------------------------------------------------
 STATUS_COUNTS = "{active} in progress · {pending} queued · {done} completed"
 FFMPEG_SOURCES = {
-    "empacotado": "Bundled — ships with the app",
-    "gerenciado": "Managed — downloaded by the app",
-    "sistema": "System — installed on this computer",
+    "empacotado": ("Bundled", "Ships with the app"),
+    "gerenciado": ("Managed", "Downloaded by the app"),
+    "sistema": ("System", "Installed on this computer"),
 }
 SETTINGS_FFMPEG = "FFmpeg"
 SETTINGS_GROUP_DOWNLOADS = "Downloads"
@@ -377,7 +377,7 @@ EXPORT_DIALOG_TITLE = "Export Video"
 EXPORT_SUMMARY_GROUP = "Project summary"
 EXPORT_SETTINGS_GROUP = "Output settings"
 EXPORT_DESTINATION_GROUP = "Destination"
-EXPORT_DESTINATION_FOLDER = "Destination folder:"
+EXPORT_DESTINATION_FOLDER = "Destination folder"
 EXPORT_DESTINATION_PICK = "Browse…"
 EXPORT_DESTINATION_PICK_TITLE = "Choose Destination Folder"
 EXPORT_ACTION_ENQUEUE = "Add to Queue"
@@ -410,8 +410,10 @@ EXPORT_QUALITY_ECONOMY = "Economy (CRF 28 - smaller file)"
 EXPORT_AUDIO_FORMAT = "Audio format"
 EXPORT_AUDIO_FORMAT_TIP = "Format and codec of the generated sound file"
 EXPORT_ESTIMATED_SIZE = "Estimated size"
-EXPORT_SUMMARY = "Total duration: <b>{duration}</b> · {tracks} track(s) · {clips} clip(s)"
-EXPORT_FILENAME = "File name:"
+EXPORT_SUMMARY_DURATION = "Total duration <b>{duration}</b>"
+EXPORT_SUMMARY_TRACKS = "{tracks} track(s)"
+EXPORT_SUMMARY_CLIPS = "{clips} clip(s)"
+EXPORT_FILENAME = "File name"
 EXPORT_FILENAME_PLACEHOLDER = "File name (without extension)"
 EXPORT_DEFAULT_SUFFIX = "_edited"
 EXPORT_DEFAULT_STEM = "edited_video"
@@ -656,19 +658,19 @@ EDIT_GAIN_DETACHED = (
 )
 
 # tela do projeto
-EDIT_CANVAS = "Canvas:"
-EDIT_CANVAS_ASPECT = "Aspect ratio:"
+EDIT_CANVAS = "Canvas"
+EDIT_CANVAS_ASPECT = "Aspect ratio"
 EDIT_CANVAS_ASPECT_AUTO = "Automatic"
 EDIT_CANVAS_ASPECT_TIP = (
     "Locks the aspect ratio of the editing canvas and the preview (e.g. 16:9, 4:3, 9:16, 1:1, 21:9).\n"
     "Clips are fitted proportionally, without distortion."
 )
-EXPORT_ASPECT = "Aspect ratio:"
+EXPORT_ASPECT = "Aspect ratio"
 EXPORT_ASPECT_AUTO = "Same as project"
 EXPORT_ASPECT_TIP = (
     "Aspect ratio of the final exported video (16:9 widescreen, 4:3 standard, 9:16 vertical, etc.)."
 )
-EDIT_CANVAS_RATE = "Frame rate:"
+EDIT_CANVAS_RATE = "Frame rate"
 EDIT_CANVAS_AUTO = "Automatic · follows the media"
 EDIT_CANVAS_RATE_AUTO = "Automatic"
 EDIT_CANVAS_SIZE = "{width} × {height}"
