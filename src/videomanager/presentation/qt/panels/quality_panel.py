@@ -11,14 +11,11 @@ também em H.264).
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QFrame,
-    QGridLayout,
     QLabel,
     QStackedWidget,
     QVBoxLayout,
@@ -49,20 +46,10 @@ from videomanager.application.media.download_policy import plan_container
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt import icons, strings
 from videomanager.presentation.qt.i18n import bind, on_language_change, retext_items
+from videomanager.presentation.qt.panels.fields import captioned, make_grid
 from videomanager.presentation.qt.panels.segmented import SegmentButton, segmented
 from videomanager.application.format_labels import resolution_label
 from videomanager.application.format_labels import choice_label
-
-def _make_grid(parent: QWidget | None = None) -> QGridLayout:
-    """Três colunas iguais, com 14 px entre elas e 16 entre as fileiras de campos."""
-    grid = QGridLayout(parent)
-    grid.setContentsMargins(0, 0, 0, 0)
-    grid.setHorizontalSpacing(14)
-    grid.setVerticalSpacing(16)
-    for coluna in range(3):
-        grid.setColumnStretch(coluna, 1)
-    return grid
-
 
 class QualityPanel(QWidget):
     """Escolha de modo (vídeo/áudio) e de todos os parâmetros de qualidade."""
@@ -141,26 +128,6 @@ class QualityPanel(QWidget):
 
         return group
 
-    @staticmethod
-    def _field(caption: Callable[[], str], widget: QWidget) -> QWidget:
-        """A legenda em cima e o campo embaixo, num bloco só: esconder o campo esconde a legenda junto."""
-        box = QWidget()
-        box.setProperty("role", "plain")
-        column = QVBoxLayout(box)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(6)
-        label = bind(QLabel(), "setText", caption)
-        label.setProperty("role", "caption")
-        column.addWidget(label)
-        widget.setProperty("role", "field")
-        if isinstance(widget, QComboBox):
-            # O tamanho que o combo pede não pode decidir a largura da coluna: três colunas iguais, e o texto
-            # mais longo se corta com reticências em vez de empurrar as vizinhas.
-            widget.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-            widget.setMinimumContentsLength(6)
-        column.addWidget(widget)
-        return box
-
     def _retranslate(self) -> None:
         # Os itens que vêm do catálogo trocam de texto; o dado e a escolha
         # ficam. As medidas e os avisos dependem do texto, e são refeitos.
@@ -179,19 +146,19 @@ class QualityPanel(QWidget):
     def _build_video_page(self) -> QWidget:
         page = QWidget()
         page.setProperty("role", "plain")
-        grid = _make_grid(page)
+        grid = make_grid(page)
 
         self._resolution = bind(QComboBox(), "setToolTip", lambda: strings.TIP_RESOLUTION)
         self._resolution.currentIndexChanged.connect(self._on_resolution_changed)
-        grid.addWidget(self._field(lambda: strings.LABEL_RESOLUTION, self._resolution), 0, 0)
+        grid.addWidget(captioned(lambda: strings.LABEL_RESOLUTION, self._resolution), 0, 0)
 
         self._fps = QComboBox()
         self._fps.currentIndexChanged.connect(self._on_fps_changed)
-        grid.addWidget(self._field(lambda: strings.LABEL_FPS, self._fps), 0, 1)
+        grid.addWidget(captioned(lambda: strings.LABEL_FPS, self._fps), 0, 1)
 
         self._codec = bind(QComboBox(), "setToolTip", lambda: strings.TIP_CODEC)
         self._codec.currentIndexChanged.connect(self._on_codec_changed)
-        grid.addWidget(self._field(lambda: strings.LABEL_CODEC, self._codec), 0, 2)
+        grid.addWidget(captioned(lambda: strings.LABEL_CODEC, self._codec), 0, 2)
 
         self._container = bind(QComboBox(), "setToolTip", lambda: strings.TIP_CONTAINER)
         for value in CONTAINERS:
@@ -200,11 +167,11 @@ class QualityPanel(QWidget):
         index = self._container.findData(self._settings.default_container)
         self._container.setCurrentIndex(max(0, index))
         self._container.currentIndexChanged.connect(self._emit_changed)
-        grid.addWidget(self._field(lambda: strings.LABEL_CONTAINER, self._container), 1, 0)
+        grid.addWidget(captioned(lambda: strings.LABEL_CONTAINER, self._container), 1, 0)
 
         self._audio_track = QComboBox()
         self._audio_track.currentIndexChanged.connect(self._emit_changed)
-        self._audio_track_box = self._field(lambda: strings.LABEL_AUDIO_TRACK, self._audio_track)
+        self._audio_track_box = captioned(lambda: strings.LABEL_AUDIO_TRACK, self._audio_track)
         grid.addWidget(self._audio_track_box, 1, 1, 1, 2)
 
         # O tamanho estimado já aparece no rodapé da aba; o texto daqui só guarda o número (``estimated_size``).
@@ -214,7 +181,7 @@ class QualityPanel(QWidget):
     def _build_audio_page(self) -> QWidget:
         page = QWidget()
         page.setProperty("role", "plain")
-        grid = _make_grid(page)
+        grid = make_grid(page)
 
         self._audio_codec = bind(QComboBox(), "setToolTip", lambda: strings.TIP_AUDIO_FORMAT)
         for codec in AUDIO_CODECS:
@@ -223,7 +190,7 @@ class QualityPanel(QWidget):
         index = self._audio_codec.findData(self._settings.default_audio_format)
         self._audio_codec.setCurrentIndex(max(0, index))
         self._audio_codec.currentIndexChanged.connect(self._on_audio_codec_changed)
-        grid.addWidget(self._field(lambda: strings.LABEL_AUDIO_FORMAT, self._audio_codec), 0, 0)
+        grid.addWidget(captioned(lambda: strings.LABEL_AUDIO_FORMAT, self._audio_codec), 0, 0)
 
         self._audio_quality = QComboBox()
         for value in AUDIO_BITRATES:
@@ -231,7 +198,7 @@ class QualityPanel(QWidget):
         index = self._audio_quality.findData(self._settings.default_audio_quality)
         self._audio_quality.setCurrentIndex(max(0, index))
         self._audio_quality.currentIndexChanged.connect(self._emit_changed)
-        grid.addWidget(self._field(lambda: strings.LABEL_AUDIO_QUALITY, self._audio_quality), 0, 1)
+        grid.addWidget(captioned(lambda: strings.LABEL_AUDIO_QUALITY, self._audio_quality), 0, 1)
 
         self._audio_size_label = QLabel("—")
 

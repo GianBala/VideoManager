@@ -23,12 +23,18 @@ ROLE_MEDIA = Qt.ItemDataRole.UserRole
 # este dado ainda não foi estimado: a linha mostra só o tamanho de hoje.
 ROLE_AFTER = Qt.ItemDataRole.UserRole + 1
 
-_PAD = 10
-_TILE = 44
+_PAD = 8
+_PAD_X = 8
+# O × fica um pouco mais para dentro que a miniatura: 12 px da borda direita da linha.
+_PAD_R = 12
+# O espaço da miniatura do protótipo (76×44): a mesma largura para vídeo e áudio, para os nomes ficarem alinhados. O
+# quadro de verdade custaria decodificar um quadro de cada arquivo; por ora o ícone ocupa o lugar dele.
+_TILE_W = 76
+_TILE_H = 44
 _GAP = 12
 _REMOVE = 24
-ENTRE_LINHAS = 6
-ALTURA = _PAD + _TILE + _PAD
+ENTRE_LINHAS = 4
+ALTURA = _PAD + _TILE_H + _PAD
 
 _CODECS = {"h264": "H.264", "hevc": "HEVC", "h265": "H.265", "vp9": "VP9", "vp8": "VP8", "av1": "AV1",
            "aac": "AAC", "mp3": "MP3", "opus": "Opus", "vorbis": "Vorbis", "flac": "FLAC", "alac": "ALAC"}
@@ -86,7 +92,7 @@ class RowDelegate(QStyledItemDelegate):
 
     @staticmethod
     def remove_rect(largura: int) -> QRect:
-        return QRect(largura - _PAD - _REMOVE, (ALTURA - _REMOVE) // 2, _REMOVE, _REMOVE)
+        return QRect(largura - _PAD_R - _REMOVE, (ALTURA - _REMOVE) // 2, _REMOVE, _REMOVE)
 
     def set_hover(self, row: int) -> bool:
         mudou = row != self._hover
@@ -103,7 +109,7 @@ class RowDelegate(QStyledItemDelegate):
         selecionado = bool(option.state & QStyle.StateFlag.State_Selected)
         passando = index.row() == self._hover or bool(option.state & QStyle.StateFlag.State_MouseOver)
         titulo = QFont(option.font)
-        titulo.setBold(True)
+        titulo.setWeight(QFont.Weight.DemiBold)
         pequeno = fonts.resized(option.font, factor=0.9)
         mt, mp = QFontMetrics(titulo), QFontMetrics(pequeno)
 
@@ -115,21 +121,21 @@ class RowDelegate(QStyledItemDelegate):
             painter.setBrush(QColor(c["raised"]))
             painter.drawRoundedRect(QRectF(0, 0, largura, ALTURA), 10, 10)
 
-        tile = QRect(_PAD, _PAD, _TILE, _TILE)
+        tile = QRect(_PAD_X, _PAD, _TILE_W, _TILE_H)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(c["raised2"]))
         painter.drawRoundedRect(QRectF(tile), 8, 8)
         desenho = icons.nav_edit if media.has_video else icons.music
         lado = 22
-        desenho(c["accent"], lado).paint(painter, QRect(tile.x() + (_TILE - lado) // 2, tile.y() + (_TILE - lado) // 2, lado, lado))
+        desenho(c["accent"], lado).paint(painter, QRect(tile.x() + (_TILE_W - lado) // 2, tile.y() + (_TILE_H - lado) // 2, lado, lado))
 
         direita = self._pintar_tamanhos(painter, media, index.data(ROLE_AFTER), largura, pequeno, titulo)
-        x = _PAD + _TILE + _GAP
+        x = _PAD_X + _TILE_W + _GAP
         livre = max(40, direita - 16 - x)
         painter.setFont(titulo)
         painter.setPen(QColor(c["text"]))
-        painter.drawText(QPoint(x, _PAD + mt.ascent() + 1), mt.elidedText(media.path.name, Qt.TextElideMode.ElideRight, livre))
-        self._pintar_selos(painter, media, QRect(x, _PAD + mt.lineSpacing() + 6, livre, mp.height() + 6), pequeno, mp)
+        painter.drawText(QPoint(x, _PAD + 3 + mt.ascent()), mt.elidedText(media.path.name, Qt.TextElideMode.ElideRight, livre))
+        self._pintar_selos(painter, media, QRect(x, _PAD + 3 + mt.lineSpacing() + 4, livre, mp.height() + 6), pequeno, mp)
 
         remover = self.remove_rect(largura)
         if passando:
