@@ -241,6 +241,15 @@ QPushButton[role="tool"] {{ background: transparent; border: 1px solid transpare
 QPushButton[role="tool"]:hover {{ background: {raised}; }}
 QPushButton[role="tool"]:checked {{ background: {soft16}; }}
 QPushButton[role="tool"]:focus {{ border-color: {focus}; }}
+/* Barra de ferramentas da linha do tempo: a pastilha do bloco escolhido (o acento sobre o fundo suave, com o ícone da espécie) e
+   os botões de volume e velocidade dele, no plano elevado. */
+QFrame[role="clip-chip"] {{ background: transparent; border: none; border-radius: 11px; }}
+QFrame[role="clip-chip"][active="true"] {{ background: {soft16}; }}
+QFrame[role="clip-chip"] QLabel {{ color: {t3}; font-size: 12px; background: transparent; }}
+QFrame[role="clip-chip"][active="true"] QLabel {{ color: {accent}; font-weight: 500; }}
+QPushButton[role="chip-btn"] {{ background: {raised}; border: 1px solid {raised}; border-radius: 10px; padding: 0px 12px; min-height: 28px; }}
+QPushButton[role="chip-btn"]:hover {{ background: {raised2}; border-color: {raised2}; }}
+QPushButton[role="chip-btn"]:disabled {{ color: {t3}; }}
 QPushButton[role="play"] {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {fill_a}, stop:1 {fill_b});
     border: 1px solid {fill_a}; border-radius: 23px; padding: 0px; }}
 QPushButton[role="play"]:hover {{ border-color: {on_fill}; }}
@@ -536,6 +545,15 @@ _registro = logging.getLogger(__name__)
 TIPOS_DE_BLOCO = {
     "video": "#4f8ef7", "audio": "#34b27b", "text": "#8b6df5", "image": "#22b8cf", "filter": "#6c7bf0",
     "transition": "#f59e0b",
+}
+
+
+# O corpo de cada espécie de bloco na linha do tempo: o tom escuro do protótipo, da mesma família da cor da espécie, que
+# deixa a cor viva para a faixa de cima e o rótulo. Fixos como as cores das espécies: o filtro, por exemplo, é um só
+# (o de cada efeito se lê pelo ícone e pelo nome no rótulo). A transição é o único corpo claro.
+CORPOS_DE_BLOCO = {
+    "video": "#17233f", "audio": "#14382f", "text": "#33266b", "image": "#12151c", "filter": "#212b69",
+    "transition": "#d48722",
 }
 
 

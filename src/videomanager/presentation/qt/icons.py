@@ -817,6 +817,15 @@ def volume(color: str, size: int = _NAV, muted: bool = False) -> QIcon:
     return _nav(color, size, desenho)
 
 
+def fit_width(color: str, size: int = _NAV) -> QIcon:
+    """Ver tudo: a seta de duas pontas, na horizontal."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawLine(QPointF(4 * u, 12 * u), QPointF(20 * u, 12 * u))
+        p.drawPolyline(QPolygonF([QPointF(8 * u, 8 * u), QPointF(4 * u, 12 * u), QPointF(8 * u, 16 * u)]))
+        p.drawPolyline(QPolygonF([QPointF(16 * u, 8 * u), QPointF(20 * u, 12 * u), QPointF(16 * u, 16 * u)]))
+    return _nav(color, size, desenho)
+
+
 def _keyframe_step(color: str, size: int, previous: bool) -> QIcon:
     def desenho(p: QPainter, u: float) -> None:
         x = 6.5 if previous else 17.5
