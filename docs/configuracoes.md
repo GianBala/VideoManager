@@ -6,7 +6,9 @@ diálogo. O arquivo salvo é `settings.json` — ver
 [`instalacao.md`](instalacao.md#onde-ficam-as-preferências) para o caminho
 exato em cada sistema.
 
-O diálogo tem três abas.
+O diálogo tem quatro abas — **Geral**, **Tema**, **Rede** e **Legendas e
+metadados** —, e **Cancelar** fica à esquerda de **OK**, nesta ordem em todo o
+aplicativo.
 
 ## Geral
 
@@ -14,10 +16,20 @@ O diálogo tem três abas.
 |---|---|
 | **Pasta de destino** (+ *Escolher…*) | Onde downloads, conversões e exportações caem por padrão. Cada aba ainda permite escolher "salvar na mesma pasta do original", que ignora esta preferência para aquele arquivo específico. |
 | **Criar uma subpasta por site** | Downloads de sites diferentes vão para subpastas próprias (ex.: `youtube/`, `bilibili/`) em vez de tudo junto — ajuda quem baixa de muitas fontes. |
-| **Tema** | Escuro ou Claro. |
 | **Idioma** | Português (Brasil) ou English, cada um escrito no próprio idioma. Vale ao confirmar com **OK**, com a janela aberta: projeto, reprodução, fila e o que estiver escolhido continuam como estavam, e o desfazer não ganha passo. Acompanham a troca também os textos do próprio Qt (OK, Cancelar, o menu de contexto dos campos) e o separador decimal dos números (vírgula em português, ponto em inglês). O que foi digitado ou nomeado — trilhas, projeto, arquivos, o conteúdo de um texto — não é traduzido; trilhas e textos criados depois nascem no idioma novo. |
 | **Codificação de vídeo** | Escolhe entre software (padrão) ou a placa de vídeo disponível (NVENC, Quick Sync, AMF, VAAPI — o que a máquina realmente tiver). O padrão continua sendo software porque comprime melhor no mesmo tamanho de arquivo; a placa é mais rápida, mas produz arquivos maiores para a mesma qualidade percebida. |
 | **Testar agora** | Sonda de verdade se o encoder escolhido funciona nesta máquina — não só se o `ffmpeg` o lista, mas se ele **codifica um quadro sem falhar**. O texto ao lado mostra o resultado ("Verificando o que esta máquina aceita…" enquanto roda, depois o veredito). Mesmo que a sonda falhe, a exportação nunca trava por isso: ela cai para software automaticamente. |
+| **FFmpeg** | De onde veio o `ffmpeg` em uso (uma pastilha: **Empacotado**, **Gerenciado** ou **Sistema**, com uma nota ao lado) e o caminho dele, num destaque. Antes essa informação ficava só numa barra de status. Sem `ffmpeg` localizado, diz "Ainda não localizado". |
+
+## Tema
+
+| Campo | O que faz |
+|---|---|
+| **Modo** | **Escuro** ou **Claro**, em dois botões. |
+| **Paleta** | Seis cartões exclusivos, cada um com uma miniatura desenhada na própria paleta e no modo escolhido: **Atual** (as cores de antes da renovação visual), **Grafite e índigo** (o padrão), **Estúdio**, **Maré**, **Aurora** e **Cinema**. O cartão escolhido leva um visto. |
+
+As cores mudam ao confirmar com **OK** e alcançam a janela inteira, inclusive o editor
+aberto, sem perder o projeto nem a reprodução.
 
 ## Rede
 

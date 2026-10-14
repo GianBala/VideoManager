@@ -82,7 +82,7 @@ Ajuste as informações do arquivo sem tocar na mídia.
 </tr>
 </table>
 
-Download, Convert e Editar compartilham **uma fila de tarefas unificada**: baixe, converta e exporte ao mesmo tempo em segundo plano, com cancelamento, nova tentativa e histórico de erros. No editor e nos Metadados a fila sai de cena, para o trabalho ocupar a janela.
+Download, Convert e Editar compartilham **uma gaveta de tarefas unificada**, à direita: baixe, converta e exporte ao mesmo tempo em segundo plano, com cancelamento, nova tentativa e histórico de erros. No editor e nos Metadados a gaveta se recolhe, para o trabalho ocupar a janela, e o selo do item Tarefas segue contando.
 
 <p align="center">
   <img src="docs/imagens/editor.png" alt="Aba Editar: prévia, acervo, propriedades com animação por quadros-chave e linha do tempo com quatro trilhas" width="100%">
