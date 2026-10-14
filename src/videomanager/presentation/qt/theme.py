@@ -235,6 +235,19 @@ QPushButton[role="tile"]:hover {{ background: {raised2}; border-color: {raised2}
 QPushButton[role="tile"]:focus {{ border-color: {focus}; }}
 QPushButton[role="tile"][active="true"] {{ background: {soft16}; border-color: {accent}; }}
 QPushButton[role="tile"]:checked {{ background: {seg_on}; border-color: {seg_ring}; color: {accent}; }}
+/* Transporte do editor: botões de ícone sem fundo (o ligado leva o tom suave), o play de 46 px em degradê, o tempo em tipo
+   monoespaçado (a família vem do código, e o tamanho daqui: o QSS de ``QWidget`` mandaria no que o código pedisse) e o aviso que fica sobre o canto da prévia. */
+QPushButton[role="tool"] {{ background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 0px; }}
+QPushButton[role="tool"]:hover {{ background: {raised}; }}
+QPushButton[role="tool"]:checked {{ background: {soft16}; }}
+QPushButton[role="tool"]:focus {{ border-color: {focus}; }}
+QPushButton[role="play"] {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {fill_a}, stop:1 {fill_b});
+    border: 1px solid {fill_a}; border-radius: 23px; padding: 0px; }}
+QPushButton[role="play"]:hover {{ border-color: {on_fill}; }}
+QPushButton[role="play"]:focus {{ border-color: {focus}; }}
+QLabel[role="clock"] {{ color: {text}; font-size: 22px; font-weight: 500; }}
+QLabel[role="clock-total"] {{ color: {t2}; font-size: 13px; }}
+QLabel[role="overlay-note"] {{ background: {screen82}; color: {t2}; border-radius: 8px; padding: 3px 10px; }}
 QComboBox[role="field"][compact="true"] {{ min-height: 32px; border-radius: 10px; }}
 QFrame[role="segments"][compact="true"] {{ border-radius: 10px; }}
 QToolButton[role="icon"][danger="true"]:hover {{ background: {err16}; }}
@@ -652,6 +665,9 @@ def _cores_do_estilo(theme: str, nome: str) -> dict[str, str]:
     # O selo "ao vivo" tem fundo vermelho fixo nos dois modos; o texto dele é sempre branco, e não o
     # texto do botão primário, que nas paletas de botão claro ou âmbar é escuro.
     cores["live_text"] = "#ffffff"
+    # O plano da prévia a 82%: o aviso que fica sobre o quadro ("Carregando quadro…") precisa ler-se sobre qualquer imagem.
+    tela = QColor(cores["screen"])
+    cores["screen82"] = f"rgba({tela.red()}, {tela.green()}, {tela.blue()}, 0.82)"
     # O ladrilho do arquivo de áudio: o verde de áudio da linha do tempo, a 16%.
     verde = QColor(TIPOS_DE_BLOCO["audio"])
     cores["audio16"] = f"rgba({verde.red()}, {verde.green()}, {verde.blue()}, 0.16)"

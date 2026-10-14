@@ -84,6 +84,8 @@ from videomanager.presentation.qt.i18n import bind, on_language_change, retext_i
 from videomanager.domain.i18n import decimal
 
 _PREVIEW_MIN_HEIGHT = 160
+# O raio do cartão da prévia, o do protótipo.
+_PREVIEW_RADIUS = 18
 
 # Os botões quadrados da aba Propriedades (quadro-chave): 30 px de lado e o ícone de 16.
 _TILE = 30
@@ -360,7 +362,6 @@ class _Preview(QLabel):
         self.setMinimumHeight(_PREVIEW_MIN_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setStyleSheet("background: #141418; border-radius: 8px;")
         bind(self, "setText", lambda: strings.EDIT_EMPTY)
         self.setProperty("role", "dim")
         self._pixmap: QPixmap | None = None
@@ -1041,6 +1042,14 @@ class _Preview(QLabel):
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         if (self._pixmap is None or self._pixmap.isNull()) and self.text():
+            # Sem quadro, o QLabel desenha o texto; o cartão é o mesmo de quando há quadro. O QSS não o faria: o
+            # ``border-radius`` de um QLabel sem moldura deixava o canto quadrado, e o plano precisa seguir o tema.
+            fundo = QPainter(self)
+            fundo.setRenderHint(QPainter.RenderHint.Antialiasing)
+            cartao = QPainterPath()
+            cartao.addRoundedRect(QRectF(self.rect()), _PREVIEW_RADIUS, _PREVIEW_RADIUS)
+            fundo.fillPath(cartao, QColor(theme.papeis(*theme.atual())["screen"]))
+            fundo.end()
             super().paintEvent(event)
             return
 
@@ -1048,10 +1057,11 @@ class _Preview(QLabel):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        # 1. Área total do monitor (pasteboard/área de trabalho cinza-escura suave)
+        # 1. O cartão do monitor: o plano ``screen`` do tema, de cantos arredondados, onde o vídeo é encaixado com a faixa
+        # escura nas sobras (o vídeo é sempre recortado pelo cartão, que é o que mantém os cantos redondos).
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), 8, 8)
-        painter.fillPath(path, QColor("#141418"))
+        path.addRoundedRect(QRectF(self.rect()), _PREVIEW_RADIUS, _PREVIEW_RADIUS)
+        painter.fillPath(path, QColor(theme.papeis(*theme.atual())["screen"]))
         painter.setClipPath(path)
 
         target = self._video_rect()
