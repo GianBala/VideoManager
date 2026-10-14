@@ -23,14 +23,33 @@ from videomanager.presentation.qt.theme import apply as aplicar_tema
 from videomanager.presentation.qt.theme import palette
 
 
+def _ouvintes_fortes() -> list:
+    """Os ouvintes que o ``theme`` guarda por referência forte: função solta e ``lambda``. Só método tem referência fraca."""
+    return [ouvinte for ouvinte in theme._ouvintes if not isinstance(ouvinte, weakref.ref)]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def sem_ouvinte_forte_esquecido():
+    """Nenhum teste deste arquivo deixa para trás um ouvinte de tema que nunca sai da lista (``TST-002``).
+
+    ``on_theme_change`` guarda função solta e ``lambda`` por referência forte, e cada ``theme.apply`` seguinte da sessão
+    os chama de novo: um que levanta enche o log de tracebacks, e um que acumula numa lista cresce para sempre.
+    """
+    antes = _ouvintes_fortes()
+    yield
+    assert _ouvintes_fortes() == antes, "um teste registrou um ouvinte de tema e não o desfez"
+
+
 @pytest.fixture
 def aplicacao(desktop_app):
     """A aplicação, devolvida ao tema que tinha: a troca é estado global e vazaria para outros testes."""
-    antes = (desktop_app.palette(), desktop_app.styleSheet(), theme.atual())
+    antes = (desktop_app.palette(), desktop_app.styleSheet(), theme.atual(), list(theme._ouvintes))
     yield desktop_app
     desktop_app.setPalette(antes[0])
     desktop_app.setStyleSheet(antes[1])
     theme._atual = antes[2]
+    # Os ouvintes registrados durante o teste (a função que levanta, o ``lambda``) saem junto: a lista é a mesma de antes.
+    theme._ouvintes[:] = antes[3]
 
 
 @pytest.fixture
