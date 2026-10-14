@@ -179,8 +179,11 @@ Da esquerda para a direita:
    o áudio já separado para outra trilha não tem mais volume próprio ali).
 10. **Velocidade do bloco** (pastilha com o raio e a velocidade, como `1,0×`) — ver
     [Velocidade e volume do bloco](#velocidade-e-volume-do-bloco).
-11. Zoom: **−** / **+** / **Ver tudo** (enquadra o projeto inteiro na largura
-    visível).
+11. Zoom: **−** / controle deslizante / **+** / **Ver tudo** (enquadra o projeto
+    inteiro na largura visível). O controle deslizante vai de "ver tudo", à
+    esquerda, até a janela mais fechada (0,4 s), à direita, e acompanha o que a
+    roda do mouse e os botões fazem; arrastá-lo mantém o cursor de reprodução no
+    mesmo lugar da tela.
 
 ### Gestos com o mouse
 

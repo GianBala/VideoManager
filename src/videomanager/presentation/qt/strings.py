@@ -635,6 +635,7 @@ EDIT_UNDO = "Desfazer"
 EDIT_REDO = "Refazer"
 EDIT_ZOOM_IN = "Aproximar"
 EDIT_ZOOM_OUT = "Afastar"
+EDIT_ZOOM_SLIDER = "Zoom da linha do tempo"
 EDIT_ZOOM_FIT = "Ver tudo"
 EDIT_ZOOM_FIT_TIP = (
     "Enquadra a edição inteira. Afastar além disso continua valendo — o vazio "
