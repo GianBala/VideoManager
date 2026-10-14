@@ -46,6 +46,7 @@ from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import BYTES_PER_PIXEL
 from videomanager.domain.preview import fit_size
+from videomanager.domain.preview import reduced_fit
 from videomanager.domain.project import MAX_GAIN_DB
 from videomanager.domain.project import MIN_GAIN_DB
 from videomanager.domain.project import Clip
@@ -899,7 +900,8 @@ def _video_chain(
     if has_transform:
         mw = clip.media.width if clip.media else None
         mh = clip.media.height if clip.media else None
-        base_w, base_h = fit_size(mw, mh, project.width, project.height)
+        base_w, base_h = reduced_fit(mw, mh, project.width, project.height,
+                                     *(canonical_size or (project.width, project.height)))
         if _interpolates(piece, fps, interpolate) and mw and mh:
             # A regra de ``_rate_first`` vale aqui também: o ``minterpolate``
             # reserva memória pelo quadro que recebe, e um 4K com qualquer
@@ -987,9 +989,9 @@ def _video_chain(
 
     if _rate_first(piece, project, fps, interpolate):
         steps.append(_rate_chain(piece, fps, interpolate))
-        steps.append(_fit_scale(project.width, project.height))
+        steps.append(_fit_scale(project.width, project.height, canonical_size))
     else:
-        steps.append(_fit_scale(project.width, project.height))
+        steps.append(_fit_scale(project.width, project.height, canonical_size))
         steps.append(_rate_chain(piece, fps, interpolate))
     steps.append("format=rgba")
     steps.append(
@@ -1051,7 +1053,7 @@ def _rate_first(
     return media.width * media.height < project.width * project.height
 
 
-def _fit_scale(width: int, height: int) -> str:
+def _fit_scale(width: int, height: int, full: tuple[int, int] | None = None) -> str:
     """Encaixa o bloco na tela **pela forma com que ele é exibido**.
 
     ``force_original_aspect_ratio=decrease`` mede a proporção em pixels
@@ -1065,10 +1067,21 @@ def _fit_scale(width: int, height: int) -> str:
     pixel embutido. Onde o arquivo não informa o pixel, ele assume quadrado e a
     conta devolve o mesmo de antes (conferido com uma entrada de ``sar``
     desconhecido). O arredondamento para par é exigência dos codificadores.
+
+    ``full`` é a tela de verdade quando esta é a reduzida da prévia (ver
+    :func:`videomanager.domain.preview.reduced_fit`, de que esta é a mesma conta
+    sobre ``dar``): o encaixe sai exato lá e só então é reduzido por eixo. Pelos
+    pixels da tela reduzida, que perdeu até 1 px de cada lado no arredondamento
+    para par, um vídeo que preenche a tela do projeto deixava fio preto.
     """
-    largest = f"min({width},{height}*dar)"
-    tallest = f"min({height},{width}/dar)"
-    return f"scale=w='trunc({largest}/2)*2':h='trunc({tallest}/2)*2'"
+    if full is None or tuple(full) == (width, height):
+        largest = f"min({width},{height}*dar)"
+        tallest = f"min({height},{width}/dar)"
+        return f"scale=w='trunc({largest}/2)*2':h='trunc({tallest}/2)*2'"
+    full_w, full_h = full
+    largest = f"min({full_w},{full_h}*dar)*{width}/{full_w}"
+    tallest = f"min({full_h},{full_w}/dar)*{height}/{full_h}"
+    return f"scale=w='round({largest}/2)*2':h='round({tallest}/2)*2'"
 
 
 def _gain_filter(clip: Clip, origin: float) -> str | None:

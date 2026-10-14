@@ -61,6 +61,7 @@ from videomanager.domain.timing import last_frame_time
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 
 from videomanager.domain.preview import fit_size
+from videomanager.domain.preview import reduced_fit
 
 from videomanager.domain.keyframe import ClipTransform
 from videomanager.domain.keyframe import Keyframe
@@ -599,7 +600,7 @@ class _Preview(QLabel):
             output_h = self._pixmap.height() if self._pixmap is not None else self._proj_h
             compose_w, compose_h = fit_size(self._proj_w, self._proj_h,
                                            min(self._proj_w, output_w), min(self._proj_h, output_h))
-            base_w, base_h = fit_size(mw, mh, compose_w, compose_h)
+            base_w, base_h = reduced_fit(mw, mh, compose_w, compose_h, self._proj_w, self._proj_h)
             animated = clip.animates("scale")
             quantize = int if animated else round
             w, h = max(2, int(quantize(base_w * sx / 2)) * 2), max(2, int(quantize(base_h * sy / 2)) * 2)
