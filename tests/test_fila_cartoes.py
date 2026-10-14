@@ -352,7 +352,7 @@ def test_a_troca_de_paleta_repinta_os_cartoes(painel, fila, desktop_app):
         desktop_app.processEvents()
     depois = cartao().pixelColor(100, 6).name()
     assert antes != depois
-    assert depois == theme.papeis("light", "mare")["raised"].lower()
+    assert depois == theme.papeis("light", "mare")["card"].lower()
 
 
 # -- custo ---------------------------------------------------------------------------------------------------
@@ -428,9 +428,9 @@ def _sobre(cor: str, fundo: str, alfa: int) -> QColor:
 def test_cada_situacao_tem_o_ladrilho_do_seu_papel_de_cor(painel, fila, desktop_app, tmp_path, modo, nome):
     aplicar_tema(desktop_app, modo, nome)
     cores = theme.papeis(modo, nome)
-    esperado = {"baixando": _sobre(cores["accent"], cores["raised"], 38),
-                "concluida": _sobre(cores["ok"], cores["raised"], 38),
-                "falhou": _sobre(cores["err"], cores["raised"], 38),
+    esperado = {"baixando": _sobre(cores["accent"], cores["card"], 38),
+                "concluida": _sobre(cores["ok"], cores["card"], 38),
+                "falhou": _sobre(cores["err"], cores["card"], 38),
                 "na fila": QColor(cores["raised2"]), "cancelada": QColor(cores["raised2"])}
     estados = _estados(tmp_path)
     ordem = list(esperado)
@@ -438,7 +438,80 @@ def test_cada_situacao_tem_o_ladrilho_do_seu_papel_de_cor(painel, fila, desktop_
     for linha, estado in enumerate(ordem):
         imagem, _ = _pintado(painel, desktop_app, linha)
         # Três pixels para dentro da borda esquerda do ladrilho, longe do ícone e do canto arredondado.
-        obtido = imagem.pixelColor(queue_cards._PAD + 3, queue_cards._PAD + queue_cards._TILE // 2)
+        meio = queue_cards._PAD + queue_cards._TILE // 2
+        obtido = imagem.pixelColor(queue_cards._PAD + 3, meio)
         alvo = esperado[estado]
+        if estado == "na fila":
+            # A tarefa que espera é pintada a 72% (o protótipo a esmaece): o ladrilho é o papel a 72% sobre o corpo do
+            # cartão, que por sua vez já está a 72% sobre a lista.
+            alvo = _sobre(cores["raised2"], imagem.pixelColor(queue_cards._PAD // 2, meio).name(), 184)
         assert max(abs(obtido.red() - alvo.red()), abs(obtido.green() - alvo.green()),
                    abs(obtido.blue() - alvo.blue())) <= 2, (estado, obtido.name(), alvo.name())
+
+
+# -- fidelidade ao protótipo: cabeçalho, plano do cartão, espaçamento e botões do pé ----------------------------------
+
+def _centro_y(painel, widget) -> int:
+    return widget.mapTo(painel, widget.rect().center()).y()
+
+
+def test_os_selos_ficam_na_linha_do_titulo_quando_cabem_e_descem_quando_nao(painel, fila, desktop_app):
+    aplicar_tema(desktop_app, "dark", "grafite")
+    _adicionar(fila, desktop_app, _tarefa("a", JobStatus.RUNNING, progress=Progress(phase="Baixando", percent=10)),
+               _tarefa("b", JobStatus.PENDING))
+    # Dois selos (ativas e na fila) cabem ao lado do título.
+    assert abs(_centro_y(painel, painel._chip_row) - _centro_y(painel, painel._title)) <= 6
+    # Com os quatro à vista não cabem nos 344 px: a linha desce.
+    _adicionar(fila, desktop_app, _tarefa("c", JobStatus.FAILED, error="x"), _tarefa("d", JobStatus.CANCELLED))
+    assert _centro_y(painel, painel._chip_row) > _centro_y(painel, painel._title) + 12
+    # E sobem de novo quando os encerrados saem.
+    fila.remove_finished()
+    painel._sync_state()
+    for _ in range(3):
+        desktop_app.processEvents()
+    assert abs(_centro_y(painel, painel._chip_row) - _centro_y(painel, painel._title)) <= 6
+
+
+def test_o_selo_tem_22_px_e_nao_estica_com_o_cabecalho(painel, fila, desktop_app):
+    aplicar_tema(desktop_app, "dark", "grafite")
+    _adicionar(fila, desktop_app, _tarefa("a", JobStatus.RUNNING, progress=Progress(phase="Baixando", percent=10)))
+    visiveis = [chip for chip in painel._chips.values() if chip.isVisible()]
+    assert visiveis and {chip.height() for chip in visiveis} == {22}
+
+
+def test_o_cartao_e_do_plano_do_cartao_e_a_distancia_entre_cartoes_e_12(painel, fila, desktop_app):
+    aplicar_tema(desktop_app, "dark", "grafite")
+    cores = theme.papeis("dark", "grafite")
+    a, b = _tarefa("a", JobStatus.DONE), _tarefa("b", JobStatus.DONE)
+    _adicionar(fila, desktop_app, a, b)
+    imagem, retangulo = _pintado(painel, desktop_app, 0)
+    assert imagem.pixelColor(queue_cards._PAD // 2, queue_cards._PAD + queue_cards._TILE // 2).name().lower() == cores["card"].lower()
+    seguinte = painel._list.visualRect(painel._list.model().index(1, 0))
+    altura = medir(a, painel._list.delegate.largura(), painel._list.font()).altura
+    assert seguinte.top() - retangulo.top() == altura + 12 == altura + queue_cards.ENTRE_CARTOES
+
+
+def test_o_cartao_que_espera_e_mais_discreto_e_selecionado_volta_a_cor_inteira(painel, fila, desktop_app):
+    aplicar_tema(desktop_app, "dark", "grafite")
+    _adicionar(fila, desktop_app, _tarefa("a", JobStatus.PENDING), _tarefa("b", JobStatus.RUNNING, progress=Progress(phase="Baixando", percent=5)))
+    espera, _ = _pintado(painel, desktop_app, 0)
+    ativo, _ = _pintado(painel, desktop_app, 1)
+    titulo_y = queue_cards._PAD + 8
+    brilho = lambda imagem: max(imagem.pixelColor(x, titulo_y).lightness() for x in range(queue_cards._PAD + queue_cards._TILE + 14, 140))
+    assert brilho(espera) < brilho(ativo)
+    painel._list.selectionModel().select(painel._list.model().index(0, 0), QItemSelectionModel.SelectionFlag.ClearAndSelect)
+    selecionada, _ = _pintado(painel, desktop_app, 0)
+    assert brilho(selecionada) >= brilho(ativo) - 2
+
+
+def test_os_botoes_do_pe_tem_36_px_e_o_de_limpar_nao_tem_fundo(painel, fila, desktop_app):
+    aplicar_tema(desktop_app, "dark", "grafite")
+    cores = theme.papeis("dark", "grafite")
+    _adicionar(fila, desktop_app, _tarefa("a", JobStatus.RUNNING, progress=Progress(phase="Baixando", percent=10)),
+               _tarefa("b", JobStatus.DONE))
+    assert painel._cancel_all.height() == painel._clear.height() == 36
+    quadro = painel.grab().toImage()
+    ponto = lambda botao: botao.mapTo(painel, QPoint(botao.width() // 2, 3))
+    cor = lambda botao: quadro.pixelColor(ponto(botao)).name().lower()
+    assert cor(painel._cancel_all) == cores["raised"].lower()
+    assert cor(painel._clear) == cores["panel"].lower()
