@@ -15,14 +15,13 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, QSize, Qt, QThreadPool, Signal, Slot
+from PySide6.QtCore import QRect, QRectF, QSize, Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -58,11 +57,11 @@ from videomanager.application.jobs.models import Job
 from videomanager.domain.selection import AUDIO_BITRATES
 from videomanager.domain.selection import LOSSLESS_AUDIO
 from videomanager.application.preferences import Preferences as Settings
-from videomanager.presentation.qt import strings, theme
+from videomanager.presentation.qt import icons, strings, theme
 from videomanager.presentation.qt.panels import convert_rows
-from videomanager.presentation.qt.panels.segmented import SegmentButton
-from videomanager.presentation.qt.i18n import align_label_column, bind, on_language_change, retext_items
-from videomanager.presentation.qt.theme import FIELD_WIDTH
+from videomanager.presentation.qt.panels.fields import captioned, make_grid
+from videomanager.presentation.qt.panels.segmented import SegmentButton, segmented
+from videomanager.presentation.qt.i18n import bind, on_language_change, retext_items
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 from videomanager.presentation.qt.tasks import WorkerRunner
 
@@ -80,10 +79,13 @@ def _codec_label(value: str) -> str | None:
     return strings.CONVERT_COPY_CODEC if value == "copy" else None
 
 
-# Altura mínima da lista de arquivos: cabem quatro linhas, e ela cresce com o
-# espaço que sobrar. O padrão do Qt para áreas de rolagem (192 px) é um palpite
-# fixo, sem relação com esta lista, e sozinho já estourava a altura da aba.
+# Altura da lista de arquivos vazia (o convite tracejado) e quantas linhas ela mostra antes de rolar. A lista tem a altura
+# dos arquivos que tem — o protótipo não deixa um vão em branco entre ela e o cartão de baixo —, e o padrão do Qt para áreas de
+# rolagem (192 px) é um palpite fixo, sem relação com esta lista.
 _LIST_MIN_HEIGHT = 120
+_LIST_MAX_ROWS = 6
+# O espaço entre os blocos da aba, o mesmo da aba Download.
+_SPACING = 18
 
 
 class _DropList(QListWidget):
@@ -174,6 +176,51 @@ class _DropList(QListWidget):
         super().keyPressEvent(event)
 
 
+class _DropHint(QPushButton):
+    """"Solte mais arquivos aqui ou escolha no computador", numa moldura tracejada sob a lista de arquivos.
+
+    É um botão de verdade (Tab, Enter e Espaço abrem o seletor, como o "Adicionar arquivos"); soltar arquivos nele é
+    soltar na aba, que já aceita o arraste em qualquer ponto. Só aparece com arquivos na lista: vazia, é a própria lista
+    que desenha o convite.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setProperty("role", "plain")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(44)
+        bind(self, "setAccessibleName", lambda: f"{strings.CONVERT_DROP_MORE} {strings.CONVERT_DROP_BROWSE}")
+        theme.on_theme_change(self._retheme)
+
+    def _retheme(self) -> None:
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        cores = theme.papeis(*theme.atual())
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        quente = self.underMouse() or self.hasFocus()
+        area = QRectF(self.rect()).adjusted(0.6, 0.6, -0.6, -0.6)
+        painter.setPen(QPen(QColor(cores["accent"] if quente else cores["t3"]), 1.2, Qt.PenStyle.DashLine))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(area, 10, 10)
+        fonte = painter.font()
+        metricas = painter.fontMetrics()
+        resto, link = strings.CONVERT_DROP_MORE, strings.CONVERT_DROP_BROWSE
+        icone = 16
+        largura = icone + 8 + metricas.horizontalAdvance(resto) + 4 + metricas.horizontalAdvance(link)
+        x = int((self.width() - largura) / 2)
+        icons.nav_download(cores["t2"], icone).paint(painter, QRect(x, (self.height() - icone) // 2, icone, icone))
+        x += icone + 8
+        base = (self.height() + metricas.ascent() - metricas.descent()) // 2
+        painter.setFont(fonte)
+        painter.setPen(QColor(cores["t2"]))
+        painter.drawText(x, base, resto)
+        painter.setPen(QColor(cores["accent"]))
+        painter.drawText(x + metricas.horizontalAdvance(resto) + 4, base, link)
+        painter.end()
+
+
 class ConvertPanel(QWidget):
     """Escolhe arquivos e o alvo, e entrega as tarefas prontas para a fila."""
 
@@ -198,7 +245,6 @@ class ConvertPanel(QWidget):
         self._processing = processing
         self._settings = settings
         self._media: list[LocalMedia] = []
-        self._labels: list[QLabel] = []
         self._inspection_token = 0
         self._inspection_worker = None
         self._inspection_paths: list[Path] = []
@@ -217,11 +263,11 @@ class ConvertPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(_SPACING)
 
         # Criados antes dos controles de alvo: a montagem deles já chama
         # _update_plan, que mexe nos dois.
-        self._start = bind(QPushButton(), "setText", lambda: strings.CONVERT_START)
+        self._start = bind(QPushButton(), "setText", self._start_text)
         self._start.setProperty("role", "primary")
         self._start.clicked.connect(self._start_conversion)
         self._plan = QLabel("")
@@ -231,20 +277,30 @@ class ConvertPanel(QWidget):
         # O resumo "O que vai acontecer" é um destaque: moldura própria, com o título em cima.
         self._plan_box = QFrame()
         self._plan_box.setProperty("role", "callout")
-        caixa = QVBoxLayout(self._plan_box)
-        caixa.setContentsMargins(14, 10, 14, 12)
-        caixa.setSpacing(4)
+        # O ícone de informação à esquerda e, ao lado dele, o título pequeno e o texto do plano.
+        linha_plano = QHBoxLayout(self._plan_box)
+        linha_plano.setContentsMargins(16, 12, 16, 12)
+        linha_plano.setSpacing(12)
+        self._plan_icon = QLabel()
+        self._plan_icon.setProperty("role", "plain")
+        linha_plano.addWidget(self._plan_icon, 0, Qt.AlignmentFlag.AlignVCenter)
+        caixa = QVBoxLayout()
+        caixa.setSpacing(2)
         titulo = bind(QLabel(), "setText", lambda: strings.CONVERT_PLAN_TITLE.upper())
         titulo.setProperty("role", "callout-title")
         caixa.addWidget(titulo)
+        self._plan.setProperty("role", "plan")
         caixa.addWidget(self._plan)
+        linha_plano.addLayout(caixa, 1)
         self._plan_box.setVisible(False)
 
-        layout.addWidget(self._build_files_group(), 1)
+        layout.addWidget(self._build_files_group())
         layout.addWidget(self._build_target_group())
-        self._align_label_column()
+        layout.addStretch(1)
         layout.addWidget(self._build_footer())
 
+        self._retheme()
+        theme.on_theme_change(self._retheme)
         self._update_plan()
         on_language_change(self._retranslate)
 
@@ -253,7 +309,6 @@ class ConvertPanel(QWidget):
         retext_items(self._resize, _resize_label)
         retext_items(self._compress_codec, strings.EXPORT_VIDEO_CODECS.get)
         self._update_files_chip()
-        self._align_label_column()
         # O plano, o tamanho estimado e a descrição de cada arquivo levam texto
         # e números do idioma.
         self._update_plan()
@@ -266,8 +321,8 @@ class ConvertPanel(QWidget):
         group = QFrame()
         group.setProperty("role", "section")
         box = QVBoxLayout(group)
-        box.setContentsMargins(14, 12, 14, 14)
-        box.setSpacing(10)
+        box.setContentsMargins(18, 16, 18, 18)
+        box.setSpacing(12)
 
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -277,18 +332,24 @@ class ConvertPanel(QWidget):
         self._files_chip = QLabel()
         self._files_chip.setProperty("role", "chip")
         self._files_chip.setVisible(False)
-        row.addWidget(self._files_chip)
+        row.addWidget(self._files_chip, 0, Qt.AlignmentFlag.AlignVCenter)
         row.addStretch(1)
-        pick = bind(QPushButton(), "setText", lambda: strings.CONVERT_PICK)
-        bind(pick, "setToolTip", lambda: strings.CONVERT_PICK_TIP.format(label=strings.CONVERT_PICK))
-        pick.clicked.connect(self._choose_files)
-        row.addWidget(pick)
+        self._pick = bind(QPushButton(), "setText", lambda: strings.CONVERT_PICK)
+        self._pick.setProperty("role", "btn")
+        bind(self._pick, "setToolTip", lambda: strings.CONVERT_PICK_TIP.format(label=strings.CONVERT_PICK))
+        self._pick.clicked.connect(self._choose_files)
+        row.addWidget(self._pick)
+        # Os dois gestos de limpar são discretos (sem fundo). "Remover selecionados" só aparece quando há seleção: o
+        # × de cada linha e a tecla Delete fazem o mesmo, e um botão sempre apagado era ruído.
         self._remove = bind(QPushButton(), "setText", lambda: strings.CONVERT_REMOVE)
+        self._remove.setProperty("role", "ghost")
         bind(self._remove, "setToolTip", lambda: strings.CONVERT_REMOVE_TIP.format(label=strings.CONVERT_REMOVE))
         self._remove.clicked.connect(self._remove_selected)
         self._remove.setEnabled(False)
+        self._remove.setVisible(False)
         row.addWidget(self._remove)
         self._clear_btn = bind(QPushButton(), "setText", lambda: strings.CONVERT_CLEAR)
+        self._clear_btn.setProperty("role", "ghost")
         self._clear_btn.clicked.connect(self.clear_files)
         self._clear_btn.setEnabled(False)
         row.addWidget(self._clear_btn)
@@ -296,21 +357,41 @@ class ConvertPanel(QWidget):
 
         self._list = _DropList()
         bind(self._list, "setAccessibleName", lambda: strings.CONVERT_FILES_GROUP)
-        self._list.setMinimumHeight(_LIST_MIN_HEIGHT)
         self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self._list.delete_requested.connect(self._remove_selected)
         self._list.remove_requested.connect(self._remove_row)
-        box.addWidget(self._list, 1)
+        box.addWidget(self._list)
+        self._fit_list()
+        # A altura acompanha os arquivos: entra ou sai linha, e a lista refaz a conta.
+        for sinal in (self._list.model().rowsInserted, self._list.model().rowsRemoved, self._list.model().modelReset):
+            sinal.connect(self._fit_list)
+
+        self._drop_hint = _DropHint()
+        self._drop_hint.clicked.connect(self._choose_files)
+        # Vazia, é a própria lista que desenha o convite: o de baixo só entra com arquivos (``_fit_list``).
+        self._drop_hint.setVisible(False)
+        box.addWidget(self._drop_hint)
 
         self._list.itemSelectionChanged.connect(self._update_remove_button)
         return group
+
+    def _fit_list(self, *_) -> None:
+        """A lista tem a altura das linhas que tem (até ``_LIST_MAX_ROWS``, depois rola); vazia, a do convite."""
+        linhas = self._list.count()
+        if linhas == 0:
+            self._list.setFixedHeight(_LIST_MIN_HEIGHT)
+        else:
+            passo = convert_rows.ALTURA + convert_rows.ENTRE_LINHAS
+            self._list.setFixedHeight(min(linhas, _LIST_MAX_ROWS) * passo)
+        if hasattr(self, "_drop_hint"):
+            self._drop_hint.setVisible(linhas > 0)
 
     def _build_footer(self) -> QWidget:
         """Onde salvar, quanto deve sair e a ação."""
         footer = QFrame()
         footer.setProperty("role", "footer")
         linha = QHBoxLayout(footer)
-        linha.setContentsMargins(16, 12, 12, 12)
+        linha.setContentsMargins(20, 12, 12, 12)
         linha.setSpacing(16)
         self._same_folder = bind(QCheckBox(), "setText", lambda: strings.CONVERT_SAME_FOLDER)
         self._same_folder.setChecked(True)
@@ -318,14 +399,16 @@ class ConvertPanel(QWidget):
         linha.addStretch(1)
         linha.addWidget(self._estimate_label, 0, Qt.AlignmentFlag.AlignBottom)
         estimated = bind(QLabel(), "setText", lambda: strings.CONVERT_ESTIMATED)
-        estimated.setProperty("role", "dim")
+        estimated.setProperty("role", "hint")
         linha.addWidget(estimated, 0, Qt.AlignmentFlag.AlignBottom)
         self._start.setProperty("emphasis", "large")
         linha.addWidget(self._start)
         return footer
 
     def _update_remove_button(self) -> None:
-        self._remove.setEnabled(bool(self._list.selectedItems()))
+        selecionados = bool(self._list.selectedItems())
+        self._remove.setEnabled(selecionados)
+        self._remove.setVisible(selecionados)
         if hasattr(self, "_clear_btn"):
             self._clear_btn.setEnabled(bool(self._media) or self._inspection_worker is not None)
             self._update_files_chip()
@@ -343,42 +426,38 @@ class ConvertPanel(QWidget):
         group = QFrame()
         group.setProperty("role", "section")
         outer = QVBoxLayout(group)
-        outer.setContentsMargins(14, 12, 14, 14)
-        outer.setSpacing(10)
+        outer.setContentsMargins(18, 16, 18, 18)
+        outer.setSpacing(12)
         title = bind(QLabel(), "setText", lambda: strings.CONVERT_TARGET_GROUP)
         title.setProperty("role", "section-title")
         outer.addWidget(title)
 
-        # Os três modos num controle segmentado. Continuam sendo três botões de rádio irmãos (o mesmo grupo
+        # Os três modos num controle segmentado, com ícone. Continuam sendo três botões de rádio irmãos (o mesmo grupo
         # exclusivo, os mesmos sinais): muda o desenho, não o comportamento nem o teclado (setas trocam de modo).
-        segmentos = QFrame()
-        segmentos.setProperty("role", "segments")
-        modes = QHBoxLayout(segmentos)
-        modes.setContentsMargins(4, 4, 4, 4)
-        modes.setSpacing(4)
-        self._to_audio = bind(SegmentButton(), "setText", lambda: strings.CONVERT_TO_AUDIO)
+        self._to_audio = bind(SegmentButton(glyph=icons.music), "setText", lambda: strings.CONVERT_TO_AUDIO)
         self._to_audio.setChecked(True)
         self._to_audio.toggled.connect(self._on_mode_changed)
-        self._to_video = bind(SegmentButton(), "setText", lambda: strings.CONVERT_TO_VIDEO)
-        self._to_compress = bind(SegmentButton(), "setText", lambda: strings.CONVERT_TO_COMPRESS)
+        self._to_video = bind(SegmentButton(glyph=icons.nav_edit), "setText", lambda: strings.CONVERT_TO_VIDEO)
+        self._to_compress = bind(SegmentButton(glyph=icons.compress), "setText", lambda: strings.CONVERT_TO_COMPRESS)
         # O rádio de áudio não avisa a troca entre vídeo e compressão.
         self._to_compress.toggled.connect(self._on_mode_changed)
-        for botao in (self._to_audio, self._to_video, self._to_compress):
-            modes.addWidget(botao)
+        segmentos = segmented([self._to_audio, self._to_video, self._to_compress])
+        bind(segmentos, "setAccessibleName", lambda: strings.CONVERT_TARGET_GROUP)
         linha_modos = QHBoxLayout()
         linha_modos.addWidget(segmentos)
         linha_modos.addStretch(1)
         outer.addLayout(linha_modos)
         outer.addWidget(self._build_level_table())
 
-        form = QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setHorizontalSpacing(10)
-        form.setVerticalSpacing(6)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
-        form.setLabelAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        # Campos em grade, com a legenda em cima. Cada modo usa as mesmas colunas; os blocos dos outros modos ficam
+        # escondidos (``_set_row_visible``) e não ocupam lugar.
+        self._blocks: dict[QWidget, QWidget] = {}
+        grade = make_grid()
+
+        def campo(legenda, widget: QWidget, linha: int, coluna: int) -> None:
+            bloco = captioned(legenda, widget)
+            self._blocks[widget] = bloco
+            grade.addWidget(bloco, linha, coluna)
 
         self._audio_codec = QComboBox()
         for codec in AUDIO_TARGETS:
@@ -386,7 +465,7 @@ class ConvertPanel(QWidget):
         index = self._audio_codec.findData(self._settings.default_audio_format)
         self._audio_codec.setCurrentIndex(max(0, index))
         self._audio_codec.currentIndexChanged.connect(self._update_plan)
-        self._add_row(form, lambda: strings.LABEL_AUDIO_FORMAT, self._audio_codec)
+        campo(lambda: strings.LABEL_AUDIO_FORMAT, self._audio_codec, 0, 0)
 
         self._audio_bitrate = QComboBox()
         for value in AUDIO_BITRATES:
@@ -394,18 +473,18 @@ class ConvertPanel(QWidget):
         index = self._audio_bitrate.findData(self._settings.default_audio_quality)
         self._audio_bitrate.setCurrentIndex(max(0, index))
         self._audio_bitrate.currentIndexChanged.connect(self._update_plan)
-        self._add_row(form, lambda: strings.LABEL_AUDIO_QUALITY, self._audio_bitrate)
+        campo(lambda: strings.LABEL_AUDIO_QUALITY, self._audio_bitrate, 0, 1)
 
         self._container = QComboBox()
         for value in VIDEO_CONTAINERS:
             self._container.addItem(f".{value}", value)
-        self._add_row(form, lambda: strings.LABEL_CONTAINER, self._container)
+        campo(lambda: strings.LABEL_CONTAINER, self._container, 0, 0)
 
         self._video_codec = QComboBox()
         for value, label in _VIDEO_CODECS:
             self._video_codec.addItem(label or _codec_label(value), value)
         self._video_codec.currentIndexChanged.connect(self._update_plan)
-        self._add_row(form, lambda: strings.LABEL_CODEC, self._video_codec)
+        campo(lambda: strings.LABEL_CODEC, self._video_codec, 0, 1)
         # Conectado depois de o seletor de codec existir: a troca de container
         # decide quais codecs continuam oferecidos.
         self._container.currentIndexChanged.connect(self._on_container_changed)
@@ -415,21 +494,16 @@ class ConvertPanel(QWidget):
         for value in _RESIZE_OPTIONS:
             self._resize.addItem(_resize_label(value), value)
         self._resize.currentIndexChanged.connect(self._update_plan)
-        self._add_row(form, lambda: strings.CONVERT_RESIZE, self._resize)
+        campo(lambda: strings.CONVERT_RESIZE, self._resize, 0, 2)
 
         self._compress_codec = QComboBox()
         for value in COMPRESS_CODECS:
             self._compress_codec.addItem(strings.EXPORT_VIDEO_CODECS[value], value)
         self._compress_codec.currentIndexChanged.connect(self._on_compress_codec_changed)
-        self._add_row(form, lambda: strings.LABEL_CODEC, self._compress_codec)
+        campo(lambda: strings.LABEL_CODEC, self._compress_codec, 0, 0)
 
-        for combo in (self._audio_codec, self._audio_bitrate, self._container,
-                      self._video_codec, self._resize, self._compress_codec):
-            combo.setFixedWidth(FIELD_WIDTH)
-
-        outer.addLayout(form)
+        outer.addLayout(grade)
         outer.addWidget(self._plan_box)
-        self._form = form
         self._on_mode_changed()
         return group
 
@@ -504,20 +578,6 @@ class ConvertPanel(QWidget):
         if not container_accepts_video(container, current):
             self._video_codec.setCurrentIndex(self._video_codec.findData("copy"))
 
-    def _add_row(self, form: QFormLayout, text: Callable[[], str], field: QWidget) -> QLabel:
-        label = bind(QLabel(), "setText", text)
-        self._labels.append(label)
-        form.addRow(label, field)
-        return label
-
-    def _align_label_column(self) -> None:
-        """Uma coluna de rótulos só, como na aba de download.
-
-        As linhas de áudio e as de vídeo se revezam conforme o modo; sem largura
-        comum, trocar de modo deslocaria os campos de lado.
-        """
-        align_label_column(self._labels)
-
     def _on_mode_changed(self) -> None:
         audio = self._to_audio.isChecked()
         compress = self._to_compress.isChecked()
@@ -532,10 +592,23 @@ class ConvertPanel(QWidget):
         self._update_plan()
 
     def _set_row_visible(self, widget: QWidget, visible: bool) -> None:
+        """Mostra ou esconde o campo e a legenda dele (o bloco inteiro)."""
         widget.setVisible(visible)
-        label = self._form.labelForField(widget)
-        if label is not None:
-            label.setVisible(visible)
+        self._blocks[widget].setVisible(visible)
+
+    def _start_text(self) -> str:
+        """"Converter" sem arquivos e "Converter 3 arquivos" com eles: o botão diz o que vai ser feito."""
+        count = len(self._media)
+        if not count:
+            return strings.CONVERT_START
+        singular, plural = strings.CONVERT_START_COUNT
+        return (singular if count == 1 else plural).format(count=count)
+
+    def _retheme(self) -> None:
+        cores = theme.papeis(*theme.atual())
+        self._pick.setIcon(icons.plus(cores["t2"], 18))
+        self._start.setIcon(icons.sync(cores["on_fill"], 18))
+        self._plan_icon.setPixmap(icons.info(cores["accent"], 20).pixmap(20, 20))
 
     # ------------------------------------------------------------------
     # Arquivos
@@ -796,6 +869,7 @@ class ConvertPanel(QWidget):
             self._audio_bitrate.setEnabled(codec not in LOSSLESS_AUDIO)
 
         self._start.setEnabled(bool(self._media) and self._inspection_worker is None)
+        bind(self._start, "setText", self._start_text)
         if self._inspection_worker is not None:
             self._plan.setText(strings.CONVERT_INSPECTING.format(count=len(self._inspection_paths)))
             self._set_plan_visible(True)
