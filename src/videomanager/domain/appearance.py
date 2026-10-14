@@ -11,6 +11,6 @@ from __future__ import annotations
 # Modo do tema, na ordem em que aparece na tela.
 THEMES = ("dark", "light")
 
-# Paletas, na ordem em que aparecem na tela. ``atual`` são as cores de antes da renovação visual.
+# Paletas, na ordem em que aparecem na tela. ``atual`` são as cores de antes da renovação visual, e ``grafite`` (a do protótipo) é a padrão.
 PALETTES = ("atual", "grafite", "estudio", "mare", "aurora", "cinema")
-DEFAULT_PALETTE = "atual"
+DEFAULT_PALETTE = "grafite"
