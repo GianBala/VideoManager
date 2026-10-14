@@ -2066,6 +2066,7 @@ class EditPanel(QWidget):
         self._timeline.menu_requested.connect(self._show_menu)
         self._timeline.media_dropped.connect(self._on_media_dropped)
         self._timeline.view_changed.connect(self._on_view_changed)
+        self._timeline.zoom_range_changed.connect(self._sync_zoom_slider)
         area_row.addWidget(self._timeline, 1)
         self._timeline_vbar = QScrollBar(Qt.Orientation.Vertical)
         self._timeline_vbar.setVisible(False)

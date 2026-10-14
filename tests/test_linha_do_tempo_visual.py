@@ -318,3 +318,55 @@ def test_o_controle_de_zoom_so_soma_o_proprio_minimo_a_barra_e_o_vao_ate_o_zoom_
     assentar(com)
     assert barra.width() < 110 and vao() < 72
     assert x(painel._fit_button) + painel._fit_button.width() <= painel.width()
+
+
+def test_arrastar_a_bolinha_do_controle_com_o_ponteiro_muda_a_janela_e_o_cursor_nao_sai_do_lugar(
+        tema_do_app, painel_de_edicao, blocos_de_edicao):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QStyle, QStyleOptionSlider
+
+    painel = painel_de_edicao
+    painel.resize(1700, 1000)
+    painel.show()
+    for _ in range(5):
+        QApplication.processEvents()
+    barra, linha = painel._zoom_slider, painel._timeline
+    painel._seek_to(2.0)
+    QApplication.processEvents()
+    antes = linha._x_of(2.0)
+    span = linha.view_span
+
+    def bolinha() -> QPoint:
+        opcao = QStyleOptionSlider()
+        barra.initStyleOption(opcao)
+        return barra.style().subControlRect(QStyle.ComplexControl.CC_Slider, opcao, QStyle.SubControl.SC_SliderHandle, barra).center()
+
+    inicio = bolinha()
+    QTest.mousePress(barra, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, inicio)
+    for x in range(inicio.x(), barra.width(), 6):
+        QTest.mouseMove(barra, QPoint(x, inicio.y()))
+        QApplication.processEvents()
+    QTest.mouseRelease(barra, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(barra.width(), inicio.y()))
+    QApplication.processEvents()
+    assert barra.value() > 900 and linha.view_span < span / 2, (barra.value(), linha.view_span, span)
+    assert abs(linha._x_of(2.0) - antes) < 2.0
+
+
+def test_o_controle_de_zoom_acompanha_a_edicao_que_encurta_ou_alonga_sem_mexer_na_janela(
+        tema_do_app, painel_de_edicao, blocos_de_edicao):
+    """A fração é medida contra a maior janela possível, que sai da duração: apagar ou desfazer um bloco muda onde a mesma
+    janela está no controle, e só ``view_changed`` não avisava (o controle ficava em 0 com a janela em 30 s de 60)."""
+    painel = painel_de_edicao
+    painel.resize(1700, 1000)
+    painel.show()
+    for _ in range(5):
+        QApplication.processEvents()
+    barra, linha = painel._zoom_slider, painel._timeline
+    assert barra.value() == round(linha.zoom_fraction() * 1000)
+    janela = (linha._view_start, linha._view_end)
+    linha.set_project(replace(painel._project, tracks=()))
+    assert (linha._view_start, linha._view_end) == janela
+    assert barra.value() == round(linha.zoom_fraction() * 1000)
+    linha.set_project(painel._project)
+    assert barra.value() == round(linha.zoom_fraction() * 1000)
