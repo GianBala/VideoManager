@@ -2363,18 +2363,20 @@ class _ClipPropertiesWidget(QWidget):
 class _MediaCardDelegate(QStyledItemDelegate):
     """Uma mídia do acervo: a miniatura de cantos arredondados com a duração no canto, e o nome embaixo.
 
-    Duas colunas dividem a largura da lista, com 10 px entre elas: a miniatura da esquerda encosta na borda esquerda, a da
-    direita na direita, e a proporção é 16:9. A seleção é um anel do acento em volta da miniatura, e não uma faixa sobre o
-    nome.
+    Duas colunas dividem a largura da lista, com 10 px entre elas, e a proporção é 16:9. As miniaturas ficam a ``MARGEM``
+    das bordas da lista: a seleção é um anel do acento que passa 2 px para fora da miniatura, e o viewport recorta o que sai
+    dele — com as miniaturas coladas nas bordas, o anel da coluna da esquerda e o da direita saíam cortados. A seleção não é
+    uma faixa sobre o nome.
     """
 
     ENTRE = 10
+    MARGEM = 2  # o quanto o anel de 2 px passa da miniatura
     NOME = 28  # a altura do nome, mais o respiro entre ele e a miniatura de baixo
 
     @classmethod
     def miniatura(cls, largura_da_lista: int) -> QSize:
         """O tamanho da miniatura numa lista de ``largura_da_lista`` px."""
-        largura = max(60, (largura_da_lista - cls.ENTRE) // 2)
+        largura = max(60, (largura_da_lista - 2 * cls.MARGEM - cls.ENTRE) // 2)
         return QSize(largura, round(largura * 9 / 16))
 
     @classmethod
@@ -2392,10 +2394,11 @@ class _MediaCardDelegate(QStyledItemDelegate):
         caixa = option.rect
         largura_da_lista = option.widget.viewport().width() if option.widget is not None else 2 * caixa.width() + 2
         tamanho = self.miniatura(largura_da_lista)
-        # Coluna da esquerda encostada à esquerda, a da direita à direita (nos pixels que sobram depois das duas células):
-        # o vão entre as duas é o ``ENTRE``.
+        # Coluna da esquerda a uma ``MARGEM`` da borda esquerda, a da direita da direita (nos pixels que sobram depois das
+        # duas células): o vão entre as duas é o ``ENTRE``.
         sobra = largura_da_lista - 2 * caixa.width()
-        esquerda = caixa.x() if index.row() % 2 == 0 else caixa.right() + 1 + sobra - tamanho.width()
+        esquerda = (caixa.x() + self.MARGEM if index.row() % 2 == 0
+                    else caixa.right() + 1 + sobra - self.MARGEM - tamanho.width())
         miniatura = QRectF(esquerda, caixa.y() + 3, tamanho.width(), tamanho.height())
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
