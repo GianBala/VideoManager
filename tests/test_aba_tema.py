@@ -103,14 +103,17 @@ def test_os_cartoes_tem_altura_que_cabe_miniatura_nome_e_linha(abrir):
 
 
 # ---------------------------------------------------------------- a preferência em disco
-def test_palette_tem_padrao_atual_e_vai_para_o_arquivo():
-    assert Preferences().palette == DEFAULT_PALETTE == "atual"
+def test_palette_tem_padrao_grafite_e_vai_para_o_arquivo():
+    # A paleta do protótipo é a de quem abre o aplicativo pela primeira vez; "Atual" segue na aba Tema, para quem prefere as
+    # cores de antes da renovação.
+    assert Preferences().palette == DEFAULT_PALETTE == "grafite"
     assert asdict(Preferences(palette="estudio"))["palette"] == "estudio"
 
 
-def test_arquivo_sem_a_chave_abre_na_paleta_atual():
-    # Quem atualiza o aplicativo tem um settings.json sem ``palette``: a aparência não muda.
-    assert Preferences.from_dict({"theme": "light"}).palette == "atual"
+def test_arquivo_sem_a_chave_abre_na_paleta_padrao():
+    # Quem atualiza o aplicativo tem um settings.json sem ``palette`` e recebe a aparência renovada, na paleta do protótipo; as
+    # cores de antes estão em Configurações → Tema → Atual.
+    assert Preferences.from_dict({"theme": "light"}).palette == "grafite"
 
 
 @pytest.mark.parametrize("nome", PALETTES)
@@ -120,7 +123,7 @@ def test_toda_paleta_do_dominio_e_aceita_na_leitura(nome):
 
 @pytest.mark.parametrize("valor", ["nao-existe", "", 3, None, ["aurora"]])
 def test_paleta_desconhecida_ou_de_tipo_errado_volta_ao_padrao(valor):
-    assert Preferences.from_dict({"palette": valor}).palette == "atual"
+    assert Preferences.from_dict({"palette": valor}).palette == "grafite"
 
 
 def test_versao_antiga_ignora_a_chave_nova_sem_quebrar():
