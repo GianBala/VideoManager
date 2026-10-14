@@ -4678,6 +4678,12 @@ class EditPanel(QWidget):
         elif self._clock_started is not None:
             position = self._clock_position + now - self._clock_started
             if looping and self._loop_armed and end > 0 and position >= end - 1e-8:
+                if self._has_sound:
+                    # O som não está tocando, mas o projeto tem: o play partiu de onde já não havia som à
+                    # frente, ou a placa parou no meio. Trocar só a imagem deixava o som do começo mudo em
+                    # todas as voltas, até alguém pausar e dar play; reabrir tudo o devolve já nesta.
+                    self._loop_playback()
+                    return
                 # Sem som, o relógio é o do sistema: a volta acontece aqui.
                 position -= end
                 self._clock_position, self._clock_started = position, now
