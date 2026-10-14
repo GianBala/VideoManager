@@ -61,6 +61,7 @@ from videomanager.presentation.qt.i18n import apply_language, bind, on_language_
 from videomanager.presentation.qt.ffmpeg_setup import ensure_ffmpeg
 from videomanager.presentation.qt.panels.address_bar import AddressBar
 from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
+from videomanager.presentation.qt.panels.edit_panel import _EDITOR_MARGINS as EDITOR_MARGINS
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
 from videomanager.presentation.qt.panels.media_card import MediaCard
 from videomanager.presentation.qt.panels.metadata_panel import MetadataPanel
@@ -200,7 +201,7 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._wrap_tab(self._convert, page=True), strings.TAB_CONVERT)
         self._edit = EditPanel(self._settings, self._tools_for_convert, editor=self._editor_service, processing=self._processing, runtime=self._runtime)
         self._edit.jobs_ready.connect(self._submit_jobs)
-        self._tabs.addTab(self._wrap_tab(self._edit, horizontal=True), strings.TAB_EDIT)
+        self._tabs.addTab(self._wrap_tab(self._edit, horizontal=True, margins=EDITOR_MARGINS), strings.TAB_EDIT)
         # A aba nasce vazia e o painel entra na primeira visita: montado com a
         # janela, ele somava ~55 ms à abertura e ~6 ms a toda troca de idioma
         # (medido), para quem nunca abre a aba.

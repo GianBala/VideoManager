@@ -46,9 +46,9 @@ def test_catalogo_e_texto_preso_seguem_a_troca(pseudo):
 
 def test_origem_com_estado_volta_igual_no_idioma_novo(pseudo):
     contagem = 3
-    rotulo = idioma.bind(QLabel(), "setToolTip", lambda: strings.EDIT_MEDIA_COUNT.format(count=contagem))
+    rotulo = idioma.bind(QLabel(), "setToolTip", lambda: strings.CARD_SUBTITLES.format(count=contagem))
     idioma.apply_language(i18n.ENGLISH)
-    assert rotulo.toolTip() == "⟦3 mídia(s)⟧"
+    assert rotulo.toolTip() == "⟦3 legenda(s) disponível(is)⟧"
 
 
 def test_texto_escrito_depois_do_bind_nao_e_apagado(pseudo):
