@@ -165,6 +165,71 @@ def test_virada_do_loop_usa_a_imagem_pronta_sem_reabrir(monkeypatch) -> None:
         panel.shutdown()
 
 
+@pytest.mark.usefixtures("desktop_app")
+def test_volta_do_loop_reabre_o_som_que_nao_estava_tocando(monkeypatch) -> None:
+    """Tocar de um ponto sem som à frente deixava o loop mudo para sempre.
+
+    O play parte de 2 s, onde o bipe de 1,5 s da trilha de áudio já acabou: não há mixagem a abrir
+    (``audio_command`` devolve ``None``) e a prévia anda pelo relógio do sistema. Na volta, essa
+    ramificação só trocava a imagem — e o som do começo, que existe, nunca mais entrava, em volta
+    nenhuma, até alguém pausar e dar play. Com som no projeto, a volta reabre o fluxo inteiro."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from videomanager.application.capabilities import FFmpegTools
+    from videomanager.bootstrap import build_desktop_runtime, build_editor_service, build_processing_service
+    from videomanager.domain.project import Clip, MediaKind, MediaRef, Track, TrackKind
+    from videomanager.infrastructure.qt.workers.signals import PreviewSignals
+    from videomanager.infrastructure.storage.settings import Settings
+    from videomanager.presentation.qt.panels import edit_panel as module
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(AudioPreview, "available", property(lambda self: True))
+    tools = FFmpegTools(Path("/usr/bin/ffmpeg"), Path("/usr/bin/ffprobe"), "teste")
+    runtime = build_desktop_runtime(audio_enabled=False)
+    workers, abertos = [], []
+
+    def playback_worker(project, seconds, size, tools, token, *, fps, text_assets=None, autostart=True):
+        worker = SimpleNamespace(seconds=seconds, autostart=autostart, token=token, started=[], cancelled=[],
+                                 signals=PreviewSignals())
+        worker.start_playback = lambda **kwargs: worker.started.append(True)
+        worker.cancel = lambda: worker.cancelled.append(True)
+        workers.append(worker)
+        return worker
+
+    monkeypatch.setattr(runtime, "playback_worker", playback_worker)
+    # A mixagem a partir de 2 s é vazia; a placa não é aberta de verdade.
+    monkeypatch.setattr(runtime, "play_audio", lambda output, project, seconds, *a, **k: abertos.append(seconds))
+    monkeypatch.setattr(runtime, "queue_audio", lambda *a, **k: False)
+    panel = module.EditPanel(Settings(), ensure_tools=lambda: tools, editor=build_editor_service(),
+                             processing=build_processing_service(), runtime=runtime)
+    monkeypatch.setattr(panel._runner, "start", lambda *args: None)
+    now = [100.0]
+    monkeypatch.setattr(module, "playback_clock", lambda: now[0])
+    try:
+        video = MediaRef(Path("/m/v.mp4"), MediaKind.VIDEO, duration=4, width=320, height=180, fps=30)
+        bipe = MediaRef(Path("/m/bipe.mp3"), MediaKind.AUDIO, duration=1.5, has_audio=True, channels=2)
+        tracks = (Track(TrackKind.VIDEO, clips=(Clip(video, 0, 4),)), Track(TrackKind.AUDIO, clips=(Clip(bipe, 0, 1.5),)))
+        panel.install_project(replace(panel._project, tracks=tracks), None, [], {})
+        panel._loop.setChecked(True)
+        assert panel._has_sound
+        reopened = []
+        monkeypatch.setattr(panel, "_loop_playback", lambda: reopened.append(True))
+
+        panel._start_playback(2.0)
+        panel._on_playback_primed(workers[-1].token)  # primeiro quadro pronto: abre o som, que não toca
+        assert not panel._audio.playing
+
+        now[0] += 1.2  # 3,2 s: a imagem do começo é preparada
+        panel._on_tick()
+        assert not reopened
+
+        now[0] += 0.9  # 4,1 s: passou do fim
+        panel._on_tick()
+        assert reopened, "a volta com som no projeto reabre o fluxo, e não só a imagem"
+    finally:
+        panel.shutdown()
+
+
 @pytest.mark.ffmpeg
 def test_mixagem_real_sai_com_o_tamanho_exato_do_loop(tmp_path) -> None:
     import subprocess
