@@ -455,6 +455,14 @@ def folder(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+def screen(color: str, size: int = _NAV) -> QIcon:
+    """A tela do projeto: o monitor, só o contorno."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawRoundedRect(QRectF(4.5 * u, 6 * u, 15 * u, 10.5 * u), 2 * u, 2 * u)
+        p.drawLine(QPointF(9.5 * u, 19 * u), QPointF(14.5 * u, 19 * u))
+    return _nav(color, size, desenho)
+
+
 def image(color: str, size: int = _NAV) -> QIcon:
     """Imagem: a moldura com o sol e a montanha."""
     def desenho(p: QPainter, u: float) -> None:

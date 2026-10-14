@@ -359,7 +359,6 @@ EDIT_MEDIA_IN_USE_MSG = (
     "A mídia “{name}” está em uso em {count} bloco(s) na linha do tempo e não pode ser removida. "
     "Remova seus blocos das faixas primeiro."
 )
-EDIT_MEDIA_COUNT = "{count} mídia(s)"
 EDIT_IMPORT_BUTTON = "Importar"
 EDIT_CLEAR_UNUSED_BUTTON = "Limpar não usados"
 # Espécie da mídia na dica do acervo, pelo nome do tipo.

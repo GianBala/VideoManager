@@ -90,6 +90,8 @@ QFrame#mediaCard {{
     border: none;
     border-radius: 14px;
 }}
+QLabel[role="doc-title"] {{ font-size: 15px; font-weight: 600; }}
+QFrame[role="divider"] {{ background: {raised2}; border: none; }}
 QLabel[role="media-title"] {{ font-size: 19px; font-weight: 600; }}
 QLabel[role="media-meta"], QLabel[role="media-empty"] {{ font-size: 13px; color: {t2}; }}
 
@@ -97,6 +99,14 @@ QLabel[role="media-meta"], QLabel[role="media-empty"] {{ font-size: 13px; color:
    herda o fundo da janela e desenha um retângulo escuro por cima da superfície
    do grupo em que está. */
 QWidget[role="plain"] {{ background: transparent; }}
+/* Colunas do editor como cartões: o plano do cartão, cantos de 16 px, e tudo o que só agrupa (abas, páginas, áreas de
+   rolagem) transparente por cima dele — os campos e botões continuam com o fundo deles. */
+QWidget[role="pane"] {{ background: {card}; border-radius: 16px; }}
+QWidget[role="pane"] QTabWidget::pane {{ background: transparent; border: none; }}
+QWidget[role="pane"] QStackedWidget {{ background: transparent; }}
+QWidget[role="pane"] QScrollArea {{ background: transparent; border: none; }}
+QWidget[role="pane"] QScrollArea > QWidget, QWidget[role="pane"] QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QListWidget[role="media"] {{ background: transparent; border: none; padding: 0px; }}
 
 QLabel {{ background: transparent; }}
 QLabel[role="dim"] {{ color: {t2}; }}
