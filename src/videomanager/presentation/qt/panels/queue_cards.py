@@ -24,19 +24,21 @@ from videomanager.application.jobs.models import Job, JobKind, JobStatus
 from videomanager.domain import i18n
 from videomanager.presentation.qt import fonts, icons, strings, theme
 
-_PAD = 14
+_PAD = 12
 _TILE = 40
 _GAP = 12
 _ACAO = 28
 _BARRA = 6
 _RAIO = 12
-_ENTRE = 10
+_ENTRE = 8
 _BOTAO = 32
 _ERRO_PAD = 10
+# O espaço entre o título e a linha de situação, que o protótipo põe a 4 px.
+_ENTRE_TEXTOS = 4
 _ICONE = 20
 # Espaço entre um cartão e o seguinte. É a lista que reserva (altura da linha = cartão + isto) e o delegate
 # que o respeita ao pintar: ``QListView.setSpacing`` mexe também na largura do item, e a largura é do que depende a quebra de texto.
-ENTRE_CARTOES = 10
+ENTRE_CARTOES = 12
 
 # Linhas que um título, uma situação e um erro ocupam antes de ganhar reticências: tarefa com texto
 # longo não pode decidir sozinha a altura da lista.
@@ -133,7 +135,7 @@ def situacao(job: Job) -> str:
 def fontes(base: QFont) -> tuple[QFont, QFont]:
     """Título em negrito no tamanho do texto; o resto, um pouco menor."""
     titulo = QFont(base)
-    titulo.setBold(True)
+    titulo.setWeight(QFont.Weight.DemiBold)
     return titulo, fonts.resized(base, factor=0.93)
 
 
@@ -161,7 +163,7 @@ def medir(job: Job, largura: int, base: QFont) -> Cartao:
     linhas_situacao = quebrar(mn, situacao(job), texto_largura, _LINHAS_SITUACAO)
     altura_titulo = len(titulo) * mt.lineSpacing()
     altura_situacao = len(linhas_situacao) * mn.lineSpacing()
-    bloco = altura_titulo + 2 + altura_situacao
+    bloco = altura_titulo + _ENTRE_TEXTOS + altura_situacao
     # O texto se centraliza no ladrilho quando cabe nele; quando passa, o ladrilho fica no topo.
     topo = _PAD + max(0, (_TILE - bloco) // 2)
     cartao = Cartao(
@@ -170,7 +172,7 @@ def medir(job: Job, largura: int, base: QFont) -> Cartao:
         titulo=titulo,
         titulo_em=QRect(texto_x, topo, texto_largura, altura_titulo),
         situacao=linhas_situacao,
-        situacao_em=QRect(texto_x, topo + altura_titulo + 2, texto_largura, altura_situacao),
+        situacao_em=QRect(texto_x, topo + altura_titulo + _ENTRE_TEXTOS, texto_largura, altura_situacao),
         acao=acao,
         acao_nome=acao_nome,
     )
@@ -350,8 +352,12 @@ class TaskDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.translate(retangulo.topLeft())
         corpo = QRectF(0.5, 0.5, self._largura - 1, cartao.altura - 1)
+        # A tarefa que espera na fila é mais discreta que a que anda: a mesma ordem de leitura do protótipo. Selecionada,
+        # ela volta à cor inteira: o anel de seleção não pode ficar esmaecido.
+        if job.status is JobStatus.PENDING and not selecionado:
+            painter.setOpacity(0.72)
         painter.setPen(QPen(QColor(c["accent"]), 1.5) if selecionado else Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(c["raised"]))
+        painter.setBrush(QColor(theme.derivadas(c)["hot"] if selecionado else c["card"]))
         painter.drawRoundedRect(corpo, _RAIO, _RAIO)
 
         painter.setPen(Qt.PenStyle.NoPen)
@@ -394,7 +400,7 @@ class TaskDelegate(QStyledItemDelegate):
             painter.setBrush(QColor(c["raised2"]))
             painter.drawRoundedRect(QRectF(cartao.acao), 8, 8)
         desenho = icons.close if cartao.acao_nome == "cancelar" else icons.folder
-        lado = 16
+        lado = 14
         alvo = QRect(cartao.acao.x() + (_ACAO - lado) // 2, cartao.acao.y() + (_ACAO - lado) // 2, lado, lado)
         self._icone(desenho, c["text"] if self._quente(job, cartao.acao_nome) else c["t2"], lado).paint(painter, alvo)
 

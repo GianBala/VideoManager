@@ -340,13 +340,18 @@ class QueuePanel(QFrame):
         self._counts = {name: 0 for name, *_ in _CHIPS}
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 14, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 22, 16, 16)
+        layout.setSpacing(14)
+        self._layout = layout
 
         header = QHBoxLayout()
+        self._header = header
+        header.setSpacing(10)
+        self._chips_inline: bool | None = None
         title = bind(QLabel(), "setText", lambda: strings.QUEUE_GROUP)
         title.setProperty("role", "drawer-title")
         header.addWidget(title)
+        self._title = title
         header.addStretch(1)
         self._hide_button = QToolButton()
         self._hide_button.setProperty("role", "icon")
@@ -356,8 +361,9 @@ class QueuePanel(QFrame):
         header.addWidget(self._hide_button)
         layout.addLayout(header)
 
-        # Os selos ficam numa linha própria: com os quatro à vista (ativas, na fila, falharam, canceladas) não
-        # cabem ao lado do título nos 344 px da gaveta.
+        # Os selos ficam ao lado do título quando cabem (o protótipo mostra dois ou três por vez); com os quatro à vista
+        # (ativas, na fila, falharam, canceladas) não cabem nos 344 px da gaveta, e vão para uma linha própria.
+        # ``_place_chips`` decide, a cada mudança de contagem e de idioma.
         self._chip_row = QWidget()
         self._chip_row.setProperty("role", "plain")
         chips = QHBoxLayout(self._chip_row)
@@ -369,8 +375,7 @@ class QueuePanel(QFrame):
             chip.setProperty("role", "chip")
             chip.setProperty("tone", tone)
             self._chips[name] = chip
-            chips.addWidget(chip)
-        chips.addStretch(1)
+            chips.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self._chip_row)
         theme.on_theme_change(self._retheme)
         self._retheme()
@@ -388,10 +393,14 @@ class QueuePanel(QFrame):
         layout.addWidget(self._list, 1)
 
         actions = QHBoxLayout()
+        actions.setSpacing(8)
         self._cancel_all = bind(QPushButton(), "setText", lambda: strings.QUEUE_CANCEL_ALL)
+        self._cancel_all.setProperty("role", "btn")
         self._cancel_all.clicked.connect(self._confirm_cancel_all)
         actions.addWidget(self._cancel_all, 1)
+        # "Limpar encerrados" é o gesto discreto: sem fundo, ao lado do que interrompe o trabalho.
         self._clear = bind(QPushButton(), "setText", lambda: strings.QUEUE_CLEAR_FINISHED)
+        self._clear.setProperty("role", "ghost")
         self._clear.clicked.connect(self._clear_finished)
         actions.addWidget(self._clear, 1)
         layout.addLayout(actions)
@@ -434,6 +443,37 @@ class QueuePanel(QFrame):
             self._chips[name].setText((singular if count == 1 else plural).format(count=count))
             self._chips[name].setVisible(count > 0)
         self._chip_row.setVisible(any(self._counts.values()))
+        self._place_chips()
+
+    def _place_chips(self) -> None:
+        """Os selos ao lado do título quando cabem; senão, numa linha própria logo abaixo dele.
+
+        A conta é a das larguras que cada peça pede, e não um número fixo: o texto de um selo muda com a contagem
+        ("1 falhou", "12 canceladas") e com o idioma.
+        """
+        visiveis = [chip for chip in self._chips.values() if not chip.isHidden()]
+        if not visiveis:
+            return
+        pedido = sum(chip.sizeHint().width() for chip in visiveis) + 6 * (len(visiveis) - 1)
+        margens = self._layout.contentsMargins()
+        livre = (DRAWER_WIDTH - margens.left() - margens.right() - self._title.sizeHint().width()
+                 - self._hide_button.sizeHint().width() - 2 * self._header.spacing())
+        inline = pedido <= livre
+        if inline == self._chips_inline:
+            return
+        self._chips_inline = inline
+        self._header.removeWidget(self._chip_row)
+        self._layout.removeWidget(self._chip_row)
+        if inline:
+            self._header.insertWidget(1, self._chip_row)
+        else:
+            self._layout.insertWidget(1, self._chip_row)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        # Só agora o estilo está aplicado e os selos pedem a largura de verdade.
+        self._chips_inline = None
+        self._place_chips()
 
     def _on_card_action(self, job: Job, region: str) -> None:
         if region == "cancelar":

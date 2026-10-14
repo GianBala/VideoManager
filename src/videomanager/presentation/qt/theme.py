@@ -157,6 +157,7 @@ QPushButton[role="primary"]:disabled {{
 QFrame[role="address-bar"] {{ background: {card}; border: 1px solid {raised}; border-radius: 12px; }}
 QFrame[role="address-bar"][focused="true"] {{ border: 1px solid {ring}; }}
 QLineEdit[role="address-edit"], QLineEdit[role="address-edit"]:focus {{ background: transparent; border: none; border-radius: 0px; padding: 0px; font-size: 15px; min-height: 26px; }}
+QPushButton[role="btn"] {{ padding: 9px 14px; border-radius: 9px; }}
 QPushButton[role="ghost"] {{ background: transparent; border: 1px solid transparent; color: {t2}; padding: 9px 12px; }}
 QPushButton[role="ghost"]:hover {{ background: {raised}; border-color: {raised}; color: {text}; }}
 QPushButton[role="ghost"]:focus {{ border-color: {focus}; }}
