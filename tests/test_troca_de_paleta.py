@@ -8,6 +8,7 @@ deixava o editor na paleta antiga até reiniciar, e a aba Tema entregaria exatam
 
 from __future__ import annotations
 
+import weakref
 from pathlib import Path
 
 import pytest
