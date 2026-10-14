@@ -630,6 +630,7 @@ EDIT_UNDO = "Undo"
 EDIT_REDO = "Redo"
 EDIT_ZOOM_IN = "Zoom In"
 EDIT_ZOOM_OUT = "Zoom Out"
+EDIT_ZOOM_SLIDER = "Timeline zoom"
 EDIT_ZOOM_FIT = "Fit All"
 EDIT_ZOOM_FIT_TIP = (
     "Frames the whole edit. Zooming out further still works — the empty space "

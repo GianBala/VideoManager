@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import cast
 
 import json
+import math
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QMimeData, QPointF, QRect, QRectF, Qt, QTimer, Signal
@@ -545,6 +546,26 @@ class Timeline(QWidget):
         anchor = self._position if anchor is None else anchor
         ratio = (anchor - self._view_start) / self.view_span
         span = self.view_span / factor
+        self.set_view(anchor - ratio * span, anchor - ratio * span + span)
+
+    def zoom_fraction(self) -> float:
+        """Onde a janela de agora está entre a mais aberta (0) e a mais fechada (1), em escala logarítmica.
+
+        Cada passo do controle deslizante multiplica a janela pelo mesmo fator, como a roda do mouse e os botões: numa escala
+        linear, quase todo o curso ficava entre "ver tudo" e "ver tudo um pouco mais perto".
+        """
+        largest = self._max_span
+        if largest <= _MIN_VIEW:
+            return 1.0
+        return max(0.0, min(1.0, math.log(largest / self.view_span) / math.log(largest / _MIN_VIEW)))
+
+    def set_zoom_fraction(self, fraction: float, anchor: float | None = None) -> None:
+        """A janela correspondente a ``fraction`` (ver ``zoom_fraction``), mantendo o ``anchor`` (o cursor) no mesmo lugar da tela."""
+        largest = self._max_span
+        fraction = max(0.0, min(1.0, fraction))
+        span = largest * math.exp(-fraction * math.log(largest / _MIN_VIEW)) if largest > _MIN_VIEW else _MIN_VIEW
+        anchor = self._position if anchor is None else anchor
+        ratio = (anchor - self._view_start) / self.view_span
         self.set_view(anchor - ratio * span, anchor - ratio * span + span)
 
     def _keep_visible(self, seconds: float) -> None:
