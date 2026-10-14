@@ -555,13 +555,14 @@ EDIT_FONT_SMALLER = "Decrease font size (1 pt)"
 EDIT_FONT_LARGER = "Increase font size (1 pt)"
 EDIT_FONT_SIZE_PRESET = "Set size to {size} pt"
 EDIT_TEXT_COLOR_TIP = "Choose a custom color"
+EDIT_TEXT_COLOR_LABEL = "Text color"
 EDIT_TEXT_COLOR_TITLE = "Text Color"
-EDIT_STROKE = "Outline:"
+EDIT_STROKE = "Outline"
 EDIT_STROKE_TIP = "Turn the text outline on or off"
 EDIT_STROKE_WIDTH_TIP = "Outline thickness in pixels"
 EDIT_STROKE_COLOR_TIP = "Choose the outline color"
 EDIT_STROKE_COLOR_TITLE = "Outline Color"
-EDIT_FONT_SIZE = "Size:"
+EDIT_FONT_SIZE = "Size"
 EDIT_FONT_BOLD = "B"
 EDIT_FONT_ITALIC = "I"
 EDIT_FONT_BOLD_TIP = "Bold"
@@ -596,8 +597,8 @@ EDIT_TRANSITIONS = {
     "slideleft": ("◀", "Slide Left"),
     "slideright": ("▶", "Slide Right"),
 }
-EDIT_CHOOSE_FILTER = "Choose a visual effect:"
-EDIT_CHOOSE_TRANSITION = "Choose a video transition:"
+EDIT_CHOOSE_FILTER = "Choose a visual effect"
+EDIT_CHOOSE_TRANSITION = "Choose a video transition"
 EDIT_EXTRA_DURATION = "Duration"
 EDIT_INSERT_TRANSITION = "Insert Transition"
 EDIT_UPDATE_TRANSITION = "Update Selected Transition"
@@ -936,7 +937,7 @@ PROP_BLUR_NOTE = "Covers the whole canvas under the clip, including the tracks b
 PROP_BLUR_CHROMA = "Unavailable while green screen is on: the blur would show where the color was removed."
 PROP_TRANSITION = "Video transition"
 PROP_TRANSITION_EFFECT = "Effect"
-EDIT_FONT_SEARCH = "🔍 Search fonts…"
+EDIT_FONT_SEARCH = "Search fonts…"
 
 JOB_STATUS_LABELS = {
     "pending": "Queued", "running": "Downloading", "processing": "Processing",

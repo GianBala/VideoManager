@@ -555,13 +555,14 @@ EDIT_FONT_SMALLER = "Diminuir tamanho da fonte (1 pt)"
 EDIT_FONT_LARGER = "Aumentar tamanho da fonte (1 pt)"
 EDIT_FONT_SIZE_PRESET = "Definir tamanho para {size} pt"
 EDIT_TEXT_COLOR_TIP = "Escolher cor personalizada"
+EDIT_TEXT_COLOR_LABEL = "Cor do texto"
 EDIT_TEXT_COLOR_TITLE = "Cor do Texto"
-EDIT_STROKE = "Contorno:"
+EDIT_STROKE = "Contorno"
 EDIT_STROKE_TIP = "Ativar ou desativar contorno no texto"
 EDIT_STROKE_WIDTH_TIP = "Grossura do contorno em pixels"
 EDIT_STROKE_COLOR_TIP = "Escolher cor do contorno"
 EDIT_STROKE_COLOR_TITLE = "Cor do Contorno"
-EDIT_FONT_SIZE = "Tamanho:"
+EDIT_FONT_SIZE = "Tamanho"
 EDIT_FONT_BOLD = "B"
 EDIT_FONT_ITALIC = "I"
 EDIT_FONT_BOLD_TIP = "Negrito"
@@ -600,8 +601,8 @@ EDIT_TRANSITIONS = {
     "slideleft": ("◀", "Slide para Esquerda"),
     "slideright": ("▶", "Slide para Direita"),
 }
-EDIT_CHOOSE_FILTER = "Escolha um efeito visual:"
-EDIT_CHOOSE_TRANSITION = "Escolha uma transição de vídeo:"
+EDIT_CHOOSE_FILTER = "Escolha um efeito visual"
+EDIT_CHOOSE_TRANSITION = "Escolha uma transição de vídeo"
 EDIT_EXTRA_DURATION = "Duração"
 EDIT_INSERT_TRANSITION = "Inserir Transição"
 EDIT_UPDATE_TRANSITION = "Atualizar Transição Selecionada"
@@ -951,7 +952,7 @@ PROP_BLUR_NOTE = "Cobre a tela inteira por baixo do bloco, inclusive as trilhas 
 PROP_BLUR_CHROMA = "Indisponível com o fundo verde ligado: o borrão apareceria onde a cor foi removida."
 PROP_TRANSITION = "Transição de Vídeo"
 PROP_TRANSITION_EFFECT = "Efeito"
-EDIT_FONT_SEARCH = "🔍 Buscar fonte..."
+EDIT_FONT_SEARCH = "Buscar fonte…"
 
 JOB_STATUS_LABELS = {
     "pending": "Na fila", "running": "Baixando", "processing": "Processando",
