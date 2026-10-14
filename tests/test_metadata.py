@@ -352,7 +352,9 @@ def test_aba_abre_edita_e_salva_a_copia(painel, ffmpeg_tools, tmp_path, wait_unt
     assert painel._saved.path.name in painel._result.text() and painel._reveal.isVisibleTo(painel)
     # A cópia guardou o que se pediu: fechar não pergunta mais nada.
     assert not painel.has_unsaved_changes and painel.confirm_discard() and len(perguntas) == 1
-    assert painel._runner.active == 0
+    # O sinal de "salvo" sai de dentro do worker, antes de ele se retirar da conta: lido na hora, o contador ainda via
+    # a tarefa que acabara de avisar (``active == 1``) quando a máquina estava carregada.
+    wait_until(lambda: painel._runner.active == 0, timeout=10)
 
 
 def test_janela_tem_a_aba_com_menu_e_sem_fila(desktop_app, monkeypatch) -> None:
