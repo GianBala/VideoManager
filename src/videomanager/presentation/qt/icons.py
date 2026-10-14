@@ -779,6 +779,44 @@ def slide_right(color: str, size: int = _NAV) -> QIcon:
     return _slide(color, size, False)
 
 
+def loop(color: str, size: int = _NAV) -> QIcon:
+    """Reproduzir em loop: duas setas que se perseguem."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawPolyline(QPolygonF([QPointF(4 * u, 11 * u), QPointF(4 * u, 8 * u), QPointF(20 * u, 8 * u)]))
+        p.drawPolyline(QPolygonF([QPointF(17 * u, 5 * u), QPointF(20 * u, 8 * u), QPointF(17 * u, 11 * u)]))
+        p.drawPolyline(QPolygonF([QPointF(20 * u, 13 * u), QPointF(20 * u, 16 * u), QPointF(4 * u, 16 * u)]))
+        p.drawPolyline(QPolygonF([QPointF(7 * u, 13 * u), QPointF(4 * u, 16 * u), QPointF(7 * u, 19 * u)]))
+    return _nav(color, size, desenho)
+
+
+def magnet(color: str, size: int = _NAV) -> QIcon:
+    """Alinhamento magnético: o ímã em U, com as pontas."""
+    def desenho(p: QPainter, u: float) -> None:
+        caminho = QPainterPath()
+        caminho.moveTo(7 * u, 4 * u)
+        caminho.lineTo(7 * u, 12 * u)
+        caminho.arcTo(QRectF(7 * u, 7 * u, 10 * u, 10 * u), 180, 180)
+        caminho.lineTo(17 * u, 4 * u)
+        p.drawPath(caminho)
+        p.drawLine(QPointF(5 * u, 4 * u), QPointF(9 * u, 4 * u))
+        p.drawLine(QPointF(15 * u, 4 * u), QPointF(19 * u, 4 * u))
+    return _nav(color, size, desenho)
+
+
+def volume(color: str, size: int = _NAV, muted: bool = False) -> QIcon:
+    """Som da prévia: o alto-falante com as ondas, ou com o X quando está mudo."""
+    def desenho(p: QPainter, u: float) -> None:
+        p.drawPolygon(QPolygonF([QPointF(4 * u, 10 * u), QPointF(8 * u, 10 * u), QPointF(13 * u, 6 * u),
+                                 QPointF(13 * u, 18 * u), QPointF(8 * u, 14 * u), QPointF(4 * u, 14 * u)]))
+        if muted:
+            p.drawLine(QPointF(16.5 * u, 9.5 * u), QPointF(21.5 * u, 14.5 * u))
+            p.drawLine(QPointF(21.5 * u, 9.5 * u), QPointF(16.5 * u, 14.5 * u))
+        else:
+            p.drawArc(QRectF(10 * u, 8 * u, 8 * u, 8 * u), -50 * 16, 100 * 16)
+            p.drawArc(QRectF(8 * u, 5 * u, 14 * u, 14 * u), -50 * 16, 100 * 16)
+    return _nav(color, size, desenho)
+
+
 def _keyframe_step(color: str, size: int, previous: bool) -> QIcon:
     def desenho(p: QPainter, u: float) -> None:
         x = 6.5 if previous else 17.5
