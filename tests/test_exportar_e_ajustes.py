@@ -8,7 +8,9 @@ não cresce quando entra o aviso do GIF (e o texto dos campos sai cortado), o ta
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QComboBox, QLabel, QSpinBox, QTabWidget
 
 from videomanager.application.capabilities import FFmpegTools
@@ -118,6 +120,33 @@ def ajustes(desktop_app, tmp_path):
         desktop_app.processEvents()
     yield janela
     janela.deleteLater()
+
+
+def test_ajustes_abre_sem_foco_visivel_e_o_tab_ainda_alcanca_a_barra_de_abas(desktop_app, tmp_path):
+    """Sem foco inicial, o Qt entrega o foco ao primeiro da ordem de Tab ao ativar a janela, e o botão "Geral"
+    abria com a borda de foco, como se alguém tivesse apertado Tab. Mede-se na ativação, que é onde a escolha
+    acontece (como em ``test_janela_abre_sem_foco_visivel…``); a barra de abas segue alcançável pelo teclado."""
+    import warnings
+
+    janela = SettingsDialog(Settings(), runtime=_SemFerramentas(build_desktop_runtime(audio_enabled=False)),
+                            tools=FFmpegTools(tmp_path / "ffmpeg", tmp_path / "ffprobe", "empacotado"))
+    try:
+        janela.show()
+        desktop_app.processEvents()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            desktop_app.setActiveWindow(janela)  # o caminho que o Qt segue ao ativar a janela
+        desktop_app.processEvents()
+        barra = janela.findChild(QTabWidget).tabBar()
+        assert desktop_app.activeWindow() is janela
+        assert desktop_app.focusWidget() is janela
+        assert not barra.hasFocus()
+        QTest.keyClick(desktop_app.focusWidget(), Qt.Key.Key_Tab)
+        desktop_app.processEvents()
+        assert barra.hasFocus()
+    finally:
+        janela.close()
+        janela.deleteLater()
 
 
 def _titulos(pagina) -> list[str]:
