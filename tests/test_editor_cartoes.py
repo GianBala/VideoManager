@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtCore import QEvent, QObject, QRect, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QRegion
 from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
 
 from videomanager.domain.project import MediaKind, MediaRef
@@ -88,6 +88,44 @@ def test_o_anel_da_selecao_aparece_inteiro_nas_duas_colunas_e_nao_e_cortado_pela
         meio = lista.visualItemRect(lista.item(linha)).y() + 3 + _MediaCardDelegate.miniatura(largura).height() // 2
         assert anel(coluna, meio), f"o anel da linha {linha} está cortado na borda da lista"
         assert anel(coluna + (1 if coluna == 0 else -1), meio)  # e tem os 2 px da espessura, não só 1
+
+
+class _RegiaoPintada(QObject):
+    """Soma as regiões que o viewport de fato repinta: é o que o Qt entrega ao delegate, e o que fica fora dela não muda."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.regiao = QRegion()
+
+    def eventFilter(self, objeto, evento) -> bool:  # noqa: N802
+        if evento.type() == QEvent.Type.Paint:
+            self.regiao = self.regiao.united(evento.region())
+        return False
+
+
+def test_o_anel_de_quem_sai_e_de_quem_entra_na_selecao_e_repintado_por_inteiro(tema_do_app, painel_de_edicao, desktop_app):
+    """Na coluna da direita o anel passa 2 px da célula do item, e o Qt só repinta a célula: ao trocar a seleção a ponta
+    direita do anel antigo ficava desenhada (e a do novo nascia sem ela) até a próxima pintura da lista inteira."""
+    lista = _com_midias(painel_de_edicao, 4)
+    largura = lista.viewport().width()
+    espiao = _RegiaoPintada()
+    lista.viewport().installEventFilter(espiao)
+    lista.setCurrentRow(0)
+    for _ in range(4):
+        desktop_app.processEvents()
+    for antes, depois in ((0, 1), (1, 3), (3, 2), (2, 0)):
+        lista.setCurrentRow(antes)
+        for _ in range(4):
+            desktop_app.processEvents()
+        espiao.regiao = QRegion()
+        lista.setCurrentRow(depois)
+        for _ in range(4):
+            desktop_app.processEvents()
+        for linha in (antes, depois):
+            caixa = lista.visualItemRect(lista.item(linha))
+            anel = _MediaCardDelegate.area_do_anel(caixa, linha, largura).toAlignedRect()
+            fora = QRegion(anel).subtracted(espiao.regiao)
+            assert fora.isEmpty(), f"{antes}→{depois}: o anel da linha {linha} tem {fora.boundingRect()} fora do que foi repintado"
 
 
 def test_a_grade_acompanha_a_largura_e_nao_depende_da_barra_de_rolagem(tema_do_app, painel_de_edicao, desktop_app):

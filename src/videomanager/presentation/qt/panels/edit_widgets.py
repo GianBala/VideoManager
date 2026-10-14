@@ -2392,19 +2392,31 @@ class _MediaCardDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index) -> QSize:  # noqa: N802
         return self.celula(option.widget.viewport().width() if option.widget is not None else 224)
 
+    @classmethod
+    def retangulo_da_miniatura(cls, caixa: QRect, linha: int, largura_da_lista: int) -> QRectF:
+        """Onde a miniatura da ``linha`` cai, dada a célula (``caixa``) que o Qt entrega ao delegate.
+
+        Coluna da esquerda a uma ``MARGEM`` da borda esquerda, a da direita da direita (nos pixels que sobram depois das
+        duas células): o vão entre as duas é o ``ENTRE``.
+        """
+        tamanho = cls.miniatura(largura_da_lista)
+        sobra = largura_da_lista - 2 * caixa.width()
+        esquerda = (caixa.x() + cls.MARGEM if linha % 2 == 0
+                    else caixa.right() + 1 + sobra - cls.MARGEM - tamanho.width())
+        return QRectF(esquerda, caixa.y() + 3, tamanho.width(), tamanho.height())
+
+    @classmethod
+    def area_do_anel(cls, caixa: QRect, linha: int, largura_da_lista: int) -> QRectF:
+        """Tudo o que o anel de seleção pinta: a miniatura mais os 2 px que ele passa para fora dela."""
+        return cls.retangulo_da_miniatura(caixa, linha, largura_da_lista).adjusted(-cls.MARGEM, -cls.MARGEM, cls.MARGEM, cls.MARGEM)
+
     def paint(self, painter: QPainter, option, index) -> None:
         referencia = index.data(Qt.ItemDataRole.UserRole)
         cores = theme.papeis(*theme.atual())
         selecionada = bool(option.state & QStyle.StateFlag.State_Selected)
         caixa = option.rect
         largura_da_lista = option.widget.viewport().width() if option.widget is not None else 2 * caixa.width() + 2
-        tamanho = self.miniatura(largura_da_lista)
-        # Coluna da esquerda a uma ``MARGEM`` da borda esquerda, a da direita da direita (nos pixels que sobram depois das
-        # duas células): o vão entre as duas é o ``ENTRE``.
-        sobra = largura_da_lista - 2 * caixa.width()
-        esquerda = (caixa.x() + self.MARGEM if index.row() % 2 == 0
-                    else caixa.right() + 1 + sobra - self.MARGEM - tamanho.width())
-        miniatura = QRectF(esquerda, caixa.y() + 3, tamanho.width(), tamanho.height())
+        miniatura = self.retangulo_da_miniatura(caixa, index.row(), largura_da_lista)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -2484,6 +2496,13 @@ class _MediaListWidget(QListWidget):
         self.setDragEnabled(True)
         self.setDragDropMode(QListView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.CopyAction)
+
+    def selectionChanged(self, selected, deselected) -> None:  # noqa: N802
+        super().selectionChanged(selected, deselected)
+        # O anel da seleção passa da célula do item (2 px, na coluna da direita), e o Qt repinta só a célula: o anel de
+        # quem saiu ficava desenhado, e o de quem entrou nascia sem a ponta, até a próxima pintura da lista inteira.
+        # São poucas células, então repintar tudo é mais barato do que calcular o que passou.
+        self.viewport().update()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
