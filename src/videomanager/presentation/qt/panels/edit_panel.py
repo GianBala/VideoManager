@@ -2944,11 +2944,12 @@ class EditPanel(QWidget):
 
         self._sync_canvas()
 
-        # Garante que o clipe permaneça ou torne a ser selecionado na timeline
+        # O projeto novo entra na linha do tempo antes da seleção: selecionar recarrega os controles pelo que ela guarda.
+        # Com o bloco desmarcado (um clique na prévia ou num vão basta) a aba continua aberta nele, e a seleção feita
+        # primeiro devolvia aos controles o valor do projeto antigo — o clique valia no modelo e voltava na tela.
+        self._timeline.set_project(self._project, refit=False)
         if self._timeline.selected != clip_id:
             self._timeline.select(clip_id)
-        else:
-            self._timeline.set_project(self._project, refit=False)
 
         # A duração de uma transição pode ser limitada pelas duas pontas do
         # corte. Recarregar devolve ao campo o valor realmente aceito pelo
