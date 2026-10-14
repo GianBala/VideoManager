@@ -32,7 +32,7 @@ _ORCAMENTO = {
     "qt/fullscreen_preview.py": 2,
     "qt/panels/edit_panel.py": 16,
     "qt/panels/edit_widgets.py": 13,
-    "qt/panels/timeline.py": 29,
+    "qt/panels/timeline.py": 1,
     "qt/strings.py": 3,
     "qt/strings_en.py": 3,
 }

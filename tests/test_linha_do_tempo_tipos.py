@@ -99,16 +99,14 @@ def test_o_topo_de_cada_bloco_leva_a_cor_da_espécie(linha, tipo, trilha):
 def test_o_cabecalho_de_cada_trilha_leva_o_ladrilho_da_cor_dela(linha):
     timeline, _ = linha
     imagem = timeline.grab().toImage()
-    fundo = QColor(DARK["surface"])
     for indice, tipo in enumerate(("text", "video", "video", "audio")):
         cabecalho = timeline._header_rect(indice)
-        # Dois pixels para dentro da borda esquerda do ladrilho, no meio da altura.
-        pixel = imagem.pixelColor(int(cabecalho.left()) + 6 + 2, int(cabecalho.center().y()))
+        # O ladrilho de 24 px é cheio, da cor da espécie: dois pixels para dentro da borda esquerda dele, no meio da altura
+        # (o ícone branco fica no centro, longe daí).
+        pixel = imagem.pixelColor(int(cabecalho.left()) + 10 + 3, int(cabecalho.center().y()))
         alvo = QColor(TIPOS_DE_BLOCO[tipo])
-        mistura = lambda c, f: round(f + (c - f) * 46 / 255)  # noqa: E731
-        esperado = (mistura(alvo.red(), fundo.red()), mistura(alvo.green(), fundo.green()),
-                    mistura(alvo.blue(), fundo.blue()))
-        assert max(abs(a - b) for a, b in zip((pixel.red(), pixel.green(), pixel.blue()), esperado)) <= 6, (indice, tipo)
+        assert max(abs(a - b) for a, b in zip((pixel.red(), pixel.green(), pixel.blue()),
+                                              (alvo.red(), alvo.green(), alvo.blue()))) <= 4, (indice, tipo)
 
 
 def test_o_rotulo_do_bloco_nao_leva_mais_emoji_e_o_ícone_se_desenha(linha, monkeypatch):

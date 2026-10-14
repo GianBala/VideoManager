@@ -127,14 +127,15 @@ from videomanager.presentation.qt.editor_project import EditorProject
 from videomanager.presentation.qt.export_dialog import ExportDialog, canvas_options
 from videomanager.application.editor.canvas import aspect_of, canvas_for_aspect, output_canvas
 from videomanager.presentation.qt.fullscreen_preview import FullscreenPreview
-from videomanager.presentation.qt.theme import atual, on_theme_change, palette
+from videomanager.presentation.qt.theme import TIPOS_DE_BLOCO, atual, on_theme_change, palette
 from videomanager.presentation.qt.panels.canvas_selector import CanvasPopup, CanvasSelector
 from videomanager.presentation.qt.panels.field_box import FieldBox, WrapCheck
 from videomanager.presentation.qt.panels.segmented import segmented
 from videomanager.presentation.qt.panels.stacked_tabs import StackedTabs
 from videomanager.presentation.qt.panels.swatch import Swatch
-from videomanager.presentation.qt.panels.timeline import AUDIO_TRACK_HEIGHT
 from videomanager.presentation.qt.panels.timeline import FILM_CELL_WIDTH
+from videomanager.presentation.qt.panels.timeline import THUMB_HEIGHT
+from videomanager.presentation.qt.panels.timeline import WAVE_HEIGHT
 from videomanager.presentation.qt.panels.timeline import VIDEO_TRACK_HEIGHT
 from videomanager.presentation.qt.panels.timeline import Timeline
 from videomanager.presentation.qt.panels.timeline import image_from_frame
@@ -142,7 +143,7 @@ from videomanager.presentation.qt.panels.timeline import pixmap_from_frame
 
 from videomanager.presentation.qt.panels.edit_widgets import index_of
 from videomanager.presentation.qt.panels.edit_widgets import (
-    _clip_name, _filter_label, _filter_name, _transition_label, _transition_name)
+    _clip_name, _filter_label, _filter_name, _kind_of, _transition_label, _transition_name)
 from videomanager.presentation.qt.panels.edit_widgets import _VolumePopup as _VolumePopup
 from videomanager.presentation.qt.panels.edit_widgets import _SpeedPopup as _SpeedPopup
 from videomanager.presentation.qt.panels.edit_widgets import _TransportBar
@@ -2001,11 +2002,13 @@ class EditPanel(QWidget):
         return box
 
     def _build_timeline_area(self) -> QWidget:
+        # A linha do tempo é um cartão como as colunas de cima, com a barra de ferramentas, a régua e as trilhas dentro.
         box = QWidget()
-        box.setProperty("role", "plain")
+        box.setProperty("role", "pane")
+        box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         column = QVBoxLayout(box)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(6)
+        column.setContentsMargins(14, 12, 14, 8)
+        column.setSpacing(8)
 
         column.addLayout(self._build_toolbar())
 
@@ -2095,7 +2098,7 @@ class EditPanel(QWidget):
             row, "", "Ctrl+Shift+Z", self._redo_edit, lambda: strings.EDIT_REDO, 40
         )
 
-        row.addSpacing(_TOOL_GROUP_GAP)
+        row.addWidget(self._divider())
         # Ícone e não texto: a barra inteira é de símbolos (↶ ↷ − +), e "Excluir
         # bloco" por extenso ao lado deles teria o dobro da largura de tudo que
         # está ali. O que diz o nome é a dica, como nos outros.
@@ -2123,41 +2126,61 @@ class EditPanel(QWidget):
         self._add_video_button = bind(QPushButton(), "setText", lambda: strings.EDIT_ADD_VIDEO_TRACK)
         bind(self._add_video_button, "setToolTip", lambda: strings.EDIT_ADD_VIDEO_TRACK_FULL)
         self._add_video_button.clicked.connect(lambda: self._add_track(TrackKind.VIDEO))
+        self._add_video_button.setProperty("role", "ghost")
+        self._add_video_button.setProperty("compact", "true")
         row.addWidget(self._add_video_button)
 
         self._add_audio_button = bind(QPushButton(), "setText", lambda: strings.EDIT_ADD_AUDIO_TRACK)
         bind(self._add_audio_button, "setToolTip", lambda: strings.EDIT_ADD_AUDIO_TRACK_FULL)
         self._add_audio_button.clicked.connect(lambda: self._add_track(TrackKind.AUDIO))
+        self._add_audio_button.setProperty("role", "ghost")
+        self._add_audio_button.setProperty("compact", "true")
         row.addWidget(self._add_audio_button)
 
         self._add_additional_button = bind(QPushButton(), "setText", lambda: strings.EDIT_ADD_ADDITIONAL_TRACK)
         bind(self._add_additional_button, "setToolTip", lambda: strings.EDIT_ADD_ADDITIONAL_TRACK_FULL)
         self._add_additional_button.clicked.connect(lambda: self._add_track(TrackKind.ADDITIONAL))
+        self._add_additional_button.setProperty("role", "ghost")
+        self._add_additional_button.setProperty("compact", "true")
         row.addWidget(self._add_additional_button)
 
         row.addStretch(1)
         self._count_label = QLabel("")
-        self._count_label.setProperty("role", "dim")
+        self._count_label.setProperty("role", "hint")
         row.addWidget(self._count_label)
         # O bloco escolhido tinha uma faixa só para ele, com dois campos de
         # timecode e o nome do arquivo. Os campos saíram — as pontas se
         # ajustam pelas alças, pelos botões de apagar e pela tesoura, todos
         # no cursor — e o nome fica aqui, sem custar altura nenhuma.
         row.addSpacing(10)
+        # O bloco escolhido é uma pastilha no tom do acento, com o ícone da espécie; sem bloco, o texto discreto de
+        # sempre (``_show_clip_chip`` troca um pelo outro).
+        self._clip_chip = QFrame()
+        self._clip_chip.setProperty("role", "clip-chip")
+        self._clip_chip.setProperty("active", "false")
+        chip_row = QHBoxLayout(self._clip_chip)
+        chip_row.setContentsMargins(10, 3, 12, 3)
+        chip_row.setSpacing(6)
+        self._clip_icon = QLabel()
+        self._clip_icon.setFixedSize(16, 16)
+        self._clip_icon.setVisible(False)
+        chip_row.addWidget(self._clip_icon)
         self._clip_label = bind(QLabel(), "setText", lambda: strings.EDIT_CLIP_NONE)
-        self._clip_label.setProperty("role", "dim")
         self._clip_label.setMinimumWidth(40)
-        row.addWidget(self._clip_label)
+        chip_row.addWidget(self._clip_label)
+        row.addWidget(self._clip_chip)
         row.addStretch(1)
 
         # Ajustes do bloco: botões suspensos compactos para volume e velocidade
-        self._volume_btn = bind(QPushButton(), "setText", lambda: f"🔊 {decimal(0.0)} dB")
+        self._volume_btn = bind(QPushButton(), "setText", lambda: f"{decimal(0.0)} dB")
+        self._volume_btn.setProperty("role", "chip-btn")
         bind(self._volume_btn, "setToolTip", lambda: strings.EDIT_GAIN_TIP)
         self._volume_btn.clicked.connect(self._show_volume_popup)
         row.addWidget(self._volume_btn)
 
         row.addSpacing(4)
-        self._speed_btn = bind(QPushButton(), "setText", lambda: f"⚡ {decimal(1.0)}x")
+        self._speed_btn = bind(QPushButton(), "setText", lambda: f"{decimal(1.0)}×")
+        self._speed_btn.setProperty("role", "chip-btn")
         bind(self._speed_btn, "setToolTip", lambda: strings.EDIT_SPEED_TIP)
         self._speed_btn.clicked.connect(self._show_speed_popup)
         row.addWidget(self._speed_btn)
@@ -2170,12 +2193,17 @@ class EditPanel(QWidget):
             ("_zoom_in_button", lambda: strings.EDIT_ZOOM_IN, lambda: self._zoom(_ZOOM_FACTOR)),
         ):
             button = QPushButton()
+            button.setProperty("role", "tool")
+            button.setIconSize(QSize(18, 18))
+            button.setFixedSize(36, 36)
             bind(button, "setToolTip", tip)
-            button.setFixedWidth(40)
+            bind(button, "setAccessibleName", tip)
             button.clicked.connect(slot)
             row.addWidget(button)
             setattr(self, atributo, button)
         fit = bind(QPushButton(), "setText", lambda: strings.EDIT_ZOOM_FIT)
+        fit.setProperty("role", "btn")
+        self._fit_button = fit
         bind(fit, "setToolTip", lambda: strings.EDIT_ZOOM_FIT_TIP)
         # Por lambda: a barra é montada antes da linha do tempo existir.
         fit.clicked.connect(lambda: self._timeline.fit())
@@ -2194,9 +2222,12 @@ class EditPanel(QWidget):
         width: int = 0,
     ) -> QPushButton:
         button = QPushButton(text)
+        # Botão de ícone sem fundo, quadrado: a barra é toda de símbolos, e a dica é também o nome.
+        button.setProperty("role", "tool")
+        button.setIconSize(QSize(18, 18))
+        button.setFixedSize(36, 36)
         bind(button, "setToolTip", lambda: f"{tip()}  ({shortcut})" if shortcut else tip())
-        if width:
-            button.setFixedWidth(width)
+        bind(button, "setAccessibleName", tip)
         button.clicked.connect(slot)
         row.addWidget(button)
         return button
@@ -3348,6 +3379,20 @@ class EditPanel(QWidget):
         if self._overlay_drag_session == clip_id:
             self._on_edit_cancelled()
 
+    def _paint_clip_chip(self, clip: Clip | None) -> None:
+        """A pastilha do bloco escolhido: no tom do acento e com o ícone da espécie; sem bloco, só o texto discreto."""
+        marcado = "true" if clip is not None else "false"
+        if self._clip_chip.property("active") != marcado:
+            self._clip_chip.setProperty("active", marcado)
+            self._clip_chip.style().unpolish(self._clip_chip)
+            self._clip_chip.style().polish(self._clip_chip)
+            for filho in self._clip_chip.findChildren(QLabel):
+                filho.style().unpolish(filho)
+                filho.style().polish(filho)
+        self._clip_icon.setVisible(clip is not None)
+        if clip is not None:
+            self._clip_icon.setPixmap(icons.TYPE_ICONS[_kind_of(clip)](self._colors["accent"], 16).pixmap(16, 16))
+
     def _show_clip_numbers(self, clip: Clip | None) -> None:
         """Volume e velocidade do bloco nos botões da barra, com o separador decimal do idioma (por ``bind``).
 
@@ -3356,11 +3401,11 @@ class EditPanel(QWidget):
         """
         if clip is not None:
             gain, speed = clip.gain_db, clip.speed
-            bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(gain, sign=True)} dB")
-            bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(speed)}x")
+            bind(self._volume_btn, "setText", lambda: f"{decimal(gain, sign=True)} dB")
+            bind(self._speed_btn, "setText", lambda: f"{decimal(speed)}×")
         else:
-            bind(self._volume_btn, "setText", lambda: f"🔊 {decimal(0.0)} dB")
-            bind(self._speed_btn, "setText", lambda: f"⚡ {decimal(1.0)}x")
+            bind(self._volume_btn, "setText", lambda: f"{decimal(0.0)} dB")
+            bind(self._speed_btn, "setText", lambda: f"{decimal(1.0)}×")
 
     def _refresh_clip_fields(self) -> None:
         clip = self._timeline.selected_clip
@@ -3373,6 +3418,7 @@ class EditPanel(QWidget):
 
         if clip is None:
             bind(self._clip_label, "setText", lambda: strings.EDIT_CLIP_NONE)
+            self._paint_clip_chip(None)
             self._preview.set_active_clip(None, self._project.width, self._project.height)
             self._update_preview_overlay_clips()
             return
@@ -3396,6 +3442,7 @@ class EditPanel(QWidget):
             return text
 
         bind(self._clip_label, "setText", info)
+        self._paint_clip_chip(clip)
         self._update_preview_overlay_clips()
 
     def _update_preview_overlay_clips(self) -> None:
@@ -3970,7 +4017,7 @@ class EditPanel(QWidget):
             begin,
             begin if clip.is_image else finish,
             count,
-            (FILM_CELL_WIDTH, VIDEO_TRACK_HEIGHT - 14),
+            (FILM_CELL_WIDTH, THUMB_HEIGHT),
             tools,
             token,
         )
@@ -4021,8 +4068,8 @@ class EditPanel(QWidget):
             clip.media.path,
             begin,
             max(0.05, finish - begin),
-            (width, AUDIO_TRACK_HEIGHT - 14),
-            self._colors["accent"],
+            (width, WAVE_HEIGHT),
+            TIPOS_DE_BLOCO["audio"],
             tools,
             token,
         )
@@ -5050,6 +5097,11 @@ class EditPanel(QWidget):
         self._redo.setIcon(icons.redo(cor))
         self._zoom_out_button.setIcon(icons.minus(cor))
         self._zoom_in_button.setIcon(icons.plus(cor))
+        self._fit_button.setIcon(icons.fit_width(cor, 16))
+        self._volume_btn.setIcon(icons.volume(cor, 16))
+        self._speed_btn.setIcon(icons.bolt(cor, 16))
+        if hasattr(self, "_timeline"):
+            self._paint_clip_chip(self._timeline.selected_clip)
         self._new_btn.setIcon(icons.file_plus(cor))
         self._open_btn.setIcon(icons.folder(cor))
         self._save_btn.setIcon(icons.save(cor))

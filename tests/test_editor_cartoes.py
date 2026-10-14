@@ -173,7 +173,9 @@ def test_a_barra_de_cima_tem_dois_fios_o_titulo_de_15_px_e_o_icone_da_tela(tema_
     painel.show()
     for _ in range(5):
         desktop_app.processEvents()
-    fios = [f for f in painel.findChildren(QFrame) if f.property("role") == "divider"]
+    # Os fios da barra de cima: a barra de ferramentas da linha do tempo tem o dela (entre desfazer e dividir), à parte.
+    barra_de_cima = painel._project_label.parentWidget()
+    fios = [f for f in painel.findChildren(QFrame) if f.property("role") == "divider" and f.parentWidget() is barra_de_cima]
     assert len(fios) == 2 and {(f.width(), f.height()) for f in fios} == {(1, 22)}
     assert painel._project_label.property("role") == "doc-title" and painel._project_label.font().pixelSize() == 15
     assert not painel._canvas_selector.icon().isNull()
