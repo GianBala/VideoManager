@@ -57,7 +57,7 @@ from videomanager.domain.project import Project
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import accepts
 from videomanager.domain.constants import MIN_SEGMENT
-from videomanager.domain.timing import frame_step
+from videomanager.domain.timing import format_timecode, frame_step
 from videomanager.presentation.qt import fonts, icons, strings, theme
 from videomanager.presentation.qt.theme import CORPOS_DE_BLOCO, TIPOS_DE_BLOCO
 
@@ -1610,14 +1610,16 @@ class Timeline(QWidget):
 
 
 def _ruler_label(seconds: float, step: float) -> str:
-    """O rótulo da régua em ``m:ss`` (``h:mm:ss`` de uma hora em diante), com o décimo quando o passo é menor que 1 s."""
-    inteiros = int(seconds + 1e-9)
-    horas, resto = divmod(inteiros, 3600)
-    minutos, segundos = divmod(resto, 60)
-    rotulo = f"{horas}:{minutos:02d}:{segundos:02d}" if horas else f"{minutos}:{segundos:02d}"
+    """O rótulo da régua em ``m:ss`` (``h:mm:ss`` de uma hora em diante), com o décimo quando o passo é menor que 1 s.
+
+    Parte de ``format_timecode``, que já tem o separador decimal do idioma e arredonda ao milissegundo antes de
+    cortar: o décimo é **truncado** (1,96 s é "1,9", e nunca "2,0" nem "1,0" com o "vai um" perdido).
+    """
+    completo = format_timecode(seconds, milliseconds=step < 1)
     if step < 1:
-        rotulo += f",{int(round((seconds - inteiros) * 10 + 1e-9)) % 10}"
-    return rotulo
+        completo = completo[:-2]  # "0:00:01,960" -> "0:00:01,9"
+    horas, minutos, resto = completo.split(":", 2)
+    return f"{int(minutos)}:{resto}" if horas == "0" else f"{horas}:{minutos}:{resto}"
 
 
 def image_from_frame(data: bytes, width: int, height: int) -> QImage:

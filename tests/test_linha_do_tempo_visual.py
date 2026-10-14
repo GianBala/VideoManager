@@ -147,6 +147,23 @@ def test_a_regua_usa_m_ss_com_o_decimo_so_quando_o_passo_e_menor_que_um_segundo(
     assert _ruler_label(59.99, 1) == "0:59"
 
 
+def test_a_regua_em_ingles_usa_o_ponto_decimal_do_idioma():
+    """O rótulo da régua vinha com a vírgula escrita no código, e em inglês o resto do programa diz ``3.5``."""
+    from videomanager.domain import i18n
+    i18n.set_language(i18n.ENGLISH)  # o fixture ``idioma_padrao`` devolve o português no fim
+    assert _ruler_label(0.5, 0.5) == "0:00.5" and _ruler_label(3.5, 0.5) == "0:03.5" and _ruler_label(0.1, 0.1) == "0:00.1"
+    assert _ruler_label(75.0, 15) == "1:15" and _ruler_label(3661.0, 1) == "1:01:01"
+
+
+def test_a_regua_trunca_o_decimo_e_nunca_vai_um():
+    """No zoom máximo (passo de 0,04 s) 1,96 s arredondava o décimo para 10 e o ``% 10`` o jogava fora: 1,96 s saía "1,0"."""
+    assert _ruler_label(1.96, 0.04) == "0:01,9" and _ruler_label(0.96, 0.04) == "0:00,9"
+    assert _ruler_label(0.04, 0.04) == "0:00,0" and _ruler_label(0.12, 0.04) == "0:00,1" and _ruler_label(61.98, 0.04) == "1:01,9"
+    # Os passos de verdade nunca repetem o rótulo de dois instantes diferentes na mesma ponta da régua.
+    rotulos = [_ruler_label(passo * k, 0.1) for k in range(0, 40) for passo in (0.1,)]
+    assert len(set(rotulos)) == len(rotulos)
+
+
 def test_as_cores_das_especies_sao_as_medidas_nas_faixas_do_prototipo():
     assert TIPOS_DE_BLOCO["video"] == "#3b79e6" and TIPOS_DE_BLOCO["audio"] == "#2fa37a"
     assert TIPOS_DE_BLOCO["text"] == "#8b5cf6" and TIPOS_DE_BLOCO["filter"] == "#6b78f0"
