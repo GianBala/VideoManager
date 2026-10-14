@@ -1775,18 +1775,18 @@ class EditPanel(QWidget):
             self._font_size_spin.setValue(clip.font_size or 48)
             self._bold_btn.setChecked(bool(clip.font_bold))
             self._italic_btn.setChecked(bool(clip.font_italic))
+            # As amostras são pintadas à mão e ignoram QSS: o que as põe na cor do bloco é ``set_color`` (e a fileira de
+            # atalhos marca a que tem essa cor), o mesmo par de ``_set_text_color``, mas sem virar edição.
             self._text_color = clip.text_color or "#ffffff"
-            self._color_indicator.setStyleSheet(
-                f"background: {self._text_color}; border: 1px solid #666; border-radius: 4px;"
-            )
+            self._color_indicator.set_color(self._text_color)
+            self._text_swatches.select(self._text_color)
             has_stroke = (clip.stroke_width or 0) > 0
             self._stroke_checkbox.setChecked(has_stroke)
             self._stroke_spin.setValue(clip.stroke_width if has_stroke else 3)
             self._stroke_spin.setEnabled(has_stroke)
             self._stroke_color = clip.stroke_color or "#000000"
-            self._stroke_color_indicator.setStyleSheet(
-                f"background: {self._stroke_color}; border: 1px solid #666; border-radius: 4px;"
-            )
+            self._stroke_color_indicator.set_color(self._stroke_color)
+            self._stroke_swatches.select(self._stroke_color)
             self._stroke_color_indicator.setEnabled(has_stroke)
             self._insert_new_text_btn.setVisible(True)
             self._insert_new_filter_btn.setVisible(False)

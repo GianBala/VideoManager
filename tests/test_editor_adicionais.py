@@ -8,10 +8,13 @@ com a largura do protótipo. Os testes medem a geometria e os pixels, com o tema
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton
 
+from videomanager.domain.project import Clip, MediaKind, MediaRef, Project, Track, TrackKind
 from videomanager.presentation.qt import strings, theme
 from videomanager.presentation.qt.panels.field_box import FieldBox, WrapCheck
 from videomanager.presentation.qt.panels.swatch import Swatch
@@ -225,3 +228,47 @@ def test_a_aba_mais_alta_rola_em_vez_de_empurrar_a_linha_do_tempo(tema_do_app, p
     botao = painel._apply_trans_btn
     base = botao.mapTo(pagina.viewport(), botao.rect().bottomLeft()).y()
     assert base <= pagina.viewport().height()
+
+
+def _texto(clip_id: int, inicio: float, **estilo) -> Clip:
+    return Clip(MediaRef(Path(f"Texto_{clip_id}"), MediaKind.IMAGE, duration=3.0), inicio, 3.0, clip_id=clip_id,
+                overlay_type="text", text_content=f"Texto {clip_id}", **estilo)
+
+
+def _pintado(amostra) -> str:
+    """A cor que a amostra de fato mostra: o pixel do meio dela, e não o que o código acha que pintou."""
+    imagem = amostra.grab().toImage()
+    return imagem.pixelColor(imagem.width() // 2, imagem.height() // 2).name().lower()
+
+
+def test_selecionar_um_bloco_de_texto_leva_as_cores_dele_as_amostras(tema_do_app, painel_de_edicao):
+    """As amostras de cor do texto e do contorno acompanham o bloco selecionado (``REG-004``).
+
+    A amostra é pintada à mão e ignora QSS: a carga do bloco que ainda mandava ``setStyleSheet`` a deixava na cor do
+    bloco anterior, com o dado certo e a tela errada. Os testes de clique só conferiam o caminho em que o usuário escolhe.
+    """
+    painel = painel_de_edicao
+    _mostrar(painel, 0)
+    vermelho = _texto(901, 0.0, text_color="#f44336", stroke_width=6, stroke_color="#0284c7")
+    amarelo = _texto(902, 3.0, text_color="#ffeb3b")
+    projeto = Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(vermelho, amarelo)),), width=1280, height=720, fps=30.0)
+    painel.install_project(projeto, None, [], {})
+    for _ in range(4):
+        QApplication.processEvents()
+
+    painel._timeline.select(901)
+    QApplication.processEvents()
+    assert painel._color_indicator.color() == "#f44336" and _pintado(painel._color_indicator) == "#f44336"
+    assert painel._stroke_color_indicator.color() == "#0284c7" and _pintado(painel._stroke_color_indicator) == "#0284c7"
+    # A fileira de amostras rápidas marca a que tem a cor do bloco: a terceira do texto e a última do contorno.
+    assert [s.selected() for s in painel._text_swatches._swatches] == [False, False, True, False, False, False]
+    assert [s.selected() for s in painel._stroke_swatches._swatches] == [False, False, False, False, False, True]
+
+    painel._timeline.select(902)
+    QApplication.processEvents()
+    assert painel._color_indicator.color() == "#ffeb3b" and _pintado(painel._color_indicator) == "#ffeb3b"
+    assert painel._stroke_color_indicator.color() == "#000000"
+    assert [s.selected() for s in painel._text_swatches._swatches] == [False, True, False, False, False, False]
+    assert [s.selected() for s in painel._stroke_swatches._swatches][:2] == [True, False]
+    # Carregar o bloco é leitura: nada disso vira edição nem sobra uma marca de "não salvo".
+    assert not painel.has_unsaved_changes
