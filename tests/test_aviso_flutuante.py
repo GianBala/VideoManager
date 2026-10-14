@@ -128,3 +128,12 @@ def test_falha_ao_gravar_preferencias_avisa_como_erro(principal, monkeypatch):
     ativos = principal._toasts.ativos
     assert len(ativos) == 1 and ativos[0].property("tipo") == "error"
     assert "Permissão negada" in ativos[0].mensagem.text()
+
+
+def test_o_x_do_aviso_tem_nome_acessivel(janela):
+    """O botão só tem ícone: sem nome, o leitor de tela anuncia só "botão" (``FRT-001``)."""
+    from PySide6.QtGui import QAccessible
+    _, host = janela
+    aviso = host.mostrar("aviso de teste")
+    interface = QAccessible.queryAccessibleInterface(aviso.botao_fechar)
+    assert interface.text(QAccessible.Text.Name) == strings.TOAST_CLOSE == aviso.botao_fechar.toolTip()
