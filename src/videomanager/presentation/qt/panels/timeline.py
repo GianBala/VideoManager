@@ -267,6 +267,9 @@ class Timeline(QWidget):
     # ``scrubbed``.
     position_changed = Signal(float)
     view_changed = Signal()
+    # A janela não mudou, mas a maior janela possível sim (a edição ficou mais curta ou mais longa): a mesma janela passa a
+    # estar em outro ponto do controle deslizante de zoom.
+    zoom_range_changed = Signal()
     # Botão direito: o widget diz **onde** foi clicado e o painel monta o menu.
     # As ações são dele (é ele quem tem o projeto e o histórico), e assim o menu
     # e os atalhos de teclado partem do mesmo lugar.
@@ -330,6 +333,7 @@ class Timeline(QWidget):
     # ------------------------------------------------------------------
 
     def set_project(self, project: Project, *, refit: bool = False) -> None:
+        widest = self._max_span
         self._project = project
         # O cursor não pode ficar além do fim: apagar um bloco ou desfazer
         # encurta a edição, e um cursor solto lá fora pede quadros que não
@@ -350,6 +354,8 @@ class Timeline(QWidget):
         self.update()
         if moved:
             self.position_changed.emit(self._position)
+        if self._max_span != widest:
+            self.zoom_range_changed.emit()
 
     def _content_height(self) -> int:
         """Altura de régua e trilhas juntas, como se nada estivesse rolado."""
