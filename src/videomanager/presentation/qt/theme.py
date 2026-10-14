@@ -218,9 +218,24 @@ QTabBar[role="underline"]::tab:focus {{ border: 1px solid {focus}; border-bottom
 /* Abas estreitas (a coluna de adicionais do editor): sem margem entre elas e com o preenchimento menor. */
 QTabBar[role="underline"][compact="true"]::tab {{ padding: 8px 5px; margin-right: 0px; font-size: 11px; }}
 QPushButton[compact="true"] {{ padding-left: 8px; padding-right: 8px; }}
-/* Aba Propriedades: seções separadas por um fio, cabeçalho menor e o × que fica vermelho ao passar o mouse. */
-QFrame[role="prop-section"] {{ background: transparent; border: none; border-top: 1px solid {raised}; }}
-QToolButton[role="section-header"][compact="true"] {{ font-size: 13px; }}
+/* Aba Propriedades: o fio entre as seções é pintado pela própria seção (``Section.paintEvent``), o cabeçalho tem 14 px e
+   o × fica vermelho ao passar o mouse. Os campos são caixas com o rótulo e a unidade dentro (``FieldBox``): o controle
+   de dentro perde a moldura, e o anel de foco é da caixa. */
+QFrame[role="prop-section"] {{ background: transparent; border: none; }}
+QToolButton[role="section-header"][compact="true"] {{ font-size: 14px; }}
+QFrame[role="field-box"] {{ background: {raised}; border: 1px solid {raised}; border-radius: 10px; }}
+QFrame[role="field-box"][focused="true"] {{ border-color: {ring}; }}
+QAbstractSpinBox[role="bare"] {{ background: transparent; border: none; padding: 0px; color: {text};
+    selection-background-color: {fill_a}; selection-color: {on_fill}; }}
+QAbstractSpinBox[role="bare"]:disabled {{ color: {t2}; }}
+QLabel[role="lead"] {{ color: {t2}; }}
+QLabel[role="unit"] {{ color: {t3}; }}
+QPushButton[role="tile"] {{ background: {raised}; border: 1px solid {raised}; border-radius: 10px; padding: 0px; }}
+QPushButton[role="tile"]:hover {{ background: {raised2}; border-color: {raised2}; }}
+QPushButton[role="tile"]:focus {{ border-color: {focus}; }}
+QPushButton[role="tile"][active="true"] {{ background: {soft16}; border-color: {accent}; }}
+QComboBox[role="field"][compact="true"] {{ min-height: 32px; border-radius: 10px; }}
+QFrame[role="segments"][compact="true"] {{ border-radius: 10px; }}
 QToolButton[role="icon"][danger="true"]:hover {{ background: {err16}; }}
 QLabel[role="group-heading"] {{ color: {t3}; font-size: 11px; font-weight: 700; padding-top: 6px; }}
 
