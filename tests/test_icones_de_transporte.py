@@ -113,8 +113,9 @@ def test_o_play_vira_pause_e_volta(painel):
 
 def test_trocar_de_tema_repinta_os_icones_do_transporte(painel, aplicacao):
     aplicar_tema(aplicacao, "dark")
-    assert _so_a_cor(painel._buttons[0].icon(), palette("dark")["text"])
+    # Botão de ícone sem fundo leva a cor secundária (``.btn.ghost`` do protótipo), e não a do texto.
+    assert _so_a_cor(painel._buttons[0].icon(), palette("dark")["text_dim"])
     aplicar_tema(aplicacao, "light")
-    assert _so_a_cor(painel._buttons[0].icon(), palette("light")["text"])
+    assert _so_a_cor(painel._buttons[0].icon(), palette("light")["text_dim"])
     # O play fica na cor do texto do botão primário, que é o fundo dele.
     assert _so_a_cor(painel._play_button.icon(), palette("light")["accent_text"])

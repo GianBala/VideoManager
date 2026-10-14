@@ -107,7 +107,7 @@ def test_os_extras_so_tem_icone_e_o_ligado_leva_o_tom_suave_com_o_icone_no_acent
     pilula = painel._prev_key.parentWidget()
     assert pilula.property("role") == "segments" and pilula.height() == 32
     assert (painel._prev_key.width(), painel._prev_key.height()) == (26, 26)
-    # Desligado, o ícone é o do texto; ligado, o do acento — e o fundo é o tom suave.
+    # Desligado, o ícone é o da cor secundária; ligado, o do acento — e o fundo é o tom suave.
     desligado = painel._loop.icon().pixmap(18, 18).toImage()
     painel._loop.setChecked(True)
     QApplication.processEvents()
@@ -122,7 +122,7 @@ def test_os_extras_so_tem_icone_e_o_ligado_leva_o_tom_suave_com_o_icone_no_acent
     # As cores do painel são as da paleta dele (``palette``), as mesmas dos ícones da barra e das abas.
     assert perto(ligado, painel._colors["accent"]) > 8 and perto(desligado, painel._colors["accent"]) == 0, \
         "o ícone ligado vai ao acento"
-    assert perto(desligado, painel._colors["text"]) > 8
+    assert perto(desligado, painel._colors["text_dim"]) > 8 and perto(desligado, painel._colors["text"]) == 0
     fundo = painel._loop.grab().toImage().pixelColor(18, 3)
     assert fundo.alpha() > 0 and fundo.name().lower() != cores["canvas"].lower()
     painel._loop.setChecked(False)
