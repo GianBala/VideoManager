@@ -22,7 +22,7 @@ from pathlib import Path
 import shiboken6
 from PySide6.QtCore import QPointF, QStandardPaths, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPalette, QPen, QPolygonF
-from PySide6.QtWidgets import QProxyStyle, QStyle
+from PySide6.QtWidgets import QDialogButtonBox, QProxyStyle, QStyle
 
 from videomanager.presentation.qt import paletas
 
@@ -41,6 +41,11 @@ class EstiloDaAplicacao(QProxyStyle):
     def styleHint(self, hint, option=None, widget=None, returnData=None) -> int:  # noqa: N802
         if hint == QStyle.StyleHint.SH_UnderlineShortcut:
             return 0
+        if hint == QStyle.StyleHint.SH_DialogButtonLayout:
+            # "Cancelar" à esquerda de "OK" (e da ação principal), com a ação à direita, em toda caixa de botões: é a ordem do
+            # protótipo, e a do GNOME. No Windows a ordem de fábrica é a inversa, e a mesma janela trocaria de ordem de um
+            # sistema para o outro.
+            return QDialogButtonBox.ButtonLayout.GnomeLayout.value
         return super().styleHint(hint, option, widget, returnData)
 
 
@@ -158,6 +163,9 @@ QPushButton[role="primary"] {{
     padding: 7px 16px;
 }}
 QPushButton[role="primary"]:hover {{ border-color: {on_fill}; }}
+/* Botões de fim de janela (OK, Cancelar): 38 px de altura e texto de 14, o tamanho da ação do rodapé de um diálogo. */
+QDialogButtonBox QPushButton {{ min-height: 36px; min-width: 64px; padding: 0px 22px; border-radius: 10px; font-size: 14px; }}
+QDialogButtonBox QPushButton[role="primary"] {{ padding: 0px 24px; }}
 QPushButton[role="primary"]:disabled {{
     background: {raised2}; color: {t2}; border-color: {raised2};
 }}
@@ -209,7 +217,7 @@ QLabel[role="callout-title"] {{ color: {accent}; font-size: 11px; font-weight: 7
 QLabel[role="plan"] {{ font-size: 13px; font-weight: 500; color: {text}; }}
 
 /* Janela de configurações: abas sublinhadas e títulos de grupo em caixa alta. */
-QTabBar[role="underline"]::tab {{ background: transparent; color: {t2}; padding: 9px 12px; margin-right: 8px;
+QTabBar[role="underline"]::tab {{ background: transparent; color: {t2}; padding: 10px 14px; margin-right: 6px; font-size: 14px;
     border: none; border-bottom: 2px solid transparent; border-radius: 0px; }}
 QTabBar[role="underline"]::tab:hover {{ color: {text}; }}
 QTabBar[role="underline"]::tab:selected {{ background: transparent; color: {accent}; font-weight: 600;

@@ -185,9 +185,9 @@ QUEUE_LOG_CLOSE = "Fechar"
 STATUS_COUNTS = "{active} em andamento · {pending} na fila · {done} concluídos"
 # De onde veio o ffmpeg em uso, pelo identificador que o localizador devolve.
 FFMPEG_SOURCES = {
-    "empacotado": "Empacotado — vem junto com o aplicativo",
-    "gerenciado": "Gerenciado — baixado pelo aplicativo",
-    "sistema": "Sistema — instalado no computador",
+    "empacotado": ("Empacotado", "Vem junto com o aplicativo"),
+    "gerenciado": ("Gerenciado", "Baixado pelo aplicativo"),
+    "sistema": ("Sistema", "Instalado no computador"),
 }
 SETTINGS_FFMPEG = "FFmpeg"
 SETTINGS_GROUP_DOWNLOADS = "Downloads"
@@ -372,7 +372,7 @@ EXPORT_DIALOG_TITLE = "Exportar Vídeo"
 EXPORT_SUMMARY_GROUP = "Resumo do Projeto"
 EXPORT_SETTINGS_GROUP = "Configurações de Saída"
 EXPORT_DESTINATION_GROUP = "Destino"
-EXPORT_DESTINATION_FOLDER = "Pasta de destino:"
+EXPORT_DESTINATION_FOLDER = "Pasta de destino"
 EXPORT_DESTINATION_PICK = "Procurar…"
 EXPORT_DESTINATION_PICK_TITLE = "Escolher pasta de destino"
 EXPORT_ACTION_ENQUEUE = "Adicionar à fila"
@@ -405,8 +405,10 @@ EXPORT_QUALITY_ECONOMY = "Econômica (CRF 28 - arquivo leve)"
 EXPORT_AUDIO_FORMAT = "Formato de áudio"
 EXPORT_AUDIO_FORMAT_TIP = "Formato e codec do arquivo de som gerado"
 EXPORT_ESTIMATED_SIZE = "Tamanho estimado"
-EXPORT_SUMMARY = "Duração total: <b>{duration}</b> · {tracks} trilha(s) · {clips} bloco(s)"
-EXPORT_FILENAME = "Nome do arquivo:"
+EXPORT_SUMMARY_DURATION = "Duração total <b>{duration}</b>"
+EXPORT_SUMMARY_TRACKS = "{tracks} trilha(s)"
+EXPORT_SUMMARY_CLIPS = "{clips} bloco(s)"
+EXPORT_FILENAME = "Nome do arquivo"
 EXPORT_FILENAME_PLACEHOLDER = "Nome do arquivo (sem extensão)"
 # Nome sugerido para o arquivo exportado: é dado, e sai no idioma do momento.
 EXPORT_DEFAULT_SUFFIX = "_editado"
@@ -661,19 +663,19 @@ EDIT_GAIN_DETACHED = (
 )
 
 # tela do projeto
-EDIT_CANVAS = "Tela:"
-EDIT_CANVAS_ASPECT = "Proporção:"
+EDIT_CANVAS = "Tela"
+EDIT_CANVAS_ASPECT = "Proporção"
 EDIT_CANVAS_ASPECT_AUTO = "Automática"
 EDIT_CANVAS_ASPECT_TIP = (
     "Fixa a proporção da tela de edição e da prévia (ex.: 16:9, 4:3, 9:16, 1:1, 21:9).\n"
     "Os blocos são encaixados proporcionalmente sem deformação."
 )
-EXPORT_ASPECT = "Proporção:"
+EXPORT_ASPECT = "Proporção"
 EXPORT_ASPECT_AUTO = "Original do projeto"
 EXPORT_ASPECT_TIP = (
     "Proporção de aspecto do vídeo final exportado (16:9 widescreen, 4:3 tradicional, 9:16 vertical, etc.)."
 )
-EDIT_CANVAS_RATE = "Taxa:"
+EDIT_CANVAS_RATE = "Taxa"
 EDIT_CANVAS_AUTO = "Automática · segue o material"
 EDIT_CANVAS_RATE_AUTO = "Automática"
 EDIT_CANVAS_SIZE = "{width} × {height}"

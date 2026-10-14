@@ -8,12 +8,12 @@ paleta se um valor mudar e não pesa no pacote. O cartão em si usa as cores do 
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPalette
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPolygonF
 from PySide6.QtWidgets import QButtonGroup, QGridLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from videomanager.domain.appearance import DEFAULT_PALETTE, PALETTES
-from videomanager.presentation.qt import paletas, strings
+from videomanager.presentation.qt import paletas, strings, theme
 
 _COLUNAS = 3
 _ALTURA_MINIATURA = 78
@@ -83,6 +83,21 @@ class _Miniatura(QWidget):
         pintor.setPen(contorno)
         pintor.setBrush(Qt.BrushStyle.NoBrush)
         pintor.drawPath(moldura)
+        # O visto do cartão marcado, no acento do tema da aplicação, no canto de cima à direita da miniatura.
+        cartao = self.parent()
+        if cartao is not None and getattr(cartao, "isChecked", lambda: False)():
+            da_aplicacao = theme.papeis(*theme.atual())
+            centro = QPointF(area.right() - 14, area.top() + 14)
+            pintor.setPen(Qt.PenStyle.NoPen)
+            pintor.setBrush(QColor(da_aplicacao["accent"]))
+            pintor.drawEllipse(centro, 10.5, 10.5)
+            pintor.setBrush(Qt.BrushStyle.NoBrush)
+            caneta = QPen(QColor(da_aplicacao["canvas"]), 2.0)
+            caneta.setCapStyle(Qt.PenCapStyle.RoundCap)
+            caneta.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            pintor.setPen(caneta)
+            pintor.drawPolyline(QPolygonF([QPointF(centro.x() - 4.2, centro.y() + 0.2), QPointF(centro.x() - 1.2, centro.y() + 3.2),
+                                           QPointF(centro.x() + 4.4, centro.y() - 3.0)]))
 
 
 class _Cartao(QPushButton):
@@ -104,6 +119,8 @@ class _Cartao(QPushButton):
         coluna.setSpacing(4)
         self.miniatura = _Miniatura(nome, modo, self)
         coluna.addWidget(self.miniatura)
+        # O visto é pintado pela miniatura (que cobre o cartão): ela se repinta quando o cartão é marcado ou desmarcado.
+        self.toggled.connect(lambda _marcado: self.miniatura.update())
         titulo = QLabel(strings.PALETTE_NAMES[nome])
         fonte = titulo.font()
         fonte.setBold(True)
@@ -111,6 +128,11 @@ class _Cartao(QPushButton):
         linha = QLabel(strings.PALETTE_TAGLINES[nome])
         linha.setProperty("role", "dim")
         linha.setWordWrap(True)
+        # Duas linhas reservadas: a altura de um rótulo que quebra depende da largura, e o cartão pede a do texto numa linha
+        # só. Com a janela mais estreita, "Cinza neutro, sem cor de marca" passava a quebrar, o cartão ficava baixo para ele
+        # e o nome da paleta se sobrepunha à miniatura.
+        linha.setMinimumHeight(2 * linha.fontMetrics().lineSpacing())
+        linha.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         for rotulo in (titulo, linha):
             _sem_mouse(rotulo)
             coluna.addWidget(rotulo)

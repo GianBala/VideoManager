@@ -233,15 +233,18 @@ def abrir(desktop_app):
 @pytest.mark.parametrize("origem", ["empacotado", "gerenciado", "sistema"])
 def test_ajustes_mostra_de_onde_veio_o_ffmpeg_e_o_caminho(abrir, origem):
     dialogo = abrir(FFmpegTools(Path("/opt/vm/ffmpeg"), Path("/opt/vm/ffprobe"), origem))
-    assert dialogo._ffmpeg_source.text() == strings.FFMPEG_SOURCES[origem]
+    # A origem é uma pastilha (o nome) com a nota ao lado, e o caminho vem embaixo.
+    nome, nota = strings.FFMPEG_SOURCES[origem]
+    assert dialogo._ffmpeg_source.text() == nome and not dialogo._ffmpeg_source.isHidden()
+    assert dialogo._ffmpeg_note.text() == nota
     assert dialogo._ffmpeg_path.text() == "/opt/vm/ffmpeg"
     assert not dialogo._ffmpeg_path.isHidden()
 
 
 def test_ajustes_sem_ffmpeg_localizado_diz_que_ainda_nao_achou(abrir):
     dialogo = abrir(None)
-    assert dialogo._ffmpeg_source.text() == strings.SETTINGS_FFMPEG_UNKNOWN
-    assert dialogo._ffmpeg_path.text() == ""
+    assert dialogo._ffmpeg_note.text() == strings.SETTINGS_FFMPEG_UNKNOWN
+    assert dialogo._ffmpeg_source.isHidden() and dialogo._ffmpeg_path.text() == ""
 
 
 def test_as_tres_origens_tem_frase_nos_dois_idiomas(desktop_app):
