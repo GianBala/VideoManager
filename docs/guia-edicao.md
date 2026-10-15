@@ -537,6 +537,14 @@ corte rápido continua disponível —; o que difere do material volta fixo.
   segundo: numa edição de 4 s isso é a diferença entre 1,1 MB e 14,9 MB (na
   tela do projeto, em 1080p a 30 q/s). Escolher tela ou taxa na mão continua
   valendo, e o tamanho estimado ao lado acompanha a escolha.
+- **Tamanho estimado** — a janela codifica trechos da mídia principal com o
+  mesmo codec, nível e tela da exportação e mostra "medindo…" até o número
+  chegar; trocar uma opção no meio da medida abandona a anterior. É um número
+  por mídia principal: com várias fontes, as outras seguem a mesma taxa. O
+  corte rápido usa a proporção do arquivo de origem, e só áudio parte do PCM
+  de 48 kHz estéreo do compositor. Se a medida falha, volta a conta por pixels,
+  que erra bastante com conteúdo muito leve ou muito pesado. Ver
+  [Estimativas de tamanho](estimativas-de-tamanho.md).
 - **Interpolar movimento** — gera quadros de verdade para blocos de vídeo
   abaixo da taxa da tela, em vez de só duplicar o quadro anterior; a conta usa
   a taxa do arquivo já multiplicada pela velocidade do bloco, e fotos não
