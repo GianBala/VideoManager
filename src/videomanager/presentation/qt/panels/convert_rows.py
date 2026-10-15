@@ -77,7 +77,7 @@ def change_label(media: LocalMedia, after: dict) -> tuple[str, str] | None:
     Uma conta que não foi medida não afirma que o arquivo cresce nem que encolhe (anunciava +10% a arquivos que saíam
     90% menores), e uma variação dentro do erro da medida não escolhe lado: a cor de aviso diria um.
     """
-    if after.get("approximate"):
+    if after.get("approximate") or after.get("skipped"):
         return None
     change = change_percent(media, after["size"])
     if change is None:
@@ -217,7 +217,8 @@ class RowDelegate(QStyledItemDelegate):
             texto, papel = rotulo
             escrever(texto, forte, mf, c[papel])
             direita -= 8
-        alvo = strings.CONVERT_MEASURING if estimado is None else format_size(estimado, estimated=True)
+        alvo = DASH if depois.get("skipped") else (
+            strings.CONVERT_MEASURING if estimado is None else format_size(estimado, estimated=True))
         escrever(alvo, forte, mf, c["text"])
         direita -= 8
         escrever("→", normal, mn, c["t3"])
