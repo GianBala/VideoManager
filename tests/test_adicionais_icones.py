@@ -122,3 +122,22 @@ def test_a_coluna_de_midia_tem_a_acao_em_largura_inteira_e_a_saida_discreta(pain
     assert painel._insert.width() >= painel._media_list.width() - 2 or not painel._insert.isVisible()
     assert painel._pool_count_label.property("role") == "chip"
     assert not painel._import.icon().isNull() and not painel._insert.icon().isNull()
+
+
+def test_selecionar_um_bloco_nao_redesenha_os_icones_que_so_dependem_do_tema(painel, blocos, monkeypatch):
+    """``PRF-001``: ~50 ícones eram rasterizados a cada seleção e a cada edição (1,6 ms) para sair idênticos.
+
+    Só os três botões principais mudam com o bloco (``+`` ou ``✓``); as opções e as abas só mudam com o tema.
+    """
+    from videomanager.presentation.qt.panels import edit_panel
+    chamadas = []
+    original = edit_panel.icons.two_states
+    monkeypatch.setattr(edit_panel.icons, "two_states", lambda *args, **kw: chamadas.append(args) or original(*args, **kw))
+    painel._timeline.select(blocos["texto"].clip_id)
+    painel._timeline.select(blocos["filtro"].clip_id)
+    painel._timeline.select(blocos["transicao"].clip_id)
+    painel._sync_extras_controls(None)
+    assert chamadas == [], f"{len(chamadas)} ícones de dois estados redesenhados por seleção"
+    # E a troca de tema continua refazendo todos.
+    painel._set_extras_icons()
+    assert chamadas
