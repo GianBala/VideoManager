@@ -58,8 +58,12 @@ Uma cadeia de combos em cascata, cada um populado só com o que a mídia
    para cima só aumentaria o arquivo (o painel avisa antes de baixar). Os perfis
    rápidos voltam o bitrate ao da fonte. O campo do valor livre aparece numa
    fileira abaixo, só com "Personalizado…" escolhido.
-6. **Trilha de áudio** — só aparece quando o site separa vídeo e áudio em
-   streams diferentes (a maioria fora do YouTube já entrega mesclado).
+6. **Trilha de áudio** — "Melhor disponível" ou uma das trilhas que o site
+   oferece (idioma, codec, bitrate). O campo está sempre à vista; só se
+   escolhe quando o site separa vídeo e áudio em streams diferentes (o YouTube
+   separa, a maioria dos outros já entrega mesclado). Nos outros casos ele fica
+   apagado e diz por quê: "Já vem junto com o vídeo" numa mídia mesclada, e
+   "Melhor disponível" enquanto nada foi analisado.
 
 Sempre que a combinação escolhida implica **trocar de codec**, **recodificar**
 ou baixar uma **resolução menor** que a melhor disponível naquele codec, ou

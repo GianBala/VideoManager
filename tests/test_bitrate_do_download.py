@@ -83,21 +83,74 @@ def test_bitrate_fica_na_segunda_fileira_e_a_trilha_de_audio_e_uma_coluna_so(pai
     assert vx == bx and vy > by
 
 
-def test_com_o_audio_mesclado_a_segunda_fileira_nao_deixa_vao(desktop_app):
+def _painel_com(desktop_app, fixture: str | None):
     instancia = QualityPanel(Settings())
-    instancia.set_matrix(build_matrix(fixture_formats("archive_muxed")), DURACAO)
+    if fixture is not None:
+        instancia.set_matrix(build_matrix(fixture_formats(fixture)), DURACAO)
     instancia.show()
     for _ in range(3):
         desktop_app.processEvents()
+    return instancia
+
+
+def _fechar(instancia) -> None:
+    instancia.close()
+    apply_language(i18n.PORTUGUESE)
+
+
+def test_a_trilha_de_audio_esta_sempre_a_vista_e_so_se_escolhe_quando_o_site_separa_o_audio(desktop_app):
+    """Escondê-la quando não há o que escolher fazia a opção parecer perdida: a trilha é um campo da personalização."""
+    vazio = _painel_com(desktop_app, None)
+    separado = _painel_com(desktop_app, "youtube_dash")
+    mesclado = _painel_com(desktop_app, "archive_muxed")
     try:
-        assert not instancia._audio_track.isVisibleTo(instancia)
-        container = instancia._container.mapTo(instancia, instancia._container.rect().topLeft())
-        bitrate = instancia._bitrate.mapTo(instancia, instancia._bitrate.rect().topLeft())
-        # O bitrate fica na coluna do meio, junto do container: o vão é à direita, e não entre os dois.
-        assert bitrate.y() == container.y() and bitrate.x() > container.x()
+        for instancia in (vazio, separado, mesclado):
+            assert instancia._audio_track.isVisibleTo(instancia) and instancia._audio_track_box.isVisibleTo(instancia)
+        assert not vazio._audio_track.isEnabled()  # nada analisado ainda
+        assert separado._audio_track.isEnabled() and separado._audio_track.itemText(0) == strings.QUALITY_BEST_AVAILABLE
+        assert separado._audio_track.count() > 1  # a melhor disponível e as trilhas que o site oferece
+        assert not mesclado._audio_track.isEnabled()
+        assert mesclado._audio_track.currentText() == strings.QUALITY_AUDIO_TRACK_MUXED
     finally:
-        instancia.close()
+        for instancia in (vazio, separado, mesclado):
+            _fechar(instancia)
+
+
+def test_o_audio_que_ja_vem_no_video_nao_entra_no_resumo_nem_muda_o_pedido(desktop_app):
+    mesclado = _painel_com(desktop_app, "archive_muxed")
+    separado = _painel_com(desktop_app, "youtube_dash")
+    try:
+        assert strings.QUALITY_AUDIO_TRACK_MUXED not in mesclado.summary()
+        assert strings.QUALITY_BEST_AVAILABLE in separado.summary()
+        esperado = mesclado._matrix.audio[0] if mesclado._matrix.audio else None
+        assert mesclado.build_request().audio is esperado  # a escolha de trilha não existe: vale a primeira, como sempre valeu
+    finally:
+        _fechar(mesclado)
+        _fechar(separado)
+
+
+def test_analisar_outra_midia_liga_e_desliga_a_escolha_da_trilha_sem_esconder_o_campo(desktop_app):
+    instancia = _painel_com(desktop_app, "youtube_dash")
+    try:
+        assert instancia._audio_track.isEnabled()
+        instancia.set_matrix(build_matrix(fixture_formats("archive_muxed")), DURACAO)
+        assert instancia._audio_track.isVisibleTo(instancia) and not instancia._audio_track.isEnabled()
+        instancia.set_matrix(build_matrix(fixture_formats("youtube_dash")), DURACAO)
+        assert instancia._audio_track.isVisibleTo(instancia) and instancia._audio_track.isEnabled()
+        assert instancia._audio_track.itemText(0) == strings.QUALITY_BEST_AVAILABLE
+    finally:
+        _fechar(instancia)
+
+
+def test_o_texto_da_trilha_mesclada_acompanha_o_idioma(desktop_app):
+    instancia = _painel_com(desktop_app, "archive_muxed")
+    try:
+        apply_language(i18n.ENGLISH)
+        assert instancia._audio_track.currentText() == strings.QUALITY_AUDIO_TRACK_MUXED == "Already included in the video"
         apply_language(i18n.PORTUGUESE)
+        assert instancia._audio_track.currentText() == "Já vem junto com o vídeo"
+    finally:
+        _fechar(instancia)
 
 
 def test_o_pedido_de_lote_leva_o_bitrate_tambem(painel):

@@ -88,6 +88,7 @@ LABEL_ESTIMATED_SIZE = "Tamanho estimado"
 ANY_FPS = "Qualquer"
 ANY_CODEC = "Qualquer"
 QUALITY_BEST_AVAILABLE = "Melhor disponível"
+QUALITY_AUDIO_TRACK_MUXED = "Já vem junto com o vídeo"
 CONTAINER_AUTO_LABEL = "Automático (o melhor sem recodificar)"
 
 TIP_CONTAINER = (
