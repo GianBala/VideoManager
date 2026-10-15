@@ -11,7 +11,7 @@ exibido de todo botão marcável é o mesmo que o painel produz ao recarregar o 
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractButton, QApplication
 
@@ -33,9 +33,8 @@ def _marcaveis(propriedades) -> list[QAbstractButton]:
 
 
 def _clicar(botao: QAbstractButton) -> None:
-    """Clique de verdade, num ponto que o botão aceita: no ``WrapCheck`` só o indicador e o texto respondem."""
-    ponto = QPoint(6, botao.height() // 2) if isinstance(botao, WrapCheck) else botao.rect().center()
-    QTest.mouseClick(botao, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, ponto)
+    """Clique de verdade no meio do botão (a linha inteira do ``WrapCheck`` responde, como a de qualquer botão)."""
+    QTest.mouseClick(botao, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, botao.rect().center())
 
 
 def _estados(propriedades) -> dict[int, tuple[str, bool]]:
@@ -62,8 +61,11 @@ def test_depois_de_cada_clique_o_botao_mostra_o_que_o_bloco_diz(tema_do_app, pai
                 break
             if desmarcado:
                 painel._timeline.select(-1)
+            marcado_antes = botao.isChecked()
             _clicar(botao)
             _processar()
+            if isinstance(botao, WrapCheck):  # um clique que o botão ignora passaria pela comparação abaixo sem medir nada
+                assert botao.isChecked() != marcado_antes, f"{nome}: o clique em {botao.text()!r} não alternou a caixa"
             exibido = _estados(propriedades)
             atual = painel._project.find(bloco.clip_id)[1]
             propriedades.load_clip(atual, painel._project.width, painel._project.height, fps=painel._project.fps,
