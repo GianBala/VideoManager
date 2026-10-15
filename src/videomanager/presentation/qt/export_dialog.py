@@ -8,9 +8,10 @@ liberando espaço para a visualização das trilhas na tela principal.
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QThreadPool
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -34,6 +35,8 @@ from videomanager.domain.render_cost import interpolation_bytes
 from videomanager.domain.export_policy import reference_clip
 from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.media import LocalMedia
+from videomanager.domain.media import VideoTarget
+from videomanager.domain.size_model import needs_sample
 from videomanager.application import encoding as hwaccel
 from videomanager.domain.estimator import estimate_export_size
 from videomanager.application.errors import VideoManagerError
@@ -57,6 +60,7 @@ from videomanager.presentation.qt import icons, strings, theme
 from videomanager.presentation.qt.panels.edit_widgets import index_of
 from videomanager.application.editor.canvas import CANVAS_PRESETS, aspect_of, canvas_for_aspect, output_canvas
 from videomanager.presentation.qt.ports import DesktopRuntimePort
+from videomanager.presentation.qt.tasks import WorkerRunner
 
 RATE_PRESETS: tuple[float, ...] = (24.0, 25.0, 30.0, 50.0, 60.0)
 
@@ -202,6 +206,15 @@ class ExportDialog(QDialog):
         self.created_job: Job | None = None
         self.chosen_canvas = initial_canvas
         self.chosen_rate = initial_rate
+
+        # Bitrate de vídeo medido por (mídia principal, como a exportação a codificaria); ``None`` quando a medida falhou
+        # e a conta por pixels é o que resta. Uma vaga só: cada escolha da janela pede a medida da sua.
+        self._samples: dict[tuple, float | None] = {}
+        self._sampling: set[tuple] = set()
+        self._sampling_token = 0
+        self._sampling_pool = QThreadPool(self)
+        self._sampling_pool.setMaxThreadCount(1)
+        self._sampling_runner = WorkerRunner(self._sampling_pool)
 
         self._build_ui()
         self._sync_presets()
@@ -941,6 +954,8 @@ class ExportDialog(QDialog):
         codec_family = ("gif" if self._container_choice == "gif"
                         else self._codec_choice or hwaccel.family_for(self._container_choice or "mp4"))
 
+        container = self._container_choice or "mp4"
+        measured, pending = self._measured_video_kbps(proj, container, codec_family, audio_only, is_fast)
         est_bytes = estimate_export_size(
             duration=export_duration,
             width=proj.width,
@@ -953,8 +968,66 @@ class ExportDialog(QDialog):
             source_size=source_size,
             source_duration=source_dur,
             quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
+            video_kbps=measured,
+            container=container,
         )
-        self._size_label.setText(format_size(est_bytes, estimated=True))
+        self._size_label.setText(strings.CONVERT_MEASURING if pending else format_size(est_bytes, estimated=True))
+
+    def _measured_video_kbps(self, proj: Project, container: str, family: str, audio_only: bool,
+                             is_fast: bool) -> tuple[float | None, bool]:
+        """``(bitrate, medindo)``: o da mídia principal codificada como a exportação a codificaria.
+
+        A conta por pixels errava de −66% a +1500% porque não enxerga o conteúdo; a medida pede uns segundos e chega em
+        segundo plano. Só a mídia principal é medida: com várias fontes é o que a exportação mais vai gastar, e o
+        restante segue a mesma taxa. Cópia, só áudio e GIF não recodificam vídeo de taxa a medir.
+        """
+        if audio_only or is_fast or family == "gif":
+            self._cancel_sampling()
+            return None, False
+        main = self._main_clip(proj)
+        local = self._probed.get(main.media.path) if main else None
+        tools = self._ensure_tools() if self._ensure_tools else None
+        target = VideoTarget(
+            container=container, video_codec=family, height=min(proj.width, proj.height), fps=proj.fps,
+            quality=self._quality_choice or hwaccel.QUALITY_BALANCED, hardware=self._settings.hardware_encoder,
+        )
+        if local is None or tools is None or not needs_sample(local, target):
+            self._cancel_sampling()
+            return None, False
+        key = (local.path, container, family, target.quality, target.height, target.fps, target.hardware)
+        if key in self._samples:
+            return self._samples[key], False
+        # Trocar de opção em sequência não espera a medida de cada passo: a que a escolha atual dispensa sai.
+        if any(pedida != key for pedida in self._sampling):
+            self._cancel_sampling()
+        if key not in self._sampling:
+            self._sampling.add(key)
+            token = self._sampling_token
+            worker = self._runtime.sample_worker(local, target, tools)
+            worker.signals.finished.connect(partial(self._on_sampled, token, key), Qt.ConnectionType.QueuedConnection)
+            worker.signals.failed.connect(lambda _error, token=token, key=key: self._on_sampled(token, key, None),
+                                          Qt.ConnectionType.QueuedConnection)
+            self._sampling_runner.start(worker, worker.signals.done)
+        return None, True
+
+    def _on_sampled(self, token: int, key: tuple, kbps: float | None) -> None:
+        if token != self._sampling_token:
+            return
+        self._sampling.discard(key)
+        self._samples[key] = kbps
+        self._update_plan()
+
+    def _cancel_sampling(self) -> None:
+        if not self._sampling:
+            return
+        self._sampling_token += 1
+        self._sampling_runner.cancel_all()
+        self._sampling.clear()
+
+    def done(self, result: int) -> None:
+        # Fechar a janela interrompe o ffmpeg da medida: o destrutor do pool esperaria o prazo dele.
+        self._cancel_sampling()
+        super().done(result)
 
     # ------------------------------------------------------------------
     # Enfileirar
