@@ -304,6 +304,10 @@ CONVERT_COMPRESS_NO_GAIN = (
     "{count} file(s) already well compressed should not come out smaller than "
     "the original, and a result that is not smaller is not saved."
 )
+CONVERT_SIZE_APPROXIMATE = (
+    "A sample could not be measured: the size is a rough calculation and can be well off, "
+    "either way."
+)
 
 # --- metadados ---------------------------------------------------------------
 TAB_METADATA = "Metadata"
