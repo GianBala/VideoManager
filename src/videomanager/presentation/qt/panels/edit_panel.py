@@ -237,6 +237,10 @@ _EXTRAS_WIDTH = 304
 # margens de 14, que é o tamanho em que as miniaturas são pedidas (ver ``_THUMB_W``).
 _MEDIA_WIDTH = 252
 
+# Piso da coluna de Adicionais. Com a gaveta de tarefas aberta no editor a janela padrão deixa o editor no mínimo dele, e a
+# coluna cai a este piso: as quatro abas pedem 262 px em inglês (com a Propriedades aberta), 2 a mais que os 260 de antes.
+_EXTRAS_MIN = 264
+
 # Largura que o monitor defende quando a janela estreita: até ela, quem cede
 # são as colunas laterais, até o mínimo delas. É a largura em que a barra de
 # transporte cabe numa linha, e o piso que o monitor tinha quando a aba ainda
@@ -1106,7 +1110,7 @@ class EditPanel(QWidget):
         box = _ExtrasColumn()
         box.setProperty("role", "pane")
         box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        box.setMinimumWidth(260)
+        box.setMinimumWidth(_EXTRAS_MIN)
         layout = QVBoxLayout(box)
         # As abas vão de ponta a ponta do cartão (o fio e o sublinhado encostam nas bordas); o conteúdo de cada aba
         # tem o próprio recuo.
