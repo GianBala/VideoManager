@@ -108,13 +108,14 @@ def test_o_aviso_ver_tarefas_abre_a_gaveta_na_janela_estreita(janela):
     assert janela._queue_panel.isVisible() and janela._queue_panel.width() == DRAWER_WIDTH
 
 
-def test_aberta_de_passagem_a_gaveta_sai_ao_trocar_de_aba_estreita(janela):
+def test_aberta_na_janela_estreita_a_gaveta_continua_ao_trocar_de_aba(janela):
+    """A janela cresceu para dar lugar a ela; ir ao editor não a esconde (o relato de 2026-10-15)."""
     _largura(janela, _limiar(janela) - 60)
     janela._nav_tasks.click()
     _assentar()
     assert janela._queue_panel.isVisible()
     _ir(janela, _TAB_EDIT)
-    assert not janela._queue_panel.isVisible()
+    assert janela._queue_panel.isVisible() and janela._queue_panel.width() == DRAWER_WIDTH
 
 
 def test_o_limiar_acompanha_o_conteudo_que_cresce_sem_que_a_janela_mude_de_tamanho(janela):

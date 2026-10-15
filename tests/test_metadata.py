@@ -378,7 +378,7 @@ def test_janela_tem_a_aba_com_menu_e_sem_fila(desktop_app, monkeypatch) -> None:
         assert janela._meta_save_action.shortcut() == QKeySequence("Ctrl+S")
         # Um atalho, uma ação: os das outras abas desligam aqui, e vice-versa.
         assert janela._convert_add_action.shortcut().isEmpty() and janela._save_proj_action.shortcut().isEmpty()
-        assert not janela._queue_panel.isVisible()
+        assert janela._queue_panel.isVisible()  # a gaveta que estava aberta em Download continua aberta nos Metadados
         for aba in (_TAB_CONVERT, _TAB_EDIT):
             janela._tabs.setCurrentIndex(aba)
             assert janela._meta_open_action.shortcut().isEmpty() and janela._meta_save_action.shortcut().isEmpty()

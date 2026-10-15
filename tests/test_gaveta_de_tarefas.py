@@ -53,40 +53,43 @@ def _ir(janela, desktop_app, indice: int) -> None:
 
 # -- onde a gaveta aparece ------------------------------------------------------------------------------------
 
-def test_a_gaveta_acompanha_a_aba_como_a_fila_acompanhava(janela, desktop_app):
+def test_a_gaveta_aberta_continua_aberta_ao_trocar_de_aba_inclusive_no_editor_e_nos_metadados(janela, desktop_app):
+    """O relato: com a gaveta aberta em Download, Convert ou Metadados, ir para o Editar a recolhia sozinha.
+
+    Trocar de aba não pode esconder o que está em andamento (é o motivo de a gaveta estar fora das abas); o editor
+    recolhia-a por conta própria, para dar espaço, e quem queria acompanhar uma tarefa enquanto edita tinha de abri-la de novo.
+    """
     visivel = {}
-    for indice in (_TAB_DOWNLOAD, _TAB_CONVERT, _TAB_EDIT, _TAB_METADATA, _TAB_DOWNLOAD):
+    for indice in (_TAB_DOWNLOAD, _TAB_CONVERT, _TAB_EDIT, _TAB_METADATA, _TAB_EDIT, _TAB_CONVERT, _TAB_DOWNLOAD):
         _ir(janela, desktop_app, indice)
-        visivel[indice] = janela._queue_panel.isVisible()
+        visivel.setdefault(indice, set()).add(janela._queue_panel.isVisible())
         # O item do menu mostra o que a gaveta mostra: marcado = gaveta à vista.
         assert janela._nav_tasks.isChecked() == janela._queue_panel.isVisible()
-    assert visivel == {_TAB_DOWNLOAD: True, _TAB_CONVERT: True, _TAB_EDIT: False, _TAB_METADATA: False}
+    assert visivel == {_TAB_DOWNLOAD: {True}, _TAB_CONVERT: {True}, _TAB_EDIT: {True}, _TAB_METADATA: {True}}
     assert janela._queue_panel.width() == DRAWER_WIDTH
 
 
-def test_recolher_vale_nas_abas_que_a_mostram_e_volta_do_editor_como_estava(janela, desktop_app):
+def test_a_gaveta_fechada_continua_fechada_ao_trocar_de_aba_e_volta_pelo_item_tarefas(janela, desktop_app):
     janela._queue_panel._hide_button.click()
     assert not janela._queue_panel.isVisible() and not janela._nav_tasks.isChecked()
-    for indice in (_TAB_CONVERT, _TAB_EDIT, _TAB_DOWNLOAD):
+    for indice in (_TAB_CONVERT, _TAB_EDIT, _TAB_METADATA, _TAB_DOWNLOAD):
         _ir(janela, desktop_app, indice)
-        assert not janela._queue_panel.isVisible()
+        assert not janela._queue_panel.isVisible(), indice
     janela._nav_tasks.click()
     assert janela._queue_panel.isVisible() and janela._nav_tasks.isChecked()
-    _ir(janela, desktop_app, _TAB_EDIT)
-    assert not janela._queue_panel.isVisible()
-    _ir(janela, desktop_app, _TAB_CONVERT)
-    assert janela._queue_panel.isVisible()
+    for indice in (_TAB_EDIT, _TAB_METADATA, _TAB_CONVERT):
+        _ir(janela, desktop_app, indice)
+        assert janela._queue_panel.isVisible(), indice
 
 
 @pytest.mark.parametrize("aba_de_trabalho", [_TAB_EDIT, _TAB_METADATA])
-def test_recolher_numa_aba_de_trabalho_so_desfaz_a_abertura_de_passagem(janela, desktop_app, aba_de_trabalho):
-    """``REG-003``: espiar as tarefas no editor e fechar a gaveta ali não a tira de Download e Convert.
+def test_fechar_numa_aba_de_trabalho_nao_tira_a_gaveta_de_download_e_convert(janela, desktop_app, aba_de_trabalho):
+    """``REG-003`` (decisão Q1): fechar a gaveta no editor ou nos Metadados não revoga a de Download e Convert.
 
-    Nas abas de trabalho a gaveta só aparece de passagem; a vontade do usuário de tê-la à vista é a das abas que
-    produzem tarefas, e fechar a espiada não a revoga.
+    A gaveta chega aberta lá (a preferência das abas que produzem tarefas); quem a fecha ali a fechou para o trabalho, e
+    ao voltar a Download ou Convert ela está onde a preferência a deixou.
     """
     _ir(janela, desktop_app, aba_de_trabalho)
-    janela._nav_tasks.click()
     assert janela._queue_panel.isVisible()
     janela._queue_panel._hide_button.click()
     assert not janela._queue_panel.isVisible() and not janela._nav_tasks.isChecked()
@@ -95,27 +98,32 @@ def test_recolher_numa_aba_de_trabalho_so_desfaz_a_abertura_de_passagem(janela, 
         assert janela._queue_panel.isVisible() and janela._nav_tasks.isChecked(), indice
 
 
-def test_abrir_de_passagem_numa_aba_de_trabalho_nao_desfaz_o_recolher_de_download(janela, desktop_app):
-    """A regra é simétrica: quem recolheu a gaveta em Download e espia as tarefas no editor a recolheu para sempre."""
+def test_abrir_numa_aba_de_trabalho_nao_desfaz_o_recolher_de_download(janela, desktop_app):
+    """A regra é simétrica: quem recolheu a gaveta em Download e a abre no editor a recolheu para as abas dela."""
     janela._queue_panel._hide_button.click()
     assert not janela._queue_panel.isVisible()
     _ir(janela, desktop_app, _TAB_EDIT)
+    assert not janela._queue_panel.isVisible()
     janela._nav_tasks.click()
     assert janela._queue_panel.isVisible()
+    _ir(janela, desktop_app, _TAB_METADATA)
+    assert janela._queue_panel.isVisible(), "aberta no editor, continua nos Metadados"
     _ir(janela, desktop_app, _TAB_DOWNLOAD)
     assert not janela._queue_panel.isVisible() and not janela._nav_tasks.isChecked()
 
 
-def test_o_item_tarefas_abre_a_gaveta_no_editor(janela, desktop_app):
+def test_o_item_tarefas_liga_e_desliga_a_gaveta_no_editor(janela, desktop_app):
     _ir(janela, desktop_app, _TAB_EDIT)
-    janela._nav_tasks.click()
     assert janela._queue_panel.isVisible()
     janela._nav_tasks.click()
     assert not janela._queue_panel.isVisible()
+    janela._nav_tasks.click()
+    assert janela._queue_panel.isVisible()
 
 
 def test_o_aviso_ver_tarefas_abre_a_gaveta_com_o_editor_aberto(janela, desktop_app, monkeypatch):
     monkeypatch.setattr(janela._queue, "submit", lambda job: None)
+    janela._queue_panel._hide_button.click()  # fechada, como quem prefere o editor sem ela
     _ir(janela, desktop_app, _TAB_EDIT)
     assert not janela._queue_panel.isVisible()
     janela._submit_jobs([Job("", "a", "", kind=JobKind.EXPORT)])
