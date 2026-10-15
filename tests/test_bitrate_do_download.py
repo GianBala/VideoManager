@@ -9,6 +9,7 @@ de uma escolha anterior, o valor pronto que fica com o separador decimal do idio
 from __future__ import annotations
 
 import pytest
+from PySide6.QtWidgets import QApplication
 
 from conftest import fixture_formats
 from videomanager.application.formatting import format_bitrate, format_size
@@ -63,6 +64,40 @@ def test_personalizado_mostra_o_campo_livre_e_o_valor_dele_vai_no_pedido(painel)
     assert painel.current_video_kbps() == 3300 and painel.build_request().video_kbps == 3300
     _escolher(painel, None)
     assert not painel._bitrate_custom_box.isVisibleTo(painel) and painel.build_request().video_kbps is None
+
+
+def test_bitrate_fica_na_segunda_fileira_e_a_trilha_de_audio_e_uma_coluna_so(painel):
+    """Seis combos em duas fileiras de três colunas iguais: o bitrate entre o container e a trilha, e o valor livre sob ele."""
+    def caixa(widget):
+        topo = widget.mapTo(painel, widget.rect().topLeft())
+        return topo.x(), topo.y(), widget.width()
+
+    assert painel._audio_track.isVisibleTo(painel)  # o YouTube separa vídeo e áudio
+    (cx, cy, cw), (bx, by, bw), (tx, ty, tw) = caixa(painel._container), caixa(painel._bitrate), caixa(painel._audio_track)
+    assert cy == by == ty and cx < bx < tx
+    assert cw == bw == tw  # a trilha de áudio já ocupou duas colunas, e o bitrate ficava sozinho numa terceira fileira
+    _escolher(painel, "custom")
+    for _ in range(3):
+        QApplication.processEvents()
+    vx, vy, _ = caixa(painel._bitrate_custom)
+    assert vx == bx and vy > by
+
+
+def test_com_o_audio_mesclado_a_segunda_fileira_nao_deixa_vao(desktop_app):
+    instancia = QualityPanel(Settings())
+    instancia.set_matrix(build_matrix(fixture_formats("archive_muxed")), DURACAO)
+    instancia.show()
+    for _ in range(3):
+        desktop_app.processEvents()
+    try:
+        assert not instancia._audio_track.isVisibleTo(instancia)
+        container = instancia._container.mapTo(instancia, instancia._container.rect().topLeft())
+        bitrate = instancia._bitrate.mapTo(instancia, instancia._bitrate.rect().topLeft())
+        # O bitrate fica na coluna do meio, junto do container: o vão é à direita, e não entre os dois.
+        assert bitrate.y() == container.y() and bitrate.x() > container.x()
+    finally:
+        instancia.close()
+        apply_language(i18n.PORTUGUESE)
 
 
 def test_o_pedido_de_lote_leva_o_bitrate_tambem(painel):
