@@ -54,13 +54,14 @@ projeto na aba Editar).
 | [Editar](guia-edicao.md) | Cortar e montar uma edição multipista |
 | [Metadados](guia-metadados.md) | Editar tags, trilhas e capa, gravando numa cópia |
 
-A gaveta é uma coluna de largura fixa. **Nas abas Editar e Metadados ela fica
-recolhida**: ali o espaço vale mais como área de trabalho, e o selo do item
-**Tarefas** continua contando as tarefas em andamento mesmo sem a gaveta
-visível. Ao enfileirar uma exportação no editor, um aviso flutuante diz que a
-tarefa entrou na fila e oferece **Ver tarefas**, que abre a gaveta ali mesmo.
-Abrir ou fechar a gaveta numa dessas duas abas é de passagem e não muda a
-preferência: em Download e Convert ela continua como estava.
+A gaveta é uma coluna de largura fixa e **trocar de aba não a mexe**: aberta
+numa aba, continua aberta nas outras, o Editar e os Metadados incluídos, para
+acompanhar uma tarefa enquanto se edita; fechada, continua fechada. O item
+**Tarefas** a liga e desliga, e o selo dele conta as tarefas em andamento mesmo
+com a gaveta fechada. Ao enfileirar uma exportação, um aviso flutuante diz que
+a tarefa entrou na fila e oferece **Ver tarefas**, que abre a gaveta ali mesmo.
+Fechar a gaveta no Editar ou nos Metadados não muda a escolha de Download e
+Convert: ao voltar a elas, a gaveta está onde estava.
 
 **Em janela estreita a gaveta recolhe sozinha.** Quando a janela é mais estreita
 que o menu, o conteúdo da aba e os 344 px da gaveta somados, a gaveta sai de
