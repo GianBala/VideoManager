@@ -45,6 +45,20 @@ Uma cadeia de combos em cascata, cada um populado só com o que a mídia
 4. **Container** — Automático, `.mp4`, `.mkv` ou `.webm`.
 5. **Trilha de áudio** — só aparece quando o site separa vídeo e áudio em
    streams diferentes (a maioria fora do YouTube já entrega mesclado).
+6. **Bitrate** — "Igual ao da fonte" (o padrão, que mostra o bitrate que a fonte
+   tem) baixa o vídeo como o site o entrega, sem recodificar. Um valor pronto
+   (500 kbps a 12 Mbps) ou "Personalizado…" (de 100 a 100 000 kbps) é o
+   consentimento de **recodificar**: depois do download, o vídeo é codificado de
+   novo a esse bitrate médio, em **duas passadas** (x264, x265 e VP9; o SVT-AV1
+   usa uma), no codec que ele já tinha (ou H.264 se o container não o aceita), e
+   o áudio, as legendas e a capa ficam como estão. O arquivo sai perto de
+   *bitrate × duração* — medido em vídeos reais, de +3% a +5% acima do pedido num
+   1080p60, e menos quando a imagem é simples demais para gastar o bitrate (uma
+   gravação de tela de 10 Mbps cabe em 0,3 a 0,7 Mbps, qualquer que seja o alvo).
+   O tamanho estimado acompanha o valor, e é, portanto, um teto.
+   Uma fonte que já está no bitrate pedido, ou abaixo, é mantida: recodificar
+   para cima só aumentaria o arquivo (o painel avisa antes de baixar). Os perfis
+   rápidos voltam o bitrate ao da fonte.
 
 Sempre que a combinação escolhida implica **trocar de codec**, **recodificar**
 ou baixar uma **resolução menor** que a melhor disponível naquele codec, ou

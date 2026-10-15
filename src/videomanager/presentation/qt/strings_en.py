@@ -127,6 +127,27 @@ TIP_CODEC = (
     "it comes back on its own as soon as you pick a resolution that has it."
 )
 
+# --- video bitrate -----------------------------------------------------------
+LABEL_VIDEO_BITRATE = "Bitrate"
+LABEL_VIDEO_BITRATE_VALUE = "Value"
+VIDEO_BITRATE_SOURCE = "Same as the source"
+VIDEO_BITRATE_SOURCE_WITH = "Same as the source ({bitrate})"
+VIDEO_BITRATE_CUSTOM = "Custom…"
+TIP_VIDEO_BITRATE = (
+    "“Same as the source” downloads the video as the site serves it, without re-encoding.\n"
+    "A value re-encodes the video after the download to that average bitrate, in two "
+    "passes: the file comes out close to bitrate × duration (less, if the picture is too "
+    "simple to spend it), but it takes longer and loses a little quality."
+)
+QUALITY_WARN_RECODE = (
+    "The video will be re-encoded at {bitrate} after the download: it takes longer and loses "
+    "a little quality. Audio, subtitles and cover art stay as they are."
+)
+QUALITY_WARN_BITRATE_ABOVE_SOURCE = (
+    "The source is {source}, below {requested}: re-encoding would only grow the file without "
+    "recovering quality. The video will be kept as it is."
+)
+
 # --- controles de áudio ------------------------------------------------------
 LABEL_AUDIO_FORMAT = "Format"
 LABEL_AUDIO_QUALITY = "Bitrate"
