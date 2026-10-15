@@ -253,7 +253,71 @@ class TestConvertSizeEstimation:
         assert size == expected
 
 
+class TestConvertSizeMeasuredAndAudio:
+    """O que a amostra mede entra na conta sem o 1,5% fixo, e o áudio deixa de ser o bitrate pedido quando não é."""
+
+    @staticmethod
+    def _video(tmp_path: Path, audio_kbps: float | None = 191.0) -> LocalMedia:
+        return LocalMedia(
+            path=tmp_path / "video.mp4", duration=100.0, format_name="mov,mp4", size=80_000_000,
+            streams=(LocalStream(index=0, kind="video", codec="h264", width=1920, height=1080, fps=30.0),
+                     LocalStream(index=1, kind="audio", codec="aac", bitrate=audio_kbps, sample_rate=48000, channels=2)),
+        )
+
+    def test_audio_copiado_de_um_video_tem_o_bitrate_da_trilha_e_nao_o_pedido(self, tmp_path: Path) -> None:
+        # AAC de 191 kbps copiado: o pedido de 128 kbps anunciava 34% a menos do que saía.
+        size = estimate_convert_size(self._video(tmp_path), AudioTarget(codec="m4a", bitrate="128"))
+        assert size == int(191.0 * 1000 / 8 * 100.0)
+
+    def test_audio_copiado_sem_bitrate_da_trilha_usa_o_arquivo_se_for_so_audio(self, tmp_path: Path) -> None:
+        music = LocalMedia(path=tmp_path / "a.m4a", duration=100.0, format_name="mov,mp4", size=3_000_000,
+                           streams=(LocalStream(index=0, kind="audio", codec="aac"),))
+        assert estimate_convert_size(music, AudioTarget(codec="m4a", bitrate="128")) == 3_000_000
+
+    def test_audio_medido_vale_o_que_o_encoder_gravou_mais_o_container(self, tmp_path: Path) -> None:
+        # O Opus de 128 kbps gravou 176: a amostra manda, não o pedido.
+        alvo = AudioTarget(codec="opus", bitrate="128", reencode=True)
+        size = estimate_convert_size(self._video(tmp_path), alvo, 176.0)
+        assert size == pytest.approx(176.0 * 1000 / 8 * 100.0 * 1.008, rel=0.01)
+
+    def test_sem_perda_sem_medida_parte_do_pcm_da_propria_trilha(self, tmp_path: Path) -> None:
+        # 48 kHz estéreo de 16 bits são 1536 kbps; o 800 fixo errava −50% a −55% em áudios reais.
+        size = estimate_convert_size(self._video(tmp_path), AudioTarget(codec="flac", bitrate="0"))
+        assert size == pytest.approx(1536.0 * 0.85 * 1000 / 8 * 100.0)
+        wav = estimate_convert_size(self._video(tmp_path), AudioTarget(codec="wav", bitrate="0"))
+        assert wav == pytest.approx(1536.0 * 1000 / 8 * 100.0)
+
+    def test_video_medido_paga_so_o_container_e_nao_um_e_meio_por_cento(self, tmp_path: Path) -> None:
+        alvo = VideoTarget(container="mp4", video_codec="h264", audio_codec="aac", audio_bitrate="128")
+        sem_medida = estimate_convert_size(self._video(tmp_path), alvo)
+        medido = estimate_convert_size(self._video(tmp_path), alvo, 5000.0)
+        carga = (5000.0 + 128.0) * 1000 / 8 * 100.0
+        assert carga < medido < carga * 1.006  # 0,2–0,4% medido em 1080p
+        assert sem_medida != medido
+
+
 class TestExportSizeEstimation:
+    def test_export_medido_soma_so_o_container_ao_bitrate_da_amostra(self) -> None:
+        sem = estimate_export_size(duration=100.0, width=1920, height=1080, fps=30.0, video_codec="h264")
+        medido = estimate_export_size(duration=100.0, width=1920, height=1080, fps=30.0, video_codec="h264",
+                                      video_kbps=3000.0)
+        carga = (3000.0 + 192.0) * 1000 / 8 * 100.0
+        assert carga < medido < carga * 1.006
+        assert medido < sem  # a conta por pixels anunciava mais que o dobro para esta fonte leve
+
+    def test_export_medido_de_gif_nao_soma_audio(self) -> None:
+        gif = estimate_export_size(duration=10.0, width=640, height=360, fps=15.0, video_codec="gif", video_kbps=800.0)
+        assert gif < 800.0 * 1000 / 8 * 10.0 * 1.01
+
+    def test_export_so_audio_sem_perda_parte_do_pcm_do_compositor(self) -> None:
+        # O compositor mistura a 48 kHz estéreo: 1536 kbps de PCM. O 800 fixo do FLAC errava −39%.
+        wav = estimate_export_size(duration=60.0, width=1, height=1, fps=30.0, video_codec="h264",
+                                   audio_only=True, audio_codec="wav")
+        flac = estimate_export_size(duration=60.0, width=1, height=1, fps=30.0, video_codec="h264",
+                                    audio_only=True, audio_codec="flac")
+        assert wav == int(1536.0 * 1000 / 8 * 60.0)
+        assert flac == pytest.approx(wav * 0.85, rel=0.001)
+
     def test_export_normal_vs_audio_only(self) -> None:
         size_video = estimate_export_size(
             duration=60.0,
