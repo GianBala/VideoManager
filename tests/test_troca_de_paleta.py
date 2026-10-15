@@ -12,6 +12,7 @@ import weakref
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 
@@ -126,6 +127,32 @@ def test_onda_sonora_ja_gerada_e_pedida_de_novo(painel, projeto, aplicacao):
     assert painel._timeline.strip_range(projeto.audio.clip_id) is not None
     aplicar_tema(aplicacao, "light")
     assert painel._timeline.strip_range(projeto.audio.clip_id) is None
+
+
+def test_as_miniaturas_do_acervo_seguem_a_troca_de_paleta(painel, aplicacao):
+    """``FRT-003``: a ficha-substituta e as faixas em volta de um quadro 4:3 eram pintadas com o fundo do tema antigo."""
+    from types import SimpleNamespace
+    audio = MediaRef(Path("m.mp3"), MediaKind.AUDIO, duration=10.0, has_audio=True)
+    video = MediaRef(Path("a.mp4"), MediaKind.VIDEO, duration=6.0, width=640, height=480, fps=30.0)
+    painel._pool = [audio, video]
+    painel._refresh_pool()
+    # Um quadro vermelho 4:3 chega do ffmpeg: a ficha 16:9 ganha faixas dos lados, na cor de fundo do tema.
+    quadro = SimpleNamespace(data=bytes([255, 0, 0]) * (168 * 126), width=168, height=126)
+    painel._on_pool_thumb_ready(video, quadro)
+
+    def fundos():
+        itens = {painel._media_list.item(i).data(Qt.ItemDataRole.UserRole).path: painel._media_list.item(i)
+                 for i in range(painel._media_list.count())}
+        imagem = {c: itens[Path(c)].icon().pixmap(QSize(214, 120)).toImage() for c in ("m.mp3", "a.mp4")}
+        return {c: imagem[c].pixelColor(1, 60).name() for c in imagem}  # a coluna da ponta esquerda
+
+    antes = fundos()
+    assert antes["m.mp3"] == antes["a.mp4"] == QColor(painel._colors["bg"]).name()
+    aplicar_tema(aplicacao, "light", "estudio")
+    depois = fundos()
+    novo = QColor(painel._colors["bg"]).name()
+    assert novo != antes["m.mp3"]
+    assert depois == {"m.mp3": novo, "a.mp4": novo}
 
 
 def test_trocar_de_tema_nao_mexe_no_projeto_nem_no_historico(painel, projeto, aplicacao):
