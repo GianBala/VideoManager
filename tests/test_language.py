@@ -256,6 +256,8 @@ _IGUAIS = {
     "META_OPEN_TIP", "META_TAGS_GROUP", "META_TRACK_HEADERS",
     # "M" de mudo e de mute.
     "EDIT_TRACK_MUTED_BADGE",
+    # "Bitrate" é a mesma palavra nas duas línguas.
+    "LABEL_VIDEO_BITRATE",
     # "Volume" é a mesma palavra nas duas línguas, e "X" e "Y" são as mesmas letras.
     "PROP_VOLUME", "PROP_FIELD_X", "PROP_FIELD_Y",
     # "Aurora" e "Cinema" são o nome da paleta nas duas línguas.
