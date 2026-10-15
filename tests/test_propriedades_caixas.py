@@ -304,3 +304,26 @@ def test_o_x_da_aba_propriedades_tem_nome_acessivel_nos_dois_idiomas(tema_do_app
     assert nome() == strings.PROP_CLOSE_TIP and nome() != ""
     apply_language(i18n.ENGLISH)
     assert nome() == strings.PROP_CLOSE_TIP and botao.toolTip() == strings.PROP_CLOSE_TIP
+
+
+def test_a_caixa_de_marcar_aceita_o_clique_em_qualquer_ponto_da_linha(desktop_app):
+    """O ``QCheckBox`` só responde no indicador e no texto de uma linha: o texto que quebra, a parte vazia à direita e a folga em cima e embaixo ficavam surdas.
+
+    E o clique ignorado subia pelos pais até o filtro do editor, que desmarcava o bloco da linha do tempo — a aba
+    continuava aberta nele, e a edição seguinte voltava ao valor antigo na tela.
+    """
+    caixa = WrapCheck()
+    caixa.setText("Preencher as bordas com o bloco desfocado, que quebra em duas linhas na coluna estreita")
+    caixa.setFixedWidth(276)
+    caixa.setFixedHeight(caixa.heightForWidth(276))
+    caixa.show()
+    for _ in range(3):
+        QApplication.processEvents()
+    pontos = {"indicador": QPoint(6, caixa.height() // 2), "meio": QPoint(caixa.width() // 2, caixa.height() // 2),
+              "direita": QPoint(caixa.width() - 4, caixa.height() // 2), "topo": QPoint(caixa.width() // 2, 2),
+              "base": QPoint(caixa.width() // 2, caixa.height() - 3)}
+    for nome, ponto in pontos.items():
+        antes = caixa.isChecked()
+        QTest.mouseClick(caixa, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, ponto)
+        assert caixa.isChecked() != antes, f"o clique em {nome} ({ponto.x()}, {ponto.y()}) não alternou a caixa"
+    caixa.deleteLater()
