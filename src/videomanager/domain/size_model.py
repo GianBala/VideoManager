@@ -43,7 +43,7 @@ MAX_STRATA = 24
 MIN_CONTENT = STRATA * MIN_LENGTH
 # Quanto tempo de relógio a medida pode gastar, e quanto do arquivo ela cobre se o resto não couber: a conta é a
 # velocidade do piloto vezes o orçamento. O piloto soma a partida do processo à codificação e por isso subestima a
-# velocidade (medido: entre 0,5× e 1× a real), o que erra para o lado de medir menos, nunca de gastar mais.
+# velocidade (medido: entre 0,4× e 1× a real), o que erra para o lado de medir menos, nunca de gastar mais.
 TIME_BUDGET = 20.0
 PILOT_SECONDS = 4.0
 # Cabendo 90% do arquivo no orçamento, mede-se o arquivo todo: os 10% restantes não valem uma extrapolação.
