@@ -300,6 +300,23 @@ preservar a curva seria parcial e mais complexo. Num bloco de áudio só "remove
 lista filtra o resto. **Fica de fora, por ora:** arrastar losangos na linha do tempo e um selo no bloco que
 indique a curva (`gain_label` mostra só o volume do bloco).
 
+## Medir o tamanho em vez de calculá-lo
+
+**`domain/size_model.py`** e **`infrastructure/ffmpeg/sample.py`**. O tamanho que o aplicativo anuncia para tudo o que
+recodifica sai de trechos codificados de verdade com o mesmo comando da conversão, e não de uma fórmula: o que um
+encoder gasta depende do conteúdo, e a fórmula errava de −66% a +1500% (o mesmo H.264 em CRF 20 saiu de 0,03× a 2,5× o
+bitrate da fonte). A conta que leva o trecho ao arquivo todo é a de uma pesquisa por amostragem — **estratos** (nenhuma
+região fica de fora), **trecho representativo** de cada estrato pela curva de bytes da fonte e **estimador de razão** —,
+e a cobertura cresce com a velocidade do encoder, medida por um piloto: o arquivo que cabe em 20 s de relógio é
+codificado inteiro. Erro medido em 10 vídeos inteiros: mediana de 0,5% a 1% e pior caso de 6% (a amostra fixa
+anterior: mediana de 4% a 11%, pior caso de −33% a +29%, e −99,9% numa fonte pesada só no começo).
+
+Duas regras que o número depende: soma-se os bytes dos **pacotes** (`ffprobe`), nunca o tamanho do arquivo do trecho,
+cujo container distorce; e o `start_time` do `ffprobe` vem **depois** dos pacotes na saída e precisa ser descontado
+(TS e câmeras não começam em zero). Quando a medida falha, a conta antiga volta **marcada como aproximada** e a tela não
+afirma que o arquivo cresce nem que encolhe. Método, números e limites em
+[Estimativas de tamanho](estimativas-de-tamanho.md).
+
 ## Fixtures reais em vez de suposições
 
 O que sustenta a promessa de funcionar em plataformas diversas são **fixtures

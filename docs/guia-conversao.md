@@ -70,11 +70,11 @@ crescimento sem garantir —, e a placa de vídeo não aceita teto.
 - **Codec de vídeo** — H.264 (toca em qualquer lugar), HEVC ou AV1 (menores,
   mais lentos para codificar). A placa de vídeo configurada é usada em H.264 e
   HEVC, com o número de qualidade de cada nível.
-- **O tamanho é medido, não adivinhado.** Ao entrar no modo, a aba codifica
-  três trechos de 8 s de cada vídeo em cada nível, em segundo plano, e mostra
-  "medindo…" até o número chegar. Quanto um vídeo encolhe depende do conteúdo:
-  uma gravação de tela quase parada encolhe para poucos por cento, uma cena com
-  movimento bem menos.
+- **O tamanho é medido, não adivinhado.** Ao entrar no modo, a aba mede cada
+  vídeo em cada nível, em segundo plano, e mostra "medindo…" até o número
+  chegar (ver [O tamanho estimado](#o-tamanho-estimado)). Quanto um vídeo
+  encolhe depende do conteúdo: uma gravação de tela quase parada encolhe para
+  poucos por cento, uma cena com movimento bem menos.
 - **Nada é ampliado nem recodificado para ficar igual.** O teto de 720p só vale
   para o que é maior que isso; um áudio que já está abaixo do teto do nível é
   copiado.
@@ -101,6 +101,30 @@ primeira faixa de áudio, e o plano avisa quando algo fica de fora. Legendas
 `mov_text` (as do MP4) não são copiadas para `.mkv`. Capas embutidas em áudio
 (MP3, M4A, FLAC) não contam como vídeo: esses arquivos são pulados em
 "Converter vídeo".
+
+## O tamanho estimado
+
+Cada arquivo da lista mostra "antes → depois" e a variação. O que **recodifica** (vídeo para H.264, HEVC, VP9 ou AV1,
+áudio para Opus, Vorbis, AAC, FLAC ou ALAC, e qualquer nível de Comprimir) é **medido**: o aplicativo codifica trechos do
+arquivo, com o mesmo comando da conversão, e mostra "medindo…" até o número chegar. O que só copia (remux, áudio no mesmo
+codec) tem o tamanho que já está lá, e MP3 e WAV, de taxa constante, saem por conta.
+
+- **Quanto se mede depende de quanto custa.** Um piloto de 4 s mede a velocidade do encoder neste conteúdo. Se o arquivo
+  inteiro cabe em 20 s de relógio (uma gravação de tela, por exemplo), ele é codificado inteiro e o número é o da
+  conversão; senão são 6 a 24 trechos espalhados pelo arquivo, de 4 a 8 s, com 24 s de vídeo no mínimo. Cada trecho é o
+  que a fonte tem de mais parecido com a média do pedaço onde está, e o que sai dele é corrigido pelo quanto a fonte pesa
+  no pedaço todo.
+- **Variação perto de zero não escolhe lado.** Até ±3% a linha mostra "≈0%" em cinza, e não "+2%" em aviso: a medida
+  erra uns pontos, e a cor de aviso diria um lado que ela não sabe.
+- **Quando não dá para medir** (pouca memória para uma amostra 4K, ffmpeg que falha, arquivo sem duração), o número vem de
+  uma conta por pixels, que a linha marca como aproximada: o plano diz que o tamanho pode errar bastante, e a linha **não
+  afirma** que o arquivo cresce nem que encolhe. A conta pode errar de −66% a +1500% conforme o conteúdo.
+- Trocar de codec, de resolução ou de nível no meio da medida abandona a medida que ninguém mais pede; voltar a uma
+  escolha já medida mostra o número na hora.
+
+Medido contra a codificação inteira de 10 vídeos reais (de 54 s a 5 min, gravações de tela, séries e filmes): erro mediano
+de **1,0%** em H.264, **0,5%** em Comprimir e **0,6%** a **0,8%** no áudio, o pior caso em **6%**. Os números e o método
+estão em [Estimativas de tamanho](estimativas-de-tamanho.md).
 
 ## Conferindo o resultado antes de converter
 
