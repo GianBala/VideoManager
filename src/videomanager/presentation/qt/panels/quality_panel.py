@@ -60,6 +60,8 @@ from videomanager.application.format_labels import choice_label
 _CUSTOM_BITRATE = "custom"
 # O padrão do campo livre: um valor corrente para vídeo de 720p a 1080p.
 _DEFAULT_CUSTOM_KBPS = 2500
+# O dado do único item da trilha de áudio quando o áudio já vem dentro do vídeo: não há o que escolher.
+_MUXED_TRACK = "muxed"
 
 
 class QualityPanel(QWidget):
@@ -152,7 +154,7 @@ class QualityPanel(QWidget):
                      else strings.VIDEO_BITRATE_CUSTOM if data == _CUSTOM_BITRATE else format_bitrate(data))
         retext_items(self._audio_codec, lambda data: strings.AUDIO_CODEC_BEST if data == "best" else None)
         retext_items(self._audio_track, lambda data: strings.QUALITY_BEST_AVAILABLE if data is None
-                     else choice_label(data))
+                     else strings.QUALITY_AUDIO_TRACK_MUXED if data == _MUXED_TRACK else choice_label(data))
         self._update_audio_source_hint()
         self._refresh_warnings()
         self._update_estimated_size()
@@ -193,8 +195,10 @@ class QualityPanel(QWidget):
         self._bitrate.currentIndexChanged.connect(self._on_bitrate_changed)
         grid.addWidget(captioned(lambda: strings.LABEL_VIDEO_BITRATE, self._bitrate), 1, 1)
 
-        # A trilha de áudio só existe quando o site separa vídeo e áudio, e ocupa a última coluna da fileira: escondida,
-        # a fileira termina no bitrate, sem um vão no meio. Criados nesta ordem, o Tab segue a leitura da grade.
+        # A trilha de áudio fica sempre à vista, na última coluna da fileira: some só a possibilidade de escolher, não o
+        # campo. Escondê-lo quando o site entrega o áudio dentro do vídeo (ou antes de analisar qualquer mídia) fazia a
+        # opção parecer perdida, e o campo aparecendo e sumindo mexia na grade a cada análise. Criados nesta ordem, o Tab
+        # segue a leitura da grade.
         self._audio_track = QComboBox()
         self._audio_track.currentIndexChanged.connect(self._emit_changed)
         self._audio_track_box = captioned(lambda: strings.LABEL_AUDIO_TRACK, self._audio_track)
@@ -270,7 +274,7 @@ class QualityPanel(QWidget):
             kbps = self.current_video_kbps()
             if kbps:
                 parts.append(format_bitrate(kbps))
-            if not self._audio_track.isHidden():
+            if self._audio_track.isEnabled():
                 parts.append(self._audio_track.currentText())
         return " · ".join(part for part in parts if part)
 
@@ -307,9 +311,8 @@ class QualityPanel(QWidget):
         self._update_mode_availability(matrix)
         self._stack.setCurrentIndex(1 if self.mode is Mode.AUDIO_ONLY else 0)
 
-        separate = matrix.needs_muxing
-        self._audio_track.setVisible(separate)
-        self._audio_track_box.setVisible(separate)
+        # Só se escolhe a trilha quando o site separa vídeo e áudio; senão o campo fica à vista, apagado, dizendo por quê.
+        self._audio_track.setEnabled(matrix.needs_muxing)
 
         self._update_audio_source_hint()
         self._update_bitrate_source_label()
@@ -381,6 +384,10 @@ class QualityPanel(QWidget):
 
     def _populate_audio_tracks(self) -> None:
         self._audio_track.clear()
+        if not self._matrix.is_empty and not self._matrix.needs_muxing:
+            # O áudio já vem no vídeo que o site entrega: não há trilha para escolher, e o campo diz isso.
+            self._audio_track.addItem(strings.QUALITY_AUDIO_TRACK_MUXED, _MUXED_TRACK)
+            return
         self._audio_track.addItem(strings.QUALITY_BEST_AVAILABLE, None)
         for choice in self._matrix.audio:
             self._audio_track.addItem(choice_label(choice), choice)
