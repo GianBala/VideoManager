@@ -327,3 +327,20 @@ def test_a_caixa_de_marcar_aceita_o_clique_em_qualquer_ponto_da_linha(desktop_ap
         QTest.mouseClick(caixa, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, ponto)
         assert caixa.isChecked() != antes, f"o clique em {nome} ({ponto.x()}, {ponto.y()}) não alternou a caixa"
     caixa.deleteLater()
+
+
+def test_o_piso_da_coluna_de_adicionais_cobre_as_quatro_abas_em_ingles(tema_do_app, painel_de_edicao, blocos_de_edicao):
+    """Com a gaveta de tarefas aberta no editor, a coluna cai ao piso: em inglês as quatro abas pedem 262 px e o piso era 260.
+
+    Em português elas pedem 287 e já passavam do piso; o que o ``validate_language.py --cortes`` cobra é que o inglês não
+    corte onde o português não corta, e foi ele que achou os 2 px.
+    """
+    try:
+        apply_language(i18n.ENGLISH)
+        _abrir(painel_de_edicao, blocos_de_edicao["texto"])
+        barra = painel_de_edicao._extras_tabs.tabBar()
+        assert barra.count() == 4
+        assert painel_de_edicao._extras_box.minimumWidth() >= barra.sizeHint().width(), (
+            f"as abas pedem {barra.sizeHint().width()} px e o piso da coluna é {painel_de_edicao._extras_box.minimumWidth()}")
+    finally:
+        apply_language(i18n.PORTUGUESE)
