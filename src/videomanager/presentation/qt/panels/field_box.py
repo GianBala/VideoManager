@@ -83,6 +83,11 @@ class WrapCheck(QCheckBox):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
 
+    def hitButton(self, pos) -> bool:  # noqa: N802
+        # A linha inteira é a caixa, como no protótipo: o clique do Qt só vale no indicador e no texto de uma linha, e o que
+        # sobrava (a parte vazia à direita, a segunda linha do texto, a folga em cima e embaixo) ficava surdo.
+        return self.rect().contains(pos)
+
     def _indicator_rect(self) -> QRect:
         option = QStyleOptionButton()
         self.initStyleOption(option)
