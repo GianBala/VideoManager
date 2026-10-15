@@ -101,7 +101,7 @@ def test_recodificar_fora_da_compressao_espera_a_amostra_e_usa_o_que_ela_mediu(d
     try:
         _codec(panel, "h264")
         assert runtime.pedidos == [("video.mp4", "h264")]
-        assert panel._list.item(0).data(convert_rows.ROLE_AFTER) == {"size": None, "approximate": False}
+        assert panel._list.item(0).data(convert_rows.ROLE_AFTER) == {"size": None, "approximate": False, "skipped": False}
         assert strings.CONVERT_MEASURING in panel._plan.text()
 
         runtime.liberar.set()
@@ -109,7 +109,7 @@ def test_recodificar_fora_da_compressao_espera_a_amostra_e_usa_o_que_ela_mediu(d
         alvo = panel._build_target(video)
         assert isinstance(alvo, VideoTarget)
         dado = panel._list.item(0).data(convert_rows.ROLE_AFTER)
-        assert dado == {"size": estimate_convert_size(video, alvo, 3000.0), "approximate": False}
+        assert dado == {"size": estimate_convert_size(video, alvo, 3000.0), "approximate": False, "skipped": False}
         assert strings.CONVERT_MEASURING not in panel._plan.text()
     finally:
         _fechar(panel)
@@ -169,6 +169,26 @@ def test_medida_que_falha_vira_aproximacao_marcada_e_nao_afirma_variacao(desktop
         assert dado["approximate"] is True and dado["size"] == estimate_convert_size(video, panel._build_target(video))
         assert convert_rows.change_label(video, dado) is None
         assert strings.CONVERT_SIZE_APPROXIMATE in panel._plan.text()
+    finally:
+        _fechar(panel)
+
+
+def test_arquivo_que_a_conversao_ignora_nao_tem_tamanho_nem_variacao(desktop_app, tmp_path) -> None:
+    """Um áudio na conversão de vídeo é ignorado: a conta por pixels dava "+37%" a um arquivo que nem é gravado."""
+    panel, runtime, video, musica = _painel(desktop_app, tmp_path)
+    try:
+        _codec(panel, "copy")
+        linha = panel._list.item(1)
+        assert linha.text().endswith("→ —")
+        dado = linha.data(convert_rows.ROLE_AFTER)
+        assert dado["skipped"] is True and dado["size"] == 0
+        assert convert_rows.change_label(musica, dado) is None
+        # Fora o ignorado, o total é a soma do que é gravado.
+        assert panel._estimate(video, panel._build_target(video)) == panel._list.item(0).data(convert_rows.ROLE_AFTER)["size"]
+        assert panel._estimate(musica, panel._build_target(musica)) == 0
+        # No áudio, é o vídeo sem trilha de som que sai da lista de gravações.
+        panel._to_audio.setChecked(True)
+        assert panel._list.item(1).data(convert_rows.ROLE_AFTER)["skipped"] is False
     finally:
         _fechar(panel)
 
