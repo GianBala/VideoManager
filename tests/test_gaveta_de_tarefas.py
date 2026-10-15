@@ -130,6 +130,12 @@ def test_nao_ha_barra_de_status(janela):
     assert janela.findChildren(QStatusBar) == []
 
 
+def test_o_tema_nao_guarda_regra_para_a_barra_de_status_que_saiu():
+    """``REQ-001``: a barra saiu na gaveta, e a regra dela ficava duas linhas mortas na fonte única do QSS."""
+    from videomanager.presentation.qt import theme
+    assert "QStatusBar" not in theme.stylesheet("dark") and "QStatusBar" not in theme.stylesheet("light")
+
+
 # -- o selo do item Tarefas -----------------------------------------------------------------------------------
 
 def test_o_selo_conta_as_tarefas_em_aberto_em_qualquer_aba_e_a_dica_diz_o_resto(janela, desktop_app):
