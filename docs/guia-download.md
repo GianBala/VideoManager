@@ -43,9 +43,7 @@ Uma cadeia de combos em cascata, cada um populado só com o que a mídia
 2. **Framerate** — "Qualquer" mais os valores existentes naquela resolução.
 3. **Codec de vídeo** — idem, restrito ao que existe na resolução escolhida.
 4. **Container** — Automático, `.mp4`, `.mkv` ou `.webm`.
-5. **Trilha de áudio** — só aparece quando o site separa vídeo e áudio em
-   streams diferentes (a maioria fora do YouTube já entrega mesclado).
-6. **Bitrate** — "Igual ao da fonte" (o padrão, que mostra o bitrate que a fonte
+5. **Bitrate** — "Igual ao da fonte" (o padrão, que mostra o bitrate que a fonte
    tem) baixa o vídeo como o site o entrega, sem recodificar. Um valor pronto
    (500 kbps a 12 Mbps) ou "Personalizado…" (de 100 a 100 000 kbps) é o
    consentimento de **recodificar**: depois do download, o vídeo é codificado de
@@ -58,7 +56,10 @@ Uma cadeia de combos em cascata, cada um populado só com o que a mídia
    O tamanho estimado acompanha o valor, e é, portanto, um teto.
    Uma fonte que já está no bitrate pedido, ou abaixo, é mantida: recodificar
    para cima só aumentaria o arquivo (o painel avisa antes de baixar). Os perfis
-   rápidos voltam o bitrate ao da fonte.
+   rápidos voltam o bitrate ao da fonte. O campo do valor livre aparece numa
+   fileira abaixo, só com "Personalizado…" escolhido.
+6. **Trilha de áudio** — só aparece quando o site separa vídeo e áudio em
+   streams diferentes (a maioria fora do YouTube já entrega mesclado).
 
 Sempre que a combinação escolhida implica **trocar de codec**, **recodificar**
 ou baixar uma **resolução menor** que a melhor disponível naquele codec, ou
