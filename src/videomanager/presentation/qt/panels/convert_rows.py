@@ -60,10 +60,31 @@ def chips(media: LocalMedia) -> list[tuple[str, str]]:
     return selos
 
 
+# Até quanto, em pontos percentuais, a variação medida não distingue crescer de encolher: o erro mediano da amostra é de
+# 1–3% e o pior caso medido, 8%.
+NEAR_ZERO = 3
+
+
 def change_percent(media: LocalMedia, after: int | None) -> int | None:
     if not media.size or after is None:
         return None
     return round((after - media.size) * 100 / media.size)
+
+
+def change_label(media: LocalMedia, after: dict) -> tuple[str, str] | None:
+    """O texto da variação de tamanho e o papel de cor dele, ou ``None`` quando não há o que afirmar.
+
+    Uma conta que não foi medida não afirma que o arquivo cresce nem que encolhe (anunciava +10% a arquivos que saíam
+    90% menores), e uma variação dentro do erro da medida não escolhe lado: a cor de aviso diria um.
+    """
+    if after.get("approximate"):
+        return None
+    change = change_percent(media, after["size"])
+    if change is None:
+        return None
+    if abs(change) <= NEAR_ZERO:
+        return "≈0%", "t2"
+    return f"{change:+d}%".replace("-", "−"), "warn" if change > 0 else "ok"
 
 
 class RowDelegate(QStyledItemDelegate):
@@ -191,10 +212,10 @@ class RowDelegate(QStyledItemDelegate):
             escrever(format_size(media.size), normal, mn, c["t2"])
             return direita
         estimado = depois["size"]
-        mudanca = change_percent(media, estimado)
-        if mudanca is not None:
-            texto = (f"{mudanca:+d}%" if mudanca else "0%").replace("-", "−")
-            escrever(texto, forte, mf, c["warn"] if mudanca > 0 else c["ok"] if mudanca < 0 else c["t2"])
+        rotulo = change_label(media, depois)
+        if rotulo is not None:
+            texto, papel = rotulo
+            escrever(texto, forte, mf, c[papel])
             direita -= 8
         alvo = strings.CONVERT_MEASURING if estimado is None else format_size(estimado, estimated=True)
         escrever(alvo, forte, mf, c["text"])

@@ -49,6 +49,7 @@ from videomanager.domain.compression import compression_target
 from videomanager.domain.media import VideoTarget
 from videomanager.application.media.conversion_description import describe_target
 from videomanager.domain.estimator import estimate_convert_size
+from videomanager.domain.size_model import needs_sample
 from videomanager.application.errors import VideoManagerError
 from videomanager.application.formatting import DASH
 from videomanager.application.formatting import format_duration
@@ -256,8 +257,9 @@ class ConvertPanel(QWidget):
         self._sampling_runner = WorkerRunner(self._inspection_pool)
         self._sampling_token = 0
         self._sampling: set[tuple] = set()
-        # Bitrate de vídeo medido por (arquivo, alvo); ``None`` quando a medida
-        # falhou e a conta por pixels é o que resta.
+        # Bitrate medido por (arquivo, alvo) — o do vídeo, ou o do áudio numa
+        # conversão só de som; ``None`` quando a medida falhou e a conta por
+        # pixels é o que resta.
         self._samples: dict[tuple, float | None] = {}
         self._tools: FFmpegTools | None = None
 
@@ -722,10 +724,10 @@ class ConvertPanel(QWidget):
         for idx, (media, target) in enumerate(zip(self._media, targets)):
             item = self._list.item(idx)
             if item:
-                estimated = self._estimate(media, target)
+                estimated, approximate = self._estimate_with_quality(media, target)
                 after = strings.CONVERT_MEASURING if estimated is None else format_size(estimated, estimated=True)
                 item.setText(self._describe(media, after))
-                item.setData(convert_rows.ROLE_AFTER, {"size": estimated})
+                item.setData(convert_rows.ROLE_AFTER, {"size": estimated, "approximate": approximate})
 
     def _remove_selected(self) -> None:
         self._remove_rows([self._list.row(item) for item in self._list.selectedItems()])
@@ -793,41 +795,68 @@ class ConvertPanel(QWidget):
                                   self._settings.hardware_encoder)
 
     @staticmethod
-    def _sample_key(media: LocalMedia, target: VideoTarget) -> tuple:
-        # Tudo que muda o vídeo codificado, e nada do áudio: Forte e Máxima de
-        # um vídeo até 720p gravam a mesma imagem e são medidos uma vez só.
-        return (media.path, target.container, target.video_codec, target.quality, target.height, target.hardware)
+    def _sample_key(media: LocalMedia, target: VideoTarget | AudioTarget) -> tuple:
+        # Tudo que muda o que o encoder grava, e nada do que não muda: no áudio, só o codec e o bitrate; no vídeo, o teto
+        # também, porque Forte e Máxima de um vídeo até 720p gravam a mesma imagem mas com tetos diferentes, e uma
+        # medida feita sob o teto de uma não vale para a outra.
+        if isinstance(target, AudioTarget):
+            return (media.path, "audio", target.codec, target.bitrate)
+        return (media.path, target.container, target.video_codec, target.quality, target.crf, target.height, target.fps,
+                target.hardware, target.max_kbps)
 
-    def _estimate(self, media: LocalMedia, target: AudioTarget | VideoTarget) -> int | None:
-        """Tamanho esperado da saída; ``None`` enquanto a amostra não chega."""
-        if not (self._to_compress.isChecked() and isinstance(target, VideoTarget)) or self._tools is None:
-            return estimate_convert_size(media, target)
+    def _estimate_with_quality(self, media: LocalMedia, target: AudioTarget | VideoTarget) -> tuple[int | None, bool]:
+        """``(tamanho, aproximado)``: ``None`` enquanto a amostra não chega; aproximado quando ela falhou.
+
+        O que recodifica é medido em trechos, na hora de escolher e não só ao comprimir: a conta por pixels não enxerga
+        o conteúdo e errou de −66% a +1500% (anunciava que o arquivo cresceria quando ele encolhia). Ela só aparece
+        quando a medida não foi possível, e marcada como aproximada.
+        """
+        if self._tools is None or not needs_sample(media, target):
+            return estimate_convert_size(media, target), False
         key = self._sample_key(media, target)
         if key not in self._samples:
-            return None
-        return estimate_convert_size(media, target, self._samples[key])
+            return None, False
+        measured = self._samples[key]
+        return estimate_convert_size(media, target, measured), measured is None
+
+    def _estimate(self, media: LocalMedia, target: AudioTarget | VideoTarget) -> int | None:
+        return self._estimate_with_quality(media, target)[0]
+
+    def _wanted_samples(self) -> dict[tuple, tuple[LocalMedia, VideoTarget | AudioTarget]]:
+        """O que a tela precisa medir agora, na ordem em que vale a pena: o que está escolhido primeiro."""
+        if self._to_compress.isChecked():
+            chosen = self._levels.checkedId()
+            pairs = [(media, self._compression_target(media, level))
+                     for level in (LEVELS[chosen], *LEVELS[:chosen], *LEVELS[chosen + 1:])
+                     for media in self._media]
+        else:
+            pairs = [(media, self._build_target(media)) for media in self._media]
+        wanted: dict[tuple, tuple[LocalMedia, VideoTarget | AudioTarget]] = {}
+        for media, target in pairs:
+            if needs_sample(media, target):
+                wanted.setdefault(self._sample_key(media, target), (media, target))
+        return wanted
 
     def _request_samples(self) -> None:
-        """Enfileira a medida do que falta, começando pelo nível escolhido."""
+        """Enfileira a medida do que falta, e abandona a que a escolha atual dispensa."""
         if self._tools is None:
             return
-        chosen = self._levels.checkedId()
-        for level in (LEVELS[chosen], *LEVELS[:chosen], *LEVELS[chosen + 1:]):
-            for media in self._media:
-                target = self._compression_target(media, level)
-                if not isinstance(target, VideoTarget):
-                    continue
-                key = self._sample_key(media, target)
-                if key in self._samples or key in self._sampling:
-                    continue
-                self._sampling.add(key)
-                token = self._sampling_token
-                worker = self._runtime.sample_worker(media, target, self._tools)
-                worker.signals.finished.connect(partial(self._on_sampled, token, key),
-                                                Qt.ConnectionType.QueuedConnection)
-                worker.signals.failed.connect(lambda _error, token=token, key=key: self._on_sampled(token, key, None),
-                                              Qt.ConnectionType.QueuedConnection)
-                self._sampling_runner.start(worker, worker.signals.done)
+        wanted = self._wanted_samples()
+        # Quem troca de codec ou de resolução em sequência não espera a medida de cada passo intermediário: o que está
+        # no ar e já não é pedido sai, e a vaga (uma só da aba) vai para o que está escolhido.
+        if any(key not in wanted for key in self._sampling):
+            self._cancel_sampling()
+        for key, (media, target) in wanted.items():
+            if key in self._samples or key in self._sampling:
+                continue
+            self._sampling.add(key)
+            token = self._sampling_token
+            worker = self._runtime.sample_worker(media, target, self._tools)
+            worker.signals.finished.connect(partial(self._on_sampled, token, key),
+                                            Qt.ConnectionType.QueuedConnection)
+            worker.signals.failed.connect(lambda _error, token=token, key=key: self._on_sampled(token, key, None),
+                                          Qt.ConnectionType.QueuedConnection)
+            self._sampling_runner.start(worker, worker.signals.done)
 
     def _on_sampled(self, token: int, key: tuple, kbps: float | None) -> None:
         if token != self._sampling_token:
@@ -898,6 +927,8 @@ class ConvertPanel(QWidget):
                         else strings.CONVERT_COMPRESS_SIZE_LARGER)
             size_info = template.format(before=format_size(before), after=formatted_size,
                                         percent=round((before - total_estimated) * 100 / before))
+        if total_estimated and any(self._estimate_with_quality(m, t)[1] for m, t in zip(self._media, targets)):
+            size_info += "\n• " + strings.CONVERT_SIZE_APPROXIMATE
         if self._to_compress.isChecked() and total_estimated:
             # Por arquivo, e não pelo total: é cada tarefa que deixa de gravar o
             # que sai maior, e um lote que encolhe no total pode ter um arquivo
@@ -913,8 +944,7 @@ class ConvertPanel(QWidget):
         self._plan.setText(f"{plan_str}\n• {size_info}")
         self._set_plan_visible(True)
         self._estimate_label.setText(formatted_size)
-        if self._to_compress.isChecked():
-            self._request_samples()
+        self._request_samples()
 
     # ------------------------------------------------------------------
 

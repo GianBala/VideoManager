@@ -713,12 +713,16 @@ class _AmostrasFalsas:
         from videomanager.infrastructure.system.process import ProcessControl
 
         control = ProcessControl()
-        self.pedidos.append((media.path.name, target.video_codec, target.quality, target.height))
+        audio = not hasattr(target, "video_codec")
+        self.pedidos.append((media.path.name, target.codec if audio else target.video_codec,
+                             None if audio else target.quality, None if audio else target.height))
 
         def medir():
             while not self.liberar.wait(0.005):
                 control.check()
             control.check()
+            if audio:
+                return 100.0
             return {"high": 4000.0, "balanced": 2000.0, "economy": 1000.0}[target.quality] / (2 if target.height else 1)
 
         return FunctionWorker(medir, control.cancel)
@@ -751,15 +755,18 @@ def test_tabela_espera_a_amostra_e_descarta_a_medida_velha(desktop_app, wait_unt
         panel._tools = TOOLS
         panel._on_inspected(panel._inspection_token, SimpleNamespace(
             probed={m.path: m for m in (video, pequeno, musica, baixado)}, rejected=[]))
-        assert runtime.pedidos == []  # fora da compressão não se mede nada
+        assert runtime.pedidos == []  # copiar não pede medida: sai o que já está lá
         panel._to_compress.setChecked(True)
 
-        # O nível escolhido primeiro; o 720p grava a mesma imagem em Forte e
-        # Máxima, e é medido uma vez; o áudio não é medido.
-        assert runtime.pedidos[:3] == [("video.mp4", "h264", "balanced", None),
+        # O nível escolhido primeiro. Forte e Máxima de um 720p gravam a mesma imagem, mas sob tetos diferentes, e a
+        # medida de um teto não vale para o outro: são 4 níveis para cada um dos 3 vídeos. O FLAC vira AAC em cada
+        # bitrate do nível (4 medidas, baratas), e o AAC não tem taxa constante.
+        assert runtime.pedidos[:4] == [("video.mp4", "h264", "balanced", None),
                                        ("pequeno.mp4", "h264", "balanced", None),
+                                       ("musica.flac", "m4a", None, None),
                                        ("baixado.mp4", "h264", "balanced", None)]
-        assert len(runtime.pedidos) == 11 and not any(p[0] == "musica.flac" for p in runtime.pedidos)
+        # Na placa não há teto: Forte e Máxima do 720p são a mesma medida, e pedida uma vez só.
+        assert len(runtime.pedidos) == (16 if placa == "software" else 15)
         assert all(rotulo.text() == strings.CONVERT_MEASURING for rotulo in panel._level_sizes)
         # O teto não espera a amostra; na placa não há teto, e o lote fica sem garantia.
         garantias = [rotulo.text() for rotulo in panel._level_ceilings]
@@ -771,18 +778,19 @@ def test_tabela_espera_a_amostra_e_descarta_a_medida_velha(desktop_app, wait_unt
 
         # Trocar o codec cancela o que estava sendo medido para o anterior.
         antigo = panel._sampling_token
+        antes = list(runtime.pedidos)
         panel._compress_codec.setCurrentIndex(panel._compress_codec.findData("hevc"))
-        assert panel._sampling_token != antigo and runtime.pedidos[11][1] == "hevc"
+        assert panel._sampling_token != antigo and runtime.pedidos[len(antes)][1] == "hevc"
         runtime.liberar.set()
         wait_until(lambda: not panel._sampling and panel._sampling_runner.active == 0, timeout=10)
-        assert {chave[2] for chave in panel._samples} == {"hevc"}
+        assert {chave[2] for chave in panel._samples} == {"hevc", "m4a"}
 
         # Uma resposta de antes da troca não entra.
         panel._on_sampled(antigo, ("velha",), 1.0)
         assert ("velha",) not in panel._samples
 
         esperado = sum(estimate_convert_size(m, alvo, {"high": 4000.0, "balanced": 2000.0}.get(alvo.quality))
-                       if isinstance(alvo, VideoTarget) else estimate_convert_size(m, alvo)
+                       if isinstance(alvo, VideoTarget) else estimate_convert_size(m, alvo, 100.0)
                        for m in (video, pequeno, musica, baixado)
                        for alvo in [compression_target(m, LEVELS[1], "hevc", placa)])
         assert panel._level_sizes[1].text().startswith(format_size(esperado, estimated=True))
