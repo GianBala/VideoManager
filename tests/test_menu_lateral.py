@@ -55,6 +55,15 @@ def test_o_menu_lista_as_abas_na_ordem_dos_indices(janela):
     assert janela._tabs.count() == 4
 
 
+def test_em_portugues_a_aba_de_conversao_se_chama_converter(janela):
+    """Em português a aba de conversão se chama "Converter" (um verbo, como "Editar"); em inglês segue "Convert"."""
+    menu = janela._tabs.tabBar()
+    assert _textos(menu) == ["Download", "Converter", "Editar", "Metadados"]
+    assert menu._itens[_TAB_CONVERT].accessibleName() == "Converter"
+    apply_language("en")
+    assert _textos(menu)[_TAB_CONVERT] == "Convert"
+
+
 def test_clicar_no_item_troca_a_pagina(janela):
     for indice in (_TAB_EDIT, _TAB_METADATA, _TAB_CONVERT, _TAB_DOWNLOAD):
         janela._tabs.tabBar()._itens[indice].click()

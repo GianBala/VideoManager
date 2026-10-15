@@ -1,7 +1,7 @@
 """A gaveta de tarefas não decide sozinha a largura mínima da janela (``REG-001``).
 
 Na ``main`` a fila ficava embaixo e a janela encolhia até 375 px. Com a gaveta ao lado, de 344 px fixos, o mínimo de Download
-e Convert subiu para 840 (947 com um vídeo analisado): o mesmo conteúdo, mais a gaveta que ninguém pediu para ver naquele
+e Converter subiu para 840 (947 com um vídeo analisado): o mesmo conteúdo, mais a gaveta que ninguém pediu para ver naquele
 momento. Agora a gaveta é a primeira a sair quando falta largura — recolhe sozinha abaixo de ``menu + mínimo do conteúdo +
 344`` e volta quando há espaço — e o item Tarefas a abre sob demanda, crescendo a janela até caber.
 """

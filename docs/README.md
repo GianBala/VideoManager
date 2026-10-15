@@ -14,7 +14,7 @@ repositório para uma visão geral rápida; esta pasta traz o manual completo.
   de tarefas comum a elas.
 - [**Aba Download**](guia-download.md) — baixar de uma URL: qualidade,
   perfis rápidos, playlists e canais.
-- [**Aba Convert**](guia-conversao.md) — converter arquivos que já estão no
+- [**Aba Converter**](guia-conversao.md) — converter arquivos que já estão no
   disco.
 - [**Aba Editar**](guia-edicao.md) — o editor multipista: importar, cortar,
   montar trilhas, atalhos de teclado, exportar.

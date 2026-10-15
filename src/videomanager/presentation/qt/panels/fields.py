@@ -1,4 +1,4 @@
-"""Campos com a legenda em cima, em grade de três colunas: o formulário das abas Download e Convert.
+"""Campos com a legenda em cima, em grade de três colunas: o formulário das abas Download e Converter.
 
 Um ``QFormLayout`` põe o rótulo ao lado do campo e obriga uma coluna de rótulos com largura comum (que desloca os campos
 ao trocar de modo). O protótipo põe a legenda **acima** do campo, e cada campo ocupa uma coluna: escondê-lo é esconder o

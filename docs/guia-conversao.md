@@ -1,4 +1,4 @@
-# Aba Convert
+# Aba Converter
 
 Converte arquivos que já estão no disco — diferente da aba Download, aqui não
 há rede envolvida, só o `ffmpeg` local.

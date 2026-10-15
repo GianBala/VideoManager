@@ -1,6 +1,6 @@
 """Botão de um controle segmentado: um ``QRadioButton`` com desenho de pílula, com ícone opcional.
 
-Os modos das abas Download e Convert continuam sendo botões de rádio irmãos — o mesmo grupo exclusivo, os mesmos
+Os modos das abas Download e Converter continuam sendo botões de rádio irmãos — o mesmo grupo exclusivo, os mesmos
 sinais, as setas do teclado trocando de modo. Só o desenho muda: sem o círculo, com o ícone e o texto centrados e o
 marcado destacado no tom do acento, com um anel fino. O QSS não faz isso (``::indicator`` com largura zero deixa o
 círculo desenhado e o texto cortado), então o botão se pinta.

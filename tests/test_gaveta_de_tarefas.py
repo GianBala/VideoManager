@@ -54,7 +54,7 @@ def _ir(janela, desktop_app, indice: int) -> None:
 # -- onde a gaveta aparece ------------------------------------------------------------------------------------
 
 def test_a_gaveta_aberta_continua_aberta_ao_trocar_de_aba_inclusive_no_editor_e_nos_metadados(janela, desktop_app):
-    """O relato: com a gaveta aberta em Download, Convert ou Metadados, ir para o Editar a recolhia sozinha.
+    """O relato: com a gaveta aberta em Download, Converter ou Metadados, ir para o Editar a recolhia sozinha.
 
     Trocar de aba não pode esconder o que está em andamento (é o motivo de a gaveta estar fora das abas); o editor
     recolhia-a por conta própria, para dar espaço, e quem queria acompanhar uma tarefa enquanto edita tinha de abri-la de novo.
@@ -84,10 +84,10 @@ def test_a_gaveta_fechada_continua_fechada_ao_trocar_de_aba_e_volta_pelo_item_ta
 
 @pytest.mark.parametrize("aba_de_trabalho", [_TAB_EDIT, _TAB_METADATA])
 def test_fechar_numa_aba_de_trabalho_nao_tira_a_gaveta_de_download_e_convert(janela, desktop_app, aba_de_trabalho):
-    """``REG-003`` (decisão Q1): fechar a gaveta no editor ou nos Metadados não revoga a de Download e Convert.
+    """``REG-003`` (decisão Q1): fechar a gaveta no editor ou nos Metadados não revoga a de Download e Converter.
 
     A gaveta chega aberta lá (a preferência das abas que produzem tarefas); quem a fecha ali a fechou para o trabalho, e
-    ao voltar a Download ou Convert ela está onde a preferência a deixou.
+    ao voltar a Download ou Converter ela está onde a preferência a deixou.
     """
     _ir(janela, desktop_app, aba_de_trabalho)
     assert janela._queue_panel.isVisible()

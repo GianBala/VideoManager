@@ -367,7 +367,7 @@ class ExportDialog(QDialog):
         settings_box.addLayout(grid)
         layout.addWidget(settings_group)
 
-        # O tamanho estimado sobe para o rodapé, junto da ação (como no Download e no Convert).
+        # O tamanho estimado sobe para o rodapé, junto da ação (como no Download e no Converter).
         self._size_label = QLabel("—")
         self._size_label.setProperty("role", "result-size")
 

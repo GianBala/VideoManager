@@ -7,7 +7,7 @@ register({
     "ERROR_URL_EMPTY": ("Informe uma URL.", "Enter a URL."),
     "ERROR_MEDIA_NO_DURATION": ("A mídia não informa duração.", "The media doesn't report its duration."),
     "ERROR_PROJECT_EMPTY": ("O projeto não tem clipes para exportar.", "The project has no clips to export."),
-    # Completam o nome do arquivo na lista de recusados da aba Convert.
+    # Completam o nome do arquivo na lista de recusados da aba Converter.
     "ERROR_NO_VIDEO_TRACK": ("não tem trilha de vídeo", "has no video track"),
     "ERROR_NO_AUDIO_TRACK": ("não tem trilha de áudio", "has no audio track"),
     "ERROR_CODEC_NOT_IN_CONTAINER": ("{codec} não cabe em .{container}", "{codec} doesn't fit in .{container}"),

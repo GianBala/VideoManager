@@ -167,7 +167,7 @@ def main() -> int:
     processar(1.0)
     salvar("download.png", 1280)
 
-    # --- aba Convert ---------------------------------------------------------
+    # --- aba Converter ---------------------------------------------------------
     janela._tabs.setCurrentIndex(1)
     janela._convert.add_files([caminhos["aurora.mp4"], caminhos["cidade.mp4"], caminhos["campo.mp4"]])
     processar(2.5)
