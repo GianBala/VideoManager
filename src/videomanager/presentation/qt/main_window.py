@@ -159,8 +159,12 @@ class MainWindow(QMainWindow):
         self._drawer_timer.setSingleShot(True)
         self._drawer_timer.setInterval(0)
         self._drawer_timer.timeout.connect(self._apply_drawer)
-        # O estilo da barra de menus (letra de atalho sublinhada só com o Alt apertado). Guardado aqui: o widget não é dono do estilo.
+        # O estilo da barra de menus (letra de atalho sublinhada só com o Alt apertado). O widget não é dono do estilo e o
+        # consulta até o último evento da destruição dele (o QMenuBar pergunta no ChildRemoved): o dono é o QApplication, que
+        # sobrevive aos widgets. Só com a referência Python, o estilo era liberado antes e o processo caía no encerramento.
         self._menu_style = EstiloDaBarraDeMenus()
+        self._menu_style.setParent(QApplication.instance())
+        self.destroyed.connect(self._menu_style.deleteLater)
         self.installEventFilter(self)
         self.setWindowTitle(APP_TITLE)
         # Altura escolhida para caber a aba inteira sem rolagem. Quem manda na
