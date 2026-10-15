@@ -109,6 +109,12 @@ o áudio recodificado em até 27% (AAC), 30% (Opus) e 39% (FLAC). Num filme de *
 +2,6% (H.264) e +4,5% (Comprimir). A medida levou uma mediana de 1,4 s (máximo 23 s, num 1080p60 pesado): um arquivo
 barato de codificar é medido inteiro, e por isso sai exato.
 
+**Exportação** (a janela de exportação sobre um clipe de cada vídeo, H.264 em "Equilibrada"; o real é o arquivo que
+`composer.export_args` grava, pelo mesmo grafo da exportação): 7 vídeos de 54 s a 5 min, de 480p a 1080p60. A janela erra de
+−0,6% a +3,0% (mediana 0,2%); os dois mais pesados, que são extrapolados e não medidos inteiros (117 s e 302 s a 60 fps),
+saem +3,0% e +2,1%. A conta antiga errava de −29% a +828% (mediana +58%). A medida usa a tela e a taxa efetivas da janela
+(as da exportação), e não as da mídia: comparar com o arquivo de outra tela dá erros de ±60% que não são da amostra.
+
 Os encoders mais lentos, em 2 vídeos de 1080p60 (HEVC e H.264 em 720p sobre o vídeo inteiro de 90–117 s; VP9 e AV1 sobre
 cortes de 30 s, porque o VP9 anda a 0,17× o tempo real):
 
