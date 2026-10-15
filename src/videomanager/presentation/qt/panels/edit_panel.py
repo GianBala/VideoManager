@@ -1861,8 +1861,12 @@ class EditPanel(QWidget):
         for button, own_kind in ((self._insert_text_btn, OverlayType.TEXT), (self._apply_filter_btn, OverlayType.FILTER),
                                  (getattr(self, "_apply_trans_btn", None), OverlayType.TRANSITION)):
             if button is not None:
-                self._action_icons[button] = (icons.check if kind is own_kind else icons.plus, "accent_text")
-        self._set_extras_icons()
+                wanted = (icons.check if kind is own_kind else icons.plus, "accent_text")
+                # Só o desenho que muda com o bloco (``+`` ou ``✓``); as opções e as abas dependem do tema e saem em
+                # ``_set_extras_icons``. Redesenhar tudo a cada seleção rasterizava ~50 ícones iguais (1,6 ms).
+                if self._action_icons.get(button) != wanted:
+                    self._action_icons[button] = wanted
+                    self._set_action_icon(button)
         bind(self._insert_text_btn, "setText",
              lambda: strings.EDIT_UPDATE_TEXT if kind is OverlayType.TEXT else strings.EDIT_INSERT_TEXT)
         bind(self._apply_filter_btn, "setText",
@@ -5174,6 +5178,13 @@ class EditPanel(QWidget):
         self._export_button.setIcon(icons.upload(self._colors["accent_text"], 18))
         self._set_transport_icons()
 
+    def _set_action_icon(self, button) -> None:
+        drawing, role = self._action_icons[button]
+        button.setIcon(drawing(self._colors[role], 16))
+        button.setIconSize(QSize(16, 16))
+        # A coluna é estreita: com o ícone, o texto de "Atualizar Transição Selecionada" passava da largura dela.
+        button.setProperty("compact", "true")
+
     def _set_extras_icons(self) -> None:
         """Ícones das colunas de mídia e de adicionais, na cor do tema em vigor.
 
@@ -5183,11 +5194,8 @@ class EditPanel(QWidget):
         for button, drawing in self._option_icons:
             button.setIcon(icons.two_states(drawing, dim, accent, 18))
             button.setIconSize(QSize(18, 18))
-        for button, (drawing, role) in self._action_icons.items():
-            button.setIcon(drawing(self._colors[role], 16))
-            button.setIconSize(QSize(16, 16))
-            # A coluna é estreita: com o ícone, o texto de "Atualizar Transição Selecionada" passava da largura dela.
-            button.setProperty("compact", "true")
+        for button in self._action_icons:
+            self._set_action_icon(button)
         for index, drawing in enumerate((icons.type_text, icons.type_filter, icons.nav_convert)):
             self._extras_tabs.setTabIcon(index, icons.two_states(drawing, dim, accent, 20))
         properties = self._extras_tabs.indexOf(self._properties_widget)
