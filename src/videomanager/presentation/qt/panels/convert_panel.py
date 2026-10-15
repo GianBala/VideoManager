@@ -724,10 +724,12 @@ class ConvertPanel(QWidget):
         for idx, (media, target) in enumerate(zip(self._media, targets)):
             item = self._list.item(idx)
             if item:
+                skipped = not self._applies(media, target)
                 estimated, approximate = self._estimate_with_quality(media, target)
-                after = strings.CONVERT_MEASURING if estimated is None else format_size(estimated, estimated=True)
+                after = DASH if skipped else (
+                    strings.CONVERT_MEASURING if estimated is None else format_size(estimated, estimated=True))
                 item.setText(self._describe(media, after))
-                item.setData(convert_rows.ROLE_AFTER, {"size": estimated, "approximate": approximate})
+                item.setData(convert_rows.ROLE_AFTER, {"size": estimated, "approximate": approximate, "skipped": skipped})
 
     def _remove_selected(self) -> None:
         self._remove_rows([self._list.row(item) for item in self._list.selectedItems()])
@@ -804,6 +806,13 @@ class ConvertPanel(QWidget):
         return (media.path, target.container, target.video_codec, target.quality, target.crf, target.height, target.fps,
                 target.hardware, target.max_kbps)
 
+    @staticmethod
+    def _applies(media: LocalMedia, target: AudioTarget | VideoTarget) -> bool:
+        """Se a conversão grava algo para este arquivo: sem a trilha que o alvo pede ela o ignora (``ProcessingService``)."""
+        if isinstance(target, AudioTarget):
+            return media.has_audio
+        return media.has_video and not media.video_is_cover
+
     def _estimate_with_quality(self, media: LocalMedia, target: AudioTarget | VideoTarget) -> tuple[int | None, bool]:
         """``(tamanho, aproximado)``: ``None`` enquanto a amostra não chega; aproximado quando ela falhou.
 
@@ -811,6 +820,8 @@ class ConvertPanel(QWidget):
         o conteúdo e errou de −66% a +1500% (anunciava que o arquivo cresceria quando ele encolhia). Ela só aparece
         quando a medida não foi possível, e marcada como aproximada.
         """
+        if not self._applies(media, target):
+            return 0, False  # o arquivo é ignorado na conversão: não grava nada, e a conta por pixels inventaria um tamanho
         if self._tools is None or not needs_sample(media, target):
             return estimate_convert_size(media, target), False
         key = self._sample_key(media, target)
