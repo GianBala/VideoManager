@@ -238,8 +238,45 @@ def test_o_item_da_gaveta_aberto_so_leva_o_icone_no_acento_sem_fundo(tema_do_app
     assert _cor(imagem, marcado.x() + 6, marcado.y() + 4).lower() != cores["panel"].lower()
 
 
-def test_a_barra_de_menus_tem_28_px_e_nao_sublinha_os_atalhos(tema_do_app, janela, desktop_app):
+def _sublinha(barra) -> int:
+    """O que a própria barra de menus responde ao estilo dela sobre sublinhar a letra de atalho."""
     from PySide6.QtWidgets import QStyle
-    assert janela.menuBar().height() == 28
-    from videomanager.presentation.qt.theme import EstiloDaAplicacao
-    assert EstiloDaAplicacao().styleHint(QStyle.StyleHint.SH_UnderlineShortcut) == 0
+    return barra.style().styleHint(QStyle.StyleHint.SH_UnderlineShortcut, None, barra)
+
+
+def test_a_barra_de_menus_tem_28_px_e_nao_sublinha_os_atalhos(tema_do_app, janela, desktop_app):
+    barra = janela.menuBar()
+    assert barra.height() == 28
+    assert _sublinha(barra) == 0  # em repouso: os protótipos não têm sublinhado
+
+
+def test_os_atalhos_dos_menus_so_aparecem_sublinhados_enquanto_o_alt_esta_apertado(tema_do_app, janela, desktop_app):
+    """``FRT-005``: com a dica desligada de vez, quem usa o teclado nunca descobria qual letra abre cada menu."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+    barra = janela.menuBar()
+
+    def assentar():
+        for _ in range(3):
+            desktop_app.processEvents()
+
+    assentar()
+    repouso = barra.grab().toImage()
+    QTest.keyPress(janela, Qt.Key.Key_Alt)
+    assentar()
+    assert _sublinha(barra) == 1 and barra.grab().toImage() != repouso
+    QTest.keyRelease(janela, Qt.Key.Key_Alt)
+    barra.setActiveAction(None)  # tocar no Alt também realça o primeiro menu (navegação por teclado do Qt): não é sublinhado
+    assentar()
+    assert _sublinha(barra) == 0 and barra.grab().toImage() == repouso
+    # Quem troca de janela com o Alt apertado (Alt+Tab) não manda a soltura: o sublinhado não pode ficar preso.
+    QTest.keyPress(janela, Qt.Key.Key_Alt)
+    assert _sublinha(barra) == 1
+    QApplication.sendEvent(janela, QEvent(QEvent.Type.WindowDeactivate))
+    assert _sublinha(barra) == 0
+    # Alt+letra abre o menu: a soltura vai para o menu aberto, e o sublinhado sai quando ele fecha.
+    QTest.keyPress(janela, Qt.Key.Key_Alt)
+    assert _sublinha(barra) == 1
+    janela._file_menu.aboutToHide.emit()
+    assert _sublinha(barra) == 0
+    QTest.keyRelease(janela, Qt.Key.Key_Alt)
