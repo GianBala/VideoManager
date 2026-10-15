@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 import pytest
 
@@ -32,6 +33,7 @@ from videomanager.domain.project import MediaRef
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import new_project
 from videomanager.infrastructure.storage.settings import Settings
+from videomanager.presentation.qt import strings
 from videomanager.presentation.qt.export_dialog import ExportDialog
 from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
 from videomanager.presentation.qt.panels.quality_panel import QualityPanel
@@ -484,6 +486,14 @@ class TestUIIntegration:
             ensure_tools=lambda: dummy_tools,
          processing=build_processing_service(), runtime=build_desktop_runtime())
         try:
+            # Com ferramentas, o tamanho é medido numa amostra e a janela diz que está medindo; com as de mentira a
+            # medida falha, e a conta por pixels fica no lugar, marcada com "~".
+            assert dialog._size_label.text() == strings.CONVERT_MEASURING
+            deadline = time.monotonic() + 10
+            while dialog._sampling and time.monotonic() < deadline:
+                qapp.processEvents()
+                time.sleep(0.005)
+            assert not dialog._sampling
             assert dialog._size_label.text() != "—"
             assert "MB" in dialog._size_label.text() or "GB" in dialog._size_label.text()
             assert "~" in dialog._size_label.text()
