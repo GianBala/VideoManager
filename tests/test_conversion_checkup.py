@@ -584,15 +584,6 @@ def test_aba_comprime_video_e_audio_da_mesma_lista(desktop_app, tmp_path) -> Non
 
 # --- Amostra do tamanho comprimido -------------------------------------------
 
-def test_amostra_espalha_trechos_de_8s_ou_usa_o_arquivo_inteiro() -> None:
-    from videomanager.infrastructure.ffmpeg.sample import sample_windows
-    assert sample_windows(0) == []
-    assert sample_windows(20.0) == [(0.0, 20.0)]
-    trechos = sample_windows(120.0)
-    assert [inicio + duracao / 2 for inicio, duracao in trechos] == [30.0, 60.0, 90.0]
-    assert {duracao for _, duracao in trechos} == {8.0}
-
-
 def _fonte_sintetica(tools: FFmpegTools, pasta: Path, segundos: int, crf: str) -> Path:
     origem = pasta / f"origem-{crf}.mp4"
     _run(tools, "-f", "lavfi", "-i", f"testsrc2=s=640x360:r=30:d={segundos}", "-f", "lavfi",

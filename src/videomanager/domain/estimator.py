@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from videomanager.domain import size_model
+
 if TYPE_CHECKING:
     from videomanager.domain.media import AudioTarget
     from videomanager.domain.media import LocalMedia
@@ -96,6 +98,24 @@ def estimate_video_bitrate(
     q_factor = _QUALITY_FACTOR.get(quality.lower().strip(), 1.0)
 
     return max(200.0, base_kbps * fps_factor * efficiency * q_factor)
+
+
+# Quadros de áudio por segundo (AAC a 48 kHz: 1024 amostras por quadro): quantas amostras o container indexa além do vídeo.
+_AUDIO_FRAMES_PER_SECOND = 47.0
+
+# Quanto o FLAC, o ALAC e o WAV (que é o próprio PCM) ocupam do PCM de 16 bits, na mediana de áudios de vídeos reais
+# (de 0,61 a 1,12 do PCM: depende do conteúdo, e por isso a amostra é quem mede; isto é só o que aparece enquanto ela
+# não chega).
+_LOSSLESS_SHARE = {"flac": 0.85, "alac": 1.0, "wav": 1.0}
+
+
+def _lossless_kbps(media: LocalMedia, target: AudioTarget) -> float | None:
+    """O bitrate de um áudio sem perda a partir do PCM da própria trilha; ``None`` se não for o caso ou faltar o dado."""
+    share = _LOSSLESS_SHARE.get(target.codec)
+    stream = media.audio
+    if share is None or stream is None or not stream.sample_rate or not stream.channels:
+        return None
+    return stream.sample_rate * stream.channels * 16 / 1000 * share
 
 
 def estimate_audio_bitrate(
@@ -266,9 +286,10 @@ def estimate_convert_size(
 ) -> int:
     """Estima tamanho de arquivo resultante da conversão local em bytes.
 
-    ``video_kbps`` é o bitrate de vídeo medido numa amostra (ver
-    ``infrastructure/ffmpeg/sample.py``): quando existe, substitui a conta por
-    pixels, que não enxerga o conteúdo.
+    ``video_kbps`` é o bitrate medido numa amostra (ver
+    ``infrastructure/ffmpeg/sample.py``) — o do vídeo, ou o do áudio quando o alvo
+    é só de áudio: quando existe, substitui a conta por pixels, que não enxerga
+    o conteúdo.
     """
     from videomanager.domain.media import AudioTarget
     from videomanager.domain.media import VideoTarget
@@ -279,10 +300,20 @@ def estimate_convert_size(
     duration = media.duration or 0.0
 
     if isinstance(target, AudioTarget):
-        if media.size and not media.has_video and copies_audio(media, target):
-            return media.size
+        if copies_audio(media, target):
+            # A trilha como está, sem a imagem, a capa nem as legendas que o arquivo carregue: pelo bitrate dela, e não
+            # pelo pedido (o nominal anunciava 128 kbps para um AAC de 191 copiado, 34% abaixo do que saía).
+            stream = media.audio
+            if stream and stream.bitrate and duration > 0:
+                return int(stream.bitrate * 1000 / 8 * duration)
+            if media.size and not media.has_video:
+                return media.size
         if duration > 0:
-            a_rate = estimate_audio_bitrate(target.codec, target.bitrate)
+            if video_kbps is not None:
+                # Medido em trechos (``infrastructure/ffmpeg/sample.py``): é o que o encoder grava para este áudio.
+                payload = video_kbps * 1000 / 8 * duration
+                return int(payload * (1 + size_model.audio_overhead(target.codec)) + size_model.AUDIO_FILE_OVERHEAD)
+            a_rate = _lossless_kbps(media, target) or estimate_audio_bitrate(target.codec, target.bitrate)
             return int((a_rate * 1000 / 8) * duration)
         if media.size:
             # Fração de áudio típica de arquivos com vídeo
@@ -342,7 +373,13 @@ def estimate_convert_size(
             v_rate = min(v_rate, target.guaranteed_kbps)
 
         if duration > 0:
-            return int(((v_rate + a_rate) * 1000 / 8) * duration * 1.015)
+            payload = (v_rate + a_rate) * 1000 / 8 * duration
+            if video_kbps is not None:
+                # Com o vídeo medido o container é só o que ele grava além dos pacotes (tabelas de amostras, índices):
+                # 0,2–0,4% em 1080p, e não o 1,5% fixo da conta por pixels, que sobrava mais de 1% em todo arquivo.
+                samples = int(duration * (orig_fps + (_AUDIO_FRAMES_PER_SECOND if media.has_audio else 0.0)))
+                return int(payload + size_model.container_overhead_bytes(target.container, samples))
+            return int(payload * 1.015)
         if media.size:
             ratio = ((target_w * target_h) / max(1, orig_w * orig_h)) ** 0.75
             return int(media.size * ratio)
@@ -362,19 +399,30 @@ def estimate_export_size(
     source_size: int | None = None,
     source_duration: float | None = None,
     quality: str = "balanced",
+    video_kbps: float | None = None,
+    container: str = "mp4",
 ) -> int:
-    """Estima tamanho de exportação da edição em bytes."""
+    """Estima tamanho de exportação da edição em bytes.
+
+    ``video_kbps`` é o bitrate de vídeo medido numa amostra da mídia principal codificada como a exportação a codificaria
+    (ver ``infrastructure/ffmpeg/sample.py``): substitui a conta por pixels, que não enxerga o conteúdo.
+    """
     if duration <= 0:
         return 0
 
     if audio_only:
-        a_rate = estimate_audio_bitrate(audio_codec)
+        # O compositor mistura a 48 kHz estéreo: é o PCM de onde partem o WAV e o FLAC.
+        pcm = size_model.COMPOSER_PCM_KBPS * _LOSSLESS_SHARE.get(audio_codec.lower().strip(), 0.0)
+        a_rate = pcm or estimate_audio_bitrate(audio_codec)
         return int((a_rate * 1000 / 8) * duration)
 
     if is_fast and source_size and source_duration and source_duration > 0:
         return int((source_size / source_duration) * duration)
 
-    v_rate = estimate_video_bitrate(width, height, fps, video_codec, quality=quality)
     # GIF não tem trilha de áudio para somar.
     a_rate = 0.0 if video_codec.lower().strip() == "gif" else 192.0
+    if video_kbps is not None:
+        samples = int(duration * (fps + (_AUDIO_FRAMES_PER_SECOND if a_rate else 0.0)))
+        return int((video_kbps + a_rate) * 1000 / 8 * duration + size_model.container_overhead_bytes(container, samples))
+    v_rate = estimate_video_bitrate(width, height, fps, video_codec, quality=quality)
     return int(((v_rate + a_rate) * 1000 / 8) * duration * 1.015)
