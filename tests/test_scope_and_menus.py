@@ -148,21 +148,22 @@ def test_edit_panel_top_project_controls_and_label(qapp: QApplication, dummy_too
         assert hasattr(panel, "_save_btn")
         assert hasattr(panel, "_project_label")
 
-        # Rótulo inicial
+        # Rótulo inicial: o nome, e a marca de "não salvo" escondida
         assert strings.EDIT_UNTITLED in panel._project_label.text()
-        assert "*" not in panel._project_label.text()
+        assert not panel._dirty_mark.isVisibleTo(panel)
 
-        # Altera projeto para sujo e verifica atualização do rótulo
+        # Altera projeto para sujo e verifica a marca
         panel._apply(panel._project.with_track(TrackKind.VIDEO))
         panel._update_project_label()
         # Uma trilha nova também faz parte do conteúdo persistido.
-        assert "*" in panel._project_label.text()
+        assert panel._dirty_mark.isVisibleTo(panel)
 
         # Simula salvar
         panel._project_path = Path("/tmp/teste_video.vmp")
         panel._session.mark_saved()
         panel._update_project_label()
         assert "teste_video.vmp" in panel._project_label.text()
+        assert not panel._dirty_mark.isVisibleTo(panel)
     finally:
         panel.shutdown()
 
@@ -234,12 +235,18 @@ def test_edit_panel_abas_roladas_nao_encolhem_a_previa(qapp: QApplication, dummy
     try:
         # As abas de Adicionais rolam sem pedir menos altura que o conteúdo: o
         # divisor vertical reparte pela dica, e com o teto de 24 linhas do
-        # QScrollArea a prévia nascia mais baixa que antes de a aba rolar.
+        # QScrollArea a prévia nascia mais baixa que antes de a aba rolar. O teto
+        # que há hoje é o da página mais alta de antes (471 px), e só alcança a que
+        # passa dele (a de Transições, de oito opções de 36 px).
+        from PySide6.QtCore import QSize
+        from videomanager.presentation.qt.panels.edit_panel import _PAGE_HEIGHT_MAX
         paginas = [panel._extras_tabs.widget(i) for i in range(panel._extras_tabs.count())]
         roladas = [p for p in paginas if isinstance(p, QScrollArea)]
         assert roladas
         for pagina in roladas:
-            assert pagina.sizeHint() == pagina.widget().sizeHint()
+            conteudo = pagina.widget().sizeHint()
+            assert pagina.sizeHint() == QSize(conteudo.width(), min(conteudo.height(), _PAGE_HEIGHT_MAX))
+        assert any(p.sizeHint() == p.widget().sizeHint() for p in roladas), "as que cabem no teto pedem o conteúdo inteiro"
     finally:
         panel.shutdown()
 

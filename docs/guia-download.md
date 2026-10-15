@@ -43,8 +43,27 @@ Uma cadeia de combos em cascata, cada um populado só com o que a mídia
 2. **Framerate** — "Qualquer" mais os valores existentes naquela resolução.
 3. **Codec de vídeo** — idem, restrito ao que existe na resolução escolhida.
 4. **Container** — Automático, `.mp4`, `.mkv` ou `.webm`.
-5. **Trilha de áudio** — só aparece quando o site separa vídeo e áudio em
-   streams diferentes (a maioria fora do YouTube já entrega mesclado).
+5. **Bitrate** — "Igual ao da fonte" (o padrão, que mostra o bitrate que a fonte
+   tem) baixa o vídeo como o site o entrega, sem recodificar. Um valor pronto
+   (500 kbps a 12 Mbps) ou "Personalizado…" (de 100 a 100 000 kbps) é o
+   consentimento de **recodificar**: depois do download, o vídeo é codificado de
+   novo a esse bitrate médio, em **duas passadas** (x264, x265 e VP9; o SVT-AV1
+   usa uma), no codec que ele já tinha (ou H.264 se o container não o aceita), e
+   o áudio, as legendas e a capa ficam como estão. O arquivo sai perto de
+   *bitrate × duração* — medido em vídeos reais, de +3% a +5% acima do pedido num
+   1080p60, e menos quando a imagem é simples demais para gastar o bitrate (uma
+   gravação de tela de 10 Mbps cabe em 0,3 a 0,7 Mbps, qualquer que seja o alvo).
+   O tamanho estimado acompanha o valor, e é, portanto, um teto.
+   Uma fonte que já está no bitrate pedido, ou abaixo, é mantida: recodificar
+   para cima só aumentaria o arquivo (o painel avisa antes de baixar). Os perfis
+   rápidos voltam o bitrate ao da fonte. O campo do valor livre aparece numa
+   fileira abaixo, só com "Personalizado…" escolhido.
+6. **Trilha de áudio** — "Melhor disponível" ou uma das trilhas que o site
+   oferece (idioma, codec, bitrate). O campo está sempre à vista; só se
+   escolhe quando o site separa vídeo e áudio em streams diferentes (o YouTube
+   separa, a maioria dos outros já entrega mesclado). Nos outros casos ele fica
+   apagado e diz por quê: "Já vem junto com o vídeo" numa mídia mesclada, e
+   "Melhor disponível" enquanto nada foi analisado.
 
 Sempre que a combinação escolhida implica **trocar de codec**, **recodificar**
 ou baixar uma **resolução menor** que a melhor disponível naquele codec, ou
@@ -62,9 +81,16 @@ explicando o porquê — nada disso acontece em silêncio.
   FLAC, ALAC, WAV.
 - **Bitrate** — em kbps; desabilitado para formatos sem perda e para
   "Original", já que bitrate não se aplica a eles.
-- Uma nota mostra o melhor bitrate disponível na origem, para calibrar a
-  escolha (pedir 320 kbps de uma fonte de 128 só deixa o arquivo maior, sem
-  ganhar qualidade).
+- **Trilha de áudio** — a mesma escolha do modo de vídeo, vista daqui: trocar
+  num modo troca no outro. Decide qual stream da origem vira o arquivo (em
+  "Original", é o arquivo que se recebe, com o codec e o bitrate dela) ou a
+  matéria-prima da recodificação, e é a única forma de escolher o idioma de uma
+  mídia com dublagens. Só se escolhe quando o site separa vídeo e áudio; senão
+  o campo fica apagado.
+- Uma nota mostra o melhor bitrate disponível na origem — ou o da trilha
+  escolhida, quando há escolha —, para calibrar a qualidade (pedir 320 kbps de
+  uma fonte de 128 só deixa o arquivo maior, sem ganhar qualidade, e o aviso
+  compara com a mesma trilha).
 
 ## Perfis rápidos
 
@@ -106,4 +132,4 @@ podem não aparecer.
 ## Acompanhando o download
 
 Depois de **Adicionar à fila**, o progresso aparece na
-[fila de tarefas](interface-geral.md#a-fila-de-tarefas), comum às abas Download, Convert e Editar.
+[fila de tarefas](interface-geral.md#a-fila-de-tarefas), comum às abas Download, Converter e Editar.

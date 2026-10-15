@@ -26,8 +26,7 @@ from videomanager.bootstrap import build_editor_service
 from videomanager.bootstrap import build_processing_service
 from videomanager.bootstrap import build_download_service
 from videomanager.bootstrap import load_preferences
-from videomanager.presentation.qt.theme import qpalette
-from videomanager.presentation.qt.theme import stylesheet
+from videomanager.presentation.qt.theme import apply as aplicar_tema
 
 
 def _icon_path() -> Path:
@@ -191,11 +190,12 @@ def build_app(argv: list[str] | None = None, *, audio_enabled: bool = True) -> t
     if not app_icon.isNull():
         app.setWindowIcon(app_icon)
 
+    # O Fusion é o único estilo idêntico no Windows e no Linux, e o QSS do tema foi escrito sobre ele. Pelo nome, sem estilo em
+    # Python: o que era dele (ordem dos botões, sublinhado dos atalhos) mora no QSS e na barra de menus.
     app.setStyle("Fusion")
 
     settings = load_preferences()
-    app.setPalette(qpalette(settings.theme))
-    app.setStyleSheet(stylesheet(settings.theme))
+    aplicar_tema(app, settings.theme, settings.palette)
     # Antes da janela: abrir em inglês é já nascer em inglês, sem troca nenhuma.
     apply_language(settings.language)
 

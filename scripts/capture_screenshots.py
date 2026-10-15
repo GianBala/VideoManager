@@ -55,6 +55,7 @@ def main() -> int:
     armazenamento.config_dir = lambda: perfil
 
     from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QMessageBox
 
     from videomanager.app import build_app
     from videomanager.application.events import Progress, ProgressStage
@@ -166,7 +167,7 @@ def main() -> int:
     processar(1.0)
     salvar("download.png", 1280)
 
-    # --- aba Convert ---------------------------------------------------------
+    # --- aba Converter ---------------------------------------------------------
     janela._tabs.setCurrentIndex(1)
     janela._convert.add_files([caminhos["aurora.mp4"], caminhos["cidade.mp4"], caminhos["campo.mp4"]])
     processar(2.5)
@@ -266,6 +267,11 @@ def main() -> int:
                    check=True, timeout=300, **subprocess_kwargs())
     print(f"demo.gif: {destino.stat().st_size / 1024:.0f} KB", flush=True)
 
+    # A janela de demonstração não tem o que salvar e a fila é de mentira: sem isto o ``closeEvent`` abre o diálogo de projeto
+    # modificado e o de "Sair mesmo?" (a fila tem tarefas em andamento), e o script espera um clique que nunca vem, com a
+    # janela fora da tela e um ffmpeg da prévia vivo.
+    painel._session.mark_saved()
+    QMessageBox.question = staticmethod(lambda *_, **__: QMessageBox.StandardButton.Yes)
     janela.close()
     return 0
 

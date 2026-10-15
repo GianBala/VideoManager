@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QRunnable, Slot
 
 from videomanager.infrastructure.yt_dlp.downloader import Downloader
+from videomanager.infrastructure.yt_dlp.downloader import RecodePlan
 from videomanager.infrastructure.yt_dlp.downloader import publish
 from videomanager.infrastructure.system.binaries import find_tools
 from videomanager.infrastructure.yt_dlp.selector import build_opts
@@ -51,7 +52,10 @@ class DownloadWorker(QRunnable):
         # leva ao destino, sem sobrescrever nada, é ``publish``.
         self._staging = self._temp / "pronto"
         opts, _ = build_opts(request.selection, request.media, request.preferences, tools, self._staging, self._temp)
-        self._downloader = Downloader(opts, on_progress=self._emit_progress)
+        # Pedir um bitrate de vídeo é o consentimento de recodificar: depois do download o vídeo é codificado de novo a ele.
+        kbps = getattr(request.selection, "video_kbps", None)
+        recode_plan = RecodePlan(kbps=kbps, tools=tools) if kbps else None
+        self._downloader = Downloader(opts, on_progress=self._emit_progress, recode_plan=recode_plan)
         self._cancel_requested = False
 
     @property

@@ -12,10 +12,13 @@ validade curta, então reaproveitar uma análise de dez minutos atrás falharia 
 
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 import threading
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -23,10 +26,13 @@ from typing import Any
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled, DownloadError, ExtractorError, Popen
 
+from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.errors import DownloadFailedError
 from videomanager.application.errors import JobCancelled
 from videomanager.application.errors import error_message
 from videomanager.domain.i18n import Text, t
+from videomanager.infrastructure.ffmpeg import recode
+from videomanager.infrastructure.system.binaries import subprocess_kwargs
 from videomanager.infrastructure.yt_dlp.extras import TolerantEmbedThumbnailPP
 from videomanager.infrastructure.yt_dlp.extras import split_thumbnail_postprocessor
 from videomanager.infrastructure.yt_dlp.probe import _translate_error
@@ -50,6 +56,14 @@ _PHASE_LABELS = {
     "FFmpegEmbedSubtitle": "PHASE_SUBTITLES",
     "MoveFiles": "PHASE_MOVING",
 }
+
+
+@dataclass(frozen=True)
+class RecodePlan:
+    """O vídeo baixado é recodificado a ``kbps`` depois do download (ver ``infrastructure/ffmpeg/recode.py``)."""
+
+    kbps: int
+    tools: FFmpegTools
 
 
 class _JobLogger:
@@ -126,9 +140,11 @@ class Downloader:
         opts: dict[str, Any],
         *,
         on_progress: ProgressCallback | None = None,
+        recode_plan: RecodePlan | None = None,
     ) -> None:
         self._opts = dict(opts)
         self._on_progress = on_progress
+        self._recode_plan = recode_plan
         self._cancelled = False
         self._logger = _JobLogger()
         self._final_path: Path | None = None
@@ -259,6 +275,59 @@ class Downloader:
         if path:
             self._final_path = Path(str(path))
 
+    def _recode_video(self) -> None:
+        """Recodifica o vídeo baixado ao bitrate pedido, trocando o arquivo no lugar (nada se perde se falhar)."""
+        plan, path = self._recode_plan, self._final_path
+        if plan is None or path is None or not path.is_file():
+            return
+        tools = plan.tools
+        try:
+            source = recode.probe_video(path, tools)
+        except (OSError, subprocess.SubprocessError, ValueError) as exc:
+            raise DownloadFailedError(Text("RECODE_FAILED", error=str(exc))) from exc
+        if not recode.needs_recode(source, plan.kbps):
+            self._logger.lines.append(t("LOG_RECODE_SKIPPED", source=round(source.kbps or 0), requested=plan.kbps))
+            return
+        family = recode.target_family(source)
+        tag = uuid.uuid4().hex[:8]
+        output = path.with_name(f".recodificando-{tag}{path.suffix}")
+        passlog = path.with_name(f".recodificando-{tag}-passada")
+        passes = recode.build_args(path, output, family, plan.kbps, source.container, tools, passlog=passlog)
+        if self._on_progress is not None:
+            self._on_progress(Progress(phase=Text("PHASE_RECODING_VIDEO"), percent=0.0))
+        try:
+            for index, args in enumerate(passes):
+                self._run_recode(args, source.duration, index, len(passes))
+            if self._cancelled:
+                raise JobCancelled("Download cancelado.")
+            os.replace(output, path)
+        finally:
+            output.unlink(missing_ok=True)
+            for leftover in recode.passlog_files(passlog):
+                leftover.unlink(missing_ok=True)
+        self._logger.lines.append(t("LOG_RECODE_DONE", family=family, requested=plan.kbps, source=round(source.kbps or 0)))
+
+    def _run_recode(self, args: list[str], duration: float | None, index: int = 0, total: int = 1) -> None:
+        """Roda um comando do ffmpeg; o progresso de cada passada ocupa a sua fatia da barra."""
+        kwargs = subprocess_kwargs()
+        kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        process = Popen(args, **kwargs)  # a classe do yt-dlp: ``_register`` a recebe, e cancelar a termina
+        errors: list[str] = []
+        reader = threading.Thread(target=lambda: errors.extend(process.stderr.readlines()[-20:]), daemon=True)
+        reader.start()
+        assert process.stdout is not None
+        for line in process.stdout:
+            done = recode.seconds_done(line)
+            if done is not None and duration and self._on_progress is not None:
+                share = min(0.99, done / duration)
+                self._on_progress(Progress(phase=Text("PHASE_RECODING_VIDEO"), percent=(index + share) * 100 / total))
+        process.wait()
+        reader.join(timeout=2)
+        if self._cancelled:
+            raise JobCancelled("Download cancelado.")
+        if process.returncode != 0:
+            raise DownloadFailedError(Text("RECODE_FAILED", error="".join(errors).strip()[-400:] or f"ffmpeg {process.returncode}"))
+
     def run(self, url: str) -> DownloadResult:
         """Baixa a URL. Levanta :class:`JobCancelled` se cancelado."""
         opts, thumbnail = split_thumbnail_postprocessor(dict(self._opts))
@@ -276,6 +345,8 @@ class Downloader:
                 if isinstance(info, dict):
                     title = str(info.get("title") or url)
                     self._capture_path(info)
+                # Dentro do bloco: o ffmpeg abre pela ``Popen`` do yt-dlp, e é ela que o entrega ao cancelamento.
+                self._recode_video()
         except DownloadCancelled as exc:
             raise JobCancelled("Download cancelado.") from exc
         except (DownloadError, ExtractorError) as exc:

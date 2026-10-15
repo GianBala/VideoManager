@@ -46,7 +46,7 @@ class _Downloader:
 
     desfecho = "ok"
 
-    def __init__(self, opts, on_progress=None):
+    def __init__(self, opts, on_progress=None, recode_plan=None):
         self.temp = Path(opts["paths"]["temp"])
         self.log = ()
 
@@ -179,7 +179,7 @@ class _YtDlpNoDestino:
 
     modo = "video"
 
-    def __init__(self, opts, on_progress=None):
+    def __init__(self, opts, on_progress=None, recode_plan=None):
         self.home = Path(opts["paths"]["home"])
         self.log = ()
 

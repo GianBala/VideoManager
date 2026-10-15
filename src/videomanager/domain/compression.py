@@ -1,4 +1,4 @@
-"""Níveis de compressão da aba Convert: quanto de qualidade cada um troca por tamanho.
+"""Níveis de compressão da aba Converter: quanto de qualidade cada um troca por tamanho.
 
 A compressão não é um alvo novo. Cada arquivo vira o ``VideoTarget`` ou o
 ``AudioTarget`` de sempre, e por isso descrição, estimativa, reserva de saída e

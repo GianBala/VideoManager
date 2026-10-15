@@ -8,16 +8,17 @@ liberando espaço para a visualização das trilhas na tela principal.
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt, QThreadPool
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
-    QFormLayout,
-    QGroupBox,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -34,6 +35,8 @@ from videomanager.domain.render_cost import interpolation_bytes
 from videomanager.domain.export_policy import reference_clip
 from videomanager.domain.export_policy import simple_trim
 from videomanager.domain.media import LocalMedia
+from videomanager.domain.media import VideoTarget
+from videomanager.domain.size_model import needs_sample
 from videomanager.application import encoding as hwaccel
 from videomanager.domain.estimator import estimate_export_size
 from videomanager.application.errors import VideoManagerError
@@ -53,10 +56,11 @@ from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_step
 from videomanager.domain.timing import keyframe_at_or_before
 from videomanager.domain.i18n import Text
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import icons, strings, theme
 from videomanager.presentation.qt.panels.edit_widgets import index_of
 from videomanager.application.editor.canvas import CANVAS_PRESETS, aspect_of, canvas_for_aspect, output_canvas
 from videomanager.presentation.qt.ports import DesktopRuntimePort
+from videomanager.presentation.qt.tasks import WorkerRunner
 
 RATE_PRESETS: tuple[float, ...] = (24.0, 25.0, 30.0, 50.0, 60.0)
 
@@ -176,7 +180,7 @@ class ExportDialog(QDialog):
         super().__init__(parent)
         self._runtime = runtime
         self.setWindowTitle(strings.EXPORT_DIALOG_TITLE)
-        self.setMinimumWidth(580)
+        self.setMinimumWidth(760)
         self.setModal(True)
 
         self._processing = processing
@@ -203,6 +207,15 @@ class ExportDialog(QDialog):
         self.chosen_canvas = initial_canvas
         self.chosen_rate = initial_rate
 
+        # Bitrate de vídeo medido por (mídia principal, como a exportação a codificaria); ``None`` quando a medida falhou
+        # e a conta por pixels é o que resta. Uma vaga só: cada escolha da janela pede a medida da sua.
+        self._samples: dict[tuple, float | None] = {}
+        self._sampling: set[tuple] = set()
+        self._sampling_token = 0
+        self._sampling_pool = QThreadPool(self)
+        self._sampling_pool.setMaxThreadCount(1)
+        self._sampling_runner = WorkerRunner(self._sampling_pool)
+
         self._build_ui()
         self._sync_presets()
         self._update_plan()
@@ -211,88 +224,131 @@ class ExportDialog(QDialog):
     # Construção da interface
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _card(title: str) -> tuple[QFrame, QVBoxLayout]:
+        """Uma seção em cartão: título e o corpo, onde entram os campos."""
+        card = QFrame()
+        card.setProperty("role", "section")
+        box = QVBoxLayout(card)
+        box.setContentsMargins(16, 14, 16, 16)
+        box.setSpacing(10)
+        heading = QLabel(title)
+        heading.setProperty("role", "section-title")
+        box.addWidget(heading)
+        return card, box
+
+    def _field(self, label: QLabel, widget: QWidget) -> QWidget:
+        """O rótulo em cima e o campo embaixo, numa célula que some quando os dois somem.
+
+        A visibilidade continua sendo a do rótulo e a do campo (as regras de ``_apply_*_visibility`` não
+        mudaram); a célula só acompanha, para não deixar um vão de altura onde o campo saiu.
+        """
+        cell = QWidget()
+        cell.setProperty("role", "plain")
+        column = QVBoxLayout(cell)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(4)
+        label.setProperty("role", "dim")
+        column.addWidget(label)
+        column.addWidget(widget)
+        self._cells.append((cell, label, widget))
+        return cell
+
+    @staticmethod
+    def _callout_icon(drawing, role: str) -> QLabel:
+        """O ícone à esquerda de um destaque (informação, aviso), no papel do tema que dá o tom do destaque."""
+        label = QLabel()
+        label.setProperty("role", "plain")
+        label.setFixedSize(20, 20)
+        label.setPixmap(drawing(theme.papeis(*theme.atual())[role], 20).pixmap(20, 20))
+        return label
+
+    def _sync_cells(self) -> None:
+        for cell, label, widget in self._cells:
+            cell.setVisible(not label.isHidden() or not widget.isHidden())
+
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
+        self._cells: list[tuple[QWidget, QLabel, QWidget]] = []
 
         # 1. Resumo da edição
-        summary_group = QGroupBox(strings.EXPORT_SUMMARY_GROUP)
-        summary_box = QVBoxLayout(summary_group)
-        summary_box.setSpacing(4)
-        summary_text = strings.EXPORT_SUMMARY.format(
-            duration=format_span(self._project.export_duration),
-            tracks=len(self._project.tracks), clips=len(self._project.clips),
-        )
-        summary_label = QLabel(summary_text)
-        summary_label.setTextFormat(Qt.TextFormat.RichText)
-        summary_box.addWidget(summary_label)
+        summary_group, summary_box = self._card(strings.EXPORT_SUMMARY_GROUP)
+        summary_box.setSpacing(6)
+        # Três pastilhas, e não uma linha: a duração (com o valor em negrito), as trilhas e os blocos.
+        chips = QHBoxLayout()
+        chips.setSpacing(8)
+        for text in (
+            strings.EXPORT_SUMMARY_DURATION.format(duration=format_span(self._project.export_duration)),
+            strings.EXPORT_SUMMARY_TRACKS.format(tracks=len(self._project.tracks)),
+            strings.EXPORT_SUMMARY_CLIPS.format(clips=len(self._project.clips)),
+        ):
+            chip = QLabel(text)
+            chip.setProperty("role", "chip")
+            chip.setTextFormat(Qt.TextFormat.RichText)
+            chips.addWidget(chip)
+        chips.addStretch(1)
+        summary_box.addLayout(chips)
         layout.addWidget(summary_group)
 
         # 2. Configurações de saída
-        settings_group = QGroupBox(strings.EXPORT_SETTINGS_GROUP)
-        self._form = QFormLayout(settings_group)
-        self._form.setSpacing(8)
+        settings_group, settings_box = self._card(strings.EXPORT_SETTINGS_GROUP)
 
         # Checkbox Exportar Somente Áudio
         self._audio_only_check = QCheckBox(strings.EXPORT_MODE_AUDIO_ONLY)
         self._audio_only_check.setToolTip(strings.EXPORT_MODE_AUDIO_ONLY_TIP)
         self._audio_only_check.toggled.connect(self._on_audio_only_toggled)
-        self._form.addRow("", self._audio_only_check)
+        settings_box.addWidget(self._audio_only_check)
 
         # Formato de vídeo (container)
         self._container_label = QLabel(strings.EXPORT_CONTAINER)
         self._container_box = QComboBox()
         self._container_box.setToolTip(strings.EXPORT_CONTAINER_TIP)
         self._container_box.currentIndexChanged.connect(self._on_container_changed)
-        self._form.addRow(self._container_label, self._container_box)
 
         # Codec de vídeo
         self._video_codec_label = QLabel(strings.EXPORT_VIDEO_CODEC)
         self._video_codec_box = QComboBox()
         self._video_codec_box.setToolTip(strings.EXPORT_VIDEO_CODEC_TIP)
         self._video_codec_box.currentIndexChanged.connect(self._on_video_codec_changed)
-        self._form.addRow(self._video_codec_label, self._video_codec_box)
 
         # Qualidade de vídeo
         self._quality_label = QLabel(strings.EXPORT_QUALITY)
         self._quality_box = QComboBox()
         self._quality_box.setToolTip(strings.EXPORT_QUALITY_TIP)
         self._quality_box.currentIndexChanged.connect(self._on_quality_changed)
-        self._form.addRow(self._quality_label, self._quality_box)
 
         # Formato de áudio (visível no modo somente áudio)
         self._audio_format_label = QLabel(strings.EXPORT_AUDIO_FORMAT)
         self._audio_format_box = QComboBox()
         self._audio_format_box.setToolTip(strings.EXPORT_AUDIO_FORMAT_TIP)
         self._audio_format_box.currentIndexChanged.connect(self._on_audio_format_changed)
-        self._form.addRow(self._audio_format_label, self._audio_format_box)
 
         # Proporção
         self._aspect_label = QLabel(strings.EXPORT_ASPECT)
         self._aspect_box = QComboBox()
         self._aspect_box.setToolTip(strings.EXPORT_ASPECT_TIP)
         self._aspect_box.currentIndexChanged.connect(self._on_aspect_changed)
-        self._form.addRow(self._aspect_label, self._aspect_box)
 
         # Resolução / Tela
         self._canvas_label = QLabel(strings.EDIT_CANVAS)
         self._canvas_box = QComboBox()
         self._canvas_box.setToolTip(strings.EDIT_CANVAS_TIP)
         self._canvas_box.currentIndexChanged.connect(self._on_canvas_changed)
-        self._form.addRow(self._canvas_label, self._canvas_box)
 
         # Taxa de quadros
         self._rate_label = QLabel(strings.EDIT_CANVAS_RATE)
         self._rate_box = QComboBox()
         self._rate_box.setToolTip(strings.EDIT_CANVAS_RATE_TIP)
         self._rate_box.currentIndexChanged.connect(self._on_rate_changed)
-        self._form.addRow(self._rate_label, self._rate_box)
 
         # Opções avançadas
         self._advanced_widget = QWidget()
-        advanced_box = QVBoxLayout(self._advanced_widget)
+        self._advanced_widget.setProperty("role", "plain")
+        advanced_box = QHBoxLayout(self._advanced_widget)
         advanced_box.setContentsMargins(0, 0, 0, 0)
-        advanced_box.setSpacing(6)
+        advanced_box.setSpacing(18)
 
         self._fast = QCheckBox(strings.EDIT_MODE_FAST)
         self._fast.setToolTip(strings.EDIT_MODE_TIP)
@@ -303,19 +359,33 @@ class ExportDialog(QDialog):
         self._interpolate.setToolTip(strings.EDIT_INTERPOLATE_TIP)
         self._interpolate.toggled.connect(self._on_option_toggled)
         advanced_box.addWidget(self._interpolate)
+        advanced_box.addStretch(1)
 
-        self._form.addRow("", self._advanced_widget)
-
-        self._size_label = QLabel("—")
-        self._size_label.setProperty("role", "dim")
-        self._form.addRow(strings.EXPORT_ESTIMATED_SIZE, self._size_label)
-
+        # Os campos em grade de duas colunas, como em exportar.png. Os de uma linha só (qualidade, formato de
+        # áudio) ocupam as duas; o que sai de cena (o codec no GIF, tudo de vídeo no só-áudio) deixa a célula
+        # vazia e a linha some.
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(10)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.addWidget(self._field(self._container_label, self._container_box), 0, 0)
+        grid.addWidget(self._field(self._video_codec_label, self._video_codec_box), 0, 1)
+        grid.addWidget(self._field(self._audio_format_label, self._audio_format_box), 1, 0, 1, 2)
+        grid.addWidget(self._field(self._quality_label, self._quality_box), 2, 0, 1, 2)
+        grid.addWidget(self._field(self._aspect_label, self._aspect_box), 3, 0)
+        grid.addWidget(self._field(self._canvas_label, self._canvas_box), 3, 1)
+        grid.addWidget(self._field(self._rate_label, self._rate_box), 4, 0)
+        grid.addWidget(self._advanced_widget, 5, 0, 1, 2)
+        settings_box.addLayout(grid)
         layout.addWidget(settings_group)
 
+        # O tamanho estimado sobe para o rodapé, junto da ação (como no Download e no Converter).
+        self._size_label = QLabel("—")
+        self._size_label.setProperty("role", "result-size")
+
         # 3. Destino do arquivo
-        dest_group = QGroupBox(strings.EXPORT_DESTINATION_GROUP)
-        dest_box = QVBoxLayout(dest_group)
-        dest_box.setSpacing(8)
+        dest_group, dest_box = self._card(strings.EXPORT_DESTINATION_GROUP)
 
         self._same_folder = QCheckBox(strings.EDIT_SAME_FOLDER)
         self._same_folder.setChecked(True)
@@ -324,9 +394,6 @@ class ExportDialog(QDialog):
 
         folder_row = QHBoxLayout()
         folder_row.setSpacing(8)
-        folder_label = QLabel(strings.EXPORT_DESTINATION_FOLDER)
-        folder_row.addWidget(folder_label)
-
         self._dest_edit = QLineEdit(str(self._runtime.download_directory(self._settings)))
         self._dest_edit.setReadOnly(True)
         self._dest_edit.setEnabled(False)
@@ -336,7 +403,16 @@ class ExportDialog(QDialog):
         self._pick_folder_button.setEnabled(False)
         self._pick_folder_button.clicked.connect(self._choose_destination_folder)
         folder_row.addWidget(self._pick_folder_button)
-        dest_box.addLayout(folder_row)
+        folder_cell = QWidget()
+        folder_cell.setProperty("role", "plain")
+        folder_column = QVBoxLayout(folder_cell)
+        folder_column.setContentsMargins(0, 0, 0, 0)
+        folder_column.setSpacing(4)
+        folder_label = QLabel(strings.EXPORT_DESTINATION_FOLDER)
+        folder_label.setProperty("role", "dim")
+        folder_column.addWidget(folder_label)
+        folder_column.addLayout(folder_row)
+        dest_box.addWidget(folder_cell)
 
         main_init = self._main_clip(self._project)
         source_init = (
@@ -353,48 +429,96 @@ class ExportDialog(QDialog):
 
         name_row = QHBoxLayout()
         name_row.setSpacing(8)
-        name_label = QLabel(strings.EXPORT_FILENAME)
-        name_row.addWidget(name_label)
-
         self._filename_edit = QLineEdit(default_stem)
         self._filename_edit.setPlaceholderText(strings.EXPORT_FILENAME_PLACEHOLDER)
         name_row.addWidget(self._filename_edit, 1)
 
         self._ext_label = QLabel(".mp4")
-        self._ext_label.setProperty("role", "dim")
+        self._ext_label.setProperty("role", "chip")
         name_row.addWidget(self._ext_label)
-        dest_box.addLayout(name_row)
+        name_cell = QWidget()
+        name_cell.setProperty("role", "plain")
+        name_column = QVBoxLayout(name_cell)
+        name_column.setContentsMargins(0, 0, 0, 0)
+        name_column.setSpacing(4)
+        name_label = QLabel(strings.EXPORT_FILENAME)
+        name_label.setProperty("role", "dim")
+        name_column.addWidget(name_label)
+        name_column.addLayout(name_row)
+        dest_box.addWidget(name_cell)
 
         layout.addWidget(dest_group)
 
-        # 4. Plano e avisos
+        # 4. Plano e avisos: o plano é o destaque da janela, o aviso tem a moldura âmbar.
         self._plan = QLabel("")
-        self._plan.setProperty("role", "dim")
         self._plan.setWordWrap(True)
-        layout.addWidget(self._plan)
+        plan_box = QFrame()
+        plan_box.setProperty("role", "callout")
+        plan_row = QHBoxLayout(plan_box)
+        plan_row.setContentsMargins(14, 12, 14, 12)
+        plan_row.setSpacing(12)
+        plan_row.addWidget(self._callout_icon(icons.info, "accent"), 0, Qt.AlignmentFlag.AlignTop)
+        plan_column = QVBoxLayout()
+        plan_column.setSpacing(4)
+        plan_title = QLabel(strings.EXPORT_PLAN_TITLE.upper())
+        plan_title.setProperty("role", "callout-title")
+        plan_column.addWidget(plan_title)
+        plan_column.addWidget(self._plan)
+        plan_row.addLayout(plan_column, 1)
+        layout.addWidget(plan_box)
 
         self._warning = QLabel("")
         self._warning.setProperty("role", "warn")
         self._warning.setWordWrap(True)
+        self._warning_box = QFrame()
+        self._warning_box.setProperty("role", "callout-warn")
+        warning_row = QHBoxLayout(self._warning_box)
+        warning_row.setContentsMargins(14, 12, 14, 12)
+        warning_row.setSpacing(12)
+        warning_row.addWidget(self._callout_icon(icons.warn, "warn"), 0, Qt.AlignmentFlag.AlignTop)
+        warning_row.addWidget(self._warning, 1)
         self._warning.setVisible(False)
-        layout.addWidget(self._warning)
+        self._warning_box.setVisible(False)
+        layout.addWidget(self._warning_box)
 
-        # 5. Botões de ação
-        actions = QHBoxLayout()
+        # 5. Rodapé: o tamanho estimado e a ação
+        footer = QFrame()
+        footer.setProperty("role", "footer")
+        actions = QHBoxLayout(footer)
+        actions.setContentsMargins(16, 10, 12, 10)
         actions.setSpacing(10)
+        size_column = QVBoxLayout()
+        size_column.setSpacing(0)
+        size_caption = QLabel(strings.EXPORT_ESTIMATED_SIZE)
+        size_caption.setProperty("role", "dim")
+        size_column.addWidget(size_caption)
+        size_column.addWidget(self._size_label)
+        actions.addLayout(size_column)
         actions.addStretch(1)
 
         self._cancel_button = QPushButton(strings.EXPORT_ACTION_CANCEL)
+        self._cancel_button.setProperty("role", "ghost")
         self._cancel_button.clicked.connect(self.reject)
         actions.addWidget(self._cancel_button)
 
         self._enqueue_button = QPushButton(strings.EXPORT_ACTION_ENQUEUE)
         self._enqueue_button.setProperty("role", "primary")
+        self._enqueue_button.setIcon(icons.plus(theme.papeis(*theme.atual())["on_fill"], 16))
+        self._enqueue_button.setIconSize(QSize(16, 16))
+        self._enqueue_button.setProperty("emphasis", "large")
         self._enqueue_button.setDefault(True)
         self._enqueue_button.clicked.connect(self._on_enqueue)
         actions.addWidget(self._enqueue_button)
 
-        layout.addLayout(actions)
+        layout.addWidget(footer)
+
+        # Piso de altura de cada campo, o que ele pede de verdade (com o preenchimento do estilo). Sem isso o layout
+        # os comprime até o mínimo do Qt quando um aviso entra embaixo (o GIF), cortando o texto ao meio em vez de a
+        # janela crescer: ela só cresce até o mínimo do layout, e o mínimo de um combo não inclui o preenchimento.
+        for campo in (self._container_box, self._video_codec_box, self._quality_box, self._audio_format_box,
+                      self._aspect_box, self._canvas_box, self._rate_box, self._dest_edit, self._filename_edit):
+            campo.ensurePolished()
+            campo.setMinimumHeight(campo.sizeHint().height())
 
     # ------------------------------------------------------------------
     # Preenchimento e sincronização
@@ -482,6 +606,7 @@ class ExportDialog(QDialog):
             widget.setVisible(not gif and not self._audio_only_check.isChecked())
         if gif and self._fast.isChecked():
             self._fast.setChecked(False)
+        self._sync_cells()
 
     def _sync_codecs(self) -> None:
         """Repopula o combo de codecs conforme o container selecionado."""
@@ -522,7 +647,7 @@ class ExportDialog(QDialog):
         # Campos de áudio — mostrar apenas no modo somente-áudio
         self._audio_format_label.setVisible(audio_only)
         self._audio_format_box.setVisible(audio_only)
-        self._apply_container_visibility()
+        self._apply_container_visibility()  # sincroniza as células ao fim
 
     @staticmethod
     def _default_container(project: Project) -> str:
@@ -804,9 +929,10 @@ class ExportDialog(QDialog):
         if hasattr(self, "_ext_label"):
             self._ext_label.setText(f".{container}")
 
-        self._plan.setText(strings.EDIT_PLAN.format(plan=plan))
+        self._plan.setText(plan)
         self._warning.setText(warning)
         self._warning.setVisible(bool(warning))
+        self._warning_box.setVisible(bool(warning))
 
         # Calcula estimativa de tamanho do arquivo exportado
         main = self._main_clip(proj)
@@ -828,6 +954,8 @@ class ExportDialog(QDialog):
         codec_family = ("gif" if self._container_choice == "gif"
                         else self._codec_choice or hwaccel.family_for(self._container_choice or "mp4"))
 
+        container = self._container_choice or "mp4"
+        measured, pending = self._measured_video_kbps(proj, container, codec_family, audio_only, is_fast)
         est_bytes = estimate_export_size(
             duration=export_duration,
             width=proj.width,
@@ -840,8 +968,66 @@ class ExportDialog(QDialog):
             source_size=source_size,
             source_duration=source_dur,
             quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
+            video_kbps=measured,
+            container=container,
         )
-        self._size_label.setText(format_size(est_bytes, estimated=True))
+        self._size_label.setText(strings.CONVERT_MEASURING if pending else format_size(est_bytes, estimated=True))
+
+    def _measured_video_kbps(self, proj: Project, container: str, family: str, audio_only: bool,
+                             is_fast: bool) -> tuple[float | None, bool]:
+        """``(bitrate, medindo)``: o da mídia principal codificada como a exportação a codificaria.
+
+        A conta por pixels errava de −66% a +1500% porque não enxerga o conteúdo; a medida pede uns segundos e chega em
+        segundo plano. Só a mídia principal é medida: com várias fontes é o que a exportação mais vai gastar, e o
+        restante segue a mesma taxa. Cópia, só áudio e GIF não recodificam vídeo de taxa a medir.
+        """
+        if audio_only or is_fast or family == "gif":
+            self._cancel_sampling()
+            return None, False
+        main = self._main_clip(proj)
+        local = self._probed.get(main.media.path) if main else None
+        tools = self._ensure_tools() if self._ensure_tools else None
+        target = VideoTarget(
+            container=container, video_codec=family, height=min(proj.width, proj.height), fps=proj.fps,
+            quality=self._quality_choice or hwaccel.QUALITY_BALANCED, hardware=self._settings.hardware_encoder,
+        )
+        if local is None or tools is None or not needs_sample(local, target):
+            self._cancel_sampling()
+            return None, False
+        key = (local.path, container, family, target.quality, target.height, target.fps, target.hardware)
+        if key in self._samples:
+            return self._samples[key], False
+        # Trocar de opção em sequência não espera a medida de cada passo: a que a escolha atual dispensa sai.
+        if any(pedida != key for pedida in self._sampling):
+            self._cancel_sampling()
+        if key not in self._sampling:
+            self._sampling.add(key)
+            token = self._sampling_token
+            worker = self._runtime.sample_worker(local, target, tools)
+            worker.signals.finished.connect(partial(self._on_sampled, token, key), Qt.ConnectionType.QueuedConnection)
+            worker.signals.failed.connect(lambda _error, token=token, key=key: self._on_sampled(token, key, None),
+                                          Qt.ConnectionType.QueuedConnection)
+            self._sampling_runner.start(worker, worker.signals.done)
+        return None, True
+
+    def _on_sampled(self, token: int, key: tuple, kbps: float | None) -> None:
+        if token != self._sampling_token:
+            return
+        self._sampling.discard(key)
+        self._samples[key] = kbps
+        self._update_plan()
+
+    def _cancel_sampling(self) -> None:
+        if not self._sampling:
+            return
+        self._sampling_token += 1
+        self._sampling_runner.cancel_all()
+        self._sampling.clear()
+
+    def done(self, result: int) -> None:
+        # Fechar a janela interrompe o ffmpeg da medida: o destrutor do pool esperaria o prazo dele.
+        self._cancel_sampling()
+        super().done(result)
 
     # ------------------------------------------------------------------
     # Enfileirar

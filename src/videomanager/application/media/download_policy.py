@@ -149,13 +149,15 @@ def plan_container(
     return ContainerPlan(container, video, audio, tuple(warnings))
 
 
-def audio_quality_warning(matrix: FormatMatrix, codec: str, quality: str) -> str | None:
+def audio_quality_warning(matrix: FormatMatrix, codec: str, quality: str, *, source_kbps: float | None = None) -> str | None:
     """Avisa quando o bitrate pedido excede o que a fonte realmente tem.
 
     Transcodificar um Opus de 128 kbps para um MP3 de 320 kbps não recupera
     nada: o arquivo triplica de tamanho e a qualidade continua sendo a do
     original — na prática, um pouco pior, porque é uma segunda compressão com
     perda. O usuário merece saber disso antes, não depois.
+
+    ``source_kbps`` é o bitrate da trilha escolhida a dedo, quando há escolha.
     """
     if codec in LOSSLESS_AUDIO or codec == "best":
         return None
@@ -164,7 +166,8 @@ def audio_quality_warning(matrix: FormatMatrix, codec: str, quality: str) -> str
     except (TypeError, ValueError):
         return None
 
-    source = matrix.best_audio_bitrate
+    # A trilha que o usuário escolheu é a fonte do arquivo; sem escolha, vale a melhor da origem.
+    source = source_kbps or matrix.best_audio_bitrate
     if source and requested > source * 1.1:
         return t("POLICY_AUDIO_BITRATE", source=format_bitrate(source), codec=codec.upper(),
                  requested=int(requested))

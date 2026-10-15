@@ -27,12 +27,14 @@ from dataclasses import dataclass, field
 from typing import cast
 
 import json
+import math
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QMimeData, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QIcon,
     QFontMetrics,
     QHelpEvent,
     QImage,
@@ -43,7 +45,6 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QPolygonF,
-    QRadialGradient,
     QWheelEvent,
 )
 from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
@@ -56,9 +57,9 @@ from videomanager.domain.project import Project
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import accepts
 from videomanager.domain.constants import MIN_SEGMENT
-from videomanager.domain.timing import format_timecode
-from videomanager.domain.timing import frame_step
-from videomanager.presentation.qt import strings
+from videomanager.domain.timing import format_timecode, frame_step
+from videomanager.presentation.qt import fonts, icons, strings, theme
+from videomanager.presentation.qt.theme import CORPOS_DE_BLOCO, TIPOS_DE_BLOCO
 
 # Mídia do acervo sendo arrastada: lista JSON de {"path", "kind", "duration"}.
 # Leva espécie e duração para a linha do tempo desenhar o bloco fantasma antes
@@ -67,16 +68,42 @@ MEDIA_MIME = "application/x-videomanager-media"
 
 # Faixas do widget.
 RULER_HEIGHT = 20
-HEADER_WIDTH = 148
+# A coluna dos cabeçalhos: o cabeçalho tem 164 px e há 10 de vão até a trilha (a do protótipo).
+HEADER_WIDTH = 174
+_HEADER_GAP = 10
 VIDEO_TRACK_HEIGHT = 58
-AUDIO_TRACK_HEIGHT = 42
-TRACK_GAP = 4
+AUDIO_TRACK_HEIGHT = 48
+TRACK_GAP = 6
 
-# Miniatura de bloco de vídeo: 16:9 sobre a altura útil da trilha.
-FILM_CELL_WIDTH = int((VIDEO_TRACK_HEIGHT - 14) * 16 / 9)
+# Miniatura de bloco de vídeo: 16:9 sobre a altura inteira da trilha (o rótulo é uma pastilha por cima da imagem, e
+# não uma faixa que tirava 12 px dela).
+THUMB_HEIGHT = VIDEO_TRACK_HEIGHT
+# Par: o ffmpeg que gera a miniatura não aceita largura ímpar no formato que o Qt lê.
+FILM_CELL_WIDTH = int(THUMB_HEIGHT * 16 / 9) // 2 * 2
+# A onda ocupa a metade de baixo do bloco de áudio, abaixo da pastilha.
+_WAVE_TOP = 22
+WAVE_HEIGHT = AUDIO_TRACK_HEIGHT - _WAVE_TOP - 4
+
+_TIPOS = TIPOS_DE_BLOCO
+_ICONES_DO_TIPO = icons.TYPE_ICONS
+_TIPO_DA_TRILHA = {TrackKind.VIDEO: "video", TrackKind.AUDIO: "audio", TrackKind.ADDITIONAL: "text"}
+# Ladrilho do ícone no cabeçalho da trilha e no rótulo do bloco, em pixels.
+_TILE_CABECALHO = 24
+_ICONE_CABECALHO = 14
+_ICONE_ROTULO = 13
+# Faixa de cor no topo de cada bloco.
+_FAIXA_DO_BLOCO = 3
+# Raio dos blocos, das trilhas e dos cabeçalhos, e a pastilha do rótulo sobre o bloco.
+_RAIO_BLOCO = 10
+_RAIO_TRILHA = 12
+_ROTULO_ALTURA = 22
+# Botões do cabeçalho (mudo e olho): quadrados de 24 px, com 6 de vão.
+_BOTAO_CABECALHO = 24
 
 _HANDLE_GRAB = 8
 _HANDLE_WIDTH = 5
+# A parte da alça que se vê: uma barra curta no meio da altura do bloco. A zona de arrasto continua a de cima a baixo.
+_HANDLE_VISIBLE = 28
 # O marcador é um controle do corte, não uma representação em escala pura.
 # Mesmo uma transição muito curta precisa continuar fácil de selecionar, como
 # o ícone entre clipes do CapCut. A duração real segue sendo dada pela régua;
@@ -240,6 +267,9 @@ class Timeline(QWidget):
     # ``scrubbed``.
     position_changed = Signal(float)
     view_changed = Signal()
+    # A janela não mudou, mas a maior janela possível sim (a edição ficou mais curta ou mais longa): a mesma janela passa a
+    # estar em outro ponto do controle deslizante de zoom.
+    zoom_range_changed = Signal()
     # Botão direito: o widget diz **onde** foi clicado e o painel monta o menu.
     # As ações são dele (é ele quem tem o projeto e o histórico), e assim o menu
     # e os atalhos de teclado partem do mesmo lugar.
@@ -252,6 +282,10 @@ class Timeline(QWidget):
     def __init__(self, colors: dict[str, str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._c = colors
+        self._icones: dict[tuple[str, int, bool], QIcon] = {}
+        # Os papéis do protótipo (``raised``, ``t3``...) que o dicionário legado não tem: refeitos a cada troca de tema.
+        self._papeis: dict[str, str] = {}
+        self._papeis_de: tuple[str, str] | None = None
         self._project = Project()
         self._position = 0.0
         self._selected = -1
@@ -299,6 +333,7 @@ class Timeline(QWidget):
     # ------------------------------------------------------------------
 
     def set_project(self, project: Project, *, refit: bool = False) -> None:
+        widest = self._max_span
         self._project = project
         # O cursor não pode ficar além do fim: apagar um bloco ou desfazer
         # encurta a edição, e um cursor solto lá fora pede quadros que não
@@ -319,6 +354,8 @@ class Timeline(QWidget):
         self.update()
         if moved:
             self.position_changed.emit(self._position)
+        if self._max_span != widest:
+            self.zoom_range_changed.emit()
 
     def _content_height(self) -> int:
         """Altura de régua e trilhas juntas, como se nada estivesse rolado."""
@@ -442,6 +479,16 @@ class Timeline(QWidget):
         strip.thumbs[moment] = image
         self.update()
 
+    def forget_waves(self) -> None:
+        """Esquece as ondas sonoras já geradas, para o painel pedi-las de novo.
+
+        A onda sai do ffmpeg como imagem **já pintada** na cor de destaque do tema. Trocar de
+        tema sem refazê-la deixaria a antiga na tela até alguém dar zoom ou rolar a linha do tempo.
+        """
+        for clip_id in [i for i, strip in self._strips.items() if strip.wave is not None]:
+            del self._strips[clip_id]
+        self.update()
+
     def set_wave(self, clip_id: int, in_point: float, out_point: float, image: QImage) -> None:
         strip = self._strips.setdefault(clip_id, _Strip(in_point, out_point, 0, {}))
         strip.in_point, strip.out_point, strip.wave = in_point, out_point, image
@@ -507,6 +554,26 @@ class Timeline(QWidget):
         span = self.view_span / factor
         self.set_view(anchor - ratio * span, anchor - ratio * span + span)
 
+    def zoom_fraction(self) -> float:
+        """Onde a janela de agora está entre a mais aberta (0) e a mais fechada (1), em escala logarítmica.
+
+        Cada passo do controle deslizante multiplica a janela pelo mesmo fator, como a roda do mouse e os botões: numa escala
+        linear, quase todo o curso ficava entre "ver tudo" e "ver tudo um pouco mais perto".
+        """
+        largest = self._max_span
+        if largest <= _MIN_VIEW:
+            return 1.0
+        return max(0.0, min(1.0, math.log(largest / self.view_span) / math.log(largest / _MIN_VIEW)))
+
+    def set_zoom_fraction(self, fraction: float, anchor: float | None = None) -> None:
+        """A janela correspondente a ``fraction`` (ver ``zoom_fraction``), mantendo o ``anchor`` (o cursor) no mesmo lugar da tela."""
+        largest = self._max_span
+        fraction = max(0.0, min(1.0, fraction))
+        span = largest * math.exp(-fraction * math.log(largest / _MIN_VIEW)) if largest > _MIN_VIEW else _MIN_VIEW
+        anchor = self._position if anchor is None else anchor
+        ratio = (anchor - self._view_start) / self.view_span
+        self.set_view(anchor - ratio * span, anchor - ratio * span + span)
+
     def _keep_visible(self, seconds: float) -> None:
         span = self.view_span
         if seconds < self._view_start:
@@ -543,7 +610,7 @@ class Timeline(QWidget):
 
     def _header_rect(self, index: int) -> QRectF:
         lane = self._lane_rect(index)
-        return QRectF(0, lane.top(), HEADER_WIDTH - 6, lane.height())
+        return QRectF(0, lane.top(), HEADER_WIDTH - _HEADER_GAP, lane.height())
 
     def _track_at(self, y: float) -> int:
         if y < RULER_HEIGHT:
@@ -575,10 +642,52 @@ class Timeline(QWidget):
         color.setAlpha(alpha)
         return color
 
+    @staticmethod
+    def _color_of_type(tipo: str, alpha: int = 255) -> QColor:
+        color = QColor(_TIPOS[tipo])
+        color.setAlpha(alpha)
+        return color
+
+    @staticmethod
+    def _tipo(clip: Clip, track) -> str:
+        """A espécie do bloco: ela é do bloco, e não da mídia dele (o áudio separado de um vídeo é áudio)."""
+        if clip.is_transition:
+            return "transition"
+        if track.kind is TrackKind.ADDITIONAL:
+            if clip.overlay_type is OverlayType.FILTER:
+                return "filter"
+            if clip.is_image or clip.overlay_type is OverlayType.IMAGE:
+                return "image"
+            return "text"
+        if track.kind is TrackKind.AUDIO or clip.audio_only:
+            return "audio"
+        return "image" if clip.is_image else "video"
+
+    def _papel(self, nome: str, alpha: int = 255) -> QColor:
+        """Um papel do tema do protótipo (``raised``, ``t3``, ``screen``...), que o dicionário legado não tem."""
+        atual = theme.atual()
+        if self._papeis_de != atual:
+            self._papeis = theme.papeis(*atual)
+            self._papeis_de = atual
+        cor = QColor(self._papeis[nome])
+        cor.setAlpha(alpha)
+        return cor
+
+    @staticmethod
+    def _corpo(tipo: str) -> QColor:
+        return QColor(CORPOS_DE_BLOCO[tipo])
+
+    def _icone(self, tipo: str, tamanho: int, branco: bool = False) -> QIcon:
+        """O ícone da espécie: na cor dela, ou branco (sobre o ladrilho cheio do cabeçalho e a pastilha do bloco)."""
+        chave = (tipo, tamanho, branco)
+        if chave not in self._icones:
+            self._icones[chave] = _ICONES_DO_TIPO[tipo]("#ffffff" if branco else _TIPOS[tipo], tamanho)
+        return self._icones[chave]
+
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), self._color("bg"))
+        # Sem fundo próprio: a linha do tempo é o miolo do cartão do editor, e o cartão é quem pinta o plano.
         # Só os blocos que tocam a área a pintar: na faixa da agulha, percorrer
         # e desenhar os 600 blocos da trilha era quase todo o custo do tique.
         self._dirty = event.rect()
@@ -607,9 +716,8 @@ class Timeline(QWidget):
         painter.end()
 
     def _paint_ruler(self, painter: QPainter) -> None:
-        font = QFont(self.font())
-        font.setPointSizeF(max(7.0, font.pointSizeF() - 2))
-        painter.setFont(font)
+        # Tempo em tipo monoespaçado e apagado: a régua é para se consultar, e não para se olhar.
+        painter.setFont(fonts.mono(11))
         step = next(
             (s for s in _RULER_STEPS if s / self._seconds_per_pixel() >= _RULER_LABEL_SPACE),
             _RULER_STEPS[-1],
@@ -622,11 +730,11 @@ class Timeline(QWidget):
         moment = int(first / step) * step
         while moment <= last:
             x = self._x_of(moment)
-            painter.setPen(QPen(self._color("border"), 1))
+            painter.setPen(QPen(self._papel("raised2"), 1))
             painter.drawLine(int(x), RULER_HEIGHT - 5, int(x), RULER_HEIGHT)
-            painter.setPen(self._color("text_dim"))
+            painter.setPen(self._papel("t3"))
             painter.drawText(
-                QRectF(x + 3, 0, _RULER_LABEL_SPACE, RULER_HEIGHT - 4),
+                QRectF(x + 4, 0, _RULER_LABEL_SPACE, RULER_HEIGHT - 4),
                 int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
                 _ruler_label(moment, step),
             )
@@ -645,43 +753,46 @@ class Timeline(QWidget):
             painter.setBrush(self._color("accent", 40))
         else:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(self._color("surface"))
-        painter.drawRoundedRect(rect, 5, 5)
+            painter.setBrush(self._papel("raised"))
+        painter.drawRoundedRect(rect, _RAIO_TRILHA, _RAIO_TRILHA)
 
-        font = QFont(self.font())
-        font.setPointSizeF(max(7.5, font.pointSizeF() - 1.5))
+        # O ícone da espécie da trilha, branco num ladrilho cheio da cor dela: achar a trilha de áudio é achar o verde.
+        tipo = _TIPO_DA_TRILHA[track.kind]
+        tile = QRectF(rect.left() + 10, rect.center().y() - _TILE_CABECALHO / 2, _TILE_CABECALHO, _TILE_CABECALHO)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._color_of_type(tipo))
+        painter.drawRoundedRect(tile, 7, 7)
+        offset = (_TILE_CABECALHO - _ICONE_CABECALHO) / 2
+        self._icone(tipo, _ICONE_CABECALHO, branco=True).paint(
+            painter, QRect(int(tile.left() + offset), int(tile.top() + offset), _ICONE_CABECALHO, _ICONE_CABECALHO))
+
+        font = fonts.resized(self.font())
+        font.setWeight(QFont.Weight.Medium)
         painter.setFont(font)
-        painter.setPen(
-            self._color("accent_text") if is_dragged else self._color("text_dim")
-        )
-        right_margin = -28
-        if track.kind is TrackKind.VIDEO:
-            right_margin = -54
+        painter.setPen(self._color("accent_text") if is_dragged else self._papel("text"))
+        # O nome termina onde começam os botões da direita (mudo e olho, ou só um deles).
+        botoes = {TrackKind.VIDEO: 2, TrackKind.AUDIO: 1, TrackKind.ADDITIONAL: 1}[track.kind]
+        right_margin = -(10 + botoes * _BOTAO_CABECALHO + (botoes - 1) * 6 + 6)
+        area = rect.adjusted(10 + _TILE_CABECALHO + 10, 0, right_margin, 0)
         painter.drawText(
-            rect.adjusted(10, 0, right_margin, 0),
+            area,
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            track.title,
+            QFontMetrics(font).elidedText(track.title, Qt.TextElideMode.ElideRight, int(area.width())),
         )
 
-        # Botão de visibilidade (olho): para vídeo e adicionais
+        # Botão de visibilidade (olho): para vídeo e adicionais, só o ícone
         if track.kind in (TrackKind.VIDEO, TrackKind.ADDITIONAL):
-            box = self._eye_rect(index)
-            painter.setBrush(self._color("surface_alt") if track.visible else self._color("bg"))
-            painter.setPen(QPen(self._color("border"), 1))
-            painter.drawRoundedRect(box, 4, 4)
-            self._paint_eye_icon(painter, box, track.visible)
+            self._paint_eye_icon(painter, self._eye_rect(index), track.visible)
 
-        # Botão de mudo: para vídeo e áudio
+        # Botão de mudo: para vídeo e áudio, num quadrado no plano acima do cabeçalho
         if track.kind in (TrackKind.VIDEO, TrackKind.AUDIO):
             box = self._mute_rect(index)
-            painter.setBrush(self._color("error") if track.muted else self._color("surface_alt"))
-            painter.setPen(QPen(self._color("border"), 1))
-            painter.drawRoundedRect(box, 4, 4)
-            painter.setPen(
-                self._color("accent_text") if track.muted else self._color("text_dim")
-            )
-            font_m = QFont(self.font())
-            font_m.setBold(True)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._color("error") if track.muted else self._papel("raised2"))
+            painter.drawRoundedRect(box, 7, 7)
+            painter.setPen(self._papel("text") if track.muted else self._papel("t2"))
+            font_m = fonts.resized(self.font(), delta=-2, minimum=9)
+            font_m.setWeight(QFont.Weight.DemiBold)
             painter.setFont(font_m)
             painter.drawText(
                 box, int(Qt.AlignmentFlag.AlignCenter), strings.EDIT_TRACK_MUTED_BADGE
@@ -691,22 +802,22 @@ class Timeline(QWidget):
         cx = box.center().x()
         cy = box.center().y()
         path = QPainterPath()
-        path.moveTo(cx - 7, cy)
-        path.cubicTo(cx - 3.5, cy - 4.5, cx + 3.5, cy - 4.5, cx + 7, cy)
-        path.cubicTo(cx + 3.5, cy + 4.5, cx - 3.5, cy + 4.5, cx - 7, cy)
+        path.moveTo(cx - 8, cy)
+        path.cubicTo(cx - 4, cy - 5.5, cx + 4, cy - 5.5, cx + 8, cy)
+        path.cubicTo(cx + 4, cy + 5.5, cx - 4, cy + 5.5, cx - 8, cy)
 
         if visible:
-            painter.setPen(QPen(self._color("text_dim"), 1.3))
+            painter.setPen(QPen(self._papel("t2"), 1.4))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
-            painter.setBrush(self._color("text_dim"))
-            painter.drawEllipse(QPointF(cx, cy), 2.2, 2.2)
+            painter.setBrush(self._papel("t2"))
+            painter.drawEllipse(QPointF(cx, cy), 2.4, 2.4)
         else:
-            painter.setPen(QPen(self._color("text_dim"), 1.2))
+            painter.setPen(QPen(self._papel("t3"), 1.3))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
-            painter.setPen(QPen(self._color("error"), 1.6))
-            painter.drawLine(QPointF(cx - 6, cy + 5), QPointF(cx + 6, cy - 5))
+            painter.setPen(QPen(self._color("error"), 1.7))
+            painter.drawLine(QPointF(cx - 7, cy + 6), QPointF(cx + 7, cy - 6))
 
     def _paint_track_drop_indicator(self, painter: QPainter) -> None:
         lane = self._lane_rect(self._drop_track_target)
@@ -723,20 +834,23 @@ class Timeline(QWidget):
 
     def _eye_rect(self, index: int) -> QRectF:
         rect = self._header_rect(index)
-        return QRectF(rect.right() - 25, rect.center().y() - 10, 22, 20)
+        return QRectF(rect.right() - 10 - _BOTAO_CABECALHO, rect.center().y() - _BOTAO_CABECALHO / 2,
+                      _BOTAO_CABECALHO, _BOTAO_CABECALHO)
 
     def _mute_rect(self, index: int) -> QRectF:
         rect = self._header_rect(index)
         track = self._project.tracks[index]
+        direita = rect.right() - 10 - _BOTAO_CABECALHO
         if track.kind is TrackKind.VIDEO:
-            return QRectF(rect.right() - 50, rect.center().y() - 10, 22, 20)
-        return QRectF(rect.right() - 25, rect.center().y() - 10, 22, 20)
+            # O olho fica à direita; o mudo, ao lado dele.
+            direita -= _BOTAO_CABECALHO + 6
+        return QRectF(direita, rect.center().y() - _BOTAO_CABECALHO / 2, _BOTAO_CABECALHO, _BOTAO_CABECALHO)
 
     def _paint_lane(self, painter: QPainter, index: int, track) -> None:
         lane = self._lane_rect(index)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._color("surface_alt", 120))
-        painter.drawRoundedRect(lane, 5, 5)
+        painter.setBrush(self._papel("raised", 105))
+        painter.drawRoundedRect(lane, _RAIO_TRILHA, _RAIO_TRILHA)
 
         painter.save()
         # Interseção, e não substituição: o recorte de fora esconde o que rolou
@@ -760,52 +874,20 @@ class Timeline(QWidget):
         if rect.right() < HEADER_WIDTH or rect.left() > self.width():
             return
 
+        tipo = self._tipo(clip, track)
         path = QPainterPath()
-        path.addRoundedRect(rect, 5, 5)
+        path.addRoundedRect(rect, _RAIO_BLOCO, _RAIO_BLOCO)
         painter.save()
         painter.setClipPath(path, Qt.ClipOperation.IntersectClip)
+        corpo = self._corpo(tipo)
         if clip.is_transition:
-            grad = QLinearGradient(rect.topLeft(), rect.topRight())
-            grad.setColorAt(0.0, QColor("#d97706"))
-            grad.setColorAt(0.5, QColor("#f59e0b"))
-            grad.setColorAt(1.0, QColor("#b45309"))
+            # O único corpo claro: um degradê curto do tom da espécie, mais claro em cima.
+            grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+            grad.setColorAt(0.0, corpo.lighter(118))
+            grad.setColorAt(1.0, corpo)
             painter.fillRect(rect, grad)
-        elif track.kind is TrackKind.ADDITIONAL:
-            if clip.overlay_type is OverlayType.FILTER:
-                fname = clip.filter_name
-                if fname == "pb":
-                    grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-                    grad.setColorAt(0.0, QColor("#455a64"))
-                    grad.setColorAt(1.0, QColor("#263238"))
-                    painter.fillRect(rect, grad)
-                elif fname == "sepia":
-                    grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-                    grad.setColorAt(0.0, QColor("#5d4037"))
-                    grad.setColorAt(1.0, QColor("#3e2723"))
-                    painter.fillRect(rect, grad)
-                elif fname == "vinheta":
-                    grad = QRadialGradient(rect.center(), max(rect.width(), rect.height()) / 1.5)
-                    grad.setColorAt(0.0, QColor("#283593"))
-                    grad.setColorAt(1.0, QColor("#0d1224"))
-                    painter.fillRect(rect, grad)
-                elif fname == "inverter":
-                    grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-                    grad.setColorAt(0.0, QColor("#00695c"))
-                    grad.setColorAt(1.0, QColor("#004d40"))
-                    painter.fillRect(rect, grad)
-                elif fname == "contraste":
-                    grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-                    grad.setColorAt(0.0, QColor("#e65100"))
-                    grad.setColorAt(1.0, QColor("#bf360c"))
-                    painter.fillRect(rect, grad)
-                else:
-                    painter.fillRect(rect, QColor(94, 53, 177, 200))
-            elif clip.is_image or clip.overlay_type is OverlayType.IMAGE:
-                painter.fillRect(rect, QColor("#1e1e24"))
-            else:
-                painter.fillRect(rect, QColor(106, 27, 154, 190))
         else:
-            painter.fillRect(rect, self._color("surface"))
+            painter.fillRect(rect, corpo)
 
         if clip.is_transition:
             pass
@@ -813,39 +895,22 @@ class Timeline(QWidget):
             self._paint_thumbs(painter, clip, rect)
         elif track.kind is TrackKind.AUDIO:
             self._paint_wave(painter, clip, rect)
+        painter.fillRect(QRectF(rect.left(), rect.top(), rect.width(), _FAIXA_DO_BLOCO), self._color_of_type(tipo))
         self._paint_clip_label(painter, clip, rect, track)
         painter.restore()
 
+        # Só o escolhido leva contorno (o anel do acento) e as alças; os outros se definem pelo corpo contra a trilha.
         selected = clip.clip_id == self._selected
-        painter.setBrush(Qt.BrushStyle.NoBrush)
         if selected:
-            border_pen = QPen(self._color("accent"), 2)
-        elif clip.is_transition:
-            border_pen = QPen(QColor("#fbbf24"), 1)
-        elif track.kind is TrackKind.ADDITIONAL:
-            if clip.overlay_type is OverlayType.FILTER:
-                f_borders = {
-                    "pb": QColor("#90a4ae"),
-                    "sepia": QColor("#bcaaa4"),
-                    "vinheta": QColor("#7986cb"),
-                    "inverter": QColor("#80cbc4"),
-                    "contraste": QColor("#ffb74d"),
-                }
-                border_pen = QPen(f_borders.get(clip.filter_name, QColor(186, 104, 200)), 1)
-            elif clip.is_image or clip.overlay_type is OverlayType.IMAGE:
-                border_pen = QPen(QColor("#00bcd4"), 1)
-            else:
-                border_pen = QPen(QColor(186, 104, 200), 1)
-        else:
-            border_pen = QPen(self._color("border"), 1)
-        painter.setPen(border_pen)
-        painter.drawPath(path)
-        if selected:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(self._color("accent"), 2))
+            painter.drawPath(path)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(self._color("accent"))
-            for x in (rect.left(), rect.right() - _HANDLE_WIDTH):
+            altura = min(_HANDLE_VISIBLE, max(8.0, rect.height() - 20))
+            for x in (rect.left() + 3, rect.right() - 3 - (_HANDLE_WIDTH - 1)):
                 painter.drawRoundedRect(
-                    QRectF(x, rect.top(), _HANDLE_WIDTH, rect.height()), 2, 2
+                    QRectF(x, rect.center().y() - altura / 2, _HANDLE_WIDTH - 1, altura), 2, 2
                 )
         self._paint_keyframe_markers(painter, clip, rect)
 
@@ -857,7 +922,7 @@ class Timeline(QWidget):
             return
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        cy = rect.bottom() - 10.0
+        cy = rect.bottom() - 12.0
         for kf in clip.visible_keyframes:
             kf_time = clip.start + kf.time_offset
             cx = self._x_of(kf_time)
@@ -870,12 +935,9 @@ class Timeline(QWidget):
                 QPointF(cx, cy + 4.5),
                 QPointF(cx - 4.5, cy),
             ])
-            if is_active:
-                painter.setBrush(QColor("#38bdf8"))
-                painter.setPen(QPen(QColor("#ffffff"), 1.2))
-            else:
-                painter.setBrush(QColor("#fbbf24"))
-                painter.setPen(QPen(QColor("#18181b"), 1.0))
+            # O losango âmbar do tema, e o do instante do cursor no acento, com um fio claro que o destaca.
+            painter.setBrush(self._color("accent") if is_active else self._papel("warn"))
+            painter.setPen(QPen(self._papel("text"), 1.2) if is_active else Qt.PenStyle.NoPen)
             painter.drawPolygon(poly)
         painter.restore()
 
@@ -898,8 +960,9 @@ class Timeline(QWidget):
         if clip.is_image or clip.overlay_type is OverlayType.IMAGE:
             first_thumb = next(iter(strip.thumbs.values()), None)
             if first_thumb is not None:
+                # Abaixo da pastilha do rótulo, e com folga embaixo para os losangos dos quadros-chave.
                 area = QRectF(
-                    rect.left(), rect.top() + 13, rect.width(), max(1.0, rect.height() - 13)
+                    rect.left(), rect.top() + 28, rect.width(), max(1.0, rect.height() - 28 - 6)
                 )
                 image, image_rect = _image_preview(first_thumb, area)
                 painter.drawImage(image_rect, image)
@@ -909,16 +972,14 @@ class Timeline(QWidget):
             cell = self._source_rect(clip, rect, begin, end)
             if cell.right() < rect.left() or cell.left() > rect.right():
                 continue
-            painter.drawImage(
-                QRectF(cell.left(), rect.top(), cell.width(), rect.height() - 12), image
-            )
+            painter.drawImage(QRectF(cell.left(), rect.top(), cell.width(), rect.height()), image)
 
     def _paint_wave(self, painter: QPainter, clip: Clip, rect: QRectF) -> None:
         strip = self._strips.get(clip.clip_id)
         if strip is None or strip.wave is None:
             return
         area = self._source_rect(clip, rect, strip.in_point, strip.out_point)
-        target = QRectF(area.left(), rect.top() + 12, area.width(), rect.height() - 14)
+        target = QRectF(area.left(), rect.top() + _WAVE_TOP, area.width(), WAVE_HEIGHT)
         if clip.reversed:
             # A onda é desenhada da esquerda para a direita no sentido da mídia;
             # espelhada em torno do centro dela, ela acompanha o bloco invertido.
@@ -934,16 +995,12 @@ class Timeline(QWidget):
     def _paint_clip_label(
         self, painter: QPainter, clip: Clip, rect: QRectF, track
     ) -> None:
-        font = QFont(self.font())
-        font.setPointSizeF(max(7.0, font.pointSizeF() - 2))
-        painter.setFont(font)
-
-        strip = QRectF(rect.left(), rect.top(), rect.width(), 13)
-        painter.fillRect(strip, self._color("bg", 190))
+        """A pastilha escura com o ícone e o nome do bloco, no canto de cima à esquerda, por cima da imagem."""
+        if rect.width() < 36:
+            return
+        font = fonts.resized(self.font(), delta=-1, minimum=10)
+        font.setWeight(QFont.Weight.DemiBold)
         silenced = clip.muted or track.muted
-        painter.setPen(
-            self._color("warn") if silenced else self._color("text")
-        )
 
         badges: list[str] = []
         if clip.reversed:
@@ -954,28 +1011,43 @@ class Timeline(QWidget):
             badges.append(clip.gain_label)
 
         if clip.overlay_type is OverlayType.TEXT:
-            text = f"🔤 {clip.text_content or strings.EDIT_CLIP_TEXT}"
+            text = clip.text_content or strings.EDIT_CLIP_TEXT
         elif clip.overlay_type is OverlayType.FILTER:
-            name = strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
-            text = f"🎨 {name}"
+            text = strings.EDIT_FILTERS.get(clip.filter_name, ("", clip.filter_name or strings.EDIT_CLIP_FILTER))[1]
         elif clip.overlay_type is OverlayType.TRANSITION:
-            name = strings.EDIT_TRANSITIONS.get(clip.transition_name,
+            text = strings.EDIT_TRANSITIONS.get(clip.transition_name,
                                                 ("", clip.transition_name or strings.EDIT_CLIP_TRANSITION))[1]
-            text = f"⏳ {name}"
-        elif clip.overlay_type is OverlayType.IMAGE or clip.is_image:
-            text = f"🖼️ {clip.media.name}"
         else:
             text = clip.media.name
 
         if badges:
             text = f"{text}   {' · '.join(badges)}"
 
+        # A pastilha tem o ícone da espécie (branco) e o texto até onde o bloco deixa; a margem de 8 px é a de cima e a da
+        # esquerda, e sobra a mesma à direita.
+        pad_left, pad_right, gap = 8, 10, 5
+        maximo = rect.width() - 16
+        metrics = QFontMetrics(font)
+        com_icone = maximo >= pad_left + _ICONE_ROTULO + pad_right + 12
+        espaco_do_texto = maximo - pad_left - pad_right - ((_ICONE_ROTULO + gap) if com_icone else 0)
+        shown = metrics.elidedText(text, Qt.TextElideMode.ElideRight, int(max(0, espaco_do_texto)))
+        largura = pad_left + ((_ICONE_ROTULO + gap) if com_icone else 0) + metrics.horizontalAdvance(shown) + pad_right
+        pastilha = QRectF(rect.left() + 8, rect.top() + _FAIXA_DO_BLOCO + 5, min(maximo, largura), _ROTULO_ALTURA)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._papel("screen", 175))
+        painter.drawRoundedRect(pastilha, 8, 8)
+
+        x = pastilha.left() + pad_left
+        if com_icone:
+            self._icone(self._tipo(clip, track), _ICONE_ROTULO, branco=True).paint(
+                painter, QRect(int(x), int(pastilha.center().y() - _ICONE_ROTULO / 2), _ICONE_ROTULO, _ICONE_ROTULO))
+            x += _ICONE_ROTULO + gap
+        painter.setFont(font)
+        painter.setPen(self._color("warn") if silenced else self._papel("text"))
         painter.drawText(
-            strip.adjusted(6, 0, -4, 0),
+            QRectF(x, pastilha.top(), pastilha.right() - x, pastilha.height()),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            QFontMetrics(font).elidedText(
-                text, Qt.TextElideMode.ElideRight, int(rect.width()) - 10
-            ),
+            shown,
         )
 
     def _paint_playhead(self, painter: QPainter) -> None:
@@ -983,10 +1055,12 @@ class Timeline(QWidget):
         if x < HEADER_WIDTH - 8 or x > self.width() + 8:
             return
         painter.setPen(QPen(self._color("error"), 2))
-        painter.drawLine(QPointF(x, RULER_HEIGHT - 8), QPointF(x, self.height() - 4))
-        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawLine(QPointF(x, RULER_HEIGHT - 6), QPointF(x, self.height() - 4))
+        # A cabeça é um triângulo apontado para baixo, com as pontas arredondadas pelo contorno.
+        cabeca = QPolygonF([QPointF(x - 6, RULER_HEIGHT - 15), QPointF(x + 6, RULER_HEIGHT - 15), QPointF(x, RULER_HEIGHT - 5)])
         painter.setBrush(self._color("error"))
-        painter.drawRoundedRect(QRectF(x - 6, RULER_HEIGHT - 16, 12, 11), 3, 3)
+        painter.setPen(QPen(self._color("error"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawPolygon(cabeca)
 
     # ------------------------------------------------------------------
     # Mouse
@@ -1536,10 +1610,16 @@ class Timeline(QWidget):
 
 
 def _ruler_label(seconds: float, step: float) -> str:
-    label = format_timecode(seconds, milliseconds=step < 1)
+    """O rótulo da régua em ``m:ss`` (``h:mm:ss`` de uma hora em diante), com o décimo quando o passo é menor que 1 s.
+
+    Parte de ``format_timecode``, que já tem o separador decimal do idioma e arredonda ao milissegundo antes de
+    cortar: o décimo é **truncado** (1,96 s é "1,9", e nunca "2,0" nem "1,0" com o "vai um" perdido).
+    """
+    completo = format_timecode(seconds, milliseconds=step < 1)
     if step < 1:
-        label = label[:-2]
-    return label[2:] if label.startswith("0:") else label
+        completo = completo[:-2]  # "0:00:01,960" -> "0:00:01,9"
+    horas, minutos, resto = completo.split(":", 2)
+    return f"{int(minutos)}:{resto}" if horas == "0" else f"{horas}:{minutos}:{resto}"
 
 
 def image_from_frame(data: bytes, width: int, height: int) -> QImage:
@@ -1562,6 +1642,8 @@ __all__ = [
     'AUDIO_TRACK_HEIGHT',
     'FILM_CELL_WIDTH',
     'HEADER_WIDTH',
+    'THUMB_HEIGHT',
+    'WAVE_HEIGHT',
     'MIN_SEGMENT',
     'RULER_HEIGHT',
     'Timeline',

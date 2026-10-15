@@ -214,3 +214,101 @@ def pytest_collection_modifyitems(config, items):
     ficam, fora = fatiar(items, indice, total)
     items[:] = ficam
     config.hook.pytest_deselected(items=fora)
+
+
+@pytest.fixture
+def dialogo_de_exportacao(desktop_app, tmp_path):
+    """O diálogo de exportação de um projeto de um clipe só — o único caso em que o "Corte rápido" é permitido."""
+    from videomanager.application.capabilities import FFmpegTools
+    from videomanager.bootstrap import build_desktop_runtime, build_processing_service
+    from videomanager.domain.media import LocalMedia, LocalStream
+    from videomanager.domain.project import Clip, MediaKind, MediaRef, TrackKind, new_project
+    from videomanager.infrastructure.storage.settings import Settings
+    from videomanager.presentation.qt.export_dialog import ExportDialog
+    ffmpeg, ffprobe = tmp_path / "ffmpeg", tmp_path / "ffprobe"
+    for arquivo in (ffmpeg, ffprobe):
+        arquivo.write_text("#!/bin/sh\nexit 0\n")
+        arquivo.chmod(0o755)
+    ferramentas = FFmpegTools(ffmpeg=ffmpeg, ffprobe=ffprobe, source="sistema")
+    caminho = tmp_path / "video.mp4"
+    caminho.write_bytes(b"x")
+    ref = MediaRef(path=caminho, kind=MediaKind.VIDEO, duration=60.0, width=1920, height=1080, fps=30.0,
+                   has_audio=True)
+    local = LocalMedia(path=caminho, duration=60.0, format_name="mov,mp4", size=1024, streams=(
+        LocalStream(index=0, kind="video", codec="h264", width=1920, height=1080, fps=30.0),
+        LocalStream(index=1, kind="audio", codec="aac", channels=2)))
+    projeto = new_project().with_track(TrackKind.VIDEO).with_clip(0, Clip(media=ref, start=0.0, duration=30.0))
+    instancia = ExportDialog(project=projeto, settings=Settings(), pool=[ref], probed={ref.path: local},
+                             keyframes=(0.0, 5.0, 10.0), ensure_tools=lambda: ferramentas,
+                             processing=build_processing_service(), runtime=build_desktop_runtime())
+    yield instancia
+    instancia.deleteLater()
+
+
+@pytest.fixture
+def tema_do_app(desktop_app):
+    """O tema real aplicado ao ``QApplication`` durante o teste, e o estado de antes devolvido no fim.
+
+    O aplicativo sempre roda com o QSS: o que o QSS muda (tamanho de rótulo, recuo de aba, altura de campo) não existe
+    num teste que não o aplica. Aplicar sem devolver deixaria estilo e paleta trocados para os testes de geometria
+    seguintes, que medem com o que estava antes.
+    """
+    from videomanager.presentation.qt import theme
+    antes = (desktop_app.palette(), desktop_app.styleSheet(), theme.atual())
+    theme.apply(desktop_app, "dark", "grafite")
+    yield desktop_app
+    desktop_app.setPalette(antes[0])
+    desktop_app.setStyleSheet(antes[1])
+    theme._atual = antes[2]
+
+
+@pytest.fixture
+def painel_de_edicao(desktop_app, monkeypatch):
+    """O painel de edição de verdade, vazio, sem diálogos que travem o teste."""
+    from PySide6.QtWidgets import QMessageBox
+    from videomanager.bootstrap import build_desktop_runtime, build_editor_service, build_processing_service
+    from videomanager.infrastructure.storage.settings import Settings
+    from videomanager.presentation.qt.panels.edit_panel import EditPanel
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Discard)
+    instancia = EditPanel(Settings(), ensure_tools=lambda: None, editor=build_editor_service(),
+                          processing=build_processing_service(), runtime=build_desktop_runtime())
+    yield instancia
+    instancia.shutdown()
+
+
+@pytest.fixture
+def blocos_de_edicao(painel_de_edicao):
+    """Um bloco de cada tipo, num projeto só, aplicado ao painel de edição."""
+    from pathlib import Path
+    from videomanager.domain.project import Clip, MediaKind, MediaRef, Project, Track, TrackKind
+    painel = painel_de_edicao
+
+    def _midia(nome, tipo, duracao=6.0, **extra):
+        return MediaRef(Path(nome), tipo, duration=duracao, width=1280, height=720, fps=30.0, **extra)
+
+    com_som = Clip(_midia("a.mp4", MediaKind.VIDEO, has_audio=True), start=0.0, duration=6.0)
+    com_som_2 = Clip(_midia("b.mp4", MediaKind.VIDEO, has_audio=True), start=6.0, duration=6.0)
+    sem_som = Clip(_midia("c.mp4", MediaKind.VIDEO, has_audio=False), start=0.0, duration=6.0)
+    imagem = Clip(_midia("i.png", MediaKind.IMAGE, 4.0), start=1.0, duration=4.0)
+    audio = Clip(_midia("m.mp3", MediaKind.AUDIO, 15.0, has_audio=True), start=0.0, duration=15.0)
+    texto = Clip(MediaRef(Path("Texto_Video Manager"), MediaKind.IMAGE, duration=5.0), start=0.5, duration=5.0,
+                 overlay_type="text", text_content="Video Manager", font_family="Sans Serif", font_size=110)
+    filtro = Clip(MediaRef(Path("Filtro_Vinheta"), MediaKind.IMAGE, duration=3.0), start=6.0, duration=6.0,
+                  overlay_type="filter", filter_name="vinheta")
+    transicao = Clip(MediaRef(Path("Transicao"), MediaKind.IMAGE, duration=1.0), start=5.5, duration=1.0,
+                     overlay_type="transition", transition_name="dissolve",
+                     transition_left_id=com_som.clip_id, transition_right_id=com_som_2.clip_id)
+    projeto = Project(
+        tracks=(
+            Track(TrackKind.ADDITIONAL, clips=(texto, filtro), name="Adicionais 1"),
+            Track(TrackKind.VIDEO, clips=(imagem,), name="Vídeo 3"),
+            Track(TrackKind.VIDEO, clips=(sem_som,), name="Vídeo 2"),
+            Track(TrackKind.VIDEO, clips=(com_som, transicao, com_som_2), name="Vídeo 1"),
+            Track(TrackKind.AUDIO, clips=(audio,), name="Áudio 1"),
+        ),
+        width=1280, height=720, fps=30.0,
+    )
+    painel._apply(projeto)
+    return {"video com som": com_som, "video sem som": sem_som, "imagem": imagem, "audio": audio,
+            "texto": texto, "filtro": filtro, "transicao": transicao}
