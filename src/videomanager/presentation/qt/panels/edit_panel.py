@@ -566,7 +566,7 @@ class EditPanel(QWidget):
     def accept_import(self, result, *, insert=False, placement=None):
         self._probed.update(result.probed)
         for ref in result.references:
-            self._pool_thumbnails.pop(ref.path, None)
+            self._forget_thumbnail(ref.path)
             self._pool_tokens.pop(ref.path, None)
         existing = {ref.path for ref in self._pool}
         self._pool.extend(ref for ref in result.references if ref.path not in existing)
@@ -600,6 +600,7 @@ class EditPanel(QWidget):
             self._session.reset(project, path)
         self._pool = list(references)
         self._pool_thumbnails.clear()
+        self._pool_frames.clear()
         self._pool_tokens.clear()
         self._probed = dict(probed)
         # Tela e taxa gravadas iguais às que o material produz voltam
@@ -771,6 +772,9 @@ class EditPanel(QWidget):
         self._pose_live = False
         self._typing_session = -1
         self._pool_thumbnails: dict[Path, QIcon] = {}
+        # O quadro que o ffmpeg entregou de cada mídia: a troca de paleta refaz a ficha (as faixas em volta de um quadro de
+        # outra proporção são do fundo do tema) sem pedir o quadro de novo.
+        self._pool_frames: dict[Path, QImage] = {}
         self._selected_filter_name = "pb"
         self._project_path: Path | None = None
         self._session.mark_saved()
@@ -2496,10 +2500,12 @@ class EditPanel(QWidget):
         self._timeline.select(last.clip_id)
         self._after_edit(refit=was_empty)
 
-    def _create_thumbnail_for(self, reference: MediaRef) -> QIcon:
-        if reference.path in self._pool_thumbnails:
-            return self._pool_thumbnails[reference.path]
+    def _forget_thumbnail(self, path: Path) -> None:
+        self._pool_thumbnails.pop(path, None)
+        self._pool_frames.pop(path, None)
 
+    def _placeholder_thumbnail(self, reference: MediaRef) -> QIcon:
+        """A ficha de quem ainda não tem quadro (ou não terá: áudio): o ícone da espécie sobre o fundo do tema."""
         card = QPixmap(_THUMB_W, _THUMB_H)
         card.fill(QColor(self._colors["bg"]))
         p = QPainter(card)
@@ -2509,7 +2515,26 @@ class EditPanel(QWidget):
         lado = 44
         desenho(self._colors["text_dim"], lado).paint(p, QRect((_THUMB_W - lado) // 2, (_THUMB_H - lado) // 2, lado, lado))
         p.end()
-        icon = QIcon(card)
+        return QIcon(card)
+
+    def _retheme_pool(self) -> None:
+        """Refaz as fichas do acervo com o fundo do tema novo: a substituta e as faixas em volta de um quadro 4:3."""
+        fundo = QColor(self._colors["bg"])
+        for reference in self._pool:
+            quadro = self._pool_frames.get(reference.path)
+            self._pool_thumbnails[reference.path] = (
+                QIcon(_ficha_do_quadro(quadro, fundo)) if quadro is not None else self._placeholder_thumbnail(reference))
+        for i in range(self._media_list.count()):
+            item = self._media_list.item(i)
+            reference = item.data(Qt.ItemDataRole.UserRole)
+            if reference and reference.path in self._pool_thumbnails:
+                item.setIcon(self._pool_thumbnails[reference.path])
+
+    def _create_thumbnail_for(self, reference: MediaRef) -> QIcon:
+        if reference.path in self._pool_thumbnails:
+            return self._pool_thumbnails[reference.path]
+
+        icon = self._placeholder_thumbnail(reference)
         self._pool_thumbnails[reference.path] = icon
 
         if reference.kind in (MediaKind.VIDEO, MediaKind.IMAGE):
@@ -2544,6 +2569,7 @@ class EditPanel(QWidget):
                 img = image_from_frame(data, w, h)
                 icon = QIcon(_ficha_do_quadro(img, QColor(self._colors["bg"])))
                 self._pool_thumbnails[reference.path] = icon
+                self._pool_frames[reference.path] = img
                 for i in range(self._media_list.count()):
                     item = self._media_list.item(i)
                     ref = item.data(Qt.ItemDataRole.UserRole)
@@ -2655,7 +2681,7 @@ class EditPanel(QWidget):
 
         if reference in self._pool:
             self._pool.remove(reference)
-        self._pool_thumbnails.pop(reference.path, None)
+        self._forget_thumbnail(reference.path)
         self._probed.pop(reference.path, None)
         self._refresh_pool()
         self._refresh_controls()
@@ -2667,7 +2693,7 @@ class EditPanel(QWidget):
             return
         for ref in to_remove:
             self._pool.remove(ref)
-            self._pool_thumbnails.pop(ref.path, None)
+            self._forget_thumbnail(ref.path)
             self._probed.pop(ref.path, None)
         self._refresh_pool()
         self._refresh_controls()
@@ -5229,6 +5255,7 @@ class EditPanel(QWidget):
         self._colors.update(palette(*atual()))
         self._set_toolbar_icons()
         self._set_extras_icons()
+        self._retheme_pool()
         self._timeline.forget_waves()
         if not self._project.is_empty:  # sem projeto não há onda a pedir, nem motivo de procurar o ffmpeg
             self._refresh_backdrop()
