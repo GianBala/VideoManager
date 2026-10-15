@@ -183,11 +183,6 @@ class QualityPanel(QWidget):
         self._container.currentIndexChanged.connect(self._emit_changed)
         grid.addWidget(captioned(lambda: strings.LABEL_CONTAINER, self._container), 1, 0)
 
-        self._audio_track = QComboBox()
-        self._audio_track.currentIndexChanged.connect(self._emit_changed)
-        self._audio_track_box = captioned(lambda: strings.LABEL_AUDIO_TRACK, self._audio_track)
-        grid.addWidget(self._audio_track_box, 1, 1, 1, 2)
-
         # Bitrate do vídeo: "igual ao da fonte" (não recodifica), um valor pronto ou um valor livre. Um número é o
         # consentimento de recodificar (ver ``VideoRequest.video_kbps``).
         self._bitrate = bind(QComboBox(), "setToolTip", lambda: strings.TIP_VIDEO_BITRATE)
@@ -196,8 +191,16 @@ class QualityPanel(QWidget):
             self._bitrate.addItem(format_bitrate(kbps), kbps)
         self._bitrate.addItem(strings.VIDEO_BITRATE_CUSTOM, _CUSTOM_BITRATE)
         self._bitrate.currentIndexChanged.connect(self._on_bitrate_changed)
-        grid.addWidget(captioned(lambda: strings.LABEL_VIDEO_BITRATE, self._bitrate), 2, 0)
+        grid.addWidget(captioned(lambda: strings.LABEL_VIDEO_BITRATE, self._bitrate), 1, 1)
 
+        # A trilha de áudio só existe quando o site separa vídeo e áudio, e ocupa a última coluna da fileira: escondida,
+        # a fileira termina no bitrate, sem um vão no meio. Criados nesta ordem, o Tab segue a leitura da grade.
+        self._audio_track = QComboBox()
+        self._audio_track.currentIndexChanged.connect(self._emit_changed)
+        self._audio_track_box = captioned(lambda: strings.LABEL_AUDIO_TRACK, self._audio_track)
+        grid.addWidget(self._audio_track_box, 1, 2)
+
+        # O valor livre só aparece quando "Personalizado…" está escolhido, numa fileira sua, sob o bitrate.
         self._bitrate_custom = QSpinBox()
         self._bitrate_custom.setRange(VIDEO_BITRATE_MIN, VIDEO_BITRATE_MAX)
         self._bitrate_custom.setSingleStep(100)
