@@ -123,8 +123,13 @@ def estimate_download_size(
     audio_codec: str = "mp3",
     audio_quality: str = "192",
     duration: float | None = None,
+    video_kbps: int | None = None,
 ) -> int | None:
-    """Estima tamanho de download em bytes para a seleção atual."""
+    """Estima tamanho de download em bytes para a seleção atual.
+
+    ``video_kbps`` é o bitrate de vídeo pedido (o vídeo é recodificado a ele depois do download): o arquivo sai perto de
+    ``kbps × duração``. Uma fonte que já está nesse bitrate, ou abaixo, não é recodificada, e a conta é a de sempre.
+    """
     from videomanager.domain.formats import Kind
     from videomanager.domain.formats import Mode
 
@@ -133,6 +138,9 @@ def estimate_download_size(
             return None
 
         v_fmt = video_choice.best
+        recoded = recode_video_bytes(v_fmt, duration, video_kbps)
+        if recoded is not None:
+            return recoded + _audio_bytes_beside_recoded_video(matrix, v_fmt, audio_choice, duration)
         v_bytes = v_fmt.filesize
         if v_bytes is None and duration and duration > 0:
             bitrate = v_fmt.effective_video_bitrate
@@ -182,6 +190,48 @@ def estimate_download_size(
         return a_fmt.filesize
 
     return None
+
+
+def recode_video_bytes(v_fmt, duration: float | None, video_kbps: int | None) -> int | None:
+    """Só o vídeo, recodificado a ``video_kbps``; ``None`` quando não há recodificação a estimar.
+
+    Não há quando nada foi pedido, quando a duração não é conhecida, ou quando a fonte já está no bitrate pedido ou abaixo
+    (ver ``infrastructure/ffmpeg/recode.py``: ali o vídeo é mantido).
+    """
+    if not video_kbps or not duration or duration <= 0:
+        return None
+    source = _video_only_kbps(v_fmt)
+    if source is not None and source <= video_kbps * 1.02:
+        return None
+    return int(video_kbps * 1000 / 8 * duration)
+
+
+def _video_only_kbps(v_fmt) -> float | None:
+    """O bitrate do vídeo da fonte, sem o áudio que um formato muxado carrega junto."""
+    from videomanager.domain.formats import Kind
+
+    if v_fmt.vbr:
+        return v_fmt.vbr
+    if v_fmt.tbr is None:
+        return None
+    if v_fmt.kind is Kind.MUXED:
+        return max(0.0, v_fmt.tbr - (v_fmt.abr or 0.0))
+    return v_fmt.tbr
+
+
+def _audio_bytes_beside_recoded_video(matrix, v_fmt, audio_choice, duration: float | None) -> int:
+    """O áudio que acompanha o vídeo recodificado: copiado, com o tamanho que a fonte dele já tem."""
+    from videomanager.domain.formats import Kind
+
+    if v_fmt.kind is Kind.MUXED or not matrix.needs_muxing:
+        # O áudio vem junto do vídeo, no bitrate dele; sem o dado, a conta usa o do áudio padrão.
+        return int((v_fmt.abr or 128.0) * 1000 / 8 * (duration or 0.0))
+    a_fmt = audio_choice.best if audio_choice else (matrix.audio[0].best if matrix.audio else None)
+    if a_fmt is None:
+        return 0
+    if a_fmt.filesize:
+        return a_fmt.filesize
+    return int((a_fmt.effective_audio_bitrate or 160.0) * 1000 / 8 * (duration or 0.0))
 
 
 def estimate_profile_size(

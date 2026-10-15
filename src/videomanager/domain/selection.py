@@ -17,6 +17,12 @@ LOSSLESS_AUDIO = {"flac", "alac", "wav"}
 
 AUDIO_BITRATES = ("320", "256", "192", "160", "128", "96", "64")
 
+# Bitrate de vídeo pedido no download (kbps): os valores prontos do seletor e os limites do campo livre. Abaixo de 100 kbps
+# a imagem deixa de ser vídeo; acima de 100 000 não há fonte da web que justifique.
+VIDEO_BITRATE_PRESETS = (500, 1000, 2500, 5000, 8000, 12000)
+VIDEO_BITRATE_MIN = 100
+VIDEO_BITRATE_MAX = 100_000
+
 
 @dataclass(frozen=True)
 class VideoRequest:
@@ -33,6 +39,9 @@ class VideoRequest:
     container: str = CONTAINER_AUTO
     max_height: int | None = None
     max_fps: int | None = None
+    # Bitrate médio do vídeo, em kbps. ``None`` é "igual ao da fonte": o vídeo fica como o site o entrega, sem recodificar.
+    # Um número é o consentimento de recodificar: depois do download o vídeo é codificado de novo a esse bitrate.
+    video_kbps: int | None = None
 
 
 @dataclass(frozen=True)

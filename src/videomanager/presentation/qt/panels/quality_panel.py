@@ -17,11 +17,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QLabel,
+    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from videomanager.domain.estimator import _video_only_kbps
 from videomanager.domain.estimator import estimate_download_size
 from videomanager.domain.format_policy import available_families
 from videomanager.domain.format_policy import available_fps
@@ -39,6 +41,9 @@ from videomanager.domain.selection import AUDIO_CODECS
 from videomanager.domain.selection import CONTAINER_AUTO
 from videomanager.domain.selection import CONTAINERS
 from videomanager.domain.selection import LOSSLESS_AUDIO
+from videomanager.domain.selection import VIDEO_BITRATE_MAX
+from videomanager.domain.selection import VIDEO_BITRATE_MIN
+from videomanager.domain.selection import VIDEO_BITRATE_PRESETS
 from videomanager.domain.selection import AudioRequest
 from videomanager.domain.selection import VideoRequest
 from videomanager.application.media.download_policy import audio_quality_warning
@@ -50,6 +55,12 @@ from videomanager.presentation.qt.panels.fields import captioned, make_grid
 from videomanager.presentation.qt.panels.segmented import SegmentButton, segmented
 from videomanager.application.format_labels import resolution_label
 from videomanager.application.format_labels import choice_label
+
+# O dado do item "Personalizado…" do seletor de bitrate: o valor vem do campo ao lado.
+_CUSTOM_BITRATE = "custom"
+# O padrão do campo livre: um valor corrente para vídeo de 720p a 1080p.
+_DEFAULT_CUSTOM_KBPS = 2500
+
 
 class QualityPanel(QWidget):
     """Escolha de modo (vídeo/áudio) e de todos os parâmetros de qualidade."""
@@ -136,6 +147,9 @@ class QualityPanel(QWidget):
         retext_items(self._fps, lambda data: strings.ANY_FPS if data is None else None)
         retext_items(self._codec, lambda data: strings.ANY_CODEC if data is None else None)
         retext_items(self._container, lambda data: strings.CONTAINER_AUTO_LABEL if data == CONTAINER_AUTO else None)
+        # Os valores prontos levam o separador decimal do idioma ("2,5 Mbps", "2.5 Mbps"): refeitos a cada troca.
+        retext_items(self._bitrate, lambda data: self._bitrate_source_text() if data is None
+                     else strings.VIDEO_BITRATE_CUSTOM if data == _CUSTOM_BITRATE else format_bitrate(data))
         retext_items(self._audio_codec, lambda data: strings.AUDIO_CODEC_BEST if data == "best" else None)
         retext_items(self._audio_track, lambda data: strings.QUALITY_BEST_AVAILABLE if data is None
                      else choice_label(data))
@@ -173,6 +187,26 @@ class QualityPanel(QWidget):
         self._audio_track.currentIndexChanged.connect(self._emit_changed)
         self._audio_track_box = captioned(lambda: strings.LABEL_AUDIO_TRACK, self._audio_track)
         grid.addWidget(self._audio_track_box, 1, 1, 1, 2)
+
+        # Bitrate do vídeo: "igual ao da fonte" (não recodifica), um valor pronto ou um valor livre. Um número é o
+        # consentimento de recodificar (ver ``VideoRequest.video_kbps``).
+        self._bitrate = bind(QComboBox(), "setToolTip", lambda: strings.TIP_VIDEO_BITRATE)
+        self._bitrate.addItem(self._bitrate_source_text(), None)
+        for kbps in VIDEO_BITRATE_PRESETS:
+            self._bitrate.addItem(format_bitrate(kbps), kbps)
+        self._bitrate.addItem(strings.VIDEO_BITRATE_CUSTOM, _CUSTOM_BITRATE)
+        self._bitrate.currentIndexChanged.connect(self._on_bitrate_changed)
+        grid.addWidget(captioned(lambda: strings.LABEL_VIDEO_BITRATE, self._bitrate), 2, 0)
+
+        self._bitrate_custom = QSpinBox()
+        self._bitrate_custom.setRange(VIDEO_BITRATE_MIN, VIDEO_BITRATE_MAX)
+        self._bitrate_custom.setSingleStep(100)
+        self._bitrate_custom.setSuffix(" kbps")
+        self._bitrate_custom.setValue(_DEFAULT_CUSTOM_KBPS)
+        self._bitrate_custom.valueChanged.connect(self._emit_changed)
+        self._bitrate_custom_box = captioned(lambda: strings.LABEL_VIDEO_BITRATE_VALUE, self._bitrate_custom)
+        self._bitrate_custom_box.setVisible(False)
+        grid.addWidget(self._bitrate_custom_box, 2, 1)
 
         # O tamanho estimado já aparece no rodapé da aba; o texto daqui só guarda o número (``estimated_size``).
         self._video_size_label = QLabel("—")
@@ -230,6 +264,9 @@ class QualityPanel(QWidget):
                 parts.append(self._audio_quality.currentText())
         else:
             parts = [self._resolution.currentText(), self._container.currentText()]
+            kbps = self.current_video_kbps()
+            if kbps:
+                parts.append(format_bitrate(kbps))
             if not self._audio_track.isHidden():
                 parts.append(self._audio_track.currentText())
         return " · ".join(part for part in parts if part)
@@ -272,6 +309,7 @@ class QualityPanel(QWidget):
         self._audio_track_box.setVisible(separate)
 
         self._update_audio_source_hint()
+        self._update_bitrate_source_label()
         self._refresh_warnings()
         self._update_estimated_size()
 
@@ -378,6 +416,32 @@ class QualityPanel(QWidget):
             self._wanted_fps = self._fps.currentData()
         self._emit_changed()
 
+    def _on_bitrate_changed(self) -> None:
+        self._bitrate_custom_box.setVisible(self._bitrate.currentData() == _CUSTOM_BITRATE)
+        self._emit_changed()
+
+    def _bitrate_source_text(self) -> str:
+        """"Igual ao da fonte", com o bitrate que a fonte tem quando se sabe qual é."""
+        source = self._source_video_kbps()
+        if source:
+            return strings.VIDEO_BITRATE_SOURCE_WITH.format(bitrate=format_bitrate(source))
+        return strings.VIDEO_BITRATE_SOURCE
+
+    def _source_video_kbps(self) -> float | None:
+        """O bitrate do vídeo que seria baixado agora, sem o áudio que um formato muxado leva junto."""
+        video = self.current_video_choice() if hasattr(self, "_resolution") else None
+        return _video_only_kbps(video.best) if video is not None else None
+
+    def current_video_kbps(self) -> int | None:
+        """O bitrate de vídeo pedido (kbps), ou ``None`` para "igual ao da fonte"."""
+        data = self._bitrate.currentData()
+        if data == _CUSTOM_BITRATE:
+            return int(self._bitrate_custom.value())
+        return int(data) if data else None
+
+    def _update_bitrate_source_label(self) -> None:
+        self._bitrate.setItemText(0, self._bitrate_source_text())
+
     def _on_audio_codec_changed(self) -> None:
         codec = self._audio_codec.currentData()
         # Bitrate não se aplica a formato sem perda nem à cópia do original.
@@ -389,6 +453,7 @@ class QualityPanel(QWidget):
         if self._loading:
             return
         self._update_audio_source_hint()
+        self._update_bitrate_source_label()
         self._refresh_warnings()
         self._update_estimated_size()
         self.changed.emit()
@@ -407,6 +472,7 @@ class QualityPanel(QWidget):
             v_choice,
             a_choice,
             duration=self._duration,
+            video_kbps=self.current_video_kbps(),
         )
         self._video_size_label.setText(format_size(v_bytes, estimated=True))
 
@@ -455,6 +521,14 @@ class QualityPanel(QWidget):
                     self._container.currentData() or CONTAINER_AUTO,
                 )
                 messages.extend(plan.warnings)
+                kbps = self.current_video_kbps()
+                if kbps:
+                    source = self._source_video_kbps()
+                    if source is not None and source <= kbps * 1.02:
+                        messages.append(strings.QUALITY_WARN_BITRATE_ABOVE_SOURCE.format(
+                            source=format_bitrate(source), requested=format_bitrate(kbps)))
+                    else:
+                        messages.append(strings.QUALITY_WARN_RECODE.format(bitrate=format_bitrate(kbps)))
 
         self._warning.setText("\n".join(f"• {m}" for m in messages))
         self._warning.setVisible(bool(messages))
@@ -534,6 +608,7 @@ class QualityPanel(QWidget):
             video=self.current_video_choice(),
             audio=self.current_audio_choice(),
             container=self._container.currentData() or CONTAINER_AUTO,
+            video_kbps=self.current_video_kbps(),
         )
 
     def build_batch_request(
@@ -557,6 +632,7 @@ class QualityPanel(QWidget):
             audio=None,
             container=self._container.currentData() or CONTAINER_AUTO,
             max_height=max_height,
+            video_kbps=self.current_video_kbps(),
         )
 
     # ------------------------------------------------------------------
@@ -595,6 +671,8 @@ class QualityPanel(QWidget):
                 self._populate_dependent()
                 container_index = self._container.findData(container)
                 self._container.setCurrentIndex(max(0, container_index))
+                # Um perfil é "sem recodificar": o bitrate volta ao da fonte.
+                self._bitrate.setCurrentIndex(0)
             else:
                 codec_index = self._audio_codec.findData(audio_codec)
                 self._audio_codec.setCurrentIndex(max(0, codec_index))
