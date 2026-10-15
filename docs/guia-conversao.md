@@ -121,6 +121,8 @@ codec) tem o tamanho que já está lá, e MP3 e WAV, de taxa constante, saem por
   afirma** que o arquivo cresce nem que encolhe. A conta pode errar de −66% a +1500% conforme o conteúdo.
 - Trocar de codec, de resolução ou de nível no meio da medida abandona a medida que ninguém mais pede; voltar a uma
   escolha já medida mostra o número na hora.
+- Um arquivo que a conversão **ignora** (um áudio na conversão de vídeo, ou um vídeo sem som na de áudio) mostra "—" no
+  lugar do tamanho e fica de fora do total: o que não é gravado não tem tamanho nem variação.
 
 Medido contra a codificação inteira de 10 vídeos reais (de 54 s a 5 min, gravações de tela, séries e filmes): erro mediano
 de **1,0%** em H.264, **0,5%** em Comprimir e **0,6%** a **0,8%** no áudio, o pior caso em **6%**. Os números e o método
