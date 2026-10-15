@@ -298,6 +298,10 @@ CONVERT_COMPRESS_NO_GAIN = (
     "{count} arquivo(s) já bem comprimido(s) não deve(m) ficar menor(es) que o "
     "original, e o que não ficar menor não é gravado."
 )
+CONVERT_SIZE_APPROXIMATE = (
+    "Não foi possível medir uma amostra: o tamanho é uma conta aproximada e pode errar bastante, "
+    "para mais ou para menos."
+)
 
 # --- metadados ---------------------------------------------------------------
 TAB_METADATA = "Metadados"
