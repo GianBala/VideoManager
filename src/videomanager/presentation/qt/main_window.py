@@ -147,11 +147,13 @@ class MainWindow(QMainWindow):
         # A sondagem da placa é uma vez por execução (ver
         # :meth:`_warm_hardware_probe`).
         self._probed_hardware = False
-        # Se o usuário quer a gaveta de tarefas aberta. Vale nas abas que produzem tarefas; o editor e os Metadados
-        # a recolhem, porque o espaço vale mais como área de trabalho (ver :meth:`_apply_drawer`).
+        # Se o usuário quer a gaveta de tarefas aberta em Download e Convert, as abas que produzem tarefas; e, à parte, no
+        # editor e nos Metadados, onde ela entra como estava na aba de onde se veio (ver :meth:`_apply_drawer`).
         self._drawer_open = True
-        # A gaveta aberta de passagem, onde a preferência não a mostraria (aba de trabalho, janela estreita), e o que
-        # a janela já mandou ao painel (``None`` até a montagem terminar: os eventos de layout antes disso não contam).
+        self._drawer_in_workspace = True
+        self._was_workspace = False
+        # A gaveta aberta numa janela estreita demais para ela (a janela cresce até caber), e o que a janela já mandou ao
+        # painel (``None`` até a montagem terminar: os eventos de layout antes disso não contam).
         self._drawer_forced = False
         self._drawer_shown: bool | None = None
         # Filha da janela: um ``QTimer.singleShot`` com método seria entregue depois de a janela ser apagada.
@@ -210,8 +212,7 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
 
         # As tarefas ficam fora das abas, numa gaveta à direita: todas as abas alimentam a mesma fila, e trocar
-        # de aba não pode esconder o que está em andamento — salvo no editor e nos Metadados, onde a gaveta dá
-        # lugar à área de trabalho (ver :meth:`_apply_drawer`).
+        # de aba não pode esconder o que está em andamento (ver :meth:`_apply_drawer`).
         self._tabs = Paginas()
         self._tabs.addTab(self._build_download_tab(), strings.TAB_DOWNLOAD)
         self._convert = ConvertPanel(self._settings, self._tools_for_convert, processing=self._processing, runtime=self._runtime)
@@ -361,26 +362,33 @@ class MainWindow(QMainWindow):
         # Na aba Metadados o painel nasce na primeira visita.
         if index == _TAB_METADATA:
             self._metadata_panel()
-        # Abrir a gaveta de passagem vale para a aba em que se pediu.
+        # Entrar no editor ou nos Metadados leva a gaveta como ela estava na aba de onde se veio: recolhê-la sozinha
+        # escondia a fila de quem tinha uma tarefa em andamento e ia editar. Entre as duas abas de trabalho nada muda.
+        em_trabalho = self._in_workspace()
+        if em_trabalho and not self._was_workspace:
+            self._drawer_in_workspace = self._drawer_open
+        self._was_workspace = em_trabalho
+        # Abrir a gaveta numa janela estreita vale para a aba em que se pediu.
         self._drawer_forced = False
         self._apply_drawer()
         self._update_menu_scope(index)
 
     def _apply_drawer(self) -> None:
-        """A gaveta de tarefas à vista, ou não, conforme a aba, a largura da janela e a vontade do usuário.
+        """A gaveta de tarefas à vista, ou não, conforme a vontade do usuário e a largura da janela.
 
-        A regra da fila sempre à vista existe para as abas que **produzem** tarefas e vão embora: quem manda
-        baixar quer acompanhar. O editor é o contrário — é onde se fica, e cada pixel que a gaveta ocupa lá sai
-        da imagem que está sendo cortada. Na aba Metadados também: salvar lá não passa pela fila, e o espaço
-        vale mais como formulário. Nada se perde: o selo do item Tarefas continua contando, e a gaveta volta
-        inteira em qualquer outra aba, com as tarefas que entraram enquanto ela estava recolhida.
+        A gaveta é uma só, e trocar de aba não a mexe: aberta numa aba, continua aberta nas outras, o editor e os
+        Metadados incluídos; fechada, continua fechada. Quem baixa ou exporta e vai editar quer acompanhar a tarefa, e
+        a gaveta está fora das abas justamente para isso. Download e Convert guardam a preferência delas (``_drawer_open``);
+        o editor e os Metadados têm a sua (``_drawer_in_workspace``), que ao entrar neles vem da aba anterior. Fechar ali
+        não revoga a de Download e Convert: ao voltar, a gaveta está onde a preferência a deixou.
 
-        Numa janela estreita ela também recolhe (ver :meth:`_narrow`), e a preferência do usuário fica como estava:
-        quando há largura de novo, a gaveta volta. O contrário seria a janela presa em 840 px por uma coluna que
-        ninguém pediu para ver naquele momento. ``_drawer_forced`` é o usuário pedindo a gaveta onde ela estaria
-        recolhida (o item Tarefas, o aviso "Ver tarefas"): ela pede então os 344 px inteiros, e a janela cresce.
+        Numa janela estreita ela também recolhe (ver :meth:`_narrow`), e a vontade do usuário fica como estava: quando
+        há largura de novo, a gaveta volta. O contrário seria a janela presa em 840 px por uma coluna que ninguém pediu
+        para ver naquele momento. ``_drawer_forced`` é o usuário pedindo a gaveta numa janela estreita demais (o item
+        Tarefas, o aviso "Ver tarefas"): ela pede então os 344 px inteiros, e a janela cresce.
         """
-        wanted = self._drawer_open and not self._in_workspace() and not self._narrow()
+        querida = self._drawer_in_workspace if self._in_workspace() else self._drawer_open
+        wanted = querida and not self._narrow()
         visible = wanted or self._drawer_forced
         self._queue_panel.set_squeezable(not self._drawer_forced)
         if visible == self._drawer_shown:
@@ -400,16 +408,17 @@ class MainWindow(QMainWindow):
         return self.width() < LARGURA_DO_MENU + self._content.minimumSizeHint().width() + DRAWER_WIDTH
 
     def _in_workspace(self) -> bool:
-        """Se a aba à vista é de trabalho (Editar, Metadados): onde a gaveta só aparece de passagem."""
+        """Se a aba à vista é de trabalho (Editar, Metadados): onde a gaveta tem a vontade própria, vinda da aba anterior."""
         return self._tabs.currentIndex() in (_TAB_EDIT, _TAB_METADATA)
 
     def _set_drawer(self, open_: bool) -> None:
-        # A vontade do usuário de ter a gaveta à vista é a das abas que produzem tarefas. Nas de trabalho ela só vem
-        # de passagem, e abrir ou fechar ali não a revoga: gravar o fechamento fazia quem espiava as tarefas no
-        # editor voltar a Download e Convert sem a fila.
-        if not self._in_workspace():
+        # A vontade do usuário vale na aba em que ele a deu: em Download e Convert é a preferência delas, no editor e nos
+        # Metadados é a de lá. Fechar no editor não revoga a de Download e Convert (decisão Q1 da revisão de b829156).
+        if self._in_workspace():
+            self._drawer_in_workspace = open_
+        else:
             self._drawer_open = open_
-        self._drawer_forced = open_ and not (self._drawer_open and not self._in_workspace() and not self._narrow())
+        self._drawer_forced = open_ and self._narrow()
         self._apply_drawer()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
@@ -884,8 +893,8 @@ class MainWindow(QMainWindow):
             self._queue.submit(job)
         if not jobs:
             return
-        # Aviso na tela porque no editor a gaveta está recolhida: sem ele, clicar em "Adicionar à fila" não teria
-        # resposta nenhuma. "Ver tarefas" abre a gaveta onde quer que o usuário esteja.
+        # Aviso na tela porque a gaveta pode estar fechada (ou a janela estreita demais para ela): sem ele, clicar em
+        # "Adicionar à fila" não teria resposta nenhuma. "Ver tarefas" abre a gaveta onde quer que o usuário esteja.
         self._toasts.mostrar(
             strings.STATUS_ENQUEUED.format(count=len(jobs)), ms=_ENQUEUED_MS,
             acao=(strings.TOAST_VIEW_TASKS, lambda: self._set_drawer(True)),
