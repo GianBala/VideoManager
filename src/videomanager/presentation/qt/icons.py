@@ -15,13 +15,21 @@ Desenhar resolve os três problemas de uma vez: mesma espessura de traço dos
 outros símbolos, cor vinda do tema (ver ``presentation/qt/theme.py``) e nenhuma dependência de
 fonte ou de QtSvg, que não está no pacote. É o mesmo caminho que a linha do tempo
 já toma ao se pintar sozinha.
+
+**Nitidez em tela de escala maior que 1.** Cada função devolve um ``QIcon`` com o desenho em várias escalas (1×, 1,5×, 2× e
+3×), cada uma desenhada **no tamanho físico** com a própria função (que já escala por ``size``) e marcada com a
+``devicePixelRatio`` dela: o Qt escolhe a que serve à tela. Um pixmap de 1× era ampliado pelo Qt em 125% a 200% e saía
+borrado ao lado de texto nítido. Um ``QIconEngine`` que desenhasse sob demanda seria mais enxuto, mas o ícone copiado
+para um botão sobrevive ao objeto Python que o criou, e o Qt derrubava o processo ao destruí-lo na coleta de lixo.
 """
 
 from __future__ import annotations
 
+import functools
+import inspect
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 
 # Lado do ícone, em pixels lógicos. Os botões da barra têm 40 px de largura;
@@ -40,12 +48,71 @@ def _canvas(size: int) -> tuple[QPixmap, QPainter]:
 
 
 def _pen(color: str, width: float = _STROKE) -> QPen:
-    pen = QPen(QColor(color), width)
+    # A espessura é medida no tamanho em que o ícone foi criado; desenhado no dobro de pixels, o traço dobra junto.
+    pen = QPen(QColor(color), width * _proporcao)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     return pen
 
 
+# True enquanto uma função de desenho está sendo chamada pelo decorador: as que compõem outras (``trim_left`` chama
+# ``_trim``) recebem o desenho cru, e não outro ícone em várias escalas.
+_desenhando = False
+# Quanto o desenho em curso é maior (ou menor) que o do tamanho em que o ícone foi criado: a geometria já escala por
+# ``size``, e a espessura do traço escala por isto (ver :func:`_pen`).
+_proporcao = 1.0
+# As escalas de tela que o ícone traz prontas. 1,25 usa a de 1,5 e 2,5 a de 3, reduzidas pelo Qt: perto do pedido, e
+# bem mais nítidas que ampliar a de 1×.
+_ESCALAS = (1.0, 1.5, 2.0, 3.0)
+
+
+def _pixmap_cru(desenho, argumentos: dict, lado: int, teto: int) -> QPixmap:
+    """O desenho em ``lado`` × ``lado`` pixels físicos, com a espessura do traço proporcional ao tamanho de criação."""
+    global _desenhando, _proporcao
+    anterior = (_desenhando, _proporcao)
+    _desenhando, _proporcao = True, lado / teto
+    try:
+        return desenho(**{**argumentos, "size": lado}).pixmap(QSize(lado, lado), 1.0)
+    finally:
+        _desenhando, _proporcao = anterior
+
+
+def desenhar(desenho, color: str, lado: int) -> QPixmap:
+    """O desenho de ``desenho`` em ``lado`` × ``lado`` pixels físicos, sem escala: o que cada escala do ícone traz."""
+    return _pixmap_cru(desenho, {"color": color}, lado, inspect.signature(desenho).parameters["size"].default)
+
+
+def _em_escalas(variantes: dict) -> QIcon:
+    """O ícone com cada estado desenhado em todas as escalas. ``variantes``: ``{estado: (desenho, argumentos)}``.
+
+    O ``size`` dos argumentos é o teto, como o do pixmap de antes: o ícone nunca é maior do que foi pedido, só mais nítido.
+    """
+    icone = QIcon()
+    for estado, (desenho, argumentos) in variantes.items():
+        teto = argumentos["size"]
+        for escala in _ESCALAS:
+            pixmap = _pixmap_cru(desenho, argumentos, round(teto * escala), teto)
+            pixmap.setDevicePixelRatio(escala)
+            icone.addPixmap(pixmap, QIcon.Mode.Normal, estado)
+    return icone
+
+
+def _desenhado(desenho):
+    """Faz da função de desenho (``cor, size, ...`` → pixmap) uma que devolve o ícone em várias escalas."""
+    assinatura = inspect.signature(desenho)
+
+    @functools.wraps(desenho)
+    def icone(*args, **kw) -> QIcon:
+        if _desenhando:
+            return desenho(*args, **kw)
+        ligados = assinatura.bind(*args, **kw)
+        ligados.apply_defaults()
+        return _em_escalas({QIcon.State.Off: (desenho, dict(ligados.arguments))})
+
+    return icone
+
+
+@_desenhado
 def scissors(color: str, size: int = _SIZE) -> QIcon:
     """Tesoura: duas lâminas cruzadas e dois anéis."""
     pixmap, painter = _canvas(size)
@@ -106,16 +173,19 @@ def _trim(color: str, size: int, keep_right: bool) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def trim_left(color: str, size: int = _SIZE) -> QIcon:
     """Apagar à esquerda: sai o que está antes do cursor."""
     return _trim(color, size, keep_right=True)
 
 
+@_desenhado
 def trim_right(color: str, size: int = _SIZE) -> QIcon:
     """Apagar à direita: sai o que está depois do cursor."""
     return _trim(color, size, keep_right=False)
 
 
+@_desenhado
 def trash(color: str, size: int = _SIZE) -> QIcon:
     """Lixeira: tampa, alça e corpo levemente afunilado, com duas ranhuras."""
     pixmap, painter = _canvas(size)
@@ -169,6 +239,7 @@ def _barra(painter: QPainter, u: float, x: float, largura: float = 1.9) -> None:
     painter.drawRoundedRect(QRectF(x * u, 4.0 * u, largura * u, 10.0 * u), 0.7 * u, 0.7 * u)
 
 
+@_desenhado
 def play(color: str, size: int = _SIZE) -> QIcon:
     pixmap, painter = _canvas(size)
     u = size / 18.0
@@ -178,6 +249,7 @@ def play(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def pause(color: str, size: int = _SIZE) -> QIcon:
     pixmap, painter = _canvas(size)
     u = size / 18.0
@@ -188,6 +260,7 @@ def pause(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def to_start(color: str, size: int = _SIZE) -> QIcon:
     """Ir ao início: uma barra e um triângulo para a esquerda."""
     pixmap, painter = _canvas(size)
@@ -199,6 +272,7 @@ def to_start(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def to_end(color: str, size: int = _SIZE) -> QIcon:
     pixmap, painter = _canvas(size)
     u = size / 18.0
@@ -209,6 +283,7 @@ def to_end(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def rewind(color: str, size: int = _SIZE) -> QIcon:
     """Voltar: dois triângulos para a esquerda."""
     pixmap, painter = _canvas(size)
@@ -220,6 +295,7 @@ def rewind(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def fast_forward(color: str, size: int = _SIZE) -> QIcon:
     pixmap, painter = _canvas(size)
     u = size / 18.0
@@ -230,6 +306,7 @@ def fast_forward(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def frame_back(color: str, size: int = _SIZE) -> QIcon:
     """Quadro anterior: um triângulo para a esquerda e a barra do quadro."""
     pixmap, painter = _canvas(size)
@@ -241,6 +318,7 @@ def frame_back(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def frame_forward(color: str, size: int = _SIZE) -> QIcon:
     pixmap, painter = _canvas(size)
     u = size / 18.0
@@ -272,14 +350,17 @@ def _volta(color: str, size: int, espelhar: bool) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def undo(color: str, size: int = _SIZE) -> QIcon:
     return _volta(color, size, espelhar=False)
 
 
+@_desenhado
 def redo(color: str, size: int = _SIZE) -> QIcon:
     return _volta(color, size, espelhar=True)
 
 
+@_desenhado
 def plus(color: str, size: int = _SIZE) -> QIcon:
     pixmap, painter = _canvas(size)
     painter.setPen(_pen(color))
@@ -290,6 +371,7 @@ def plus(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def minus(color: str, size: int = _SIZE) -> QIcon:
     pixmap, painter = _canvas(size)
     painter.setPen(_pen(color))
@@ -299,6 +381,7 @@ def minus(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def check(color: str, size: int = _SIZE) -> QIcon:
     """Confirmação: o tique."""
     pixmap, painter = _canvas(size)
@@ -309,6 +392,7 @@ def check(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def warn(color: str, size: int = _SIZE) -> QIcon:
     """Aviso: triângulo com ponto de exclamação."""
     pixmap, painter = _canvas(size)
@@ -322,6 +406,7 @@ def warn(color: str, size: int = _SIZE) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def close(color: str, size: int = _SIZE) -> QIcon:
     pixmap, painter = _canvas(size)
     painter.setPen(_pen(color))
@@ -348,6 +433,7 @@ def _nav(color: str, size: int, desenho) -> QIcon:
     return QIcon(pixmap)
 
 
+@_desenhado
 def nav_download(color: str, size: int = _NAV) -> QIcon:
     def desenho(p: QPainter, u: float) -> None:
         p.drawLine(QPointF(12 * u, 4 * u), QPointF(12 * u, 14.5 * u))
@@ -356,6 +442,7 @@ def nav_download(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def nav_convert(color: str, size: int = _NAV) -> QIcon:
     def desenho(p: QPainter, u: float) -> None:
         p.drawLine(QPointF(5 * u, 8 * u), QPointF(18 * u, 8 * u))
@@ -365,6 +452,7 @@ def nav_convert(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def nav_edit(color: str, size: int = _NAV) -> QIcon:
     """Fita de filme: moldura, duas divisões e os furos das bordas."""
     def desenho(p: QPainter, u: float) -> None:
@@ -377,6 +465,7 @@ def nav_edit(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def nav_metadata(color: str, size: int = _NAV) -> QIcon:
     """Etiqueta: o contorno em losango alongado e o furo."""
     def desenho(p: QPainter, u: float) -> None:
@@ -386,6 +475,7 @@ def nav_metadata(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def nav_settings(color: str, size: int = _NAV) -> QIcon:
     """Dois controles deslizantes."""
     def desenho(p: QPainter, u: float) -> None:
@@ -399,16 +489,15 @@ def nav_settings(color: str, size: int = _NAV) -> QIcon:
 
 def two_states(desenho, normal: str, marcado: str, size: int = _NAV) -> QIcon:
     """Um ícone com uma cor em repouso e outra quando o botão está marcado."""
-    icone = QIcon()
-    icone.addPixmap(desenho(normal, size).pixmap(size, size), QIcon.Mode.Normal, QIcon.State.Off)
-    icone.addPixmap(desenho(marcado, size).pixmap(size, size), QIcon.Mode.Normal, QIcon.State.On)
-    return icone
+    return _em_escalas({QIcon.State.Off: (desenho, {"color": normal, "size": size}),
+                        QIcon.State.On: (desenho, {"color": marcado, "size": size})})
 
 
 # ---------------------------------------------------------------------------
 # Tarefas
 # ---------------------------------------------------------------------------
 
+@_desenhado
 def upload(color: str, size: int = _NAV) -> QIcon:
     """Exportação: a seta de baixar, de cabeça para cima."""
     def desenho(p: QPainter, u: float) -> None:
@@ -418,6 +507,7 @@ def upload(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def sync(color: str, size: int = _NAV) -> QIcon:
     """Processamento: duas setas em volta, uma para cada metade do círculo."""
     def desenho(p: QPainter, u: float) -> None:
@@ -429,6 +519,7 @@ def sync(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def clock(color: str, size: int = _NAV) -> QIcon:
     """Na fila: relógio."""
     def desenho(p: QPainter, u: float) -> None:
@@ -437,6 +528,7 @@ def clock(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def folder(color: str, size: int = _NAV) -> QIcon:
     """Abrir a pasta do arquivo."""
     def desenho(p: QPainter, u: float) -> None:
@@ -455,6 +547,7 @@ def folder(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def screen(color: str, size: int = _NAV) -> QIcon:
     """A tela do projeto: o monitor, só o contorno."""
     def desenho(p: QPainter, u: float) -> None:
@@ -463,6 +556,7 @@ def screen(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def image(color: str, size: int = _NAV) -> QIcon:
     """Imagem: a moldura com o sol e a montanha."""
     def desenho(p: QPainter, u: float) -> None:
@@ -473,6 +567,7 @@ def image(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def info(color: str, size: int = _NAV) -> QIcon:
     """Aviso informativo: o círculo com o "i"."""
     def desenho(p: QPainter, u: float) -> None:
@@ -482,6 +577,7 @@ def info(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def compress(color: str, size: int = _NAV) -> QIcon:
     """Comprimir: duas setas de pontas opostas que se encontram no meio."""
     def desenho(p: QPainter, u: float) -> None:
@@ -492,6 +588,7 @@ def compress(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def clipboard(color: str, size: int = _NAV) -> QIcon:
     """Colar: a prancheta, com a presilha de cima."""
     def desenho(p: QPainter, u: float) -> None:
@@ -500,6 +597,7 @@ def clipboard(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def task_list(color: str, size: int = _NAV) -> QIcon:
     """A fila vazia: três linhas com marcador."""
     def desenho(p: QPainter, u: float) -> None:
@@ -513,6 +611,7 @@ def task_list(color: str, size: int = _NAV) -> QIcon:
 # Barra superior do editor
 # ---------------------------------------------------------------------------
 
+@_desenhado
 def file_plus(color: str, size: int = _NAV) -> QIcon:
     """Novo projeto: a folha com a ponta dobrada e um mais."""
     def desenho(p: QPainter, u: float) -> None:
@@ -533,6 +632,7 @@ def file_plus(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def save(color: str, size: int = _NAV) -> QIcon:
     """Salvar: o disquete, com a aba de cima e a etiqueta de baixo."""
     def desenho(p: QPainter, u: float) -> None:
@@ -558,16 +658,19 @@ def _painel(color: str, size: int, divisao: float) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def preview_collapse(color: str, size: int = _NAV) -> QIcon:
     """Retrair a prévia: o quadro e, embaixo, a faixa que passa a ocupar a janela."""
     return _painel(color, size, 10)
 
 
+@_desenhado
 def preview_expand(color: str, size: int = _NAV) -> QIcon:
     """Expandir a prévia: a divisão desce, a imagem volta a crescer."""
     return _painel(color, size, 15)
 
 
+@_desenhado
 def fullscreen(color: str, size: int = _NAV) -> QIcon:
     """Tela cheia: os quatro cantos."""
     def desenho(p: QPainter, u: float) -> None:
@@ -577,6 +680,7 @@ def fullscreen(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def chevron_right(color: str, size: int = _SIZE) -> QIcon:
     """Recolher a gaveta, que fica à direita."""
     pixmap, painter = _canvas(size)
@@ -591,6 +695,7 @@ def chevron_right(color: str, size: int = _SIZE) -> QIcon:
 # Aba Download
 # ---------------------------------------------------------------------------
 
+@_desenhado
 def link(color: str, size: int = _NAV) -> QIcon:
     """O campo do endereço: dois elos de corrente."""
     def desenho(p: QPainter, u: float) -> None:
@@ -600,6 +705,7 @@ def link(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def star(color: str, size: int = _NAV) -> QIcon:
     """Máxima qualidade."""
     def desenho(p: QPainter, u: float) -> None:
@@ -612,6 +718,7 @@ def star(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def music(color: str, size: int = _NAV) -> QIcon:
     """Só o áudio: nota musical."""
     def desenho(p: QPainter, u: float) -> None:
@@ -623,6 +730,7 @@ def music(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def waveform(color: str, size: int = _NAV) -> QIcon:
     """Áudio original, sem perda: barras de onda."""
     def desenho(p: QPainter, u: float) -> None:
@@ -631,6 +739,7 @@ def waveform(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def chevron_down(color: str, size: int = _SIZE) -> QIcon:
     """Seção aberta."""
     pixmap, painter = _canvas(size)
@@ -645,6 +754,7 @@ def chevron_down(color: str, size: int = _SIZE) -> QIcon:
 # Espécies de bloco da linha do tempo
 # ---------------------------------------------------------------------------
 
+@_desenhado
 def type_text(color: str, size: int = _NAV) -> QIcon:
     """Bloco de texto: a letra T."""
     def desenho(p: QPainter, u: float) -> None:
@@ -654,6 +764,7 @@ def type_text(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def type_filter(color: str, size: int = _NAV) -> QIcon:
     """Bloco de filtro: dois círculos que se sobrepõem."""
     def desenho(p: QPainter, u: float) -> None:
@@ -662,6 +773,7 @@ def type_filter(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def type_image(color: str, size: int = _NAV) -> QIcon:
     """Bloco de imagem: moldura com o sol e a montanha."""
     def desenho(p: QPainter, u: float) -> None:
@@ -676,6 +788,7 @@ def type_image(color: str, size: int = _NAV) -> QIcon:
 # Opções de filtro e de transição (aba Adicionais do editor)
 # ---------------------------------------------------------------------------
 
+@_desenhado
 def half_circle(color: str, size: int = _NAV) -> QIcon:
     """Preto e branco: círculo metade cheio."""
     def desenho(p: QPainter, u: float) -> None:
@@ -688,6 +801,7 @@ def half_circle(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def cup(color: str, size: int = _NAV) -> QIcon:
     """Sépia: xícara de café."""
     def desenho(p: QPainter, u: float) -> None:
@@ -698,6 +812,7 @@ def cup(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def bolt(color: str, size: int = _NAV) -> QIcon:
     """Alto contraste: raio."""
     def desenho(p: QPainter, u: float) -> None:
@@ -706,6 +821,7 @@ def bolt(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def target(color: str, size: int = _NAV) -> QIcon:
     """Vinheta: círculos concêntricos."""
     def desenho(p: QPainter, u: float) -> None:
@@ -714,6 +830,7 @@ def target(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def dashed_circle(color: str, size: int = _NAV) -> QIcon:
     """Fade: círculo tracejado."""
     def desenho(p: QPainter, u: float) -> None:
@@ -724,6 +841,7 @@ def dashed_circle(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def square_filled(color: str, size: int = _NAV) -> QIcon:
     """Fade para preto: quadrado cheio."""
     def desenho(p: QPainter, u: float) -> None:
@@ -732,6 +850,7 @@ def square_filled(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def square_outline(color: str, size: int = _NAV) -> QIcon:
     """Fade para branco: quadrado vazado."""
     def desenho(p: QPainter, u: float) -> None:
@@ -751,10 +870,12 @@ def _wipe(color: str, size: int, para_esquerda: bool) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def wipe_left(color: str, size: int = _NAV) -> QIcon:
     return _wipe(color, size, True)
 
 
+@_desenhado
 def wipe_right(color: str, size: int = _NAV) -> QIcon:
     return _wipe(color, size, False)
 
@@ -771,14 +892,17 @@ def _slide(color: str, size: int, para_esquerda: bool) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def slide_left(color: str, size: int = _NAV) -> QIcon:
     return _slide(color, size, True)
 
 
+@_desenhado
 def slide_right(color: str, size: int = _NAV) -> QIcon:
     return _slide(color, size, False)
 
 
+@_desenhado
 def loop(color: str, size: int = _NAV) -> QIcon:
     """Reproduzir em loop: duas setas que se perseguem."""
     def desenho(p: QPainter, u: float) -> None:
@@ -789,6 +913,7 @@ def loop(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def magnet(color: str, size: int = _NAV) -> QIcon:
     """Alinhamento magnético: o ímã em U, com as pontas."""
     def desenho(p: QPainter, u: float) -> None:
@@ -803,6 +928,7 @@ def magnet(color: str, size: int = _NAV) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def volume(color: str, size: int = _NAV, muted: bool = False) -> QIcon:
     """Som da prévia: o alto-falante com as ondas, ou com o X quando está mudo."""
     def desenho(p: QPainter, u: float) -> None:
@@ -817,6 +943,7 @@ def volume(color: str, size: int = _NAV, muted: bool = False) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def fit_width(color: str, size: int = _NAV) -> QIcon:
     """Ver tudo: a seta de duas pontas, na horizontal."""
     def desenho(p: QPainter, u: float) -> None:
@@ -836,15 +963,18 @@ def _keyframe_step(color: str, size: int, previous: bool) -> QIcon:
     return _nav(color, size, desenho)
 
 
+@_desenhado
 def keyframe_prev(color: str, size: int = _NAV) -> QIcon:
     """Quadro-chave anterior: a barra e o ângulo que aponta para trás."""
     return _keyframe_step(color, size, True)
 
 
+@_desenhado
 def keyframe_next(color: str, size: int = _NAV) -> QIcon:
     return _keyframe_step(color, size, False)
 
 
+@_desenhado
 def diamond(color: str, size: int = _NAV, filled: bool = False) -> QIcon:
     """O quadro-chave do cursor: losango vazado onde não há ponto, cheio onde há."""
     def desenho(p: QPainter, u: float) -> None:
