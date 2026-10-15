@@ -153,8 +153,9 @@ class QualityPanel(QWidget):
         retext_items(self._bitrate, lambda data: self._bitrate_source_text() if data is None
                      else strings.VIDEO_BITRATE_CUSTOM if data == _CUSTOM_BITRATE else format_bitrate(data))
         retext_items(self._audio_codec, lambda data: strings.AUDIO_CODEC_BEST if data == "best" else None)
-        retext_items(self._audio_track, lambda data: strings.QUALITY_BEST_AVAILABLE if data is None
-                     else strings.QUALITY_AUDIO_TRACK_MUXED if data == _MUXED_TRACK else choice_label(data))
+        for track in self._track_fields():
+            retext_items(track, lambda data: strings.QUALITY_BEST_AVAILABLE if data is None
+                         else strings.QUALITY_AUDIO_TRACK_MUXED if data == _MUXED_TRACK else choice_label(data))
         self._update_audio_source_hint()
         self._refresh_warnings()
         self._update_estimated_size()
@@ -200,7 +201,7 @@ class QualityPanel(QWidget):
         # opção parecer perdida, e o campo aparecendo e sumindo mexia na grade a cada análise. Criados nesta ordem, o Tab
         # segue a leitura da grade.
         self._audio_track = QComboBox()
-        self._audio_track.currentIndexChanged.connect(self._emit_changed)
+        self._audio_track.currentIndexChanged.connect(lambda index: self._on_track_changed(self._audio_track, index))
         self._audio_track_box = captioned(lambda: strings.LABEL_AUDIO_TRACK, self._audio_track)
         grid.addWidget(self._audio_track_box, 1, 2)
 
@@ -241,6 +242,13 @@ class QualityPanel(QWidget):
         self._audio_quality.currentIndexChanged.connect(self._emit_changed)
         grid.addWidget(captioned(lambda: strings.LABEL_AUDIO_QUALITY, self._audio_quality), 0, 1)
 
+        # A mesma escolha de trilha da página de vídeo, vista daqui: dois campos, uma escolha (``_on_track_changed``). Em
+        # "Somente áudio" é o que decide qual stream da origem vira o arquivo (ou a matéria-prima da recodificação).
+        self._audio_page_track = QComboBox()
+        self._audio_page_track.currentIndexChanged.connect(
+            lambda index: self._on_track_changed(self._audio_page_track, index))
+        grid.addWidget(captioned(lambda: strings.LABEL_AUDIO_TRACK, self._audio_page_track), 0, 2)
+
         self._audio_size_label = QLabel("—")
 
         # Uma nota sobre o campo de cima, na largura toda.
@@ -269,6 +277,8 @@ class QualityPanel(QWidget):
             parts = [self._audio_codec.currentText()]
             if self._audio_quality.isEnabled():
                 parts.append(self._audio_quality.currentText())
+            if self._audio_track.isEnabled():
+                parts.append(self._audio_track.currentText())
         else:
             parts = [self._resolution.currentText(), self._container.currentText()]
             kbps = self.current_video_kbps()
@@ -312,7 +322,8 @@ class QualityPanel(QWidget):
         self._stack.setCurrentIndex(1 if self.mode is Mode.AUDIO_ONLY else 0)
 
         # Só se escolhe a trilha quando o site separa vídeo e áudio; senão o campo fica à vista, apagado, dizendo por quê.
-        self._audio_track.setEnabled(matrix.needs_muxing)
+        for track in self._track_fields():
+            track.setEnabled(matrix.needs_muxing)
 
         self._update_audio_source_hint()
         self._update_bitrate_source_label()
@@ -382,15 +393,32 @@ class QualityPanel(QWidget):
         index = self._codec.findData(self._wanted_family)
         self._codec.setCurrentIndex(index if index >= 0 else 0)
 
+    def _track_fields(self) -> tuple[QComboBox, QComboBox]:
+        """Os dois campos da mesma escolha: o da página de vídeo e o da página de áudio."""
+        return self._audio_track, self._audio_page_track
+
     def _populate_audio_tracks(self) -> None:
-        self._audio_track.clear()
-        if not self._matrix.is_empty and not self._matrix.needs_muxing:
-            # O áudio já vem no vídeo que o site entrega: não há trilha para escolher, e o campo diz isso.
-            self._audio_track.addItem(strings.QUALITY_AUDIO_TRACK_MUXED, _MUXED_TRACK)
-            return
-        self._audio_track.addItem(strings.QUALITY_BEST_AVAILABLE, None)
-        for choice in self._matrix.audio:
-            self._audio_track.addItem(choice_label(choice), choice)
+        muxed = not self._matrix.is_empty and not self._matrix.needs_muxing
+        for track in self._track_fields():
+            track.blockSignals(True)
+            track.clear()
+            if muxed:
+                # O áudio já vem no vídeo que o site entrega: não há trilha para escolher, e o campo diz isso.
+                track.addItem(strings.QUALITY_AUDIO_TRACK_MUXED, _MUXED_TRACK)
+            else:
+                track.addItem(strings.QUALITY_BEST_AVAILABLE, None)
+                for choice in self._matrix.audio:
+                    track.addItem(choice_label(choice), choice)
+            track.setCurrentIndex(0)
+            track.blockSignals(False)
+
+    def _on_track_changed(self, changed: QComboBox, index: int) -> None:
+        """A escolha de trilha é uma só: o outro campo acompanha, sem repetir o aviso."""
+        other = self._audio_page_track if changed is self._audio_track else self._audio_track
+        other.blockSignals(True)
+        other.setCurrentIndex(index)
+        other.blockSignals(False)
+        self._emit_changed()
 
     def _selected_height(self) -> int | None:
         data = self._resolution.currentData()
@@ -499,11 +527,20 @@ class QualityPanel(QWidget):
         )
         self._audio_size_label.setText(format_size(a_bytes, estimated=True))
 
+    def _explicit_track(self) -> AudioChoice | None:
+        """A trilha que o usuário escolheu a dedo; ``None`` em "Melhor disponível" ou quando não há o que escolher."""
+        data = self._audio_track.currentData()
+        return data if isinstance(data, AudioChoice) else None
+
     def _update_audio_source_hint(self) -> None:
+        explicit = self._explicit_track()
         best = self._matrix.best_audio_bitrate
-        self._audio_source.setText(
-            strings.AUDIO_SOURCE_INFO.format(bitrate=format_bitrate(best)) if best else ""
-        )
+        if explicit is not None:
+            # Uma trilha extraída do vídeo pode não informar o bitrate: a nota fica em branco, em vez de dizer o da melhor.
+            text = strings.AUDIO_SOURCE_CHOSEN.format(bitrate=format_bitrate(explicit.bitrate)) if explicit.bitrate else ""
+        else:
+            text = strings.AUDIO_SOURCE_INFO.format(bitrate=format_bitrate(best)) if best else ""
+        self._audio_source.setText(text)
 
     def _refresh_warnings(self) -> None:
         """Mostra, antes de baixar, o que a escolha atual implica.
@@ -516,7 +553,11 @@ class QualityPanel(QWidget):
         if self.mode is Mode.AUDIO_ONLY:
             codec = self._audio_codec.currentData() or "mp3"
             quality = self._audio_quality.currentData() or "192"
-            warning = audio_quality_warning(self._matrix, codec, quality)
+            explicit = self._explicit_track()
+            # Sem o bitrate da trilha escolhida não há com o que comparar: nenhum aviso, e não o da melhor trilha.
+            warning = (None if explicit is not None and not explicit.bitrate else
+                       audio_quality_warning(self._matrix, codec, quality,
+                                             source_kbps=explicit.bitrate if explicit is not None else None))
             if warning:
                 messages.append(warning)
             choice = self.current_audio_choice()
