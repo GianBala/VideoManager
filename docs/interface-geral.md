@@ -59,6 +59,14 @@ recolhida**: ali o espaço vale mais como área de trabalho, e o selo do item
 **Tarefas** continua contando as tarefas em andamento mesmo sem a gaveta
 visível. Ao enfileirar uma exportação no editor, um aviso flutuante diz que a
 tarefa entrou na fila e oferece **Ver tarefas**, que abre a gaveta ali mesmo.
+Abrir ou fechar a gaveta numa dessas duas abas é de passagem e não muda a
+preferência: em Download e Convert ela continua como estava.
+
+**Em janela estreita a gaveta recolhe sozinha.** Quando a janela é mais estreita
+que o menu, o conteúdo da aba e os 344 px da gaveta somados, a gaveta sai de
+cena em vez de segurar a janela numa largura grande (sem ela, a janela encolhe
+até o mínimo do conteúdo). Se a janela volta a ter largura, ela volta. O item
+**Tarefas** a abre mesmo assim, e a janela cresce o necessário para caber.
 
 ## A gaveta de tarefas
 

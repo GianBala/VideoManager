@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Slot
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -69,7 +69,7 @@ from videomanager.presentation.qt.panels.personalize_card import PersonalizeCard
 from videomanager.presentation.qt.panels.profiles_panel import PROFILES, Profile
 from videomanager.presentation.qt.panels.profiles_panel import ProfilesPanel
 from videomanager.presentation.qt.panels.quality_panel import QualityPanel
-from videomanager.presentation.qt.panels.queue_panel import QueuePanel
+from videomanager.presentation.qt.panels.queue_panel import DRAWER_WIDTH, QueuePanel
 from videomanager.presentation.qt.playlist_dialog import PlaylistDialog
 from videomanager.presentation.qt.settings_dialog import SettingsDialog
 from videomanager.presentation.qt.nav_rail import LARGURA as LARGURA_DO_MENU, Paginas
@@ -149,6 +149,16 @@ class MainWindow(QMainWindow):
         # Se o usuário quer a gaveta de tarefas aberta. Vale nas abas que produzem tarefas; o editor e os Metadados
         # a recolhem, porque o espaço vale mais como área de trabalho (ver :meth:`_apply_drawer`).
         self._drawer_open = True
+        # A gaveta aberta de passagem, onde a preferência não a mostraria (aba de trabalho, janela estreita), e o que
+        # a janela já mandou ao painel (``None`` até a montagem terminar: os eventos de layout antes disso não contam).
+        self._drawer_forced = False
+        self._drawer_shown: bool | None = None
+        # Filha da janela: um ``QTimer.singleShot`` com método seria entregue depois de a janela ser apagada.
+        self._drawer_timer = QTimer(self)
+        self._drawer_timer.setSingleShot(True)
+        self._drawer_timer.setInterval(0)
+        self._drawer_timer.timeout.connect(self._apply_drawer)
+        self.installEventFilter(self)
         self.setWindowTitle(APP_TITLE)
         # Altura escolhida para caber a aba inteira sem rolagem. Quem manda na
         # conta é a aba de edição, a mais alta das quatro: cada pixel a mais
@@ -187,6 +197,7 @@ class MainWindow(QMainWindow):
         moldura.setSpacing(0)
         conteudo = QWidget()
         conteudo.setProperty("role", "plain")
+        self._content = conteudo
         root = QVBoxLayout(conteudo)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -343,11 +354,13 @@ class MainWindow(QMainWindow):
         # Na aba Metadados o painel nasce na primeira visita.
         if index == _TAB_METADATA:
             self._metadata_panel()
+        # Abrir a gaveta de passagem vale para a aba em que se pediu.
+        self._drawer_forced = False
         self._apply_drawer()
         self._update_menu_scope(index)
 
-    def _apply_drawer(self, *, force: bool = False) -> None:
-        """A gaveta de tarefas à vista, ou não, conforme a aba e a vontade do usuário.
+    def _apply_drawer(self) -> None:
+        """A gaveta de tarefas à vista, ou não, conforme a aba, a largura da janela e a vontade do usuário.
 
         A regra da fila sempre à vista existe para as abas que **produzem** tarefas e vão embora: quem manda
         baixar quer acompanhar. O editor é o contrário — é onde se fica, e cada pixel que a gaveta ocupa lá sai
@@ -355,13 +368,29 @@ class MainWindow(QMainWindow):
         vale mais como formulário. Nada se perde: o selo do item Tarefas continua contando, e a gaveta volta
         inteira em qualquer outra aba, com as tarefas que entraram enquanto ela estava recolhida.
 
-        ``force`` é o usuário pedindo a gaveta onde ela estaria recolhida (o aviso "Ver tarefas" no editor).
+        Numa janela estreita ela também recolhe (ver :meth:`_narrow`), e a preferência do usuário fica como estava:
+        quando há largura de novo, a gaveta volta. O contrário seria a janela presa em 840 px por uma coluna que
+        ninguém pediu para ver naquele momento. ``_drawer_forced`` é o usuário pedindo a gaveta onde ela estaria
+        recolhida (o item Tarefas, o aviso "Ver tarefas"): ela pede então os 344 px inteiros, e a janela cresce.
         """
-        visible = force or (self._drawer_open and not self._in_workspace())
+        wanted = self._drawer_open and not self._in_workspace() and not self._narrow()
+        visible = wanted or self._drawer_forced
+        self._queue_panel.set_squeezable(not self._drawer_forced)
+        if visible == self._drawer_shown:
+            return
+        self._drawer_shown = visible
         self._queue_panel.setVisible(visible)
         blocked = self._nav_tasks.blockSignals(True)
         self._nav_tasks.setChecked(visible)
         self._nav_tasks.blockSignals(blocked)
+
+    def _narrow(self) -> bool:
+        """Se falta largura para a gaveta ao lado do conteúdo: o menu, o mínimo que o conteúdo pede e os 344 px dela.
+
+        O mínimo do conteúdo muda com o que está na tela (analisar um vídeo o alarga em ~100 px), por isso o limiar é
+        medido a cada vez e não é um número fixo.
+        """
+        return self.width() < LARGURA_DO_MENU + self._content.minimumSizeHint().width() + DRAWER_WIDTH
 
     def _in_workspace(self) -> bool:
         """Se a aba à vista é de trabalho (Editar, Metadados): onde a gaveta só aparece de passagem."""
@@ -373,7 +402,24 @@ class MainWindow(QMainWindow):
         # editor voltar a Download e Convert sem a fila.
         if not self._in_workspace():
             self._drawer_open = open_
-        self._apply_drawer(force=open_)
+        self._drawer_forced = open_ and not (self._drawer_open and not self._in_workspace() and not self._narrow())
+        self._apply_drawer()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self._drawer_shown is not None:
+            self._apply_drawer()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        # O mínimo do conteúdo pode mudar sem a janela mudar de tamanho (um vídeo analisado, outro idioma). É um filtro
+        # de si mesma, e não um ``event()`` sobrescrito, de propósito: o ``DeferredDelete`` que apaga a janela passa
+        # por ``event()``, e o destrutor do ``QThreadPool`` espera os workers lá dentro. Com o override em Python esse
+        # ``delete this`` rodava num quadro que segura o GIL, e um worker ainda vivo, que precisa dele para terminar,
+        # travava o fechamento para sempre (reproduzido: a janela apagada com um worker dormindo trava, sem o override
+        # não). O filtro devolve antes de o evento chegar ao Qt, e o layout só termina de assentar no tique seguinte (um temporizador de 0 ms, que também junta pedidos em sequência).
+        if watched is self and event.type() == QEvent.Type.LayoutRequest and self._drawer_shown is not None:
+            self._drawer_timer.start()
+        return False
 
     @staticmethod
     def _wrap_scrollable(inner: QWidget, *, horizontal: bool = False) -> QScrollArea:

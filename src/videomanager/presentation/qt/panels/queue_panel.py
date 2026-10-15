@@ -334,7 +334,11 @@ class QueuePanel(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setProperty("role", "drawer")
-        self.setFixedWidth(DRAWER_WIDTH)
+        # Largura máxima, e não fixa: quem decide se a gaveta cabe é a janela (``MainWindow._apply_drawer``), e o mínimo
+        # que ela anuncia depende disso (ver :meth:`set_squeezable`). Esticamento zero no layout da janela, então o
+        # conteúdo cede primeiro e ela mantém os 344 px até o conteúdo chegar ao próprio mínimo.
+        self.setMaximumWidth(DRAWER_WIDTH)
+        self._squeezable = True
         self._runtime = runtime
         self._queue = queue
         self._counts = {name: 0 for name, *_ in _CHIPS}
@@ -444,6 +448,23 @@ class QueuePanel(QFrame):
             self._chips[name].setVisible(count > 0)
         self._chip_row.setVisible(any(self._counts.values()))
         self._place_chips()
+
+    def set_squeezable(self, squeezable: bool) -> None:
+        """Se a gaveta pode ceder largura: ``False`` faz o mínimo da janela incluir os 344 px dela.
+
+        À vista por preferência, ela não conta no mínimo da janela — abaixo do limiar a janela a recolhe, em vez de
+        ficar presa em 840 px por causa de uma coluna que ninguém pediu naquele momento. Aberta de passagem
+        (o item Tarefas numa janela estreita), ela pede o espaço inteiro e a janela cresce até caber.
+        """
+        if squeezable != self._squeezable:
+            self._squeezable = squeezable
+            self.updateGeometry()
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(DRAWER_WIDTH, super().sizeHint().height())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(0 if self._squeezable else DRAWER_WIDTH, super().minimumSizeHint().height())
 
     def _place_chips(self) -> None:
         """Os selos ao lado do título quando cabem; senão, numa linha própria logo abaixo dele.
