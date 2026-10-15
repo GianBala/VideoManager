@@ -1,4 +1,4 @@
-"""Linha de arquivo da aba Convert: nome, especificações e o antes → depois do tamanho.
+"""Linha de arquivo da aba Converter: nome, especificações e o antes → depois do tamanho.
 
 A lista era uma linha de texto por arquivo, "nome · codec WxH · áudio · duração · tamanho → estimado", que o
 olho tinha de desmontar. Aqui cada parte tem o seu lugar: o nome em cima, as especificações em selos embaixo,

@@ -43,7 +43,7 @@ Cole o endereço e baixe com opções reais da fonte.
 </td>
 <td width="25%" valign="top">
 
-### 🔄 Convert
+### 🔄 Converter
 
 Converta e reprocesse mídias locais com rapidez.
 
@@ -82,7 +82,7 @@ Ajuste as informações do arquivo sem tocar na mídia.
 </tr>
 </table>
 
-Download, Convert e Editar compartilham **uma gaveta de tarefas unificada**, à direita: baixe, converta e exporte ao mesmo tempo em segundo plano, com cancelamento, nova tentativa e histórico de erros. No editor e nos Metadados a gaveta se recolhe, para o trabalho ocupar a janela, e o selo do item Tarefas segue contando.
+Download, Converter e Editar compartilham **uma gaveta de tarefas unificada**, à direita: baixe, converta e exporte ao mesmo tempo em segundo plano, com cancelamento, nova tentativa e histórico de erros. No editor e nos Metadados a gaveta se recolhe, para o trabalho ocupar a janela, e o selo do item Tarefas segue contando.
 
 <p align="center">
   <img src="docs/imagens/editor.png" alt="Aba Editar: prévia, acervo, propriedades com animação por quadros-chave e linha do tempo com quatro trilhas" width="100%">
@@ -91,11 +91,11 @@ Download, Convert e Editar compartilham **uma gaveta de tarefas unificada**, à 
 <table>
 <tr>
 <td width="50%"><img src="docs/imagens/download.png" alt="Aba Download: cartão da mídia, qualidade, perfis rápidos e fila"></td>
-<td width="50%"><img src="docs/imagens/convert.png" alt="Aba Convert: lista de arquivos, destino da conversão e fila"></td>
+<td width="50%"><img src="docs/imagens/convert.png" alt="Aba Converter: lista de arquivos, destino da conversão e fila"></td>
 </tr>
 <tr>
 <td align="center"><sub><b>Download</b> — qualidade vinda da própria mídia e perfis de um clique</sub></td>
-<td align="center"><sub><b>Convert</b> — o plano da conversão aparece antes de enfileirar</sub></td>
+<td align="center"><sub><b>Converter</b> — o plano da conversão aparece antes de enfileirar</sub></td>
 </tr>
 </table>
 
@@ -152,7 +152,7 @@ Mais em [empacotamento](docs/empacotamento.md) e [instalação](docs/instalacao.
 flowchart TD
     subgraph UI["Interface (PySide6)"]
         D["⬇️ Aba Download<br/>URLs e playlists"]
-        C["🔄 Aba Convert<br/>Arquivos locais"]
+        C["🔄 Aba Converter<br/>Arquivos locais"]
         E["✂️ Aba Editar<br/>Linha do tempo multipista"]
     end
 
@@ -207,7 +207,7 @@ src/videomanager/
 
 | Para… | Leia |
 | --- | --- |
-| **Usar** | [Manual](docs/README.md) · [Instalação](docs/instalacao.md) · [Download](docs/guia-download.md) · [Convert](docs/guia-conversao.md) · [Editor](docs/guia-edicao.md) · [Configurações](docs/configuracoes.md) |
+| **Usar** | [Manual](docs/README.md) · [Instalação](docs/instalacao.md) · [Download](docs/guia-download.md) · [Converter](docs/guia-conversao.md) · [Editor](docs/guia-edicao.md) · [Configurações](docs/configuracoes.md) |
 | **Entender o código** | [Guia de arquitetura](docs/clean-architecture/README.md) · [Decisões de projeto](docs/decisoes-de-projeto.md) · [Catálogo de módulos](docs/clean-architecture/modulos.md) |
 | **Contribuir** | [Guia de desenvolvimento](docs/desenvolvimento.md) · [Testes](docs/clean-architecture/testes.md) · [Empacotamento](docs/empacotamento.md) |
 

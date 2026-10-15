@@ -21,7 +21,7 @@ ABOUT_BODY = (
 
 # --- abas --------------------------------------------------------------------
 TAB_DOWNLOAD = "Download"
-TAB_CONVERT = "Convert"
+TAB_CONVERT = "Converter"
 TAB_EDIT = "Editar"
 
 # --- menus -------------------------------------------------------------------
