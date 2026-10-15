@@ -22,15 +22,6 @@ from videomanager.infrastructure.storage.settings import Settings
 from videomanager.presentation.qt import fonts, strings, theme
 from videomanager.presentation.qt.panels.segmented import SegmentButton
 from videomanager.presentation.qt.settings_dialog import SettingsDialog
-from videomanager.presentation.qt.theme import EstiloDaAplicacao
-
-
-@pytest.fixture
-def estilo_do_app(desktop_app):
-    """O estilo do aplicativo (``EstiloDaAplicacao``, que o ``build_app`` instala) enquanto o teste dura."""
-    desktop_app.setStyle(EstiloDaAplicacao())
-    yield desktop_app
-    desktop_app.setStyle("Fusion")
 
 
 @pytest.fixture
@@ -42,7 +33,7 @@ def exportar(tema_do_app, dialogo_de_exportacao):
 
 
 @pytest.fixture
-def ajustes(tema_do_app, estilo_do_app):
+def ajustes(tema_do_app):
     janela = SettingsDialog(Settings(), runtime=_SemFerramentas(build_desktop_runtime(audio_enabled=False)),
                             tools=FFmpegTools(Path("/opt/vm/ffmpeg"), Path("/opt/vm/ffprobe"), "empacotado"))
     janela.show()
@@ -109,13 +100,24 @@ def test_cancelar_fica_a_esquerda_de_ok_e_os_dois_tem_38_px_em_qualquer_caixa_de
     ok, cancelar = (caixa.button(QDialogButtonBox.StandardButton.Ok), caixa.button(QDialogButtonBox.StandardButton.Cancel))
     assert cancelar.x() < ok.x()
     assert ok.height() == cancelar.height() == 38 and ok.property("role") == "primary"
-    # É a regra do estilo, e não desta janela: qualquer caixa de botões vem na mesma ordem.
-    assert desktop_app.style().styleHint(QStyle.StyleHint.SH_DialogButtonLayout) == QDialogButtonBox.ButtonLayout.GnomeLayout.value
+    # É a regra do tema, e não desta janela: qualquer caixa de botões vem na mesma ordem.
+    assert caixa.style().styleHint(QStyle.StyleHint.SH_DialogButtonLayout, None, caixa) == QDialogButtonBox.ButtonLayout.GnomeLayout.value
     outra = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
     outra.show()
     QApplication.processEvents()
     assert (outra.button(QDialogButtonBox.StandardButton.Cancel).x() < outra.button(QDialogButtonBox.StandardButton.Ok).x())
     outra.deleteLater()
+
+
+def test_cancelar_fica_a_esquerda_tambem_nas_caixas_de_mensagem_do_qt(tema_do_app, desktop_app):
+    """``PRF-002``: a ordem vem do QSS do tema, e não de um estilo global em Python; as caixas que o Qt monta (``QMessageBox``) a seguem."""
+    from PySide6.QtWidgets import QMessageBox
+    mensagem = QMessageBox(QMessageBox.Icon.Question, "t", "x", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+    mensagem.show()
+    QApplication.processEvents()
+    caixa = mensagem.findChild(QDialogButtonBox)
+    assert (caixa.button(QDialogButtonBox.StandardButton.Cancel).x() < caixa.button(QDialogButtonBox.StandardButton.Yes).x())
+    mensagem.deleteLater()
 
 
 def test_o_modo_do_tema_e_um_controle_segmentado_ligado_a_lista_escondida(ajustes):

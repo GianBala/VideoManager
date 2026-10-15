@@ -22,30 +22,30 @@ from pathlib import Path
 import shiboken6
 from PySide6.QtCore import QPointF, QStandardPaths, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPalette, QPen, QPolygonF
-from PySide6.QtWidgets import QDialogButtonBox, QProxyStyle, QStyle
+from PySide6.QtWidgets import QProxyStyle, QStyle
 
 from videomanager.presentation.qt import paletas
 
 
 
-class EstiloDaAplicacao(QProxyStyle):
-    """O Fusion, que é o único estilo idêntico no Windows e no Linux, sem o sublinhado fixo dos atalhos.
+class EstiloDaBarraDeMenus(QProxyStyle):
+    """O Fusion em que a letra de atalho do menu só é sublinhada enquanto o Alt está apertado.
 
-    O Qt sublinha a letra de atalho ("A̲rquivo") sempre que o estilo manda; com a dica desligada ela só aparece
-    enquanto Alt está apertado, e o atalho continua funcionando. Os protótipos têm a barra de menus sem sublinhado.
+    O Fusion sublinha sempre; os protótipos têm a barra de menus sem sublinhado em repouso, e a dica desligada de vez
+    tirava de quem usa o teclado o único sinal de qual letra abre cada menu. Quem diz que o Alt está apertado é a janela
+    (``alt_apertado``): ela vê as teclas, o estilo só responde.
+
+    Vale **só para a barra de menus**. Este mesmo estilo, com ``styleHint`` em Python, já foi o do aplicativo inteiro, e o
+    Qt o consultava 29,7 mil vezes na abertura (71 ms): as únicas letras de atalho do aplicativo são as três da barra.
     """
 
     def __init__(self) -> None:
         super().__init__("Fusion")
+        self.alt_apertado = False
 
     def styleHint(self, hint, option=None, widget=None, returnData=None) -> int:  # noqa: N802
         if hint == QStyle.StyleHint.SH_UnderlineShortcut:
-            return 0
-        if hint == QStyle.StyleHint.SH_DialogButtonLayout:
-            # "Cancelar" à esquerda de "OK" (e da ação principal), com a ação à direita, em toda caixa de botões: é a ordem do
-            # protótipo, e a do GNOME. No Windows a ordem de fábrica é a inversa, e a mesma janela trocaria de ordem de um
-            # sistema para o outro.
-            return QDialogButtonBox.ButtonLayout.GnomeLayout.value
+            return int(self.alt_apertado)
         return super().styleHint(hint, option, widget, returnData)
 
 
@@ -164,6 +164,10 @@ QPushButton[role="primary"] {{
 }}
 QPushButton[role="primary"]:hover {{ border-color: {on_fill}; }}
 /* Botões de fim de janela (OK, Cancelar): 38 px de altura e texto de 14, o tamanho da ação do rodapé de um diálogo. */
+/* "Cancelar" à esquerda de "OK" (e da ação principal), com a ação à direita, em toda caixa de botões, inclusive nas do próprio Qt
+   (QMessageBox): é a ordem do protótipo e a do GNOME (3 = QDialogButtonBox::GnomeLayout). No Windows a de fábrica é a inversa, e a
+   mesma janela trocaria de ordem de um sistema para o outro. Por QSS, e não por um estilo em Python: ele custava a abertura. */
+QDialogButtonBox {{ button-layout: 3; }}
 QDialogButtonBox QPushButton {{ min-height: 36px; min-width: 64px; padding: 0px 22px; border-radius: 10px; font-size: 14px; }}
 QDialogButtonBox QPushButton[role="primary"] {{ padding: 0px 24px; }}
 QPushButton[role="primary"]:disabled {{

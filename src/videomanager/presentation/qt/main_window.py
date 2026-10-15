@@ -73,6 +73,7 @@ from videomanager.presentation.qt.panels.queue_panel import DRAWER_WIDTH, QueueP
 from videomanager.presentation.qt.playlist_dialog import PlaylistDialog
 from videomanager.presentation.qt.settings_dialog import SettingsDialog
 from videomanager.presentation.qt.nav_rail import LARGURA as LARGURA_DO_MENU, Paginas
+from videomanager.presentation.qt.theme import EstiloDaBarraDeMenus
 from videomanager.presentation.qt.theme import apply as aplicar_tema
 from videomanager.presentation.qt.toast import ToastHost
 from videomanager.presentation.qt.ports import DesktopRuntimePort
@@ -158,6 +159,8 @@ class MainWindow(QMainWindow):
         self._drawer_timer.setSingleShot(True)
         self._drawer_timer.setInterval(0)
         self._drawer_timer.timeout.connect(self._apply_drawer)
+        # O estilo da barra de menus (letra de atalho sublinhada só com o Alt apertado). Guardado aqui: o widget não é dono do estilo.
+        self._menu_style = EstiloDaBarraDeMenus()
         self.installEventFilter(self)
         self.setWindowTitle(APP_TITLE)
         # Altura escolhida para caber a aba inteira sem rolagem. Quem manda na
@@ -417,9 +420,21 @@ class MainWindow(QMainWindow):
         # ``delete this`` rodava num quadro que segura o GIL, e um worker ainda vivo, que precisa dele para terminar,
         # travava o fechamento para sempre (reproduzido: a janela apagada com um worker dormindo trava, sem o override
         # não). O filtro devolve antes de o evento chegar ao Qt, e o layout só termina de assentar no tique seguinte (um temporizador de 0 ms, que também junta pedidos em sequência).
-        if watched is self and event.type() == QEvent.Type.LayoutRequest and self._drawer_shown is not None:
-            self._drawer_timer.start()
+        if watched is self:
+            tipo = event.type()
+            if tipo == QEvent.Type.LayoutRequest and self._drawer_shown is not None:
+                self._drawer_timer.start()
+            elif tipo in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease) and event.key() == Qt.Key.Key_Alt:
+                self._set_alt(tipo == QEvent.Type.KeyPress)
+            elif tipo == QEvent.Type.WindowDeactivate:
+                # Alt+Tab não manda a soltura do Alt a esta janela: sem isto o sublinhado ficava preso.
+                self._set_alt(False)
         return False
+
+    def _set_alt(self, apertado: bool) -> None:
+        if self._menu_style.alt_apertado != apertado:
+            self._menu_style.alt_apertado = apertado
+            self.menuBar().update()
 
     @staticmethod
     def _wrap_scrollable(inner: QWidget, *, horizontal: bool = False) -> QScrollArea:
@@ -497,6 +512,10 @@ class MainWindow(QMainWindow):
         self._file_menu.aboutToShow.connect(self._on_file_menu_about_to_show)
         self._tools_menu = bind(self.menuBar().addMenu(""), "setTitle", lambda: strings.MENU_TOOLS)
         self._help_menu = bind(self.menuBar().addMenu(""), "setTitle", lambda: strings.MENU_HELP)
+        self.menuBar().setStyle(self._menu_style)
+        # Alt+letra abre o menu e a soltura do Alt vai para o menu aberto: o sublinhado sai quando o menu fecha.
+        for menu in (self._file_menu, self._tools_menu, self._help_menu):
+            menu.aboutToHide.connect(lambda: self._set_alt(False))
 
         # Ações universais
         self._quit_action = bind(QAction(self), "setText", lambda: strings.ACTION_QUIT)
