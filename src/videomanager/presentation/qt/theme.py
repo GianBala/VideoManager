@@ -492,9 +492,6 @@ QMenu::item:selected {{
 QMenu {{ border: 1px solid {raised2}; padding: 4px; }}
 QMenu::item {{ padding: 6px 22px; border-radius: 4px; }}
 
-QStatusBar {{ background: {panel}; color: {t2}; }}
-QStatusBar::item {{ border: none; }}
-
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
 QScrollBar::handle:vertical {{ background: {raised2}; border-radius: 5px; min-height: 24px; }}
 QScrollBar::handle:vertical:hover {{ background: {t2}; }}
