@@ -81,9 +81,16 @@ explicando o porquê — nada disso acontece em silêncio.
   FLAC, ALAC, WAV.
 - **Bitrate** — em kbps; desabilitado para formatos sem perda e para
   "Original", já que bitrate não se aplica a eles.
-- Uma nota mostra o melhor bitrate disponível na origem, para calibrar a
-  escolha (pedir 320 kbps de uma fonte de 128 só deixa o arquivo maior, sem
-  ganhar qualidade).
+- **Trilha de áudio** — a mesma escolha do modo de vídeo, vista daqui: trocar
+  num modo troca no outro. Decide qual stream da origem vira o arquivo (em
+  "Original", é o arquivo que se recebe, com o codec e o bitrate dela) ou a
+  matéria-prima da recodificação, e é a única forma de escolher o idioma de uma
+  mídia com dublagens. Só se escolhe quando o site separa vídeo e áudio; senão
+  o campo fica apagado.
+- Uma nota mostra o melhor bitrate disponível na origem — ou o da trilha
+  escolhida, quando há escolha —, para calibrar a qualidade (pedir 320 kbps de
+  uma fonte de 128 só deixa o arquivo maior, sem ganhar qualidade, e o aviso
+  compara com a mesma trilha).
 
 ## Perfis rápidos
 
