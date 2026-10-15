@@ -1,4 +1,4 @@
-"""A aba Convert reorganizada: linhas de arquivo com antes → depois, modos segmentados, resumo e rodapé.
+"""A aba Converter reorganizada: linhas de arquivo com antes → depois, modos segmentados, resumo e rodapé.
 
 O que um reposicionamento perde em silêncio: o × que remove a linha errada (ou deixa a lista e ``_media``
 discordando), o modo que muda no desenho e não no painel, o rodapé que promete um tamanho diferente do que o

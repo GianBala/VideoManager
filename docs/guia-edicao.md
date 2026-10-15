@@ -558,7 +558,7 @@ corte rápido continua disponível —; o que difere do material volta fixo.
   ("Copiar sem recodificar (h264)"), desabilitados; as escolhas de
   recodificação voltam ao desmarcar. GIF nunca usa o corte rápido.
 - **"Salvar na mesma pasta do arquivo original"** — mesmo padrão da aba
-  Convert.
+  Converter.
 
 O texto **"O que vai acontecer: {plano}"** resume o resultado antes de
 confirmar, com um aviso extra quando aplicável: a memória estimada da

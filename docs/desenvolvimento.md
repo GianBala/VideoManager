@@ -159,7 +159,7 @@ régua.
   que quebra compatibilidade: um `.vmp` que a versão anterior não abre,
   preferências que ela leria errado, uma funcionalidade removida.
 - **Segundo número** (3.0 → 3.1): modo ou opção nova numa ferramenta que já
-  existe (o modo Comprimir da aba Convert, a interface em inglês) e
+  existe (o modo Comprimir da aba Converter, a interface em inglês) e
   correções que valem uma entrega.
 - O número mora em `pyproject.toml` e em `src/videomanager/__init__.py`, e
   `test_video_track_button_positions_and_version` o confere.

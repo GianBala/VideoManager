@@ -6,7 +6,7 @@ menu, o **menu lateral**, a área da aba à vista e, à direita, a **gaveta de
 tarefas** — comum às abas, para que trocar de aba nunca esconda o que está em
 andamento.
 
-O **menu lateral** tem as quatro abas (**Download**, **Convert**, **Editar** e
+O **menu lateral** tem as quatro abas (**Download**, **Converter**, **Editar** e
 **Metadados**), de cima para baixo, e embaixo dois itens que não são abas:
 **Tarefas**, que abre e fecha a gaveta (com um selo que conta as tarefas em
 andamento e na fila) e **Ajustes**, que abre as [configurações](configuracoes.md).
@@ -16,13 +16,13 @@ A aba à vista leva uma faixa do acento na borda da janela e o fundo suave.
 
 Os menus **Arquivo** e **Ferramentas** acompanham a aba à vista: só aparecem os
 comandos que fazem sentido nela, e os atalhos de uma aba ficam desligados nas
-outras (`Ctrl+O`, por exemplo, adiciona arquivos na aba Convert e abre um
+outras (`Ctrl+O`, por exemplo, adiciona arquivos na aba Converter e abre um
 projeto na aba Editar).
 
 - **&Arquivo**
   - Na aba **Download**: **Abrir pasta de downloads…** (abre no gerenciador de
     arquivos do sistema a pasta configurada) e **Sair**.
-  - Na aba **Convert**: **Adicionar arquivos para conversão…** (`Ctrl+O`),
+  - Na aba **Converter**: **Adicionar arquivos para conversão…** (`Ctrl+O`),
     **Remover arquivos selecionados**, **Limpar lista de conversão**, **Abrir
     pasta de destino…** e **Sair**. Remover e Limpar ficam desabilitados
     quando não há o que remover.
@@ -50,7 +50,7 @@ projeto na aba Editar).
 | Aba | Para que serve |
 |---|---|
 | [Download](guia-download.md) | Baixar vídeo/áudio de uma URL (yt-dlp) |
-| [Convert](guia-conversao.md) | Converter arquivos que já estão no disco |
+| [Converter](guia-conversao.md) | Converter arquivos que já estão no disco |
 | [Editar](guia-edicao.md) | Cortar e montar uma edição multipista |
 | [Metadados](guia-metadados.md) | Editar tags, trilhas e capa, gravando numa cópia |
 
@@ -61,7 +61,7 @@ acompanhar uma tarefa enquanto se edita; fechada, continua fechada. O item
 com a gaveta fechada. Ao enfileirar uma exportação, um aviso flutuante diz que
 a tarefa entrou na fila e oferece **Ver tarefas**, que abre a gaveta ali mesmo.
 Fechar a gaveta no Editar ou nos Metadados não muda a escolha de Download e
-Convert: ao voltar a elas, a gaveta está onde estava.
+Converter: ao voltar a elas, a gaveta está onde estava.
 
 **Em janela estreita a gaveta recolhe sozinha.** Quando a janela é mais estreita
 que o menu, o conteúdo da aba e os 344 px da gaveta somados, a gaveta sai de
@@ -71,7 +71,7 @@ até o mínimo do conteúdo). Se a janela volta a ter largura, ela volta. O item
 
 ## A gaveta de tarefas
 
-Uma lista de **cartões**, um por tarefa, compartilhada por Download, Convert e
+Uma lista de **cartões**, um por tarefa, compartilhada por Download, Converter e
 Editar — um download, uma conversão e uma exportação de edição aparecem lado a
 lado na mesma lista, na ordem em que foram enfileirados. No título, duas
 pastilhas contam as tarefas **ativas** e as **na fila**. Com a lista vazia, ela

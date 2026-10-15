@@ -211,7 +211,7 @@ QLabel[role="result-size"] {{ font-size: 22px; font-weight: 700; color: {text}; 
    o cartão marcado não crescer e empurrar os vizinhos. */
 QPushButton[role="palette"] {{ background: {raised}; border: 2px solid {raised}; border-radius: 10px; padding: 0px; text-align: left; }}
 QPushButton[role="palette"]:hover {{ border-color: {raised2}; }}
-/* Aba Convert: a lista de arquivos se pinta sozinha sobre o cartão; os três modos são um controle segmentado
+/* Aba Converter: a lista de arquivos se pinta sozinha sobre o cartão; os três modos são um controle segmentado
    (três botões de rádio de desenho próprio, ver ``segmented.py``); o resumo é um destaque com moldura no tom do acento. */
 QListWidget[role="files"] {{ background: transparent; border: none; padding: 0px; }}
 QFrame[role="segments"] {{ background: {raised}; border: none; border-radius: 11px; }}

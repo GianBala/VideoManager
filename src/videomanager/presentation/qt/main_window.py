@@ -1,7 +1,7 @@
 """Janela principal: três abas de trabalho sobre uma fila só.
 
 **Download** — endereço e destino no topo, qualidade à esquerda, perfis rápidos
-à direita —, **Convert**, para arquivos que já estão no disco, e **Editar**, que
+à direita —, **Converter**, para arquivos que já estão no disco, e **Editar**, que
 recorta vídeo. As três enfileiram no mesmo lugar, e por isso a **fila fica fora
 das abas**, embaixo: trocar de aba não esconde o que está em andamento.
 
@@ -82,7 +82,7 @@ from videomanager.presentation.qt.ports import DesktopRuntimePort
 _TAB_DOWNLOAD = 0
 _TAB_CONVERT = 1
 _TAB_EDIT = 2
-# No fim, e não ao lado da Convert: scripts de validação e testes situam o
+# No fim, e não ao lado da aba Converter: scripts de validação e testes situam o
 # editor no índice 2, e a aba nova não desloca nenhum deles.
 _TAB_METADATA = 3
 # Sem margem lateral: o conteúdo da aba fica na mesma coluna da fila, que está
@@ -147,7 +147,7 @@ class MainWindow(QMainWindow):
         # A sondagem da placa é uma vez por execução (ver
         # :meth:`_warm_hardware_probe`).
         self._probed_hardware = False
-        # Se o usuário quer a gaveta de tarefas aberta em Download e Convert, as abas que produzem tarefas; e, à parte, no
+        # Se o usuário quer a gaveta de tarefas aberta em Download e Converter, as abas que produzem tarefas; e, à parte, no
         # editor e nos Metadados, onde ela entra como estava na aba de onde se veio (ver :meth:`_apply_drawer`).
         self._drawer_open = True
         self._drawer_in_workspace = True
@@ -378,9 +378,9 @@ class MainWindow(QMainWindow):
 
         A gaveta é uma só, e trocar de aba não a mexe: aberta numa aba, continua aberta nas outras, o editor e os
         Metadados incluídos; fechada, continua fechada. Quem baixa ou exporta e vai editar quer acompanhar a tarefa, e
-        a gaveta está fora das abas justamente para isso. Download e Convert guardam a preferência delas (``_drawer_open``);
+        a gaveta está fora das abas justamente para isso. Download e Converter guardam a preferência delas (``_drawer_open``);
         o editor e os Metadados têm a sua (``_drawer_in_workspace``), que ao entrar neles vem da aba anterior. Fechar ali
-        não revoga a de Download e Convert: ao voltar, a gaveta está onde a preferência a deixou.
+        não revoga a de Download e Converter: ao voltar, a gaveta está onde a preferência a deixou.
 
         Numa janela estreita ela também recolhe (ver :meth:`_narrow`), e a vontade do usuário fica como estava: quando
         há largura de novo, a gaveta volta. O contrário seria a janela presa em 840 px por uma coluna que ninguém pediu
@@ -412,8 +412,8 @@ class MainWindow(QMainWindow):
         return self._tabs.currentIndex() in (_TAB_EDIT, _TAB_METADATA)
 
     def _set_drawer(self, open_: bool) -> None:
-        # A vontade do usuário vale na aba em que ele a deu: em Download e Convert é a preferência delas, no editor e nos
-        # Metadados é a de lá. Fechar no editor não revoga a de Download e Convert (decisão Q1 da revisão de b829156).
+        # A vontade do usuário vale na aba em que ele a deu: em Download e Converter é a preferência delas, no editor e nos
+        # Metadados é a de lá. Fechar no editor não revoga a de Download e Converter (decisão Q1 da revisão de b829156).
         if self._in_workspace():
             self._drawer_in_workspace = open_
         else:
@@ -609,7 +609,7 @@ class MainWindow(QMainWindow):
         # Configurações gerais sempre presentes em Ferramentas
         self._tools_menu.addAction(self._settings_action)
         # O mesmo atalho vale uma coisa em cada aba (Ctrl+O abre arquivos na
-        # Convert, projeto no editor e arquivo nos Metadados): só os da aba atual
+        # Converter, projeto no editor e arquivo nos Metadados): só os da aba atual
         # ficam ligados, senão o Qt acusa atalho ambíguo e nenhum dispara.
         for action in (self._meta_open_action, self._meta_save_action):
             action.setShortcut(QKeySequence())
