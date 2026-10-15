@@ -416,6 +416,24 @@ def video_encoder_args(
     return ["-c:v", encoder, *quality, *bitrate_cap(encoder, max_kbps), *hevc_tag(encoder, container)]
 
 
+def target_bitrate_quality(encoder: str, kbps: int) -> tuple[str, ...]:
+    """Qualidade por **bitrate médio** (ABR), no lugar do CRF: o encoder gasta ``kbps`` em média, e o arquivo sai do tamanho
+    que a conta ``kbps × duração`` anuncia. É a escolha de quem quer controlar o tamanho, e não a qualidade.
+
+    Só os encoders de software: na placa o controle de taxa é quantização fixa (ver ``_ENCODER_QUALITY``).
+    """
+    rate = ("-b:v", f"{kbps}k")
+    if encoder == "libx264":
+        return (*rate, "-preset", "medium", "-pix_fmt", "yuv420p")
+    if encoder == "libx265":
+        return (*rate, "-pix_fmt", "yuv420p")
+    if encoder == "libvpx-vp9":
+        return (*rate, "-deadline", "good", "-cpu-used", "2", "-row-mt", "1", "-pix_fmt", "yuv420p")
+    if encoder == "libsvtav1":
+        return (*rate, "-preset", "8", "-pix_fmt", "yuv420p")
+    return rate
+
+
 def bitrate_cap(encoder: str, max_kbps: int | None) -> list[str]:
     """Teto de bitrate sobre o nível de qualidade, onde o encoder o respeita.
 

@@ -21,7 +21,7 @@ ABOUT_BODY = (
 
 # --- abas --------------------------------------------------------------------
 TAB_DOWNLOAD = "Download"
-TAB_CONVERT = "Convert"
+TAB_CONVERT = "Converter"
 TAB_EDIT = "Editar"
 
 # --- menus -------------------------------------------------------------------
@@ -47,7 +47,7 @@ EDIT_NEW_BUTTON = "Novo"
 EDIT_OPEN_BUTTON = "Abrir…"
 EDIT_SAVE_BUTTON = "Salvar"
 EDIT_SAVE_AS_BUTTON = "Salvar como..."
-EDIT_PROJECT_STATUS = "Projeto: {name}{dirty}"
+EDIT_UNSAVED = "não salvo"
 EDIT_UNTITLED = "Sem título"
 CONVERT_CLEAR = "Limpar lista"
 
@@ -58,21 +58,27 @@ URL_ANALYZE = "Analisar"
 URL_CANCEL = "Cancelar"
 URL_CANCEL_TIP = "Cancelar a análise do endereço em andamento"
 URL_PASTE_AND_ANALYZE = "Colar e analisar"
+URL_CLEAR = "Limpar o endereço"
 
 # --- card da mídia -----------------------------------------------------------
 CARD_EMPTY = "Nenhuma mídia analisada.\nCole um endereço acima e clique em Analisar."
 CARD_LIVE = "TRANSMISSÃO AO VIVO"
 CARD_NO_THUMB = "sem\nminiatura"
+CARD_LIVE_BADGE = "AO VIVO"
+CARD_CHIP_UP_TO = "até {height}p"
 CARD_SUBTITLES = "{count} legenda(s) disponível(is)"
 CARD_DRM = "{count} formato(s) bloqueado(s) por DRM"
 
 # --- modo --------------------------------------------------------------------
 MODE_LABEL = "O que baixar"
-MODE_VIDEO = "Vídeo (com áudio)"
+MODE_VIDEO = "Vídeo com áudio"
 MODE_AUDIO = "Somente áudio"
 
 # --- controles de vídeo ------------------------------------------------------
-QUALITY_GROUP = "Qualidade"
+PERSONALIZE_TITLE = "Personalizar"
+PERSONALIZE_HINT = "ajuste cada detalhe antes de enfileirar"
+RESULT_LABEL = "Resultado"
+RESULT_ESTIMATED = "estimado"
 LABEL_RESOLUTION = "Resolução"
 LABEL_FPS = "Framerate"
 LABEL_CODEC = "Codec de vídeo"
@@ -82,6 +88,7 @@ LABEL_ESTIMATED_SIZE = "Tamanho estimado"
 ANY_FPS = "Qualquer"
 ANY_CODEC = "Qualquer"
 QUALITY_BEST_AVAILABLE = "Melhor disponível"
+QUALITY_AUDIO_TRACK_MUXED = "Já vem junto com o vídeo"
 CONTAINER_AUTO_LABEL = "Automático (o melhor sem recodificar)"
 
 TIP_CONTAINER = (
@@ -112,11 +119,33 @@ TIP_CODEC = (
     "sozinha assim que você escolher uma resolução que a tenha."
 )
 
+# --- bitrate de vídeo --------------------------------------------------------
+LABEL_VIDEO_BITRATE = "Bitrate"
+LABEL_VIDEO_BITRATE_VALUE = "Valor"
+VIDEO_BITRATE_SOURCE = "Igual ao da fonte"
+VIDEO_BITRATE_SOURCE_WITH = "Igual ao da fonte ({bitrate})"
+VIDEO_BITRATE_CUSTOM = "Personalizado…"
+TIP_VIDEO_BITRATE = (
+    "“Igual ao da fonte” baixa o vídeo como o site o entrega, sem recodificar.\n"
+    "Um valor recodifica o vídeo depois do download para esse bitrate médio, em duas "
+    "passadas: o arquivo sai perto de bitrate × duração (menos, se a imagem for simples "
+    "demais para gastá-lo), mas demora mais e perde um pouco de qualidade."
+)
+QUALITY_WARN_RECODE = (
+    "O vídeo será recodificado a {bitrate} depois do download: demora mais e perde um "
+    "pouco de qualidade. O áudio, as legendas e a capa ficam como estão."
+)
+QUALITY_WARN_BITRATE_ABOVE_SOURCE = (
+    "A fonte tem {source}, abaixo de {requested}: recodificar só aumentaria o arquivo, sem "
+    "recuperar qualidade. O vídeo será mantido como está."
+)
+
 # --- controles de áudio ------------------------------------------------------
 LABEL_AUDIO_FORMAT = "Formato"
 LABEL_AUDIO_QUALITY = "Bitrate"
 AUDIO_CODEC_BEST = "Original (sem perda, mais rápido)"
 AUDIO_SOURCE_INFO = "Melhor trilha da origem: {bitrate}"
+AUDIO_SOURCE_CHOSEN = "Trilha escolhida: {bitrate}"
 
 TIP_AUDIO_FORMAT = (
     "“Original” apenas extrai o áudio do arquivo, sem recodificar: é instantâneo "
@@ -125,13 +154,14 @@ TIP_AUDIO_FORMAT = (
 )
 
 # --- destino -----------------------------------------------------------------
-DEST_LABEL = "Destino"
+DEST_LABEL = "Salvar em"
 DEST_BROWSE = "Escolher…"
+DEST_CHANGE = "Alterar"
 DEST_TOOLTIP = "Pasta onde os arquivos concluídos são salvos"
 
 # --- perfis ------------------------------------------------------------------
-PROFILES_GROUP = "Perfis rápidos"
-PROFILE_HINT = "Um clique configura tudo e adiciona à fila."
+PROFILES_GROUP = "Baixar com um clique"
+PROFILE_HINT = "o perfil já entra na fila com a configuração dele"
 PROFILE_MP4_1080 = "MP4 1080p"
 PROFILE_MP4_1080_SUB = "compatível com tudo"
 PROFILE_MP3_320 = "MP3 320k"
@@ -146,7 +176,13 @@ ADD_TO_QUEUE = "Adicionar à fila"
 ADD_TO_QUEUE_TIP = "Analise um endereço antes de adicionar à fila"
 
 # --- fila --------------------------------------------------------------------
-QUEUE_GROUP = "Fila"
+QUEUE_GROUP = "Tarefas"
+QUEUE_HIDE = "Recolher as tarefas"
+# (singular, plural) de cada selo do cabeçalho das tarefas.
+QUEUE_CHIP_ACTIVE = ("{count} ativa", "{count} ativas")
+QUEUE_CHIP_PENDING = ("{count} na fila", "{count} na fila")
+QUEUE_CHIP_FAILED = ("{count} falhou", "{count} falharam")
+QUEUE_CHIP_CANCELLED = ("{count} cancelada", "{count} canceladas")
 QUEUE_COLUMNS = ("Título", "Saída", "Situação", "Progresso", "Velocidade")
 QUEUE_EMPTY = "A fila está vazia."
 QUEUE_ETA = "faltam {eta}"
@@ -157,6 +193,7 @@ QUEUE_OPEN_FOLDER = "Abrir pasta do arquivo"
 QUEUE_OPEN_FILE = "Abrir arquivo"
 QUEUE_COPY_ERROR = "Copiar mensagem de erro"
 QUEUE_SHOW_LOG = "Ver detalhes técnicos"
+QUEUE_DETAILS = "Detalhes técnicos"
 QUEUE_CLEAR_FINISHED = "Limpar encerrados"
 QUEUE_CANCEL_ALL = "Cancelar todos"
 QUEUE_CANCEL_ALL_TITLE = "Cancelar todas?"
@@ -169,10 +206,24 @@ QUEUE_LOG_CLOSE = "Fechar"
 
 # --- status bar --------------------------------------------------------------
 STATUS_COUNTS = "{active} em andamento · {pending} na fila · {done} concluídos"
-STATUS_FFMPEG = "ffmpeg: {source}"
 # De onde veio o ffmpeg em uso, pelo identificador que o localizador devolve.
-FFMPEG_SOURCES = {"empacotado": "empacotado", "gerenciado": "gerenciado", "sistema": "sistema"}
-STATUS_ENQUEUED = "{count} tarefa(s) adicionada(s) à fila — acompanhe na aba Download"
+FFMPEG_SOURCES = {
+    "empacotado": ("Empacotado", "Vem junto com o aplicativo"),
+    "gerenciado": ("Gerenciado", "Baixado pelo aplicativo"),
+    "sistema": ("Sistema", "Instalado no computador"),
+}
+SETTINGS_FFMPEG = "FFmpeg"
+SETTINGS_GROUP_DOWNLOADS = "Downloads"
+SETTINGS_GROUP_LANGUAGE = "Idioma"
+SETTINGS_GROUP_VIDEO = "Vídeo"
+SETTINGS_GROUP_SPEED = "Velocidade"
+SETTINGS_GROUP_COOKIES = "Cookies"
+SETTINGS_GROUP_FILE = "No arquivo"
+SETTINGS_GROUP_SUBS = "Legendas"
+SETTINGS_FFMPEG_UNKNOWN = "Ainda não localizado"
+TOAST_CLOSE = "Fechar aviso"
+STATUS_ENQUEUED = "{count} tarefa(s) adicionada(s) à fila"
+TOAST_VIEW_TASKS = "Ver tarefas"
 # Na barra de status, e não num diálogo: não poder gravar as preferências não
 # interrompe nada do que está em andamento.
 STATUS_SETTINGS_FAILED = "Não foi possível gravar as preferências: {error}"
@@ -194,18 +245,24 @@ PLAYLIST_NOTE = (
 )
 
 # --- conversor local ---------------------------------------------------------
-CONVERT_FILES_GROUP = "Arquivos a converter"
-CONVERT_PICK = "Escolher arquivos…"
+CONVERT_FILES_GROUP = "Arquivos"
+CONVERT_FILES_COUNT = ("{count} arquivo · {size}", "{count} arquivos · {size}")
+CONVERT_NO_AUDIO = "sem áudio"
+CONVERT_PLAN_TITLE = "O que vai acontecer"
+CONVERT_ESTIMATED = "estimado"
+CONVERT_PICK = "Adicionar arquivos"
 CONVERT_INSPECTING = "Inspecionando {count} arquivo(s)…"
 CONVERT_REJECTED = "Estes arquivos foram ignorados:"
 CONVERT_REMOVE = "Remover selecionados"
-CONVERT_DROP_HINT = "Arraste arquivos aqui, ou clique em “Escolher arquivos…”"
-CONVERT_TO_AUDIO = "Converter para áudio"
-CONVERT_TO_VIDEO = "Converter vídeo"
+CONVERT_DROP_HINT = "Arraste arquivos aqui, ou clique em “Adicionar arquivos”"
+CONVERT_DROP_MORE = "Solte mais arquivos aqui ou"
+CONVERT_DROP_BROWSE = "escolha no computador"
+CONVERT_START_COUNT = ("Converter {count} arquivo", "Converter {count} arquivos")
+CONVERT_TO_AUDIO = "Áudio"
+CONVERT_TO_VIDEO = "Vídeo"
 CONVERT_START = "Converter"
 CONVERT_SAME_FOLDER = "Salvar na mesma pasta do arquivo original"
 CONVERT_TARGET_GROUP = "Converter para"
-CONVERT_PLAN = "O que vai acontecer: {plan}"
 CONVERT_ESTIMATED_SIZE = "Tamanho estimado: {size}"
 CONVERT_RESIZE = "Redimensionar para"
 CONVERT_KEEP = "Manter original"
@@ -243,16 +300,21 @@ CONVERT_COMPRESS_NO_GAIN = (
     "{count} arquivo(s) já bem comprimido(s) não deve(m) ficar menor(es) que o "
     "original, e o que não ficar menor não é gravado."
 )
+CONVERT_SIZE_APPROXIMATE = (
+    "Não foi possível medir uma amostra: o tamanho é uma conta aproximada e pode errar bastante, "
+    "para mais ou para menos."
+)
 
 # --- metadados ---------------------------------------------------------------
 TAB_METADATA = "Metadados"
+NAV_SETTINGS = "Ajustes"
+NAV_TASKS = "Tarefas"
 ACTION_META_OPEN = "Abrir arquivo…"
 ACTION_META_SAVE = "Salvar cópia"
-META_FILE_GROUP = "Arquivo"
 META_OPEN = "Abrir arquivo…"
 META_OPEN_TIP = "{label} (Ctrl+O)"
 META_DROP_HINT = "Arraste um arquivo de vídeo ou áudio para cá, ou clique em “Abrir arquivo…”"
-META_FILE_INFO = "{name}   ·   {format}   ·   {duration}"
+META_DROP_AGAIN = "ou arraste outro arquivo de vídeo ou áudio para cá"
 META_LOADING = "Lendo {name}…"
 META_FILE_FILTER = (
     "Mídia (*.mp4 *.m4v *.mov *.mkv *.mka *.webm *.avi *.mp3 *.m4a *.flac *.opus *.ogg *.wav);;Todos (*)"
@@ -314,7 +376,7 @@ EDIT_IMPORT_TIP = (
 )
 EDIT_IMPORT_REJECTED = "Estes arquivos foram ignorados:"
 EDIT_POOL_TIP = "Mídias já importadas nesta edição · arraste uma delas até a linha do tempo"
-EDIT_MEDIA_POOL_TITLE = "Mídia do projeto"
+EDIT_MEDIA_POOL_TITLE = "Mídia"
 EDIT_MEDIA_EMPTY = "Arraste mídias para cá\nou clique em “+ Importar”"
 EDIT_MEDIA_REMOVE = "Deletar  (Del)"
 EDIT_CLEAR_UNUSED = "Limpar não utilizados"
@@ -324,9 +386,8 @@ EDIT_MEDIA_IN_USE_MSG = (
     "A mídia “{name}” está em uso em {count} bloco(s) na linha do tempo e não pode ser removida. "
     "Remova seus blocos das faixas primeiro."
 )
-EDIT_MEDIA_COUNT = "{count} mídia(s)"
-EDIT_IMPORT_BUTTON = "+ Importar"
-EDIT_CLEAR_UNUSED_BUTTON = "🧹 Limpar não usados"
+EDIT_IMPORT_BUTTON = "Importar"
+EDIT_CLEAR_UNUSED_BUTTON = "Limpar não usados"
 # Espécie da mídia na dica do acervo, pelo nome do tipo.
 EDIT_MEDIA_KINDS = {"VIDEO": "Vídeo", "IMAGE": "Imagem", "AUDIO": "Áudio"}
 EDIT_CHANNELS_STEREO = "estéreo"
@@ -338,7 +399,7 @@ EXPORT_DIALOG_TITLE = "Exportar Vídeo"
 EXPORT_SUMMARY_GROUP = "Resumo do Projeto"
 EXPORT_SETTINGS_GROUP = "Configurações de Saída"
 EXPORT_DESTINATION_GROUP = "Destino"
-EXPORT_DESTINATION_FOLDER = "Pasta de destino:"
+EXPORT_DESTINATION_FOLDER = "Pasta de destino"
 EXPORT_DESTINATION_PICK = "Procurar…"
 EXPORT_DESTINATION_PICK_TITLE = "Escolher pasta de destino"
 EXPORT_ACTION_ENQUEUE = "Adicionar à fila"
@@ -371,8 +432,10 @@ EXPORT_QUALITY_ECONOMY = "Econômica (CRF 28 - arquivo leve)"
 EXPORT_AUDIO_FORMAT = "Formato de áudio"
 EXPORT_AUDIO_FORMAT_TIP = "Formato e codec do arquivo de som gerado"
 EXPORT_ESTIMATED_SIZE = "Tamanho estimado"
-EXPORT_SUMMARY = "Duração total: <b>{duration}</b> · {tracks} trilha(s) · {clips} bloco(s)"
-EXPORT_FILENAME = "Nome do arquivo:"
+EXPORT_SUMMARY_DURATION = "Duração total <b>{duration}</b>"
+EXPORT_SUMMARY_TRACKS = "{tracks} trilha(s)"
+EXPORT_SUMMARY_CLIPS = "{clips} bloco(s)"
+EXPORT_FILENAME = "Nome do arquivo"
 EXPORT_FILENAME_PLACEHOLDER = "Nome do arquivo (sem extensão)"
 # Nome sugerido para o arquivo exportado: é dado, e sai no idioma do momento.
 EXPORT_DEFAULT_SUFFIX = "_editado"
@@ -442,9 +505,7 @@ EDIT_PREV_KEY = (
     "Keyframe anterior — o ponto de corte rápido mais próximo antes do cursor"
 )
 EDIT_NEXT_KEY = "Próximo keyframe — o ponto de corte rápido logo à frente"
-EDIT_PREV_KEY_SHORT = "◁ keyframe"
-EDIT_NEXT_KEY_SHORT = "keyframe ▷"
-EDIT_POSITION = "{current}  /  {total}"
+EDIT_POSITION_TOTAL = "/ {total}"
 # Nome da tecla nas dicas ("Reproduzir  (Espaço)").
 EDIT_KEY_SPACE = "Espaço"
 EDIT_SHORTCUT = "{label}  ({key})"
@@ -457,7 +518,6 @@ EDIT_EXIT_FULLSCREEN_TIP = "Sair da tela cheia (Esc)"
 EDIT_VOLUME = "Volume da prévia"
 EDIT_LOOP = "Loop"
 EDIT_LOOP_TIP = "Reproduzir continuamente em loop ao chegar ao final"
-EDIT_SNAP = "🧲"
 EDIT_SNAP_TIP = "Alinhamento magnético às bordas e rotação (Auto-attach)"
 EDIT_PROPERTIES = "Propriedades"
 EDIT_PROPERTIES_TIP = "Abrir aba de propriedades com edição numérica precisa do item"
@@ -521,25 +581,26 @@ EDIT_FONT_SMALLER = "Diminuir tamanho da fonte (1 pt)"
 EDIT_FONT_LARGER = "Aumentar tamanho da fonte (1 pt)"
 EDIT_FONT_SIZE_PRESET = "Definir tamanho para {size} pt"
 EDIT_TEXT_COLOR_TIP = "Escolher cor personalizada"
+EDIT_TEXT_COLOR_LABEL = "Cor do texto"
 EDIT_TEXT_COLOR_TITLE = "Cor do Texto"
-EDIT_STROKE = "Contorno:"
+EDIT_STROKE = "Contorno"
 EDIT_STROKE_TIP = "Ativar ou desativar contorno no texto"
 EDIT_STROKE_WIDTH_TIP = "Grossura do contorno em pixels"
 EDIT_STROKE_COLOR_TIP = "Escolher cor do contorno"
 EDIT_STROKE_COLOR_TITLE = "Cor do Contorno"
-EDIT_FONT_SIZE = "Tamanho:"
+EDIT_FONT_SIZE = "Tamanho"
 EDIT_FONT_BOLD = "B"
 EDIT_FONT_ITALIC = "I"
 EDIT_FONT_BOLD_TIP = "Negrito"
 EDIT_FONT_ITALIC_TIP = "Itálico"
 EDIT_TEXT_SWATCH_TIP = "Texto na cor {color}"
 EDIT_STROKE_SWATCH_TIP = "Contorno na cor {color}"
-EDIT_INSERT_TEXT = "+ Inserir Texto"
-EDIT_UPDATE_TEXT = "✓ Salvar Alterações no Texto"
-EDIT_INSERT_NEW_TEXT = "+ Inserir como Novo Texto"
-EDIT_APPLY_FILTER = "+ Aplicar Filtro"
-EDIT_UPDATE_FILTER = "✓ Atualizar Filtro Selecionado"
-EDIT_INSERT_NEW_FILTER = "+ Inserir como Novo Filtro"
+EDIT_INSERT_TEXT = "Inserir Texto"
+EDIT_UPDATE_TEXT = "Salvar Alterações no Texto"
+EDIT_INSERT_NEW_TEXT = "Inserir como Novo Texto"
+EDIT_APPLY_FILTER = "Aplicar Filtro"
+EDIT_UPDATE_FILTER = "Atualizar Filtro Selecionado"
+EDIT_INSERT_NEW_FILTER = "Inserir como Novo Filtro"
 EDIT_FILTER_BW = "Preto e Branco"
 EDIT_FILTER_SEPIA = "Sépia"
 EDIT_FILTER_VIGNETTE = "Vinheta"
@@ -566,12 +627,12 @@ EDIT_TRANSITIONS = {
     "slideleft": ("◀", "Slide para Esquerda"),
     "slideright": ("▶", "Slide para Direita"),
 }
-EDIT_CHOOSE_FILTER = "Escolha um efeito visual:"
-EDIT_CHOOSE_TRANSITION = "Escolha uma transição de vídeo:"
-EDIT_EXTRA_DURATION = "Duração:"
-EDIT_INSERT_TRANSITION = "+ Inserir Transição"
-EDIT_UPDATE_TRANSITION = "✓ Atualizar Transição Selecionada"
-EDIT_INSERT_NEW_TRANSITION = "+ Inserir como Nova Transição"
+EDIT_CHOOSE_FILTER = "Escolha um efeito visual"
+EDIT_CHOOSE_TRANSITION = "Escolha uma transição de vídeo"
+EDIT_EXTRA_DURATION = "Duração"
+EDIT_INSERT_TRANSITION = "Inserir Transição"
+EDIT_UPDATE_TRANSITION = "Atualizar Transição Selecionada"
+EDIT_INSERT_NEW_TRANSITION = "Inserir como Nova Transição"
 EDIT_CLIP_TEXT = "Texto"
 EDIT_CLIP_FILTER = "Filtro"
 EDIT_CLIP_TRANSITION = "Transição"
@@ -601,6 +662,7 @@ EDIT_UNDO = "Desfazer"
 EDIT_REDO = "Refazer"
 EDIT_ZOOM_IN = "Aproximar"
 EDIT_ZOOM_OUT = "Afastar"
+EDIT_ZOOM_SLIDER = "Zoom da linha do tempo"
 EDIT_ZOOM_FIT = "Ver tudo"
 EDIT_ZOOM_FIT_TIP = (
     "Enquadra a edição inteira. Afastar além disso continua valendo — o vazio "
@@ -629,23 +691,26 @@ EDIT_GAIN_DETACHED = (
 )
 
 # tela do projeto
-EDIT_CANVAS = "Tela:"
-EDIT_CANVAS_ASPECT = "Proporção:"
+EDIT_CANVAS = "Tela"
+EDIT_CANVAS_ASPECT = "Proporção"
 EDIT_CANVAS_ASPECT_AUTO = "Automática"
 EDIT_CANVAS_ASPECT_TIP = (
     "Fixa a proporção da tela de edição e da prévia (ex.: 16:9, 4:3, 9:16, 1:1, 21:9).\n"
     "Os blocos são encaixados proporcionalmente sem deformação."
 )
-EXPORT_ASPECT = "Proporção:"
+EXPORT_ASPECT = "Proporção"
 EXPORT_ASPECT_AUTO = "Original do projeto"
 EXPORT_ASPECT_TIP = (
     "Proporção de aspecto do vídeo final exportado (16:9 widescreen, 4:3 tradicional, 9:16 vertical, etc.)."
 )
-EDIT_CANVAS_RATE = "Taxa:"
+EDIT_CANVAS_RATE = "Taxa"
 EDIT_CANVAS_AUTO = "Automática · segue o material"
 EDIT_CANVAS_RATE_AUTO = "Automática"
 EDIT_CANVAS_SIZE = "{width} × {height}"
 EDIT_CANVAS_FPS = "{fps} fps"
+EDIT_CANVAS_SUMMARY_AUTO = "Tela automática · {aspect} · {size} · {rate}"
+EDIT_CANVAS_SUMMARY = "Tela · {aspect} · {size} · {rate}"
+EDIT_CANVAS_BUTTON_TIP = "Proporção e tamanho da tela do projeto, e o formato de slideshow"
 EDIT_CANVAS_TIP = (
     "O tamanho do vídeo exportado. Todo bloco é encaixado nela inteiro, com "
     "tarja preta onde sobra — nada é esticado nem cortado.\n"
@@ -688,7 +753,7 @@ EDIT_MODE_TIP = (
     "O corte rápido copia os dados como estão: sai em segundos e sem perda "
     "nenhuma, mas começa no keyframe anterior ao ponto marcado."
 )
-EDIT_PLAN = "O que vai acontecer: {plan}"
+EXPORT_PLAN_TITLE = "O que vai acontecer"
 EDIT_PLAN_FAST = ".{container} · cópia direta (sem recodificar) · {duration}"
 EDIT_FAST_UNAVAILABLE = (
     "O corte rápido vale enquanto a edição for um recorte de um arquivo só, na "
@@ -766,13 +831,26 @@ SETTINGS_ENCODER_TEST_TIP = (
     "Manda a placa codificar um quadro de verdade. É o único jeito de saber: "
     "o ffmpeg lista encoders que não abrem nesta máquina."
 )
-SETTINGS_THEME = "Tema"
+SETTINGS_TAB_THEME = "Tema"
+SETTINGS_THEME_MODE = "Modo"
+SETTINGS_PALETTE = "Paleta"
+SETTINGS_PALETTE_HINT = "As cores mudam ao confirmar com OK."
 SETTINGS_LANGUAGE = "Idioma"
 # Cada idioma no próprio nome, nos dois catálogos: é assim que quem não lê o
 # idioma de agora encontra o seu na lista.
 LANGUAGE_NAMES = {"pt-BR": "Português (Brasil)", "en": "English"}
 THEME_DARK = "Escuro"
 THEME_LIGHT = "Claro"
+# Nome e uma linha de cada paleta, pelo identificador de videomanager.domain.appearance.
+PALETTE_NAMES = {
+    "atual": "Atual", "grafite": "Grafite e índigo", "estudio": "Estúdio",
+    "mare": "Maré", "aurora": "Aurora", "cinema": "Cinema",
+}
+PALETTE_TAGLINES = {
+    "atual": "As cores originais", "grafite": "Cinza azulado e índigo",
+    "estudio": "Cinza neutro, sem cor de marca", "mare": "Azul-marinho e ciano",
+    "aurora": "Ameixa, violeta e magenta", "cinema": "Carvão quente e âmbar",
+}
 
 # --- diálogos e erros --------------------------------------------------------
 DIALOG_ERROR_TITLE = "Não foi possível continuar"
@@ -839,8 +917,8 @@ EDIT_KEYFRAME_NEXT = "Próximo quadro-chave"
 EDIT_KEYFRAME_ADD = "Adicionar quadro-chave no instante atual"
 EDIT_KEYFRAME_REMOVE = "Remover quadro-chave deste instante"
 EDIT_KEYFRAME_TOGGLE = "Alternar quadro-chave no cursor"
-EDIT_KEYFRAME_EASING = "Interpolação:"
-EDIT_OPACITY = "Opacidade:"
+EDIT_KEYFRAME_EASING = "Interpolação"
+EDIT_OPACITY = "Opacidade"
 # Efeitos rápidos de animação, pelo identificador; o vazio é o item de convite.
 EDIT_ANIMATION_PRESETS = {
     "": "— Selecionar preset —",
@@ -863,40 +941,45 @@ EDIT_EASINGS = {
 
 # aba Propriedades
 PROP_TITLE = "Propriedades"
-PROP_TITLE_CLIP = "Propriedades: {name}"
 PROP_CLOSE_TIP = "Fechar aba de propriedades"
+PROP_NO_SETTINGS = "Este bloco não tem ajustes além da duração e da posição na linha do tempo."
 PROP_CLIP_ID = "ID #{id} · {kind}"
 # Espécie do bloco, pelo tipo de sobreposição gravado no projeto.
 PROP_KINDS = {"none": "Mídia", "image": "Imagem", "text": "Texto", "filter": "Filtro", "transition": "Transição"}
 PROP_TRANSFORM = "Transformação"
 PROP_SPEED = "Velocidade"
 PROP_VOLUME = "Volume"
-PROP_POS_X = "Posição X:"
-PROP_POS_Y = "Posição Y:"
-PROP_WIDTH = "Largura:"
-PROP_HEIGHT = "Altura:"
+PROP_POS_X = "Posição X"
+PROP_POS_Y = "Posição Y"
+PROP_WIDTH = "Largura"
+PROP_HEIGHT = "Altura"
+PROP_FIELD_X = "X"
+PROP_FIELD_Y = "Y"
+PROP_FIELD_W = "L"
+PROP_FIELD_H = "A"
+PROP_SPEED_RANGE = "0,1× a 10×"
 PROP_LOCK_RATIO = "Travar proporção"
-PROP_SCALE = "Escala:"
-PROP_ROTATION = "Rotação:"
+PROP_SCALE = "Escala"
+PROP_ROTATION = "Rotação"
 PROP_KEYFRAMES_NONE = "Sem quadros-chave"
 PROP_KEYFRAMES_COUNT = "{count} quadro(s)-chave"
-PROP_QUICK_EFFECT = "Efeito Rápido:"
+PROP_QUICK_EFFECT = "Efeito Rápido"
 PROP_CHROMA = "Fundo Verde (Chroma Key)"
 PROP_CHROMA_ENABLE = "Ativar remoção de fundo verde"
-PROP_CHROMA_COLOR = "Cor a remover:"
+PROP_CHROMA_COLOR = "Cor a remover"
 PROP_CHROMA_COLOR_TIP = "Clique para escolher a cor a ser removida"
 PROP_CHROMA_PICK_TITLE = "Escolher cor para remover"
 PROP_CHROMA_PRESETS = {"#00FF00": "Verde Padrão", "#00B140": "Verde Studio", "#0000FF": "Azul"}
 PROP_CHROMA_PRESET_TIP = "{name} ({color})"
-PROP_CHROMA_TOLERANCE = "Tolerância:"
-PROP_CHROMA_SMOOTHING = "Suavização:"
+PROP_CHROMA_TOLERANCE = "Tolerância"
+PROP_CHROMA_SMOOTHING = "Suavização"
 PROP_BLUR = "Fundo Desfocado"
 PROP_BLUR_ENABLE = "Preencher as bordas com o bloco desfocado"
 PROP_BLUR_NOTE = "Cobre a tela inteira por baixo do bloco, inclusive as trilhas abaixo dele."
 PROP_BLUR_CHROMA = "Indisponível com o fundo verde ligado: o borrão apareceria onde a cor foi removida."
 PROP_TRANSITION = "Transição de Vídeo"
-PROP_TRANSITION_EFFECT = "Efeito:"
-EDIT_FONT_SEARCH = "🔍 Buscar fonte..."
+PROP_TRANSITION_EFFECT = "Efeito"
+EDIT_FONT_SEARCH = "Buscar fonte…"
 
 JOB_STATUS_LABELS = {
     "pending": "Na fila", "running": "Baixando", "processing": "Processando",

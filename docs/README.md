@@ -14,7 +14,7 @@ repositório para uma visão geral rápida; esta pasta traz o manual completo.
   de tarefas comum a elas.
 - [**Aba Download**](guia-download.md) — baixar de uma URL: qualidade,
   perfis rápidos, playlists e canais.
-- [**Aba Convert**](guia-conversao.md) — converter arquivos que já estão no
+- [**Aba Converter**](guia-conversao.md) — converter arquivos que já estão no
   disco.
 - [**Aba Editar**](guia-edicao.md) — o editor multipista: importar, cortar,
   montar trilhas, atalhos de teclado, exportar.
@@ -32,6 +32,9 @@ repositório para uma visão geral rápida; esta pasta traz o manual completo.
 - [**Decisões de projeto**](decisoes-de-projeto.md) — os algoritmos por trás
   das escolhas principais (normalização de extratores, corte sem recodificar,
   grafo único do ffmpeg) e o motivo de cada uma.
+- [**Estimativas de tamanho**](estimativas-de-tamanho.md) — como o aplicativo
+  anuncia quanto um arquivo vai pesar, o que a indústria faz, o erro medido
+  contra a codificação inteira e o que continua sem garantia.
 - [**Plano de migração para Clean Architecture**](plano-clean-architecture.md)
   — registro da proposta original; veja as entregas e evidências no
   [registro da migração](clean-architecture/migracao.md).

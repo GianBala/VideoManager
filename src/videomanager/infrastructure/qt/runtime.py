@@ -13,7 +13,7 @@ from videomanager import APP_NAME
 from videomanager.application.media.preview import prepare_preview
 from videomanager.infrastructure.ffmpeg import hardware, composer
 from videomanager.infrastructure.ffmpeg.metadata import cover_bytes, read_metadata, save_metadata
-from videomanager.infrastructure.ffmpeg.sample import sample_video_kbps
+from videomanager.infrastructure.ffmpeg.sample import sample_kbps
 from videomanager.infrastructure.system.process import ProcessControl
 from videomanager.infrastructure.system import binaries
 from videomanager.infrastructure.system import memory
@@ -60,9 +60,9 @@ class DesktopRuntime:
         return FunctionWorker(partial(save_metadata, meta, edit, tools, control, fallback), control.cancel)
 
     def sample_worker(self, media, target, tools):
-        """Mede o bitrate de vídeo de ``target`` em trechos de ``media``; cancelável."""
+        """Mede em trechos de ``media`` o bitrate que ``target`` grava (o vídeo, ou o áudio); cancelável."""
         control = ProcessControl()
-        return FunctionWorker(partial(sample_video_kbps, media, target, tools, control), control.cancel)
+        return FunctionWorker(partial(sample_kbps, media, target, tools, control), control.cancel)
 
     def probe_worker(self, *args, **kwargs):
         return ProbeWorker(*args, **kwargs)

@@ -58,6 +58,39 @@ def fit_size(
     )
 
 
+def reduced_fit(
+    media_width: int | None,
+    media_height: int | None,
+    canvas_width: int,
+    canvas_height: int,
+    full_width: int,
+    full_height: int,
+) -> tuple[int, int]:
+    """Tamanho do vídeo na tela reduzida da prévia, encaixado como na tela de verdade.
+
+    A tela da prévia é a do projeto com cada lado levado ao par de baixo, e por
+    isso nem sempre tem a proporção dela: 1920×1080 na caixa 596×508 vira
+    592×334. Encaixar por pixels nessa tela deixava 1 px preto em cima e embaixo
+    (2 px nas laterais, conforme a janela) de um vídeo que preenche a tela do
+    projeto, e a moldura da prévia ficava a um fio da imagem. Aqui o encaixe é
+    feito na tela de verdade, onde ele é exato, e só então reduzido eixo a eixo:
+    quem preenche uma tela preenche a outra.
+
+    Arredonda para o par mais próximo, e não para baixo, para o ruído do ponto
+    flutuante (591,99999) não custar 2 px; como os lados da tela são pares, o
+    resultado nunca passa dela. Sem redução é a regra de sempre (``fit_size``).
+    """
+    if (canvas_width, canvas_height) == (full_width, full_height):
+        return fit_size(media_width, media_height, canvas_width, canvas_height)
+    width = media_width or 16
+    height = media_height or 9
+    scale = min(full_width / width, full_height / height)
+    return (
+        max(2, int(width * scale * canvas_width / full_width / 2 + 0.5) * 2),
+        max(2, int(height * scale * canvas_height / full_height / 2 + 0.5) * 2),
+    )
+
+
 def filmstrip_times(start: float, end: float, count: int) -> tuple[float, ...]:
     """Instantes das miniaturas que cobrem um trecho da linha do tempo.
 

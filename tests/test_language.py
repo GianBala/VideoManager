@@ -46,9 +46,9 @@ def test_catalogo_e_texto_preso_seguem_a_troca(pseudo):
 
 def test_origem_com_estado_volta_igual_no_idioma_novo(pseudo):
     contagem = 3
-    rotulo = idioma.bind(QLabel(), "setToolTip", lambda: strings.EDIT_MEDIA_COUNT.format(count=contagem))
+    rotulo = idioma.bind(QLabel(), "setToolTip", lambda: strings.CARD_SUBTITLES.format(count=contagem))
     idioma.apply_language(i18n.ENGLISH)
-    assert rotulo.toolTip() == "⟦3 mídia(s)⟧"
+    assert rotulo.toolTip() == "⟦3 legenda(s) disponível(is)⟧"
 
 
 def test_texto_escrito_depois_do_bind_nao_e_apagado(pseudo):
@@ -248,16 +248,20 @@ _PORTUGUES = re.compile(r"[ãõçáéíóúâêôà]|\b(de|para|com|sem|uma?|os|
 # tradução — o detector acima não reconhece "Copiar".
 _IGUAIS = {
     "TAB_DOWNLOAD", "TAB_CONVERT", "LABEL_CONTAINER", "LABEL_AUDIO_QUALITY", "PROFILE_MP4_1080",
-    "PROFILE_MP3_320", "STATUS_FFMPEG", "CONVERT_PICK_TIP", "CONVERT_REMOVE_TIP", "EDIT_CHANNELS_MONO",
-    "EXPORT_CONTAINERS", "EXPORT_VIDEO_CODECS", "EXPORT_AUDIO_FORMATS", "EXPORT_ASPECTS", "EDIT_PREV_KEY_SHORT",
-    "EDIT_NEXT_KEY_SHORT", "EDIT_LOOP", "EDIT_FONT_BOLD", "EDIT_FONT_ITALIC", "EDIT_TRANSITIONS",
+    "PROFILE_MP3_320", "SETTINGS_FFMPEG", "SETTINGS_GROUP_DOWNLOADS", "SETTINGS_GROUP_COOKIES", "CONVERT_PICK_TIP", "CONVERT_REMOVE_TIP", "EDIT_CHANNELS_MONO",
+    "EXPORT_CONTAINERS", "EXPORT_VIDEO_CODECS", "EXPORT_AUDIO_FORMATS", "EXPORT_ASPECTS",
+    "EDIT_POSITION_TOTAL", "EDIT_LOOP", "EDIT_FONT_BOLD", "EDIT_FONT_ITALIC", "EDIT_TRANSITIONS",
     "EDIT_CANVAS_FPS", "PROP_CLIP_ID", "EDIT_SLIDESHOW", "LANGUAGE_NAMES",
     # "Tags" e "Codec" são as mesmas palavras nas duas línguas.
     "META_OPEN_TIP", "META_TAGS_GROUP", "META_TRACK_HEADERS",
     # "M" de mudo e de mute.
     "EDIT_TRACK_MUTED_BADGE",
-    # "Volume" é a mesma palavra nas duas línguas.
-    "PROP_VOLUME",
+    # "Bitrate" é a mesma palavra nas duas línguas.
+    "LABEL_VIDEO_BITRATE",
+    # "Volume" é a mesma palavra nas duas línguas, e "X" e "Y" são as mesmas letras.
+    "PROP_VOLUME", "PROP_FIELD_X", "PROP_FIELD_Y",
+    # "Aurora" e "Cinema" são o nome da paleta nas duas línguas.
+    "PALETTE_NAMES",
 }
 
 

@@ -56,7 +56,7 @@ EDIT_NEW_BUTTON = "New"
 EDIT_OPEN_BUTTON = "Open…"
 EDIT_SAVE_BUTTON = "Save"
 EDIT_SAVE_AS_BUTTON = "Save As…"
-EDIT_PROJECT_STATUS = "Project: {name}{dirty}"
+EDIT_UNSAVED = "unsaved"
 EDIT_UNTITLED = "Untitled"
 CONVERT_CLEAR = "Clear List"
 
@@ -67,21 +67,27 @@ URL_ANALYZE = "Analyze"
 URL_CANCEL = "Cancel"
 URL_CANCEL_TIP = "Cancel the URL analysis in progress"
 URL_PASTE_AND_ANALYZE = "Paste and Analyze"
+URL_CLEAR = "Clear the address"
 
 # --- card da mídia -----------------------------------------------------------
 CARD_EMPTY = "No media analyzed.\nPaste a URL above and click Analyze."
 CARD_LIVE = "LIVE STREAM"
 CARD_NO_THUMB = "no\nthumbnail"
+CARD_LIVE_BADGE = "LIVE"
+CARD_CHIP_UP_TO = "up to {height}p"
 CARD_SUBTITLES = "{count} subtitle(s) available"
 CARD_DRM = "{count} format(s) blocked by DRM"
 
 # --- modo --------------------------------------------------------------------
 MODE_LABEL = "What to download"
-MODE_VIDEO = "Video (with audio)"
+MODE_VIDEO = "Video with audio"
 MODE_AUDIO = "Audio only"
 
 # --- controles de vídeo ------------------------------------------------------
-QUALITY_GROUP = "Quality"
+PERSONALIZE_TITLE = "Customize"
+PERSONALIZE_HINT = "adjust every detail before queueing"
+RESULT_LABEL = "Result"
+RESULT_ESTIMATED = "estimated"
 LABEL_RESOLUTION = "Resolution"
 LABEL_FPS = "Frame rate"
 LABEL_CODEC = "Video codec"
@@ -91,6 +97,7 @@ LABEL_ESTIMATED_SIZE = "Estimated size"
 ANY_FPS = "Any"
 ANY_CODEC = "Any"
 QUALITY_BEST_AVAILABLE = "Best available"
+QUALITY_AUDIO_TRACK_MUXED = "Already included in the video"
 CONTAINER_AUTO_LABEL = "Automatic (best without re-encoding)"
 
 TIP_CONTAINER = (
@@ -121,11 +128,33 @@ TIP_CODEC = (
     "it comes back on its own as soon as you pick a resolution that has it."
 )
 
+# --- video bitrate -----------------------------------------------------------
+LABEL_VIDEO_BITRATE = "Bitrate"
+LABEL_VIDEO_BITRATE_VALUE = "Value"
+VIDEO_BITRATE_SOURCE = "Same as the source"
+VIDEO_BITRATE_SOURCE_WITH = "Same as the source ({bitrate})"
+VIDEO_BITRATE_CUSTOM = "Custom…"
+TIP_VIDEO_BITRATE = (
+    "“Same as the source” downloads the video as the site serves it, without re-encoding.\n"
+    "A value re-encodes the video after the download to that average bitrate, in two "
+    "passes: the file comes out close to bitrate × duration (less, if the picture is too "
+    "simple to spend it), but it takes longer and loses a little quality."
+)
+QUALITY_WARN_RECODE = (
+    "The video will be re-encoded at {bitrate} after the download: it takes longer and loses "
+    "a little quality. Audio, subtitles and cover art stay as they are."
+)
+QUALITY_WARN_BITRATE_ABOVE_SOURCE = (
+    "The source is {source}, below {requested}: re-encoding would only grow the file without "
+    "recovering quality. The video will be kept as it is."
+)
+
 # --- controles de áudio ------------------------------------------------------
 LABEL_AUDIO_FORMAT = "Format"
 LABEL_AUDIO_QUALITY = "Bitrate"
 AUDIO_CODEC_BEST = "Original (lossless, fastest)"
 AUDIO_SOURCE_INFO = "Best source track: {bitrate}"
+AUDIO_SOURCE_CHOSEN = "Chosen track: {bitrate}"
 
 TIP_AUDIO_FORMAT = (
     "“Original” just extracts the audio from the file, without re-encoding: it's "
@@ -134,13 +163,14 @@ TIP_AUDIO_FORMAT = (
 )
 
 # --- destino -----------------------------------------------------------------
-DEST_LABEL = "Destination"
+DEST_LABEL = "Save to"
 DEST_BROWSE = "Browse…"
+DEST_CHANGE = "Change"
 DEST_TOOLTIP = "Folder where finished files are saved"
 
 # --- perfis ------------------------------------------------------------------
-PROFILES_GROUP = "Quick profiles"
-PROFILE_HINT = "One click sets everything up and adds it to the queue."
+PROFILES_GROUP = "Download in one click"
+PROFILE_HINT = "the profile goes straight into the queue with its own settings"
 PROFILE_MP4_1080 = "MP4 1080p"
 PROFILE_MP4_1080_SUB = "plays everywhere"
 PROFILE_MP3_320 = "MP3 320k"
@@ -155,7 +185,13 @@ ADD_TO_QUEUE = "Add to Queue"
 ADD_TO_QUEUE_TIP = "Analyze a URL before adding it to the queue"
 
 # --- fila --------------------------------------------------------------------
-QUEUE_GROUP = "Queue"
+QUEUE_GROUP = "Tasks"
+QUEUE_HIDE = "Hide tasks"
+# (singular, plural) de cada selo do cabeçalho das tarefas.
+QUEUE_CHIP_ACTIVE = ("{count} active", "{count} active")
+QUEUE_CHIP_PENDING = ("{count} queued", "{count} queued")
+QUEUE_CHIP_FAILED = ("{count} failed", "{count} failed")
+QUEUE_CHIP_CANCELLED = ("{count} cancelled", "{count} cancelled")
 QUEUE_COLUMNS = ("Title", "Output", "Status", "Progress", "Speed")
 QUEUE_EMPTY = "The queue is empty."
 QUEUE_ETA = "{eta} left"
@@ -166,6 +202,7 @@ QUEUE_OPEN_FOLDER = "Open Containing Folder"
 QUEUE_OPEN_FILE = "Open File"
 QUEUE_COPY_ERROR = "Copy Error Message"
 QUEUE_SHOW_LOG = "Show Technical Details"
+QUEUE_DETAILS = "Technical details"
 QUEUE_CLEAR_FINISHED = "Clear Finished"
 QUEUE_CANCEL_ALL = "Cancel All"
 QUEUE_CANCEL_ALL_TITLE = "Cancel All?"
@@ -178,9 +215,23 @@ QUEUE_LOG_CLOSE = "Close"
 
 # --- status bar --------------------------------------------------------------
 STATUS_COUNTS = "{active} in progress · {pending} queued · {done} completed"
-STATUS_FFMPEG = "ffmpeg: {source}"
-FFMPEG_SOURCES = {"empacotado": "bundled", "gerenciado": "managed", "sistema": "system"}
-STATUS_ENQUEUED = "{count} task(s) added to the queue — follow them in the Download tab"
+FFMPEG_SOURCES = {
+    "empacotado": ("Bundled", "Ships with the app"),
+    "gerenciado": ("Managed", "Downloaded by the app"),
+    "sistema": ("System", "Installed on this computer"),
+}
+SETTINGS_FFMPEG = "FFmpeg"
+SETTINGS_GROUP_DOWNLOADS = "Downloads"
+SETTINGS_GROUP_LANGUAGE = "Language"
+SETTINGS_GROUP_VIDEO = "Video"
+SETTINGS_GROUP_SPEED = "Speed"
+SETTINGS_GROUP_COOKIES = "Cookies"
+SETTINGS_GROUP_FILE = "In the file"
+SETTINGS_GROUP_SUBS = "Subtitles"
+SETTINGS_FFMPEG_UNKNOWN = "Not located yet"
+TOAST_CLOSE = "Dismiss notice"
+STATUS_ENQUEUED = "{count} task(s) added to the queue"
+TOAST_VIEW_TASKS = "View tasks"
 STATUS_SETTINGS_FAILED = "Could not save the preferences: {error}"
 
 # --- playlist ----------------------------------------------------------------
@@ -200,18 +251,24 @@ PLAYLIST_NOTE = (
 )
 
 # --- conversor local ---------------------------------------------------------
-CONVERT_FILES_GROUP = "Files to convert"
-CONVERT_PICK = "Choose Files…"
+CONVERT_FILES_GROUP = "Files"
+CONVERT_FILES_COUNT = ("{count} file · {size}", "{count} files · {size}")
+CONVERT_NO_AUDIO = "no audio"
+CONVERT_PLAN_TITLE = "What will happen"
+CONVERT_ESTIMATED = "estimated"
+CONVERT_PICK = "Add Files"
 CONVERT_INSPECTING = "Inspecting {count} file(s)…"
 CONVERT_REJECTED = "These files were skipped:"
 CONVERT_REMOVE = "Remove Selected"
-CONVERT_DROP_HINT = "Drag files here, or click “Choose Files…”"
-CONVERT_TO_AUDIO = "Convert to audio"
-CONVERT_TO_VIDEO = "Convert video"
+CONVERT_DROP_HINT = "Drag files here, or click “Add Files”"
+CONVERT_DROP_MORE = "Drop more files here or"
+CONVERT_DROP_BROWSE = "browse your computer"
+CONVERT_START_COUNT = ("Convert {count} file", "Convert {count} files")
+CONVERT_TO_AUDIO = "Audio"
+CONVERT_TO_VIDEO = "Video"
 CONVERT_START = "Convert"
 CONVERT_SAME_FOLDER = "Save in the same folder as the original file"
 CONVERT_TARGET_GROUP = "Convert to"
-CONVERT_PLAN = "What will happen: {plan}"
 CONVERT_ESTIMATED_SIZE = "Estimated size: {size}"
 CONVERT_RESIZE = "Resize to"
 CONVERT_KEEP = "Keep original"
@@ -249,16 +306,21 @@ CONVERT_COMPRESS_NO_GAIN = (
     "{count} file(s) already well compressed should not come out smaller than "
     "the original, and a result that is not smaller is not saved."
 )
+CONVERT_SIZE_APPROXIMATE = (
+    "A sample could not be measured: the size is a rough calculation and can be well off, "
+    "either way."
+)
 
 # --- metadados ---------------------------------------------------------------
 TAB_METADATA = "Metadata"
+NAV_SETTINGS = "Settings"
+NAV_TASKS = "Tasks"
 ACTION_META_OPEN = "Open File…"
 ACTION_META_SAVE = "Save Copy"
-META_FILE_GROUP = "File"
 META_OPEN = "Open File…"
 META_OPEN_TIP = "{label} (Ctrl+O)"
 META_DROP_HINT = "Drag a video or audio file here, or click “Open File…”"
-META_FILE_INFO = "{name}   ·   {format}   ·   {duration}"
+META_DROP_AGAIN = "or drop another video or audio file here"
 META_LOADING = "Reading {name}…"
 META_FILE_FILTER = (
     "Media (*.mp4 *.m4v *.mov *.mkv *.mka *.webm *.avi *.mp3 *.m4a *.flac *.opus *.ogg *.wav);;All files (*)"
@@ -320,7 +382,7 @@ EDIT_IMPORT_TIP = (
 )
 EDIT_IMPORT_REJECTED = "These files were skipped:"
 EDIT_POOL_TIP = "Media already imported into this edit · drag one onto the timeline"
-EDIT_MEDIA_POOL_TITLE = "Project media"
+EDIT_MEDIA_POOL_TITLE = "Media"
 EDIT_MEDIA_EMPTY = "Drag media here\nor click “+ Import”"
 EDIT_MEDIA_REMOVE = "Delete  (Del)"
 EDIT_CLEAR_UNUSED = "Clear Unused"
@@ -330,9 +392,8 @@ EDIT_MEDIA_IN_USE_MSG = (
     "The media “{name}” is used by {count} clip(s) on the timeline and can't be removed. "
     "Remove its clips from the tracks first."
 )
-EDIT_MEDIA_COUNT = "{count} item(s)"
-EDIT_IMPORT_BUTTON = "+ Import"
-EDIT_CLEAR_UNUSED_BUTTON = "🧹 Clear Unused"
+EDIT_IMPORT_BUTTON = "Import"
+EDIT_CLEAR_UNUSED_BUTTON = "Clear Unused"
 EDIT_MEDIA_KINDS = {"VIDEO": "Video", "IMAGE": "Image", "AUDIO": "Audio"}
 EDIT_CHANNELS_STEREO = "stereo"
 EDIT_CHANNELS_MONO = "mono"
@@ -343,7 +404,7 @@ EXPORT_DIALOG_TITLE = "Export Video"
 EXPORT_SUMMARY_GROUP = "Project summary"
 EXPORT_SETTINGS_GROUP = "Output settings"
 EXPORT_DESTINATION_GROUP = "Destination"
-EXPORT_DESTINATION_FOLDER = "Destination folder:"
+EXPORT_DESTINATION_FOLDER = "Destination folder"
 EXPORT_DESTINATION_PICK = "Browse…"
 EXPORT_DESTINATION_PICK_TITLE = "Choose Destination Folder"
 EXPORT_ACTION_ENQUEUE = "Add to Queue"
@@ -376,8 +437,10 @@ EXPORT_QUALITY_ECONOMY = "Economy (CRF 28 - smaller file)"
 EXPORT_AUDIO_FORMAT = "Audio format"
 EXPORT_AUDIO_FORMAT_TIP = "Format and codec of the generated sound file"
 EXPORT_ESTIMATED_SIZE = "Estimated size"
-EXPORT_SUMMARY = "Total duration: <b>{duration}</b> · {tracks} track(s) · {clips} clip(s)"
-EXPORT_FILENAME = "File name:"
+EXPORT_SUMMARY_DURATION = "Total duration <b>{duration}</b>"
+EXPORT_SUMMARY_TRACKS = "{tracks} track(s)"
+EXPORT_SUMMARY_CLIPS = "{clips} clip(s)"
+EXPORT_FILENAME = "File name"
 EXPORT_FILENAME_PLACEHOLDER = "File name (without extension)"
 EXPORT_DEFAULT_SUFFIX = "_edited"
 EXPORT_DEFAULT_STEM = "edited_video"
@@ -444,9 +507,7 @@ EDIT_PREV_KEY = (
     "Previous keyframe — the nearest fast-cut point before the playhead"
 )
 EDIT_NEXT_KEY = "Next keyframe — the fast-cut point just ahead"
-EDIT_PREV_KEY_SHORT = "◁ keyframe"
-EDIT_NEXT_KEY_SHORT = "keyframe ▷"
-EDIT_POSITION = "{current}  /  {total}"
+EDIT_POSITION_TOTAL = "/ {total}"
 EDIT_KEY_SPACE = "Space"
 EDIT_SHORTCUT = "{label}  ({key})"
 EDIT_FRAME_NUMBER = "frame {index}"
@@ -458,7 +519,6 @@ EDIT_EXIT_FULLSCREEN_TIP = "Exit full screen (Esc)"
 EDIT_VOLUME = "Preview volume"
 EDIT_LOOP = "Loop"
 EDIT_LOOP_TIP = "Keep playing in a loop when the end is reached"
-EDIT_SNAP = "🧲"
 EDIT_SNAP_TIP = "Magnetic snapping to edges and rotation (auto-attach)"
 EDIT_PROPERTIES = "Properties"
 EDIT_PROPERTIES_TIP = "Open the Properties tab to edit the item with precise numbers"
@@ -521,25 +581,26 @@ EDIT_FONT_SMALLER = "Decrease font size (1 pt)"
 EDIT_FONT_LARGER = "Increase font size (1 pt)"
 EDIT_FONT_SIZE_PRESET = "Set size to {size} pt"
 EDIT_TEXT_COLOR_TIP = "Choose a custom color"
+EDIT_TEXT_COLOR_LABEL = "Text color"
 EDIT_TEXT_COLOR_TITLE = "Text Color"
-EDIT_STROKE = "Outline:"
+EDIT_STROKE = "Outline"
 EDIT_STROKE_TIP = "Turn the text outline on or off"
 EDIT_STROKE_WIDTH_TIP = "Outline thickness in pixels"
 EDIT_STROKE_COLOR_TIP = "Choose the outline color"
 EDIT_STROKE_COLOR_TITLE = "Outline Color"
-EDIT_FONT_SIZE = "Size:"
+EDIT_FONT_SIZE = "Size"
 EDIT_FONT_BOLD = "B"
 EDIT_FONT_ITALIC = "I"
 EDIT_FONT_BOLD_TIP = "Bold"
 EDIT_FONT_ITALIC_TIP = "Italic"
 EDIT_TEXT_SWATCH_TIP = "Text in color {color}"
 EDIT_STROKE_SWATCH_TIP = "Outline in color {color}"
-EDIT_INSERT_TEXT = "+ Insert Text"
-EDIT_UPDATE_TEXT = "✓ Save Text Changes"
-EDIT_INSERT_NEW_TEXT = "+ Insert as New Text"
-EDIT_APPLY_FILTER = "+ Apply Filter"
-EDIT_UPDATE_FILTER = "✓ Update Selected Filter"
-EDIT_INSERT_NEW_FILTER = "+ Insert as New Filter"
+EDIT_INSERT_TEXT = "Insert Text"
+EDIT_UPDATE_TEXT = "Save Text Changes"
+EDIT_INSERT_NEW_TEXT = "Insert as New Text"
+EDIT_APPLY_FILTER = "Apply Filter"
+EDIT_UPDATE_FILTER = "Update Selected Filter"
+EDIT_INSERT_NEW_FILTER = "Insert as New Filter"
 EDIT_FILTER_BW = "Black and White"
 EDIT_FILTER_SEPIA = "Sepia"
 EDIT_FILTER_VIGNETTE = "Vignette"
@@ -562,12 +623,12 @@ EDIT_TRANSITIONS = {
     "slideleft": ("◀", "Slide Left"),
     "slideright": ("▶", "Slide Right"),
 }
-EDIT_CHOOSE_FILTER = "Choose a visual effect:"
-EDIT_CHOOSE_TRANSITION = "Choose a video transition:"
-EDIT_EXTRA_DURATION = "Duration:"
-EDIT_INSERT_TRANSITION = "+ Insert Transition"
-EDIT_UPDATE_TRANSITION = "✓ Update Selected Transition"
-EDIT_INSERT_NEW_TRANSITION = "+ Insert as New Transition"
+EDIT_CHOOSE_FILTER = "Choose a visual effect"
+EDIT_CHOOSE_TRANSITION = "Choose a video transition"
+EDIT_EXTRA_DURATION = "Duration"
+EDIT_INSERT_TRANSITION = "Insert Transition"
+EDIT_UPDATE_TRANSITION = "Update Selected Transition"
+EDIT_INSERT_NEW_TRANSITION = "Insert as New Transition"
 EDIT_CLIP_TEXT = "Text"
 EDIT_CLIP_FILTER = "Filter"
 EDIT_CLIP_TRANSITION = "Transition"
@@ -596,6 +657,7 @@ EDIT_UNDO = "Undo"
 EDIT_REDO = "Redo"
 EDIT_ZOOM_IN = "Zoom In"
 EDIT_ZOOM_OUT = "Zoom Out"
+EDIT_ZOOM_SLIDER = "Timeline zoom"
 EDIT_ZOOM_FIT = "Fit All"
 EDIT_ZOOM_FIT_TIP = (
     "Frames the whole edit. Zooming out further still works — the empty space "
@@ -624,23 +686,26 @@ EDIT_GAIN_DETACHED = (
 )
 
 # tela do projeto
-EDIT_CANVAS = "Canvas:"
-EDIT_CANVAS_ASPECT = "Aspect ratio:"
+EDIT_CANVAS = "Canvas"
+EDIT_CANVAS_ASPECT = "Aspect ratio"
 EDIT_CANVAS_ASPECT_AUTO = "Automatic"
 EDIT_CANVAS_ASPECT_TIP = (
     "Locks the aspect ratio of the editing canvas and the preview (e.g. 16:9, 4:3, 9:16, 1:1, 21:9).\n"
     "Clips are fitted proportionally, without distortion."
 )
-EXPORT_ASPECT = "Aspect ratio:"
+EXPORT_ASPECT = "Aspect ratio"
 EXPORT_ASPECT_AUTO = "Same as project"
 EXPORT_ASPECT_TIP = (
     "Aspect ratio of the final exported video (16:9 widescreen, 4:3 standard, 9:16 vertical, etc.)."
 )
-EDIT_CANVAS_RATE = "Frame rate:"
+EDIT_CANVAS_RATE = "Frame rate"
 EDIT_CANVAS_AUTO = "Automatic · follows the media"
 EDIT_CANVAS_RATE_AUTO = "Automatic"
 EDIT_CANVAS_SIZE = "{width} × {height}"
 EDIT_CANVAS_FPS = "{fps} fps"
+EDIT_CANVAS_SUMMARY_AUTO = "Automatic canvas · {aspect} · {size} · {rate}"
+EDIT_CANVAS_SUMMARY = "Canvas · {aspect} · {size} · {rate}"
+EDIT_CANVAS_BUTTON_TIP = "The project canvas: aspect ratio, size and the slideshow format"
 EDIT_CANVAS_TIP = (
     "The size of the exported video. Every clip is fitted into it whole, with "
     "black bars where there is room left — nothing is stretched or cropped.\n"
@@ -682,7 +747,7 @@ EDIT_MODE_TIP = (
     "A fast cut copies the data as is: it's done in seconds with no loss at "
     "all, but starts at the keyframe before the marked point."
 )
-EDIT_PLAN = "What will happen: {plan}"
+EXPORT_PLAN_TITLE = "What will happen"
 EDIT_PLAN_FAST = ".{container} · direct copy (no re-encode) · {duration}"
 EDIT_FAST_UNAVAILABLE = (
     "Fast cut works while the edit is a trim of a single file, at its own canvas "
@@ -758,11 +823,23 @@ SETTINGS_ENCODER_TEST_TIP = (
     "Has the GPU encode a real frame. It's the only way to know: ffmpeg lists "
     "encoders that don't open on this machine."
 )
-SETTINGS_THEME = "Theme"
+SETTINGS_TAB_THEME = "Theme"
+SETTINGS_THEME_MODE = "Mode"
+SETTINGS_PALETTE = "Palette"
+SETTINGS_PALETTE_HINT = "Colors change when you confirm with OK."
 SETTINGS_LANGUAGE = "Language"
 LANGUAGE_NAMES = {"pt-BR": "Português (Brasil)", "en": "English"}
 THEME_DARK = "Dark"
 THEME_LIGHT = "Light"
+PALETTE_NAMES = {
+    "atual": "Current", "grafite": "Graphite and indigo", "estudio": "Studio",
+    "mare": "Tide", "aurora": "Aurora", "cinema": "Cinema",
+}
+PALETTE_TAGLINES = {
+    "atual": "The original colors", "grafite": "Blue-gray and indigo",
+    "estudio": "Neutral gray, no brand color", "mare": "Navy and cyan",
+    "aurora": "Plum, violet and magenta", "cinema": "Warm charcoal and amber",
+}
 
 # --- diálogos e erros --------------------------------------------------------
 DIALOG_ERROR_TITLE = "Unable to Continue"
@@ -827,8 +904,8 @@ EDIT_KEYFRAME_NEXT = "Next keyframe"
 EDIT_KEYFRAME_ADD = "Add a keyframe at the current time"
 EDIT_KEYFRAME_REMOVE = "Remove the keyframe at this time"
 EDIT_KEYFRAME_TOGGLE = "Toggle a keyframe at the playhead"
-EDIT_KEYFRAME_EASING = "Easing:"
-EDIT_OPACITY = "Opacity:"
+EDIT_KEYFRAME_EASING = "Easing"
+EDIT_OPACITY = "Opacity"
 EDIT_ANIMATION_PRESETS = {
     "": "— Select a preset —",
     "slide_up": "Slide Up (from the bottom)",
@@ -850,39 +927,44 @@ EDIT_EASINGS = {
 
 # aba Propriedades
 PROP_TITLE = "Properties"
-PROP_TITLE_CLIP = "Properties: {name}"
 PROP_CLOSE_TIP = "Close the Properties tab"
+PROP_NO_SETTINGS = "This block has no settings besides its duration and its position on the timeline."
 PROP_CLIP_ID = "ID #{id} · {kind}"
 PROP_KINDS = {"none": "Media", "image": "Image", "text": "Text", "filter": "Filter", "transition": "Transition"}
 PROP_TRANSFORM = "Transform"
 PROP_SPEED = "Speed"
 PROP_VOLUME = "Volume"
-PROP_POS_X = "Position X:"
-PROP_POS_Y = "Position Y:"
-PROP_WIDTH = "Width:"
-PROP_HEIGHT = "Height:"
+PROP_POS_X = "Position X"
+PROP_POS_Y = "Position Y"
+PROP_WIDTH = "Width"
+PROP_HEIGHT = "Height"
+PROP_FIELD_X = "X"
+PROP_FIELD_Y = "Y"
+PROP_FIELD_W = "W"
+PROP_FIELD_H = "H"
+PROP_SPEED_RANGE = "0.1× to 10×"
 PROP_LOCK_RATIO = "Lock aspect ratio"
-PROP_SCALE = "Scale:"
-PROP_ROTATION = "Rotation:"
+PROP_SCALE = "Scale"
+PROP_ROTATION = "Rotation"
 PROP_KEYFRAMES_NONE = "No keyframes"
 PROP_KEYFRAMES_COUNT = "{count} keyframe(s)"
-PROP_QUICK_EFFECT = "Quick effect:"
+PROP_QUICK_EFFECT = "Quick effect"
 PROP_CHROMA = "Green screen (chroma key)"
 PROP_CHROMA_ENABLE = "Enable green screen removal"
-PROP_CHROMA_COLOR = "Color to remove:"
+PROP_CHROMA_COLOR = "Color to remove"
 PROP_CHROMA_COLOR_TIP = "Click to choose the color to remove"
 PROP_CHROMA_PICK_TITLE = "Choose Color to Remove"
 PROP_CHROMA_PRESETS = {"#00FF00": "Standard green", "#00B140": "Studio green", "#0000FF": "Blue"}
 PROP_CHROMA_PRESET_TIP = "{name} ({color})"
-PROP_CHROMA_TOLERANCE = "Tolerance:"
-PROP_CHROMA_SMOOTHING = "Smoothing:"
+PROP_CHROMA_TOLERANCE = "Tolerance"
+PROP_CHROMA_SMOOTHING = "Smoothing"
 PROP_BLUR = "Blurred Background"
 PROP_BLUR_ENABLE = "Fill the edges with the blurred clip"
 PROP_BLUR_NOTE = "Covers the whole canvas under the clip, including the tracks below it."
 PROP_BLUR_CHROMA = "Unavailable while green screen is on: the blur would show where the color was removed."
 PROP_TRANSITION = "Video transition"
-PROP_TRANSITION_EFFECT = "Effect:"
-EDIT_FONT_SEARCH = "🔍 Search fonts…"
+PROP_TRANSITION_EFFECT = "Effect"
+EDIT_FONT_SEARCH = "Search fonts…"
 
 JOB_STATUS_LABELS = {
     "pending": "Queued", "running": "Downloading", "processing": "Processing",
