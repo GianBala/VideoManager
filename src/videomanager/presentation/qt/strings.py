@@ -118,6 +118,27 @@ TIP_CODEC = (
     "sozinha assim que você escolher uma resolução que a tenha."
 )
 
+# --- bitrate de vídeo --------------------------------------------------------
+LABEL_VIDEO_BITRATE = "Bitrate"
+LABEL_VIDEO_BITRATE_VALUE = "Valor"
+VIDEO_BITRATE_SOURCE = "Igual ao da fonte"
+VIDEO_BITRATE_SOURCE_WITH = "Igual ao da fonte ({bitrate})"
+VIDEO_BITRATE_CUSTOM = "Personalizado…"
+TIP_VIDEO_BITRATE = (
+    "“Igual ao da fonte” baixa o vídeo como o site o entrega, sem recodificar.\n"
+    "Um valor recodifica o vídeo depois do download para esse bitrate médio, em duas "
+    "passadas: o arquivo sai perto de bitrate × duração (menos, se a imagem for simples "
+    "demais para gastá-lo), mas demora mais e perde um pouco de qualidade."
+)
+QUALITY_WARN_RECODE = (
+    "O vídeo será recodificado a {bitrate} depois do download: demora mais e perde um "
+    "pouco de qualidade. O áudio, as legendas e a capa ficam como estão."
+)
+QUALITY_WARN_BITRATE_ABOVE_SOURCE = (
+    "A fonte tem {source}, abaixo de {requested}: recodificar só aumentaria o arquivo, sem "
+    "recuperar qualidade. O vídeo será mantido como está."
+)
+
 # --- controles de áudio ------------------------------------------------------
 LABEL_AUDIO_FORMAT = "Formato"
 LABEL_AUDIO_QUALITY = "Bitrate"
