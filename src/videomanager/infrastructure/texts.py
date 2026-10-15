@@ -24,6 +24,7 @@ register({
     "PHASE_EXTRACTING_AUDIO": ("Extraindo áudio", "Extracting audio"),
     "PHASE_CONVERTING_VIDEO": ("Convertendo vídeo", "Converting video"),
     "PHASE_REMUXING": ("Trocando o container", "Changing the container"),
+    "PHASE_RECODING_VIDEO": ("Recodificando o vídeo no bitrate escolhido", "Re-encoding the video at the chosen bitrate"),
     "PHASE_METADATA": ("Gravando metadados", "Writing metadata"),
     "PHASE_THUMBNAIL": ("Embutindo a capa", "Embedding the thumbnail"),
     "PHASE_SUBTITLES": ("Embutindo legendas", "Embedding subtitles"),
@@ -353,6 +354,18 @@ register({
     "DOWNLOAD_WRITE_FAILED": (
         "Falha ao gravar o arquivo: {error}. Verifique espaço em disco e permissões da pasta de destino.",
         "Couldn't write the file: {error}. Check the disk space and the destination folder's permissions.",
+    ),
+    "RECODE_FAILED": (
+        "Não foi possível recodificar o vídeo no bitrate escolhido: {error}",
+        "Couldn't re-encode the video at the chosen bitrate: {error}",
+    ),
+    "LOG_RECODE_SKIPPED": (
+        "O vídeo baixado já tem {source} kbps, no bitrate pedido ({requested} kbps) ou abaixo: mantido sem recodificar.",
+        "The downloaded video is already at {source} kbps, at or below the requested bitrate ({requested} kbps): kept as is.",
+    ),
+    "LOG_RECODE_DONE": (
+        "Vídeo recodificado em {family} a {requested} kbps (a fonte tinha {source} kbps).",
+        "Video re-encoded as {family} at {requested} kbps (the source was {source} kbps).",
     ),
     "THUMBNAIL_NOT_EMBEDDED": ("A capa não foi embutida: {error}", "The thumbnail wasn't embedded: {error}"),
 })

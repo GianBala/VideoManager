@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QFrame,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -16,18 +17,21 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from videomanager.application import encoding as hwaccel
+from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.application.preferences import RANGES
 from videomanager.presentation.qt.tasks import WorkerRunner
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import fonts, strings
+from videomanager.presentation.qt.arrow_spin import ArrowSpinBox
 from videomanager.presentation.qt.i18n import align_label_column
+from videomanager.presentation.qt.panels.segmented import SegmentButton, segmented
+from videomanager.presentation.qt.palette_picker import SeletorDePaleta
 from videomanager.presentation.qt.theme import FIELD_WIDTH
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
@@ -45,9 +49,11 @@ class SettingsDialog(QDialog):
         parent: QWidget | None = None,
         *,
         runtime: DesktopRuntimePort,
+        tools: FFmpegTools | None = None,
     ) -> None:
         super().__init__(parent)
         self._runtime = runtime
+        self._tools = tools
         # A sondagem da placa corre fora da thread da interface (ver
         # :meth:`_describe_encoder`).
         self._runner = WorkerRunner()
@@ -61,8 +67,12 @@ class SettingsDialog(QDialog):
         self._labels: list[QLabel] = []
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 18, 24, 20)
+        layout.setSpacing(16)
         tabs = QTabWidget()
+        tabs.tabBar().setProperty("role", "underline")
         tabs.addTab(self._build_general(), strings.SETTINGS_TAB_GENERAL)
+        tabs.addTab(self._build_theme(), strings.SETTINGS_TAB_THEME)
         tabs.addTab(self._build_network(), strings.SETTINGS_TAB_NETWORK)
         tabs.addTab(self._build_subs(), strings.SETTINGS_TAB_SUBS)
         self._align_label_column()
@@ -73,7 +83,13 @@ class SettingsDialog(QDialog):
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setProperty("role", "primary")
         layout.addWidget(buttons)
+        # Sem foco inicial, o Qt entrega o foco ao primeiro da ordem de Tab — a barra de abas — ao ativar o
+        # diálogo, e "Geral" abria com a borda de foco, como se Tab já tivesse sido apertado. O foco nasce no
+        # próprio diálogo, que não desenha nada: o Tab continua alcançando a barra (como em ``MainWindow``).
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setFocus()
 
     # ------------------------------------------------------------------
 
@@ -81,12 +97,20 @@ class SettingsDialog(QDialog):
         page = QWidget()
         page.setProperty("role", "plain")
         form = QFormLayout(page)
-        form.setHorizontalSpacing(10)
-        form.setVerticalSpacing(8)
+        form.setContentsMargins(0, 16, 0, 8)
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(12)
         form.setLabelAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
         return page, form
+
+    @staticmethod
+    def _add_heading(form: QFormLayout, text: str) -> None:
+        """Título de um grupo de campos: "DOWNLOADS", "VÍDEO"… Só agrupa, não guarda nada."""
+        heading = QLabel(text.upper())
+        heading.setProperty("role", "group-heading")
+        form.addRow(heading)
 
     def _add_row(self, form: QFormLayout, text: str, field: QWidget | QHBoxLayout) -> None:
         label = QLabel(text)
@@ -140,11 +164,13 @@ class SettingsDialog(QDialog):
     def _build_general(self) -> QWidget:
         page, form = self._make_page()
 
+        self._add_heading(form, strings.SETTINGS_GROUP_DOWNLOADS)
         row = QHBoxLayout()
         # Sem margem própria: com ela a linha do destino terminava antes das
         # outras da mesma coluna.
         row.setContentsMargins(0, 0, 0, 0)
         self._dest = QLineEdit(self._settings.download_dir)
+        self._dest.setProperty("role", "field")
         row.addWidget(self._dest, 1)
         browse = QPushButton(strings.DEST_BROWSE)
         browse.clicked.connect(self._choose_dir)
@@ -155,26 +181,23 @@ class SettingsDialog(QDialog):
         self._separate.setChecked(self._settings.separate_by_site)
         self._add_check(form, self._separate)
 
-        self._theme = QComboBox()
-        self._theme.addItem(strings.THEME_DARK, "dark")
-        self._theme.addItem(strings.THEME_LIGHT, "light")
-        self._theme.setCurrentIndex(max(0, self._theme.findData(self._settings.theme)))
-        self._theme.setFixedWidth(FIELD_WIDTH)
-        self._add_row(form, strings.SETTINGS_THEME, self._theme)
-
+        self._add_heading(form, strings.SETTINGS_GROUP_LANGUAGE)
         self._language = QComboBox()
         for code, name in strings.LANGUAGE_NAMES.items():
             self._language.addItem(name, code)
         self._language.setCurrentIndex(max(0, self._language.findData(self._settings.language)))
+        self._language.setProperty("role", "field")
         self._language.setFixedWidth(FIELD_WIDTH)
         self._add_row(form, strings.SETTINGS_LANGUAGE, self._language)
 
+        self._add_heading(form, strings.SETTINGS_GROUP_VIDEO)
         self._encoder = QComboBox()
         for value, label in hwaccel.choices():
             self._encoder.addItem(label, value)
         self._encoder.setCurrentIndex(
             max(0, self._encoder.findData(self._settings.hardware_encoder))
         )
+        self._encoder.setProperty("role", "field")
         self._encoder.setFixedWidth(FIELD_WIDTH)
         self._encoder.setToolTip(strings.SETTINGS_ENCODER_TIP)
         self._encoder.currentIndexChanged.connect(self._describe_encoder)
@@ -195,23 +218,110 @@ class SettingsDialog(QDialog):
         row.addWidget(test)
         form.addRow(row)
         self._describe_encoder()
+        self._add_row(form, strings.SETTINGS_FFMPEG, self._build_ffmpeg_info())
 
         return page
+
+    def _build_ffmpeg_info(self) -> QFrame:
+        """De onde veio o ffmpeg em uso e onde ele está, num destaque com a origem numa pastilha.
+
+        Mora ao lado da codificação porque as duas linhas respondem à mesma pergunta: com o que este
+        aplicativo vai codificar. Era a única coisa que a barra de status dizia só ali, em português de
+        uma palavra ("ffmpeg: sistema"), e só enquanto a janela estava aberta.
+        """
+        destaque = QFrame()
+        destaque.setProperty("role", "callout")
+        coluna = QVBoxLayout(destaque)
+        coluna.setContentsMargins(14, 10, 14, 10)
+        coluna.setSpacing(6)
+        linha = QHBoxLayout()
+        linha.setSpacing(10)
+        if self._tools is None:
+            origem, nota, caminho = "", strings.SETTINGS_FFMPEG_UNKNOWN, ""
+        else:
+            origem, nota = strings.FFMPEG_SOURCES.get(self._tools.source, (self._tools.source, ""))
+            caminho = str(self._tools.ffmpeg)
+        self._ffmpeg_source = QLabel(origem)
+        self._ffmpeg_source.setProperty("role", "chip")
+        self._ffmpeg_source.setProperty("tone", "accent")
+        self._ffmpeg_source.setVisible(bool(origem))
+        linha.addWidget(self._ffmpeg_source, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._ffmpeg_note = QLabel(nota)
+        self._ffmpeg_note.setProperty("role", "dim")
+        self._ffmpeg_note.setWordWrap(True)
+        linha.addWidget(self._ffmpeg_note, 1)
+        coluna.addLayout(linha)
+        self._ffmpeg_path = QLabel(caminho)
+        self._ffmpeg_path.setProperty("role", "dim")
+        self._ffmpeg_path.setFont(fonts.mono(12))
+        self._ffmpeg_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._ffmpeg_path.setWordWrap(True)
+        self._ffmpeg_path.setVisible(bool(caminho))
+        coluna.addWidget(self._ffmpeg_path)
+        return destaque
+
+    def _build_theme(self) -> QWidget:
+        """Modo (escuro ou claro) e paleta: as duas escolhas que definem as cores do aplicativo."""
+        page, form = self._make_page()
+
+        self._theme = QComboBox()
+        self._theme.addItem(strings.THEME_DARK, "dark")
+        self._theme.addItem(strings.THEME_LIGHT, "light")
+        self._theme.setCurrentIndex(max(0, self._theme.findData(self._settings.theme)))
+        self._theme.setFixedWidth(FIELD_WIDTH)
+        # O modo se escolhe nos dois botões segmentados; a lista continua sendo quem guarda o valor (``result_settings`` e a
+        # miniatura das paletas leem dela) e fica escondida, sempre de acordo com os botões.
+        self._theme.setParent(page)
+        self._theme.setVisible(False)
+        self._add_heading(form, strings.SETTINGS_THEME_MODE)
+        form.addRow(self._build_mode_selector())
+
+        self._add_heading(form, strings.SETTINGS_PALETTE)
+        self._palette_picker = SeletorDePaleta(self._settings.palette, self._settings.theme)
+        form.addRow(self._palette_picker)
+        hint = QLabel(strings.SETTINGS_PALETTE_HINT)
+        hint.setProperty("role", "dim")
+        hint.setWordWrap(True)
+        form.addRow(hint)
+        # As miniaturas mostram a paleta no modo escolhido, antes de confirmar.
+        self._theme.currentIndexChanged.connect(
+            lambda _index: self._palette_picker.set_mode(self._theme.currentData() or "dark"))
+        return page
+
+    def _build_mode_selector(self) -> QWidget:
+        """Escuro | Claro como um controle segmentado, ligado à lista escondida ``_theme``."""
+        botoes = []
+        for index, (value, label) in enumerate((("dark", strings.THEME_DARK), ("light", strings.THEME_LIGHT))):
+            botao = SegmentButton()
+            botao.setText(label)
+            botao.setChecked(self._theme.currentIndex() == index)
+            botao.clicked.connect(lambda _, i=index: self._theme.setCurrentIndex(i))
+            botoes.append(botao)
+        # A lista manda: trocar por ela (um teste, um atalho) marca o botão certo.
+        self._theme.currentIndexChanged.connect(lambda i: botoes[i].setChecked(True) if 0 <= i < len(botoes) else None)
+        caixa = QWidget()
+        caixa.setProperty("role", "plain")
+        linha = QHBoxLayout(caixa)
+        linha.setContentsMargins(0, 0, 0, 0)
+        linha.addWidget(segmented(botoes), 0, Qt.AlignmentFlag.AlignLeft)
+        linha.addStretch(1)
+        return caixa
 
     def _build_network(self) -> QWidget:
         page, form = self._make_page()
 
-        self._concurrent = QSpinBox()
+        self._add_heading(form, strings.SETTINGS_GROUP_SPEED)
+        self._concurrent = ArrowSpinBox()
         self._concurrent.setRange(*RANGES["max_concurrent_jobs"])
         self._concurrent.setValue(self._settings.max_concurrent_jobs)
         self._add_row(form, strings.SETTINGS_CONCURRENT, self._concurrent)
 
-        self._fragments = QSpinBox()
+        self._fragments = ArrowSpinBox()
         self._fragments.setRange(*RANGES["concurrent_fragments"])
         self._fragments.setValue(self._settings.concurrent_fragments)
         self._add_row(form, strings.SETTINGS_FRAGMENTS, self._fragments)
 
-        self._rate = QSpinBox()
+        self._rate = ArrowSpinBox()
         self._rate.setRange(*RANGES["rate_limit_kbps"])
         self._rate.setSingleStep(256)
         self._rate.setValue(self._settings.rate_limit_kbps)
@@ -220,6 +330,7 @@ class SettingsDialog(QDialog):
         for spin in (self._concurrent, self._fragments, self._rate):
             spin.setFixedWidth(_NUMBER_WIDTH)
 
+        self._add_heading(form, strings.SETTINGS_GROUP_COOKIES)
         self._cookies = QComboBox()
         self._cookies.addItem(strings.SETTINGS_COOKIES_NONE, "")
         for browser in sorted(self._runtime.cookie_browsers):
@@ -228,12 +339,14 @@ class SettingsDialog(QDialog):
             max(0, self._cookies.findData(self._settings.cookies_browser))
         )
         self._cookies.setToolTip(strings.SETTINGS_COOKIES_TIP)
+        self._cookies.setProperty("role", "field")
         self._cookies.setFixedWidth(FIELD_WIDTH)
         self._add_row(form, strings.SETTINGS_COOKIES, self._cookies)
 
         cookie_file_row = QHBoxLayout()
         cookie_file_row.setContentsMargins(0, 0, 0, 0)
         self._cookies_file = QLineEdit(self._settings.cookies_file)
+        self._cookies_file.setProperty("role", "field")
         self._cookies_file.setPlaceholderText(strings.SETTINGS_COOKIES_FILE_PLACEHOLDER)
         self._cookies_file.setToolTip(strings.SETTINGS_COOKIES_FILE_TIP)
         cookie_file_row.addWidget(self._cookies_file, 1)
@@ -247,6 +360,7 @@ class SettingsDialog(QDialog):
     def _build_subs(self) -> QWidget:
         page, form = self._make_page()
 
+        self._add_heading(form, strings.SETTINGS_GROUP_FILE)
         self._embed_thumb = QCheckBox(strings.SETTINGS_EMBED_THUMB)
         self._embed_thumb.setChecked(self._settings.embed_thumbnail)
         self._add_check(form, self._embed_thumb)
@@ -255,6 +369,7 @@ class SettingsDialog(QDialog):
         self._embed_meta.setChecked(self._settings.embed_metadata)
         self._add_check(form, self._embed_meta)
 
+        self._add_heading(form, strings.SETTINGS_GROUP_SUBS)
         self._write_subs = QCheckBox(strings.SETTINGS_WRITE_SUBS)
         self._write_subs.setChecked(self._settings.write_subtitles)
         self._add_check(form, self._write_subs)
@@ -268,6 +383,7 @@ class SettingsDialog(QDialog):
         self._add_check(form, self._auto_subs)
 
         self._sub_langs = QLineEdit(", ".join(self._settings.subtitle_langs))
+        self._sub_langs.setProperty("role", "field")
         self._add_row(form, strings.SETTINGS_SUB_LANGS, self._sub_langs)
 
         return page
@@ -302,6 +418,7 @@ class SettingsDialog(QDialog):
         updated.download_dir = self._dest.text().strip() or self._settings.download_dir
         updated.separate_by_site = self._separate.isChecked()
         updated.theme = self._theme.currentData() or "dark"
+        updated.palette = self._palette_picker.palette()
         updated.language = self._language.currentData() or self._settings.language
         updated.hardware_encoder = (
             self._encoder.currentData() or hwaccel.SOFTWARE

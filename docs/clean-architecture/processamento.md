@@ -62,15 +62,20 @@ Estas regras saíram de um checkup da conversão e têm teste em
   `VideoTarget` (com `quality`, que escolhe o número na tabela de cada encoder,
   a mesma da exportação) ou num `AudioTarget` (com `reencode`, sem o qual o
   mesmo codec seria copiado intacto); descrição, estimativa e execução seguem os
-  caminhos da conversão. O tamanho de vídeo da tabela vem de
-  `infrastructure/ffmpeg/sample.py`: três trechos de 8 s codificados com o
-  mesmo `build_video_args`. A conta por pixels errou de −66% a +1500% em vídeos
-  reais; trechos de 2 s erravam até +195%, porque o keyframe que abre cada
-  trecho pesa demais num conteúdo parado, e 8 s é o intervalo de keyframes do
-  x264. A medida roda na vaga da inspeção (um ffmpeg por vez da aba), é
-  cancelada ao mudar arquivos, codec, modo ou encoder, e só começa se couber em
-  70% da memória disponível (~600 bytes por pixel da origem: 4,3 GB num 4K);
-  senão, ou com memória desconhecida, a conta por pixels fica no lugar.
+  caminhos da conversão. O tamanho de tudo o que recodifica (a tabela, e também a
+  conversão comum e a janela de exportação) vem de
+  `infrastructure/ffmpeg/sample.py`, que codifica trechos com o mesmo
+  `build_video_args` e entrega os bytes ao `domain/size_model.py`: estratos,
+  trecho representativo pela curva da fonte, estimador de razão, e cobertura
+  proporcional à velocidade do encoder (arquivo inteiro quando cabe em 20 s de
+  relógio). A conta por pixels errou de −66% a +1500% em vídeos reais; o desenho
+  anterior, três trechos de 8 s a 25%, 50% e 75%, errou −99,9% numa fonte pesada
+  só nos primeiros 20%. As decisões e os números estão em
+  [Estimativas de tamanho](../estimativas-de-tamanho.md). A medida roda na vaga da
+  inspeção (um ffmpeg por vez da aba), é cancelada ao mudar arquivos, codec, modo
+  ou encoder, e só começa se couber em 70% da memória disponível (~600 bytes por
+  pixel da origem: 4,3 GB num 4K); senão, ou com memória desconhecida, a conta
+  por pixels fica no lugar, marcada como aproximada.
   O vídeo é **CRF com teto**: `VideoTarget.max_kbps` é uma fração do bitrate de
   vídeo da origem (85/70/50/35% por nível), enviada como VBV ao x264 e ao x265
   (`-maxrate`/`-bufsize` de 1 s) e como `mbr` ao SVT-AV1. Medido contra o CRF

@@ -1,21 +1,28 @@
 # Janela principal
 
-A janela abre com o título "Video Manager {versão}", em 1180×1000 px. Ela tem
-três partes fixas: a barra de menu, quatro abas (**Download**, **Convert**,
-**Editar** e **Metadados**) e, embaixo delas, a **fila de tarefas** — comum às
-abas, para que trocar de aba nunca esconda o que está em andamento.
+A janela abre com o título "Video Manager {versão}", em 1000 px de altura e 1180 px
+de largura de conteúdo (mais o menu lateral). Ela tem quatro partes: a barra de
+menu, o **menu lateral**, a área da aba à vista e, à direita, a **gaveta de
+tarefas** — comum às abas, para que trocar de aba nunca esconda o que está em
+andamento.
+
+O **menu lateral** tem as quatro abas (**Download**, **Converter**, **Editar** e
+**Metadados**), de cima para baixo, e embaixo dois itens que não são abas:
+**Tarefas**, que abre e fecha a gaveta (com um selo que conta as tarefas em
+andamento e na fila) e **Ajustes**, que abre as [configurações](configuracoes.md).
+A aba à vista leva uma faixa do acento na borda da janela e o fundo suave.
 
 ## Barra de menu
 
 Os menus **Arquivo** e **Ferramentas** acompanham a aba à vista: só aparecem os
 comandos que fazem sentido nela, e os atalhos de uma aba ficam desligados nas
-outras (`Ctrl+O`, por exemplo, adiciona arquivos na aba Convert e abre um
+outras (`Ctrl+O`, por exemplo, adiciona arquivos na aba Converter e abre um
 projeto na aba Editar).
 
 - **&Arquivo**
   - Na aba **Download**: **Abrir pasta de downloads…** (abre no gerenciador de
     arquivos do sistema a pasta configurada) e **Sair**.
-  - Na aba **Convert**: **Adicionar arquivos para conversão…** (`Ctrl+O`),
+  - Na aba **Converter**: **Adicionar arquivos para conversão…** (`Ctrl+O`),
     **Remover arquivos selecionados**, **Limpar lista de conversão**, **Abrir
     pasta de destino…** e **Sair**. Remover e Limpar ficam desabilitados
     quando não há o que remover.
@@ -43,24 +50,40 @@ projeto na aba Editar).
 | Aba | Para que serve |
 |---|---|
 | [Download](guia-download.md) | Baixar vídeo/áudio de uma URL (yt-dlp) |
-| [Convert](guia-conversao.md) | Converter arquivos que já estão no disco |
+| [Converter](guia-conversao.md) | Converter arquivos que já estão no disco |
 | [Editar](guia-edicao.md) | Cortar e montar uma edição multipista |
 | [Metadados](guia-metadados.md) | Editar tags, trilhas e capa, gravando numa cópia |
 
-O divisor entre as abas e a fila é ajustado automaticamente conforme o
-tamanho da janela — até o usuário arrastá-lo manualmente, quando a escolha
-passa a ser dele e para de mudar sozinha. **Nas abas Editar e Metadados a fila
-fica oculta**: ali o espaço vale mais como área de trabalho, e a barra de
-status continua contando as tarefas em andamento mesmo sem a fila visível.
+A gaveta é uma coluna de largura fixa e **trocar de aba não a mexe**: aberta
+numa aba, continua aberta nas outras, o Editar e os Metadados incluídos, para
+acompanhar uma tarefa enquanto se edita; fechada, continua fechada. O item
+**Tarefas** a liga e desliga, e o selo dele conta as tarefas em andamento mesmo
+com a gaveta fechada. Ao enfileirar uma exportação, um aviso flutuante diz que
+a tarefa entrou na fila e oferece **Ver tarefas**, que abre a gaveta ali mesmo.
+Fechar a gaveta no Editar ou nos Metadados não muda a escolha de Download e
+Converter: ao voltar a elas, a gaveta está onde estava.
 
-## A fila de tarefas
+**Em janela estreita a gaveta recolhe sozinha.** Quando a janela é mais estreita
+que o menu, o conteúdo da aba e os 344 px da gaveta somados, a gaveta sai de
+cena em vez de segurar a janela numa largura grande (sem ela, a janela encolhe
+até o mínimo do conteúdo). Se a janela volta a ter largura, ela volta. O item
+**Tarefas** a abre mesmo assim, e a janela cresce o necessário para caber.
 
-Tabela com as colunas **Título**, **Saída**, **Situação**, **Progresso** e
-**Velocidade**, compartilhada por Download, Convert e Editar — um download, uma conversão e
-uma exportação de edição aparecem lado a lado na mesma lista, na ordem em que
-foram enfileirados. Com a fila vazia, ela mostra "A fila está vazia."
+## A gaveta de tarefas
 
-- **Duplo clique** numa linha abre o arquivo resultante (se já existir).
+Uma lista de **cartões**, um por tarefa, compartilhada por Download, Converter e
+Editar — um download, uma conversão e uma exportação de edição aparecem lado a
+lado na mesma lista, na ordem em que foram enfileirados. No título, duas
+pastilhas contam as tarefas **ativas** e as **na fila**. Com a lista vazia, ela
+mostra "A fila está vazia.".
+
+Cada cartão traz um ícone da situação (baixando, convertendo, concluído, falhou,
+na fila), o título, a situação com o perfil ("Baixando · MP4 · 1080p"), a barra
+de progresso e, embaixo dela, a porcentagem à esquerda e a velocidade e o tempo
+restante à direita. A tarefa concluída mostra o tamanho do arquivo, e a que falhou, o
+motivo em vermelho.
+
+- **Duplo clique** num cartão abre o arquivo resultante (se já existir).
 - **Botão direito** abre um menu contextual ao que está selecionado:
   - **Cancelar** — se a tarefa ainda não terminou.
   - **Tentar de novo** — se ela falhou ou foi cancelada.
@@ -68,17 +91,15 @@ foram enfileirados. Com a fila vazia, ela mostra "A fila está vazia."
   - **Copiar mensagem de erro** — se houve erro.
   - **Ver detalhes técnicos** — abre um diálogo somente leitura com o log
     completo daquela tarefa (as mensagens que o yt-dlp/ffmpeg produziram).
-- Dois botões fixos abaixo da tabela: **Cancelar todos** e **Limpar
+- Dois botões fixos embaixo da lista: **Cancelar todos** e **Limpar
   encerrados** (remove da lista o que já terminou, com sucesso ou erro).
 
-A coluna **Velocidade** muda de significado conforme a fase: taxa de
-transferência e tempo estimado enquanto baixa; "parte X/Y" quando o stream é
-fragmentado e não tem tamanho total conhecido (comum em HLS); o tamanho final
-do arquivo quando a tarefa termina; um traço quando não há nada a mostrar.
-
-A barra de status, na base da janela, resume o estado da fila
-("`{ativos} em andamento · {pendentes} na fila · {concluídos} concluídos`")
-e mostra a origem do `ffmpeg` em uso (embutido, baixado ou do sistema).
+Quando o stream é fragmentado e não tem tamanho total conhecido (comum em HLS),
+em vez do tempo restante o cartão mostra "parte X/Y". Os avisos que antes ficavam
+numa barra de status — "{n} tarefa(s) adicionada(s) à fila", o erro de gravação
+das preferências — são **avisos flutuantes** que somem sozinhos; a **origem do
+`ffmpeg`** em uso (empacotado, gerenciado ou do sistema) e o caminho dele estão em
+**Configurações → Geral**.
 
 ## Fechar a janela com tarefas em andamento
 

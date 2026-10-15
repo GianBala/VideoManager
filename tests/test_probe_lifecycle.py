@@ -92,7 +92,8 @@ def test_analise_real_monta_cartao_qualidades_e_libera_fila(desktop_app, monkeyp
         desktop_app.processEvents()
         assert not errors, errors
         assert window._card._title.text() == media.title
-        assert media.duration and ':' in window._card._meta.text()
+        # A duração mora no selo da miniatura (o cartão do protótipo a tira da linha de origem).
+        assert media.duration and ':' in window._card._thumb.badge()
         assert window._add_button.isEnabled()
     finally:
         for worker in workers:

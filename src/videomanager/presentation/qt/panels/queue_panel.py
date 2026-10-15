@@ -1,20 +1,19 @@
-"""A fila de tarefas: tabela com progresso, ações e menu de contexto.
+"""A fila de tarefas: lista de cartões com progresso, ações e menu de contexto.
 
-Usa ``QAbstractTableModel`` com um delegate de barra de progresso, em vez de
-``QTableWidget`` com um widget por célula. A diferença importa: o progresso chega
-várias vezes por segundo por tarefa, e criar/atualizar um ``QProgressBar`` real em
-cada célula gasta muito mais que desenhar a barra no delegate.
+O modelo é um ``QAbstractTableModel`` e o desenho é um delegate (:mod:`queue_cards`), em vez de um widget
+por tarefa. A diferença importa: o progresso chega várias vezes por segundo por tarefa, e criar/atualizar
+widgets reais em cada linha gasta muito mais que desenhar o cartão no delegate.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, Qt, QUrl
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QRect, QRectF, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
+    QColor,
     QDesktopServices,
-    QFontDatabase,
     QPainter,
     QPalette,
 )
@@ -22,36 +21,34 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QDialog,
-    QGroupBox,
+    QFrame,
     QHBoxLayout,
-    QHeaderView,
+    QLabel,
+    QListView,
     QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QStyle,
-    QStyledItemDelegate,
-    QStyleOptionProgressBar,
-    QTableView,
+    QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
 from videomanager.application.formatting import DASH
-from videomanager.application.formatting import format_eta
 from videomanager.application.formatting import format_size
-from videomanager.application.formatting import format_speed
 from videomanager.application.jobs.models import Job
 from videomanager.application.jobs.models import JobStatus
-from videomanager.presentation.qt import strings
+from videomanager.presentation.qt import fonts, icons, strings, theme
 from videomanager.presentation.qt.i18n import bind, on_language_change
+from videomanager.presentation.qt.panels.queue_cards import REGIOES_CLICAVEIS, TaskDelegate, situacao, velocidade_e_tempo
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
 _COL_TITLE, _COL_OUTPUT, _COL_STATUS, _COL_PROGRESS, _COL_SPEED = range(5)
 
-# Linhas que a fila mostra por inteiro antes de precisar rolar. Sem esse piso o
-# divisor cede toda a altura ao painel de cima e sobra uma linha e meia.
-_MIN_ROWS = 4
+# Cartões simples que a lista mostra por inteiro antes de precisar rolar. Sem esse piso o divisor cede
+# toda a altura ao painel de cima e sobra um cartão e meio.
+_MIN_CARDS = 2
 
 
 def status_text(job):
@@ -115,6 +112,10 @@ class QueueModel(QAbstractTableModel):
             if column == _COL_SPEED:
                 return self._speed_text(job)
 
+        if role == Qt.ItemDataRole.AccessibleTextRole and column == _COL_TITLE:
+            # O cartão é pintado: o leitor de tela só tem o que o modelo diz dele.
+            return f"{job.title}. {situacao(job)}" + (f". {job.error}" if job.error else "")
+
         if role == Qt.ItemDataRole.ToolTipRole:
             if column == _COL_STATUS and job.error:
                 return str(job.error)
@@ -139,11 +140,7 @@ class QueueModel(QAbstractTableModel):
             return format_size(job.result_size) if job.result_size else DASH
         if progress is None:
             return DASH
-        pieces: list[str] = []
-        if progress.speed:
-            pieces.append(format_speed(progress.speed))
-        if progress.eta:
-            pieces.append(strings.QUEUE_ETA.format(eta=format_eta(progress.eta)))
+        pieces = velocidade_e_tempo(job)
         if not pieces and progress.fragment_count:
             pieces.append(strings.QUEUE_FRAGMENT.format(index=progress.fragment_index or 0,
                                                         count=progress.fragment_count))
@@ -177,78 +174,156 @@ class QueueModel(QAbstractTableModel):
         self.endResetModel()
 
 
-class ProgressDelegate(QStyledItemDelegate):
-    """Desenha a barra de progresso da coluna de andamento."""
+class QueueView(QListView):
+    """A lista de cartões.
 
-    def paint(self, painter, option, index) -> None:
-        percent = index.data(Qt.ItemDataRole.DisplayRole)
-        job: Job | None = index.data(Qt.ItemDataRole.UserRole)
-
-        bar = QStyleOptionProgressBar()
-        bar.rect = option.rect.adjusted(4, 5, -4, -5)
-        # A folha de estilo não alcança o que o delegate desenha; quem responde
-        # pelas cores aqui é a paleta da aplicação (ver presentation/qt/theme.qpalette).
-        bar.palette = option.palette
-        bar.minimum = 0
-        bar.textVisible = True
-        bar.textAlignment = Qt.AlignmentFlag.AlignCenter
-
-        if job is not None and job.status is JobStatus.DONE:
-            bar.maximum, bar.progress, bar.text = 100, 100, "100%"
-        elif job is not None and job.status in (JobStatus.FAILED, JobStatus.CANCELLED):
-            bar.maximum, bar.progress = 100, 0
-            bar.text = strings.JOB_STATUS_LABELS[job.status.value]
-        elif job is not None and job.status is JobStatus.PENDING:
-            # Barra vazia, não animada: a animação sugere trabalho em curso, e
-            # uma tarefa esperando vaga na fila ainda não começou nada.
-            bar.maximum, bar.progress = 100, 0
-            bar.text = strings.JOB_STATUS_LABELS[job.status.value]
-        elif percent is None:
-            # Barra contínua: acontece em HLS sem tamanho total e durante o
-            # pós-processamento, quando não há percentual honesto a mostrar.
-            bar.maximum, bar.progress, bar.text = 0, 0, "…"
-        else:
-            bar.maximum, bar.progress = 100, int(percent)
-            bar.text = f"{percent:.0f}%"
-
-        QApplication.style().drawControl(
-            QStyle.ControlElement.CE_ProgressBar, bar, painter
-        )
-
-
-class _QueueTable(QTableView):
-    """Tabela cuja altura preferida é a mínima que ela aceita.
-
-    O padrão do Qt para qualquer área de rolagem é um palpite fixo (192 px) que
-    não tem relação com esta tabela. O divisor reservava esse palpite e tirava a
-    diferença dos controles, que apareciam cortados com a fila vazia embaixo.
-    Pedindo o mínimo, a fila ainda cresce com a janela — mas só depois que o
-    resto está inteiro.
+    A altura preferida é a mínima que ela aceita: o padrão do Qt para qualquer área de rolagem é um palpite
+    fixo (192 px) sem relação com o conteúdo. O divisor reservava esse palpite e tirava a diferença dos
+    controles, que apareciam cortados com a fila vazia embaixo. Pedindo o mínimo, a fila ainda cresce com
+    a janela — mas só depois que o resto está inteiro.
     """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._delegate = TaskDelegate(self)
+        self.setItemDelegate(self._delegate)
+        self.setProperty("role", "queue")
+        self.setFrameShape(QListView.Shape.NoFrame)
+        self.setUniformItemSizes(False)
+        # Largura nova, altura nova: o texto quebra por largura, então a lista refaz as medidas ao redimensionar.
+        self.setResizeMode(QListView.ResizeMode.Adjust)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setMouseTracking(True)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+    @property
+    def delegate(self) -> TaskDelegate:
+        return self._delegate
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(super().sizeHint().width(), self.minimumHeight())
 
+    def card_at(self, position) -> tuple[Job | None, str, QModelIndex]:
+        """A tarefa sob ``position`` (coordenadas da lista), a região do cartão e o índice."""
+        index = self.indexAt(position)
+        if not index.isValid():
+            return None, "", index
+        job: Job | None = index.data(Qt.ItemDataRole.UserRole)
+        if job is None:
+            return None, "", index
+        return job, self._delegate.regiao_em(job, self.visualRect(index), position), index
+
+    def dataChanged(self, top_left, bottom_right, roles=()) -> None:  # noqa: N802
+        """Só o andamento mudou: repinta a linha, sem pedir a altura de todas as outras de novo.
+
+        A lista refaz o layout inteiro a cada aviso do modelo, e com 200 tarefas isso custava 23 ms por
+        aviso de progresso. A altura de um cartão não depende do percentual, então na maioria dos avisos
+        basta repintar.
+        """
+        model = self.model()
+        largura = self._delegate.largura()
+        jobs = [model.index(row, 0).data(Qt.ItemDataRole.UserRole)
+                for row in range(top_left.row(), bottom_right.row() + 1)]
+        if largura and all(job is not None and not self._delegate.mudou_a_altura(job, largura, self.font())
+                           for job in jobs):
+            for row in range(top_left.row(), bottom_right.row() + 1):
+                self.viewport().update(self.visualRect(model.index(row, 0)))
+            return
+        super().dataChanged(top_left, bottom_right, roles)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        # Depois do ``super``: a barra de rolagem que aparece (ou some) estreita a área sem mexer na lista, e é a
+        # largura da área que o delegate usa para quebrar o texto.
+        self._delegate.set_largura(self.viewport().width())
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        super().mouseMoveEvent(event)
+        job, region, _ = self.card_at(event.position().toPoint())
+        clickable = region in REGIOES_CLICAVEIS
+        changed = self._delegate.set_hover(job.job_id if job and clickable else None, region if clickable else "")
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if clickable else Qt.CursorShape.ArrowCursor)
+        if changed:
+            self.viewport().update()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        if self._delegate.set_hover(None):
+            self.viewport().update()
+        super().leaveEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        # O segundo clique rápido num botão do cartão (cancelar, abrir a pasta) não é "abrir o arquivo".
+        _, region, _ = self.card_at(event.position().toPoint())
+        if region in REGIOES_CLICAVEIS:
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def viewportEvent(self, event) -> bool:  # noqa: N802
+        if event.type() != QEvent.Type.ToolTip:
+            return super().viewportEvent(event)
+        job, region, index = self.card_at(event.pos())
+        tips = {"cancelar": strings.QUEUE_CANCEL, "pasta": strings.QUEUE_OPEN_FOLDER,
+                "repetir": strings.QUEUE_RETRY, "detalhes": strings.QUEUE_SHOW_LOG}
+        if job is not None and region == "erro":
+            text = str(job.error)  # o cartão corta o erro em quatro linhas; o texto inteiro mora aqui
+        elif job is not None:
+            text = tips.get(region) or self.model().data(index, Qt.ItemDataRole.ToolTipRole)
+        else:
+            text = None
+        if text:
+            QToolTip.showText(event.globalPos(), text, self.viewport())
+        else:
+            QToolTip.hideText()
+        event.accept()
+        return True
+
     def paintEvent(self, event) -> None:  # noqa: N802
         """Diz que a fila está vazia, em vez de mostrar um retângulo em branco.
 
-        Uma tabela só com cabeçalho e um vazio embaixo passa impressão de tela
-        que não carregou.
+        Uma lista sem nada passa impressão de tela que não carregou.
         """
         super().paintEvent(event)
         model = self.model()
         if model is not None and model.rowCount():
             return
+        colors = theme.papeis(*theme.atual())
         painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        area = self.viewport().rect()
+        side, gap, line = 56, 12, 20
+        tile = QRect(area.center().x() - side // 2, area.center().y() - (side + gap + line) // 2, side, side)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(colors["raised"]))
+        painter.drawRoundedRect(QRectF(tile), 16, 16)
+        icon = 26
+        icons.task_list(colors["t3"], icon).paint(
+            painter, QRect(tile.x() + (side - icon) // 2, tile.y() + (side - icon) // 2, icon, icon))
         painter.setPen(self.palette().color(QPalette.ColorRole.PlaceholderText))
-        painter.drawText(
-            self.viewport().rect(), Qt.AlignmentFlag.AlignCenter, strings.QUEUE_EMPTY
-        )
+        painter.drawText(QRect(area.x(), tile.bottom() + gap, area.width(), line),
+                         Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, strings.QUEUE_EMPTY)
         painter.end()
 
 
-class QueuePanel(QGroupBox):
-    """A fila, com barra de ações e menu de contexto."""
+# Largura da gaveta: cabe o cartão com o texto do tempo restante e o botão de cancelar sem quebrar linha.
+DRAWER_WIDTH = 344
+
+# (nome, papel de cor, situações que contam) de cada selo do cabeçalho, na ordem em que aparecem.
+_CHIPS = (
+    ("active", "accent", (JobStatus.RUNNING, JobStatus.PROCESSING), "QUEUE_CHIP_ACTIVE"),
+    ("pending", "dim", (JobStatus.PENDING,), "QUEUE_CHIP_PENDING"),
+    ("failed", "err", (JobStatus.FAILED,), "QUEUE_CHIP_FAILED"),
+    ("cancelled", "dim", (JobStatus.CANCELLED,), "QUEUE_CHIP_CANCELLED"),
+)
+
+
+class QueuePanel(QFrame):
+    """A gaveta de tarefas: cabeçalho com a contagem, a lista de cartões, ações em lote e menu de contexto."""
+
+    hide_requested = Signal()
 
     def __init__(
         self,
@@ -258,54 +333,178 @@ class QueuePanel(QGroupBox):
         runtime: DesktopRuntimePort,
     ) -> None:
         super().__init__(parent)
-        bind(self, "setTitle", lambda: strings.QUEUE_GROUP)
+        self.setProperty("role", "drawer")
+        # Largura máxima, e não fixa: quem decide se a gaveta cabe é a janela (``MainWindow._apply_drawer``), e o mínimo
+        # que ela anuncia depende disso (ver :meth:`set_squeezable`). Esticamento zero no layout da janela, então o
+        # conteúdo cede primeiro e ela mantém os 344 px até o conteúdo chegar ao próprio mínimo.
+        self.setMaximumWidth(DRAWER_WIDTH)
+        self._squeezable = True
         self._runtime = runtime
         self._queue = queue
+        self._counts = {name: 0 for name, *_ in _CHIPS}
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 22, 16, 16)
+        layout.setSpacing(14)
+        self._layout = layout
+
+        header = QHBoxLayout()
+        self._header = header
+        header.setSpacing(10)
+        self._chips_inline: bool | None = None
+        title = bind(QLabel(), "setText", lambda: strings.QUEUE_GROUP)
+        title.setProperty("role", "drawer-title")
+        header.addWidget(title)
+        self._title = title
+        header.addStretch(1)
+        self._hide_button = QToolButton()
+        self._hide_button.setProperty("role", "icon")
+        self._hide_button.setIconSize(QSize(18, 18))
+        bind(self._hide_button, "setToolTip", lambda: strings.QUEUE_HIDE)
+        self._hide_button.clicked.connect(self.hide_requested)
+        header.addWidget(self._hide_button)
+        layout.addLayout(header)
+
+        # Os selos ficam ao lado do título quando cabem (o protótipo mostra dois ou três por vez); com os quatro à vista
+        # (ativas, na fila, falharam, canceladas) não cabem nos 344 px da gaveta, e vão para uma linha própria.
+        # ``_place_chips`` decide, a cada mudança de contagem e de idioma.
+        self._chip_row = QWidget()
+        self._chip_row.setProperty("role", "plain")
+        chips = QHBoxLayout(self._chip_row)
+        chips.setContentsMargins(0, 0, 0, 0)
+        chips.setSpacing(6)
+        self._chips: dict[str, QLabel] = {}
+        for name, tone, _statuses, _key in _CHIPS:
+            chip = QLabel()
+            chip.setProperty("role", "chip")
+            chip.setProperty("tone", tone)
+            self._chips[name] = chip
+            chips.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._chip_row)
+        theme.on_theme_change(self._retheme)
+        self._retheme()
 
         self._model = QueueModel(queue, self)
-        self._table = _QueueTable()
-        self._table.setModel(self._model)
-        self._table.setItemDelegateForColumn(_COL_PROGRESS, ProgressDelegate(self._table))
-        self._table.setAlternatingRowColors(True)
-        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._table.customContextMenuRequested.connect(self._show_context_menu)
-        self._table.doubleClicked.connect(self._open_selected_file)
-
-        header = self._table.horizontalHeader()
-        # O padrão do Qt centraliza o título da coluna, mas o conteúdo das
-        # células é alinhado à esquerda: sem isto, cabeçalho e dados ficam em
-        # colunas visualmente diferentes.
-        header.setDefaultAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        header.setSectionResizeMode(_COL_TITLE, QHeaderView.ResizeMode.Stretch)
-        for column in (_COL_OUTPUT, _COL_STATUS, _COL_PROGRESS, _COL_SPEED):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
-        self._table.setColumnWidth(_COL_OUTPUT, 190)
-        self._table.setColumnWidth(_COL_STATUS, 170)
-        self._table.setColumnWidth(_COL_PROGRESS, 120)
-        self._table.setColumnWidth(_COL_SPEED, 150)
+        self._list = QueueView()
+        bind(self._list, "setAccessibleName", lambda: strings.QUEUE_GROUP)
+        self._list.setModel(self._model)
+        self._list.customContextMenuRequested.connect(self._show_context_menu)
+        self._list.doubleClicked.connect(self._open_selected_file)
+        self._list.delegate.acionado.connect(self._on_card_action)
         self._fit_min_height()
-        # Depois do modelo, que avisa o cabeçalho do texto novo antes da medida.
+        # O piso depende da fonte, e a fonte pode ser outra depois da troca de idioma.
         on_language_change(self._fit_min_height)
-        layout.addWidget(self._table, 1)
+        layout.addWidget(self._list, 1)
 
         actions = QHBoxLayout()
-        actions.addStretch(1)
+        actions.setSpacing(8)
         self._cancel_all = bind(QPushButton(), "setText", lambda: strings.QUEUE_CANCEL_ALL)
+        self._cancel_all.setProperty("role", "btn")
         self._cancel_all.clicked.connect(self._confirm_cancel_all)
-        actions.addWidget(self._cancel_all)
+        actions.addWidget(self._cancel_all, 1)
+        # "Limpar encerrados" é o gesto discreto: sem fundo, ao lado do que interrompe o trabalho.
         self._clear = bind(QPushButton(), "setText", lambda: strings.QUEUE_CLEAR_FINISHED)
+        self._clear.setProperty("role", "ghost")
         self._clear.clicked.connect(self._clear_finished)
-        actions.addWidget(self._clear)
+        actions.addWidget(self._clear, 1)
         layout.addLayout(actions)
+        queue.job_added.connect(self._sync_state)
+        queue.job_changed.connect(self._sync_state)
+        on_language_change(self._retext_chips)
+        # Os selos nascem com texto (escondidos): o que a troca de idioma reescreve tem de existir antes dela.
+        self._retext_chips()
+        self._sync_state()
+
+    def _retheme(self) -> None:
+        self._hide_button.setIcon(icons.chevron_right(theme.papeis(*theme.atual())["t2"]))
+
+    def _sync_state(self, *_) -> None:
+        """Os botões de baixo e os selos do cabeçalho acompanham as tarefas.
+
+        Os botões só ficam à mão quando têm o que fazer (antes respondiam sem fazer nada). Uma passada só pelas
+        tarefas, que o progresso chama várias vezes por segundo: os selos só são reescritos quando uma contagem muda.
+        """
+        counts = {name: 0 for name, *_ in _CHIPS}
+        unfinished = finished = False
+        for job in self._queue.jobs:
+            if job.status.is_final:
+                finished = True
+            else:
+                unfinished = True
+            for name, _tone, statuses, _key in _CHIPS:
+                if job.status in statuses:
+                    counts[name] += 1
+        self._cancel_all.setEnabled(unfinished)
+        self._clear.setEnabled(finished)
+        if counts != self._counts:
+            self._counts = counts
+            self._retext_chips()
+
+    def _retext_chips(self) -> None:
+        for name, _tone, _statuses, key in _CHIPS:
+            count = self._counts[name]
+            singular, plural = getattr(strings, key)
+            self._chips[name].setText((singular if count == 1 else plural).format(count=count))
+            self._chips[name].setVisible(count > 0)
+        self._chip_row.setVisible(any(self._counts.values()))
+        self._place_chips()
+
+    def set_squeezable(self, squeezable: bool) -> None:
+        """Se a gaveta pode ceder largura: ``False`` faz o mínimo da janela incluir os 344 px dela.
+
+        À vista por preferência, ela não conta no mínimo da janela — abaixo do limiar a janela a recolhe, em vez de
+        ficar presa em 840 px por causa de uma coluna que ninguém pediu naquele momento. Aberta de passagem
+        (o item Tarefas numa janela estreita), ela pede o espaço inteiro e a janela cresce até caber.
+        """
+        if squeezable != self._squeezable:
+            self._squeezable = squeezable
+            self.updateGeometry()
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(DRAWER_WIDTH, super().sizeHint().height())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(0 if self._squeezable else DRAWER_WIDTH, super().minimumSizeHint().height())
+
+    def _place_chips(self) -> None:
+        """Os selos ao lado do título quando cabem; senão, numa linha própria logo abaixo dele.
+
+        A conta é a das larguras que cada peça pede, e não um número fixo: o texto de um selo muda com a contagem
+        ("1 falhou", "12 canceladas") e com o idioma.
+        """
+        visiveis = [chip for chip in self._chips.values() if not chip.isHidden()]
+        if not visiveis:
+            return
+        pedido = sum(chip.sizeHint().width() for chip in visiveis) + 6 * (len(visiveis) - 1)
+        margens = self._layout.contentsMargins()
+        livre = (DRAWER_WIDTH - margens.left() - margens.right() - self._title.sizeHint().width()
+                 - self._hide_button.sizeHint().width() - 2 * self._header.spacing())
+        inline = pedido <= livre
+        if inline == self._chips_inline:
+            return
+        self._chips_inline = inline
+        self._header.removeWidget(self._chip_row)
+        self._layout.removeWidget(self._chip_row)
+        if inline:
+            self._header.insertWidget(1, self._chip_row)
+        else:
+            self._layout.insertWidget(1, self._chip_row)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        # Só agora o estilo está aplicado e os selos pedem a largura de verdade.
+        self._chips_inline = None
+        self._place_chips()
+
+    def _on_card_action(self, job: Job, region: str) -> None:
+        if region == "cancelar":
+            self._queue.cancel(job.job_id)
+        elif region == "repetir":
+            self._queue.retry(job.job_id)
+        elif region == "detalhes":
+            self._show_log(job)
+        elif region == "pasta":
+            self._reveal(job.result_path)
 
     def _confirm_cancel_all(self) -> None:
         """Confirma antes de cancelar: o botão fica ao lado de "Limpar encerrados".
@@ -324,25 +523,21 @@ class QueuePanel(QGroupBox):
             self._queue.cancel_all()
 
     def _fit_min_height(self) -> None:
-        # Piso de quatro linhas inteiras, medido nas métricas reais do cabeçalho
-        # e das linhas: um número redondo escrito à mão cortava a última linha
-        # ao meio, e cortaria outra quantidade em cada tema ou fonte — ou
-        # idioma, quando o cabeçalho troca de texto.
-        self._table.setMinimumHeight(
-            self._table.horizontalHeader().sizeHint().height()
-            + _MIN_ROWS * self._table.verticalHeader().defaultSectionSize()
-            + 2 * self._table.frameWidth()
-        )
+        # Piso de dois cartões inteiros, medido pela fonte em uso: um número redondo escrito à mão cortaria
+        # o último ao meio em outra fonte, outro tema ou outro idioma.
+        card = self._list.delegate.altura_minima(self._list.font())
+        self._list.setMinimumHeight(_MIN_CARDS * card + 2 * self._list.frameWidth())
 
     # ------------------------------------------------------------------
 
     def _selected_jobs(self) -> list[Job]:
-        rows = {index.row() for index in self._table.selectionModel().selectedRows()}
+        rows = {index.row() for index in self._list.selectionModel().selectedIndexes()}
         return [job for row in sorted(rows) if (job := self._model.job_at(row))]
 
     def _clear_finished(self) -> None:
         self._queue.remove_finished()
         self._model.reload()
+        self._sync_state()
 
     def _show_context_menu(self, position) -> None:
         jobs = self._selected_jobs()
@@ -384,7 +579,7 @@ class QueuePanel(QGroupBox):
             menu.addAction(action)
 
         if not menu.isEmpty():
-            menu.exec(self._table.viewport().mapToGlobal(position))
+            menu.exec(self._list.viewport().mapToGlobal(position))
 
     def _open_selected_file(self) -> None:
         jobs = self._selected_jobs()
@@ -412,7 +607,7 @@ class QueuePanel(QGroupBox):
         text.setReadOnly(True)
         # Monoespaçada: é saída de ferramenta, com colunas e caminhos que só
         # ficam legíveis alinhados.
-        text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        text.setFont(fonts.mono())
         text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         text.setPlainText("\n".join(job.log))
         box.addWidget(text)

@@ -411,7 +411,7 @@ def test_lista_de_efeitos_do_audio_acompanha_a_troca_de_idioma(desktop_app, pseu
 
 
 def test_botoes_da_barra_sem_bloco_mostram_zero_sem_sinal(panel):
-    """Sem bloco selecionado o volume é "0,0 dB" e a velocidade "1,0x": o sinal de "+" só aparece num bloco.
+    """Sem bloco selecionado o volume é "0,0 dB" e a velocidade "1,0×": o sinal de "+" só aparece num bloco.
     Extrair os dois textos numa função os fazia nascer com "+0,0 dB", 4 px mais largos, e o retrato
     do comportamento (geometria do ``_clip_label``) acusou."""
     from videomanager.domain.i18n import decimal
@@ -419,7 +419,8 @@ def test_botoes_da_barra_sem_bloco_mostram_zero_sem_sinal(panel):
     clip = Clip(_video(), 0.0, 5.0)
     panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(clip,)),)), None, [], {})
     panel._refresh_clip_fields()
-    assert panel._volume_btn.text() == f"🔊 {decimal(0.0)} dB"
-    assert panel._speed_btn.text() == f"⚡ {decimal(1.0)}x"
+    # O texto sem emoji (o ícone é desenhado, na cor do tema) e com o sinal de multiplicar da velocidade.
+    assert panel._volume_btn.text() == f"{decimal(0.0)} dB" and not panel._volume_btn.icon().isNull()
+    assert panel._speed_btn.text() == f"{decimal(1.0)}×" and not panel._speed_btn.icon().isNull()
     panel._timeline.select(clip.clip_id)
-    assert panel._volume_btn.text() == f"🔊 {decimal(0.0, sign=True)} dB", "num bloco o sinal fica, como sempre"
+    assert panel._volume_btn.text() == f"{decimal(0.0, sign=True)} dB", "num bloco o sinal fica, como sempre"

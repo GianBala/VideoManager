@@ -5,17 +5,24 @@ em cima, trilhas empilhadas embaixo, blocos que se arrastam no tempo e entre
 trilhas. **O que está nas trilhas é o que vai ser exportado** — não há marca
 de entrada/saída escondida num formulário à parte.
 
-A janela reúne os comandos de projeto e exportação no topo, acervo e Adicionais
-ao lado da prévia e, abaixo, a linha do tempo. O divisor entre a prévia e
+A janela reúne os comandos de projeto e exportação no topo, o acervo e os Adicionais
+em dois cartões ao lado da prévia e, abaixo, a linha do tempo, também num cartão.
+O divisor entre a prévia e
 a linha do tempo é livre — arraste para dar mais espaço a quem
 precisar dele naquele momento; **"Retrair prévia"** é só o atalho para o
 extremo mais pedido (linha do tempo ocupando quase tudo).
 
-A barra do topo traz, da esquerda para a direita: **Novo**, **Abrir…**,
-**Salvar** e **Salvar como…**; o nome do projeto, com um asterisco enquanto há
-alterações não salvas; **Slideshow**, **Proporção** e **Tela** (ver
-[Exportando a edição](#exportando-a-edição) para o que cada uma decide);
-**Retrair prévia**, **Tela cheia** e **Exportar**.
+A barra do topo traz, da esquerda para a direita: **Novo**, **Abrir…** e
+**Salvar** (o **Salvar como…** está no botão direito do Salvar e no menu
+Arquivo); o nome do projeto, com um ponto âmbar e "não salvo" enquanto há
+alterações não salvas; o **seletor de tela** (proporção, tamanho, taxa e o
+formato de **Slideshow**; ver [Exportando a edição](#exportando-a-edição) para o
+que cada uma decide); **Retrair prévia**, **Tela cheia** e **Exportar**.
+
+A coluna do acervo mostra as mídias em miniaturas de duas colunas, com a duração
+no canto das de vídeo e áudio; a de Adicionais tem as abas **Texto**, **Filtros**
+e **Transições** (e **Propriedades**, depois de aberta), cada uma com o ícone
+sobre o nome.
 
 A coluna de Adicionais já abre com a largura da aba Propriedades, e abrir a
 aba devolve essa largura a uma coluna que tenha sido estreitada, quando a
@@ -118,21 +125,24 @@ Abaixo da imagem, a barra de transporte:
 | Próximo quadro | `.` | avança um quadro |
 | Avançar 1s | — | avança um segundo |
 | Ir ao fim | — | vai para o fim da edição |
-| ◁ keyframe / keyframe ▷ | — | pula para o ponto de corte rápido mais próximo, antes/depois do cursor |
+| Keyframe anterior / seguinte (dois ícones num cartão só) | — | pula para o ponto de corte rápido mais próximo, antes/depois do cursor |
 
-Com **Loop** marcado, a reprodução volta ao começo sem corte: um pouco antes do
+Com o botão **Loop** (duas setas em círculo) ligado — ele fica com o fundo suave e o
+ícone no acento —, a reprodução volta ao começo sem corte: um pouco antes do
 fim, imagem e som do começo já ficam prontos, e o som é emendado na mesma saída
 de áudio. A volta acontece no fim do que se vê e se ouve (o mesmo fim do arquivo
 exportado). Um bloco de vídeo nunca termina em preto por causa de sobra no
 arquivo: blocos novos duram exatamente a trilha de vídeo, e os de projetos
 antigos seguram o último quadro.
 
-Ao lado, um botão de mudo e um controle de volume regulam **apenas a prévia**
+Ao lado, o **ímã** (alinhamento magnético, também com fundo suave quando ligado), um
+botão de mudo e um controle de volume regulam **apenas a prévia**
 (não afetam o volume dos blocos nem o resultado exportado).
 
-O relógio de posição e o contador de quadros usam fonte monoespaçada com
-largura travada no maior valor daquele projeto, para a barra inteira não
-tremer a cada troca de dígito durante a reprodução.
+O relógio de posição (`0:00:02`, em destaque), a duração total e o contador de
+quadros usam fonte monoespaçada com largura travada no maior valor daquele
+projeto, para a barra inteira não tremer a cada troca de dígito durante a
+reprodução. Com largura de sobra, relógio, botões e extras ficam numa fileira só.
 
 Numa janela estreita (tela de notebook, ou escala de 125% ou mais no Windows),
 os controles da direita da barra — keyframe, Loop, ímã e volume — descem para
@@ -162,13 +172,18 @@ Da esquerda para a direita:
    "Vídeo N" existentes: apagar a "Vídeo 2" e criar outra devolve "Vídeo 2",
    e um nome que você escolheu não entra na conta.
 7. Contador de trilhas/blocos/duração total do projeto.
-8. Nome do bloco selecionado.
-9. **Volume do bloco** (`🔊`) — abre um painel com o ganho em decibéis; só fica
+8. O bloco selecionado, numa pastilha com o ícone da espécie e o nome.
+9. **Volume do bloco** (pastilha com o ícone de som e o ganho em dB) — abre um
+   painel com o ganho em decibéis; só fica
    habilitado quando o bloco tem som próprio ajustável (um bloco de vídeo com
    o áudio já separado para outra trilha não tem mais volume próprio ali).
-10. **Velocidade do bloco** (`⚡`) — ver [Velocidade e volume do bloco](#velocidade-e-volume-do-bloco).
-11. Zoom: **−** / **+** / **Ver tudo** (enquadra o projeto inteiro na largura
-    visível).
+10. **Velocidade do bloco** (pastilha com o raio e a velocidade, como `1,0×`) — ver
+    [Velocidade e volume do bloco](#velocidade-e-volume-do-bloco).
+11. Zoom: **−** / controle deslizante / **+** / **Ver tudo** (enquadra o projeto
+    inteiro na largura visível). O controle deslizante vai de "ver tudo", à
+    esquerda, até a janela mais fechada (0,4 s), à direita, e acompanha o que a
+    roda do mouse e os botões fazem; arrastá-lo mantém o cursor de reprodução no
+    mesmo lugar da tela.
 
 ### Gestos com o mouse
 
@@ -276,7 +291,7 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
   podem ser feitos direto na prévia, arrastando o objeto e suas alças —
   inclusive a de rotação, acima da caixa de seleção. Um objeto arrastado ou
   digitado aparece na hora; o quadro completo do compositor chega logo depois.
-- **Velocidade** e **Volume** — os mesmos ajustes dos botões **⚡** e **🔊** da barra, também aqui:
+- **Velocidade** e **Volume** — os mesmos ajustes das pastilhas de velocidade e de volume da barra, também aqui:
   são o que a aba mostra num bloco de **áudio** (que não tem transformação nem Fundo Verde) e
   aparecem também em vídeo com áudio. Fotos, textos, filtros e transições não têm velocidade nem
   volume; um vídeo sem som não tem volume. Num vídeo cujo áudio já foi separado, o volume fica à
@@ -323,11 +338,11 @@ A aba **Propriedades** mostra o bloco selecionado em campos numéricos:
     chegada; o Degrau em qualquer das duas pontas mantém o valor até o ponto
     seguinte.
   - **Volume animado.** O campo **Volume** da aba mostra o que se ouve no cursor.
-    Num bloco sem quadros-chave ele é o volume do bloco, como o 🔊 da barra; num
+    Num bloco sem quadros-chave ele é o volume do bloco, como a pastilha de volume da barra; num
     bloco animado, digitar ali cria ou atualiza o ponto do instante atual — um
     fade-in, por exemplo, é um ponto em −60 dB no começo e outro em 0 dB um
-    pouco depois. O ponto guarda a diferença para o volume do bloco (o que o 🔊
-    ajusta continua valendo para o bloco todo, e a curva anda em cima dele), e a
+    pouco depois. O ponto guarda a diferença para o volume do bloco (o que a pastilha de
+    volume ajusta continua valendo para o bloco todo, e a curva anda em cima dele), e a
     interpolação é em dB, limitada a −60/+12 dB como o controle. **Editar toda a
     animação** desloca o volume do bloco inteiro e deixa os pontos onde estão. Um
     bloco de **áudio** só tem esta animação (sem transformação nem efeitos de
@@ -360,7 +375,7 @@ posição relativos do texto, incluindo contorno e animação.
 
 ### Velocidade e volume do bloco
 
-Os botões **🔊 dB** e **⚡ velocidade**, na barra da linha do tempo, abrem um
+As pastilhas de **volume (dB)** e de **velocidade**, na barra da linha do tempo, abrem um
 painel curto para o bloco selecionado (os mesmos valores estão na aba [Propriedades](#propriedades-e-animação)). A velocidade vai de 0,1× a 10×, com
 atalhos (0,5×, 1×, 1,5×, 2×, 4×); o bloco encurta ou alonga na trilha, e a
 animação por quadros-chave encurta ou alonga junto. Se a
@@ -522,6 +537,14 @@ corte rápido continua disponível —; o que difere do material volta fixo.
   segundo: numa edição de 4 s isso é a diferença entre 1,1 MB e 14,9 MB (na
   tela do projeto, em 1080p a 30 q/s). Escolher tela ou taxa na mão continua
   valendo, e o tamanho estimado ao lado acompanha a escolha.
+- **Tamanho estimado** — a janela codifica trechos da mídia principal com o
+  mesmo codec, nível e tela da exportação e mostra "medindo…" até o número
+  chegar; trocar uma opção no meio da medida abandona a anterior. É um número
+  por mídia principal: com várias fontes, as outras seguem a mesma taxa. O
+  corte rápido usa a proporção do arquivo de origem, e só áudio parte do PCM
+  de 48 kHz estéreo do compositor. Se a medida falha, volta a conta por pixels,
+  que erra bastante com conteúdo muito leve ou muito pesado. Ver
+  [Estimativas de tamanho](estimativas-de-tamanho.md).
 - **Interpolar movimento** — gera quadros de verdade para blocos de vídeo
   abaixo da taxa da tela, em vez de só duplicar o quadro anterior; a conta usa
   a taxa do arquivo já multiplicada pela velocidade do bloco, e fotos não
@@ -543,7 +566,7 @@ corte rápido continua disponível —; o que difere do material volta fixo.
   ("Copiar sem recodificar (h264)"), desabilitados; as escolhas de
   recodificação voltam ao desmarcar. GIF nunca usa o corte rápido.
 - **"Salvar na mesma pasta do arquivo original"** — mesmo padrão da aba
-  Convert.
+  Converter.
 
 O texto **"O que vai acontecer: {plano}"** resume o resultado antes de
 confirmar, com um aviso extra quando aplicável: a memória estimada da
@@ -556,4 +579,4 @@ keyframe).
 em andamento, na mesma [fila de tarefas](interface-geral.md#a-fila-de-tarefas)
 — com a diferença de que, na aba Editar, a fila fica oculta e a janela
 inteira permanece dedicada à edição; o progresso da exportação continua
-visível na barra de status.
+visível no selo do item **Tarefas** do menu lateral e na gaveta de tarefas, que o aviso "Ver tarefas" abre.

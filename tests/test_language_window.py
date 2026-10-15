@@ -192,6 +192,32 @@ def test_troca_nao_refaz_a_divisao_das_colunas_do_editor(janelas, pseudo, tmp_pa
     assert divisor.sizes()[:2] == colunas
 
 
+def test_a_troca_entrega_os_pedidos_de_layout_pendentes_antes_de_devolver_as_colunas(janelas, tmp_path, monkeypatch):
+    """Os pedidos de layout que a troca deixa na fila têm de ser entregues **antes** de ``restore_columns``.
+
+    Entregues depois, voltavam a apertar as colunas pelo mínimo do idioma novo: a de Adicionais ficava em 260 px em vez de
+    307 (47 px a menos, e a volta ao português não a devolvia). Quem os entregava por acaso era a conta de altura da janela,
+    que saiu com a gaveta; hoje é a linha de ``_settle_columns``. Nenhum teste de geometria a vê (o efeito depende do que
+    está pendente na fila e do tamanho da janela): só ``validate_language.py --modo pseudo`` pegava, com 94 diferenças.
+    """
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+    janela = janelas()
+    _cena_editor(janela, _foto(tmp_path), 803, propriedades=True)
+    editor = janela._edit
+    ordem: list[str] = []
+    entregar = QApplication.sendPostedEvents
+    monkeypatch.setattr(QApplication, "sendPostedEvents", staticmethod(
+        lambda receptor=None, tipo=0: (ordem.append("entrega" if tipo == int(QEvent.Type.LayoutRequest) else "outro"),
+                                       entregar(receptor, tipo))[-1]))
+    devolver = editor._top_splitter.restore_columns
+    monkeypatch.setattr(editor._top_splitter, "restore_columns", lambda: (ordem.append("devolve"), devolver())[-1])
+    idioma.apply_language(i18n.ENGLISH)
+    # O divisor também se devolve sozinho no próprio redimensionamento; a que conta é a última, a de ``_settle_columns``.
+    ultima = len(ordem) - 1 - ordem[::-1].index("devolve")
+    assert "entrega" in ordem[:ultima], ordem
+
+
 def test_troca_com_o_editor_escondido_tambem_preserva_as_colunas(janelas, pseudo, tmp_path, desktop_app):
     """Aba escondida recebe o redimensionamento só ao aparecer, fora da troca."""
     janela = janelas()
@@ -281,13 +307,13 @@ class _SemFerramentas:
         return None
 
 
-def test_idioma_nas_configuracoes_logo_abaixo_do_tema(desktop_app):
+def test_idioma_nas_configuracoes_com_a_mesma_largura_do_modo_do_tema(desktop_app):
     from videomanager.presentation.qt.settings_dialog import SettingsDialog
     dialogo = SettingsDialog(Settings(language=i18n.ENGLISH),
                              runtime=_SemFerramentas(build_desktop_runtime(audio_enabled=False)))
     try:
-        formulario = dialogo._theme.parentWidget().layout()
-        assert formulario.getWidgetPosition(dialogo._language)[0] == formulario.getWidgetPosition(dialogo._theme)[0] + 1
+        # O modo do tema mudou para a aba própria (Tema), então os dois combos já não são linhas
+        # vizinhas do mesmo formulário: o que continua valendo é a largura igual.
         assert dialogo._language.maximumWidth() == dialogo._theme.maximumWidth()
         # Cada idioma no próprio nome, qualquer que seja o de agora.
         assert [dialogo._language.itemText(i) for i in range(dialogo._language.count())] == [

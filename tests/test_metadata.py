@@ -352,7 +352,9 @@ def test_aba_abre_edita_e_salva_a_copia(painel, ffmpeg_tools, tmp_path, wait_unt
     assert painel._saved.path.name in painel._result.text() and painel._reveal.isVisibleTo(painel)
     # A cópia guardou o que se pediu: fechar não pergunta mais nada.
     assert not painel.has_unsaved_changes and painel.confirm_discard() and len(perguntas) == 1
-    assert painel._runner.active == 0
+    # O sinal de "salvo" sai de dentro do worker, antes de ele se retirar da conta: lido na hora, o contador ainda via
+    # a tarefa que acabara de avisar (``active == 1``) quando a máquina estava carregada.
+    wait_until(lambda: painel._runner.active == 0, timeout=10)
 
 
 def test_janela_tem_a_aba_com_menu_e_sem_fila(desktop_app, monkeypatch) -> None:
@@ -376,7 +378,7 @@ def test_janela_tem_a_aba_com_menu_e_sem_fila(desktop_app, monkeypatch) -> None:
         assert janela._meta_save_action.shortcut() == QKeySequence("Ctrl+S")
         # Um atalho, uma ação: os das outras abas desligam aqui, e vice-versa.
         assert janela._convert_add_action.shortcut().isEmpty() and janela._save_proj_action.shortcut().isEmpty()
-        assert not janela._queue_panel.isVisible()
+        assert janela._queue_panel.isVisible()  # a gaveta que estava aberta em Download continua aberta nos Metadados
         for aba in (_TAB_CONVERT, _TAB_EDIT):
             janela._tabs.setCurrentIndex(aba)
             assert janela._meta_open_action.shortcut().isEmpty() and janela._meta_save_action.shortcut().isEmpty()
@@ -491,16 +493,18 @@ def test_so_os_campos_de_varias_linhas_tem_alca(painel_visivel) -> None:
 def test_arrastar_a_alca_amplia_so_o_campo_dela(painel_visivel, desktop_app) -> None:
     campos, alcas = painel_visivel._fields, painel_visivel._grips
     descricao, comentario = campos["description"].height(), campos["comment"].height()
+    rotulo = painel_visivel._labels[list(campos).index("description")]
+    topo_do_rotulo = rotulo.mapTo(painel_visivel, rotulo.rect().topLeft()).y()
     _arrastar(alcas["description"], 120)
     _assentar(desktop_app)
     assert campos["description"].height() == descricao + 120
     assert campos["comment"].height() == comentario  # o irmão não se mexe
-    # A alça fica colada ao campo, na largura dele, e o rótulo continua no topo da linha:
+    # A alça fica colada ao campo, na largura dele, e o rótulo continua onde estava, em cima do campo:
     topo = lambda w: w.mapTo(painel_visivel, w.rect().topLeft())  # noqa: E731
     assert topo(alcas["description"]).y() == topo(campos["description"]).y() + campos["description"].height()
     assert alcas["description"].width() == campos["description"].width()
-    rotulo = painel_visivel._labels[list(campos).index("description")]
-    assert topo(rotulo).y() == topo(campos["description"]).y()
+    assert topo(rotulo).y() == topo_do_rotulo
+    assert topo(rotulo).y() + rotulo.height() <= topo(campos["description"]).y()
 
     _arrastar(alcas["comment"], 40)
     _assentar(desktop_app)

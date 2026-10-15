@@ -1,7 +1,7 @@
 """Janela principal: três abas de trabalho sobre uma fila só.
 
 **Download** — endereço e destino no topo, qualidade à esquerda, perfis rápidos
-à direita —, **Convert**, para arquivos que já estão no disco, e **Editar**, que
+à direita —, **Converter**, para arquivos que já estão no disco, e **Editar**, que
 recorta vídeo. As três enfileiram no mesmo lugar, e por isso a **fila fica fora
 das abas**, embaixo: trocar de aba não esconde o que está em andamento.
 
@@ -23,7 +23,8 @@ from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequen
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QGridLayout,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -31,8 +32,6 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QScrollArea,
-    QSplitter,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -46,6 +45,7 @@ from videomanager.application.preferences import Preferences
 from dataclasses import asdict
 from videomanager.application.jobs.models import Job
 from videomanager.application.jobs.models import JobStatus
+from videomanager.domain.estimator import estimate_profile_size
 from videomanager.domain.formats import FormatMatrix
 from videomanager.domain.formats import MediaInfo
 from videomanager.domain.formats import Mode
@@ -54,36 +54,49 @@ from videomanager.domain.selection import AudioRequest
 from videomanager.domain.selection import VideoRequest
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt.tasks import WorkerRunner
-from videomanager.presentation.qt import strings
+from videomanager.application.formatting import DASH
+from videomanager.presentation.qt import icons, strings, theme
 from videomanager.presentation.qt.accessibility import name_controls
 from videomanager.presentation.qt.i18n import apply_language, bind, on_language_change
 from videomanager.presentation.qt.ffmpeg_setup import ensure_ffmpeg
+from videomanager.presentation.qt.panels.address_bar import AddressBar
 from videomanager.presentation.qt.panels.convert_panel import ConvertPanel
+from videomanager.presentation.qt.panels.edit_panel import _EDITOR_MARGINS as EDITOR_MARGINS
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
 from videomanager.presentation.qt.panels.media_card import MediaCard
 from videomanager.presentation.qt.panels.metadata_panel import MetadataPanel
-from videomanager.presentation.qt.panels.profiles_panel import Profile
+from videomanager.presentation.qt.panels.personalize_card import PersonalizeCard
+from videomanager.presentation.qt.panels.profiles_panel import PROFILES, Profile
 from videomanager.presentation.qt.panels.profiles_panel import ProfilesPanel
 from videomanager.presentation.qt.panels.quality_panel import QualityPanel
-from videomanager.presentation.qt.panels.queue_panel import QueuePanel
+from videomanager.presentation.qt.panels.queue_panel import DRAWER_WIDTH, QueuePanel
 from videomanager.presentation.qt.playlist_dialog import PlaylistDialog
 from videomanager.presentation.qt.settings_dialog import SettingsDialog
-from videomanager.presentation.qt.theme import qpalette
-from videomanager.presentation.qt.theme import stylesheet
+from videomanager.presentation.qt.nav_rail import LARGURA as LARGURA_DO_MENU, Paginas
+from videomanager.presentation.qt.theme import EstiloDaBarraDeMenus
+from videomanager.presentation.qt.theme import apply as aplicar_tema
+from videomanager.presentation.qt.toast import ToastHost
 from videomanager.presentation.qt.ports import DesktopRuntimePort
 
 # Índices das abas, na ordem em que são criadas.
 _TAB_DOWNLOAD = 0
 _TAB_CONVERT = 1
 _TAB_EDIT = 2
-# No fim, e não ao lado da Convert: scripts de validação e testes situam o
+# No fim, e não ao lado da aba Converter: scripts de validação e testes situam o
 # editor no índice 2, e a aba nova não desloca nenhum deles.
 _TAB_METADATA = 3
 # Sem margem lateral: o conteúdo da aba fica na mesma coluna da fila, que está
 # fora das abas. Em cima, só o respiro que separa da barra de abas.
-_TAB_MARGINS = (0, 10, 0, 0)
+# Cada página decide a própria margem (a janela não tem mais uma moldura em volta de todas): as que ainda não foram
+# redesenhadas mantêm o recuo de sempre (12 px de cada lado e 22 em cima, que eram os 12 da moldura mais 10); as que
+# seguem o protótipo usam 28 px nas laterais, 24 em cima e embaixo e 18 entre os blocos.
+_TAB_MARGINS = (12, 22, 12, 12)
 _TAB_SPACING = 10
-# Quanto tempo o aviso de "adicionado à fila" fica na barra de status.
+_PAGE_MARGINS = (28, 24, 28, 24)
+_PAGE_SPACING = 18
+# A aba Metadados tem a sua: 20 em cima e 22 embaixo, para o formulário e o rodapé caberem na janela padrão.
+_METADATA_MARGINS = (28, 20, 28, 22)
+# Quanto tempo o aviso de "adicionado à fila" fica na tela.
 _ENQUEUED_MS = 5000
 
 # Espera antes de sondar a placa. A janela aparece primeiro: a sondagem abre
@@ -134,30 +147,48 @@ class MainWindow(QMainWindow):
         # A sondagem da placa é uma vez por execução (ver
         # :meth:`_warm_hardware_probe`).
         self._probed_hardware = False
-        self._split_by_user = False
-        self._balancing = False
+        # Se o usuário quer a gaveta de tarefas aberta em Download e Converter, as abas que produzem tarefas; e, à parte, no
+        # editor e nos Metadados, onde ela entra como estava na aba de onde se veio (ver :meth:`_apply_drawer`).
+        self._drawer_open = True
+        self._drawer_in_workspace = True
+        self._was_workspace = False
+        # A gaveta aberta numa janela estreita demais para ela (a janela cresce até caber), e o que a janela já mandou ao
+        # painel (``None`` até a montagem terminar: os eventos de layout antes disso não contam).
+        self._drawer_forced = False
+        self._drawer_shown: bool | None = None
+        # Filha da janela: um ``QTimer.singleShot`` com método seria entregue depois de a janela ser apagada.
+        self._drawer_timer = QTimer(self)
+        self._drawer_timer.setSingleShot(True)
+        self._drawer_timer.setInterval(0)
+        self._drawer_timer.timeout.connect(self._apply_drawer)
+        # O estilo da barra de menus (letra de atalho sublinhada só com o Alt apertado). O widget não é dono do estilo e o
+        # consulta até o último evento da destruição dele (o QMenuBar pergunta no ChildRemoved): o dono é o QApplication, que
+        # sobrevive aos widgets. Só com a referência Python, o estilo era liberado antes e o processo caía no encerramento.
+        self._menu_style = EstiloDaBarraDeMenus()
+        self._menu_style.setParent(QApplication.instance())
+        self.destroyed.connect(self._menu_style.deleteLater)
+        self.installEventFilter(self)
         self.setWindowTitle(APP_TITLE)
-        # Altura escolhida para caber a aba inteira sem rolagem — barra de abas,
-        # cabeçalho e controles — com a fila mostrando quatro linhas. Quem manda
-        # na conta é a aba de edição, a mais alta das três: cada pixel a mais
-        # aqui vira prévia maior lá (ver :meth:`_balance_panes`), e abaixo disto
-        # o editor nasceria com o botão de exportar fora da vista. O teto é a
-        # tela de 1080p com barra de tarefas. Em telas mais baixas o painel
-        # rola, que é para isso que ele está numa área de rolagem.
-        self.resize(1180, 1000)
+        # Altura escolhida para caber a aba inteira sem rolagem. Quem manda na
+        # conta é a aba de edição, a mais alta das quatro: cada pixel a mais
+        # aqui vira prévia maior lá, e abaixo disto o editor nasceria com o
+        # botão de exportar fora da vista. O teto é a tela de 1080p com barra de
+        # tarefas. Em telas mais baixas o painel rola, que é para isso que ele
+        # está numa área de rolagem.
+        # 1180 px é o que o conteúdo sempre teve; o menu lateral é largura que não pode sair dele, senão o editor
+        # (que pede 1191) nascia com 87 px de rolagem horizontal em vez dos 11 de antes.
+        self.resize(1180 + LARGURA_DO_MENU, 1000)
 
         self._queue = self._runtime.queue(settings, self)
-        self._queue.counts_changed.connect(self._update_status)
+        self._queue.counts_changed.connect(self._update_tasks_badge)
 
         self._build_ui()
+        self._toasts = ToastHost(self)
         self._build_menu()
         self._update_menu_scope(_TAB_DOWNLOAD)
-        self._update_status()
+        self._update_tasks_badge()
         on_language_change(self._retranslate)
         name_controls(self)
-        # Rótulos e avisos mudam de altura com o texto: a altura que as abas
-        # pedem também, medida depois de todos os layouts assentarem.
-        on_language_change(self._balance_panes, after_layout=True)
         # Depois de a janela aparecer, e não durante a montagem: o que se ganha
         # é tempo na primeira exportação, e não vale pagá-lo na abertura.
         QTimer.singleShot(_PROBE_DELAY_MS, self._warm_hardware_probe)
@@ -169,23 +200,27 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
+        # O menu lateral fica à esquerda de tudo; a coluna do conteúdo (abas e fila) é a de sempre.
+        moldura = QHBoxLayout(central)
+        moldura.setContentsMargins(0, 0, 0, 0)
+        moldura.setSpacing(0)
+        conteudo = QWidget()
+        conteudo.setProperty("role", "plain")
+        self._content = conteudo
+        root = QVBoxLayout(conteudo)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # A fila fica fora das abas, embaixo: todas alimentam a mesma fila, e
-        # trocar de aba não pode esconder o que está em andamento — salvo no
-        # editor, onde ela dá lugar à prévia (ver :meth:`_on_tab_changed`).
-        self._tabs = QTabWidget()
+        # As tarefas ficam fora das abas, numa gaveta à direita: todas as abas alimentam a mesma fila, e trocar
+        # de aba não pode esconder o que está em andamento (ver :meth:`_apply_drawer`).
+        self._tabs = Paginas()
         self._tabs.addTab(self._build_download_tab(), strings.TAB_DOWNLOAD)
         self._convert = ConvertPanel(self._settings, self._tools_for_convert, processing=self._processing, runtime=self._runtime)
         self._convert.jobs_ready.connect(self._submit_jobs)
-        self._convert.changed.connect(self._balance_panes)
-        self._tabs.addTab(self._wrap_tab(self._convert), strings.TAB_CONVERT)
+        self._tabs.addTab(self._wrap_tab(self._convert, page=True), strings.TAB_CONVERT)
         self._edit = EditPanel(self._settings, self._tools_for_convert, editor=self._editor_service, processing=self._processing, runtime=self._runtime)
         self._edit.jobs_ready.connect(self._submit_jobs)
-        self._edit.changed.connect(self._balance_panes)
-        self._tabs.addTab(self._wrap_tab(self._edit, horizontal=True), strings.TAB_EDIT)
+        self._tabs.addTab(self._wrap_tab(self._edit, horizontal=True, margins=EDITOR_MARGINS), strings.TAB_EDIT)
         # A aba nasce vazia e o painel entra na primeira visita: montado com a
         # janela, ele somava ~55 ms à abertura e ~6 ms a toda troca de idioma
         # (medido), para quem nunca abre a aba.
@@ -195,24 +230,18 @@ class MainWindow(QMainWindow):
         self._metadata_page.layout().setContentsMargins(0, 0, 0, 0)
         self._tabs.addTab(self._metadata_page, strings.TAB_METADATA)
 
-        self._vertical = QSplitter(Qt.Orientation.Vertical)
-        self._vertical.addWidget(self._tabs)
         self._queue_panel = QueuePanel(self._queue, runtime=self._runtime)
-        self._vertical.addWidget(self._queue_panel)
-        # Os controles têm altura natural — passar disso só deixa espaço vazio.
-        # A fila, ao contrário, aproveita cada pixel: é o painel que o usuário
-        # fica olhando depois de enfileirar. Por isso a sobra vai toda para
-        # baixo, e a divisão é refeita a cada mudança de tamanho enquanto o
-        # usuário não assumir o divisor (ver :meth:`_balance_panes`).
-        self._vertical.setStretchFactor(0, 0)
-        self._vertical.setStretchFactor(1, 1)
-        self._vertical.setChildrenCollapsible(False)
-        self._vertical.installEventFilter(self)
-        self._vertical.splitterMoved.connect(self._on_split_moved)
-        # A divisão do editor é diferente da das outras abas (ver
-        # :meth:`_balance_panes`), então trocar de aba pede um novo cálculo.
+        self._queue_panel.hide_requested.connect(lambda: self._set_drawer(False))
         self._tabs.currentChanged.connect(self._on_tab_changed)
-        root.addWidget(self._vertical, 1)
+        root.addWidget(self._tabs, 1)
+        # Tarefas e Ajustes não são páginas: o primeiro liga e desliga a gaveta, o segundo abre o diálogo. Moram
+        # no pé do menu, longe dos itens que trocam de aba.
+        self._nav_tasks = self._tabs.rail.add_toggle(icons.task_list, strings.NAV_TASKS, self._set_drawer)
+        self._nav_settings = self._tabs.rail.add_action(icons.nav_settings, strings.NAV_SETTINGS, self._open_settings)
+        moldura.addWidget(self._tabs.rail)
+        moldura.addWidget(conteudo, 1)
+        moldura.addWidget(self._queue_panel)
+        self._apply_drawer()
         # Sem foco inicial, o Qt entrega o foco ao primeiro da ordem de Tab — a
         # barra de abas —, e a aba Download abria com a borda de foco, como se
         # Tab já tivesse sido apertado. O foco nasce no widget central, que não
@@ -222,34 +251,91 @@ class MainWindow(QMainWindow):
         central.setFocus()
 
     def _build_download_tab(self) -> QWidget:
-        """Endereço, destino, controles de qualidade e perfis rápidos."""
+        """Endereço e destino em cima, o que se baixa no meio (rola) e o resultado com a ação embaixo."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(*_TAB_MARGINS)
-        layout.setSpacing(_TAB_SPACING)
+        layout.setContentsMargins(*_PAGE_MARGINS)
+        layout.setSpacing(_PAGE_SPACING)
 
         self._header = self._build_header()
         layout.addWidget(self._header)
 
-        self._left_pane = self._build_left_pane()
-        self._right_pane = self._build_right_pane()
-        self._middle = QSplitter(Qt.Orientation.Horizontal)
-        self._middle.addWidget(self._left_pane)
-        self._middle.addWidget(self._right_pane)
-        self._middle.setStretchFactor(0, 1)
-        self._middle.setStretchFactor(1, 0)
-        self._middle.setSizes([820, 300])
-        self._middle.setChildrenCollapsible(False)
+        # A coluna do meio é o que rola; o rodapé fica fora dela, à vista, porque é onde está a ação.
+        self._middle = QWidget()
+        self._middle.setProperty("role", "plain")
+        coluna = QVBoxLayout(self._middle)
+        coluna.setContentsMargins(0, 0, 0, 0)
+        coluna.setSpacing(_PAGE_SPACING)
+        self._card = MediaCard(runtime=self._runtime)
+        coluna.addWidget(self._card)
+        self._profiles = ProfilesPanel()
+        self._profiles.profile_chosen.connect(self._on_profile)
+        coluna.addWidget(self._profiles)
+        # Recolher o "Personalizar" só esconde os campos: eles guardam o que foi escolhido, e o rodapé continua
+        # enfileirando com isso.
+        self._quality = QualityPanel(self._settings)
+        self._quality.changed.connect(self._update_add_button)
+        self._personalize = PersonalizeCard(self._quality)
+        coluna.addWidget(self._personalize)
+        coluna.addStretch(1)
         layout.addWidget(self._wrap_scrollable(self._middle), 1)
+        layout.addWidget(self._build_footer())
         return tab
 
+    def _retheme_header(self) -> None:
+        self._dest_icon.setPixmap(icons.folder(theme.papeis(*theme.atual())["t3"], 16).pixmap(16, 16))
+
+    def _retheme_footer(self) -> None:
+        self._add_button.setIcon(icons.plus(theme.papeis(*theme.atual())["on_fill"], 18))
+
+    def _build_footer(self) -> QWidget:
+        """O resultado do que está escolhido, o tamanho estimado e a ação de enfileirar."""
+        footer = QFrame()
+        footer.setProperty("role", "footer")
+        linha = QHBoxLayout(footer)
+        linha.setContentsMargins(16, 12, 12, 12)
+        linha.setSpacing(16)
+
+        resultado = QVBoxLayout()
+        resultado.setSpacing(2)
+        legenda = bind(QLabel(), "setText", lambda: strings.RESULT_LABEL)
+        legenda.setProperty("role", "micro")
+        resultado.addWidget(legenda)
+        self._result_summary = QLabel(DASH)
+        self._result_summary.setProperty("role", "result")
+        self._result_summary.setWordWrap(True)
+        resultado.addWidget(self._result_summary)
+        linha.addLayout(resultado, 1)
+
+        tamanho = QHBoxLayout()
+        tamanho.setSpacing(6)
+        self._result_size = QLabel(DASH)
+        self._result_size.setProperty("role", "result-size")
+        tamanho.addWidget(self._result_size, 0, Qt.AlignmentFlag.AlignBottom)
+        self._result_estimated = bind(QLabel(), "setText", lambda: strings.RESULT_ESTIMATED)
+        self._result_estimated.setProperty("role", "dim")
+        tamanho.addWidget(self._result_estimated, 0, Qt.AlignmentFlag.AlignBottom)
+        linha.addLayout(tamanho)
+
+        self._add_button = bind(QPushButton(), "setText", lambda: strings.ADD_TO_QUEUE)
+        self._add_button.setProperty("role", "primary")
+        self._add_button.setProperty("emphasis", "large")
+        self._add_button.setEnabled(False)
+        bind(self._add_button, "setToolTip", lambda: strings.ADD_TO_QUEUE_TIP)
+        self._add_button.clicked.connect(self._add_current_to_queue)
+        linha.addWidget(self._add_button)
+        self._retheme_footer()
+        theme.on_theme_change(self._retheme_footer)
+        return footer
+
     @staticmethod
-    def _wrap_tab(inner: QWidget, *, horizontal: bool = False) -> QWidget:
-        """Dá à aba a mesma margem e a mesma rolagem da outra."""
+    def _wrap_tab(inner: QWidget, *, horizontal: bool = False, page: bool = False,
+                  margins: tuple[int, int, int, int] | None = None) -> QWidget:
+        """Dá à aba a mesma margem e a mesma rolagem da outra (``page``: a margem do protótipo, de 28 px)."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(*_TAB_MARGINS)
-        layout.setSpacing(_TAB_SPACING)
+        layout.setContentsMargins(*(margins or (_PAGE_MARGINS if page else _TAB_MARGINS)))
+        layout.setSpacing(_PAGE_SPACING if page else _TAB_SPACING)
         layout.addWidget(MainWindow._wrap_scrollable(inner, horizontal=horizontal))
         return tab
 
@@ -257,133 +343,111 @@ class MainWindow(QMainWindow):
         for index, text in enumerate((strings.TAB_DOWNLOAD, strings.TAB_CONVERT, strings.TAB_EDIT,
                                       strings.TAB_METADATA)):
             self._tabs.setTabText(index, text)
-        self._update_status()
+        self._nav_settings.set_text(strings.NAV_SETTINGS)
+        self._nav_tasks.set_text(strings.NAV_TASKS)
+        self._update_tasks_badge()
+        self._update_footer()
         # Os nomes acessíveis tirados das dicas acompanham as dicas novas.
         name_controls(self)
-
-    def _on_split_moved(self, *_: int) -> None:
-        self._split_by_user = not self._balancing
 
     def _metadata_panel(self) -> MetadataPanel:
         """O painel da aba Metadados, criado na primeira vez que alguém o pede."""
         if self._metadata is None:
             self._metadata = MetadataPanel(self._settings, self._tools_for_convert, runtime=self._runtime)
-            self._metadata_page.layout().addWidget(self._wrap_tab(self._metadata))
+            self._metadata_page.layout().addWidget(self._wrap_tab(self._metadata, page=True, margins=_METADATA_MARGINS))
             name_controls(self._metadata)
         return self._metadata
 
     def _on_tab_changed(self, index: int) -> None:
-        """A fila sai de cena no editor, e a janela inteira vira área de trabalho.
-
-        A regra da fila sempre à vista existe para as duas abas que **produzem**
-        tarefas e vão embora: quem manda baixar quer acompanhar. O editor é o
-        contrário — é onde se fica, e cada pixel que a fila ocupa lá sai da
-        imagem que está sendo cortada.
-
-        Nada se perde: a barra de status continua contando o que está em
-        andamento, na fila e concluído, e a fila volta inteira em qualquer outra
-        aba, com as tarefas que entraram enquanto ela estava escondida.
-        """
-        # Na aba Metadados também: salvar lá não passa pela fila, e o espaço
-        # vale mais como formulário.
+        # Na aba Metadados o painel nasce na primeira visita.
         if index == _TAB_METADATA:
             self._metadata_panel()
-        self._queue_panel.setVisible(index not in (_TAB_EDIT, _TAB_METADATA))
-        self._balance_panes()
+        # Entrar no editor ou nos Metadados leva a gaveta como ela estava na aba de onde se veio: recolhê-la sozinha
+        # escondia a fila de quem tinha uma tarefa em andamento e ia editar. Entre as duas abas de trabalho nada muda.
+        em_trabalho = self._in_workspace()
+        if em_trabalho and not self._was_workspace:
+            self._drawer_in_workspace = self._drawer_open
+        self._was_workspace = em_trabalho
+        # Abrir a gaveta numa janela estreita vale para a aba em que se pediu.
+        self._drawer_forced = False
+        self._apply_drawer()
         self._update_menu_scope(index)
 
-    def _tabs_height(self) -> int:
-        """Altura pedida pelas abas: a maior de todas, para todas caberem.
+    def _apply_drawer(self) -> None:
+        """A gaveta de tarefas à vista, ou não, conforme a vontade do usuário e a largura da janela.
 
-        É a mesma para todas de propósito. A fila fica sempre na mesma linha, o
-        divisor não pula ao trocar de aba, e nenhuma delas nasce cortada — que
-        era o que acontecia quando a altura vinha só da aba de download e a de
-        conversão precisava de mais. Quem quiser outra divisão arrasta o
-        divisor; a partir daí a escolha é do usuário.
+        A gaveta é uma só, e trocar de aba não a mexe: aberta numa aba, continua aberta nas outras, o editor e os
+        Metadados incluídos; fechada, continua fechada. Quem baixa ou exporta e vai editar quer acompanhar a tarefa, e
+        a gaveta está fora das abas justamente para isso. Download e Converter guardam a preferência delas (``_drawer_open``);
+        o editor e os Metadados têm a sua (``_drawer_in_workspace``), que ao entrar neles vem da aba anterior. Fechar ali
+        não revoga a de Download e Converter: ao voltar, a gaveta está onde a preferência a deixou.
 
-        A aba de edição pede mais que as outras, e é ela quem manda quando cabe:
-        o teto continua sendo a altura mínima da fila (ver :meth:`_balance_panes`),
-        então em tela baixa ninguém fica sem espaço — o editor é que passa a
-        rolar.
+        Numa janela estreita ela também recolhe (ver :meth:`_narrow`), e a vontade do usuário fica como estava: quando
+        há largura de novo, a gaveta volta. O contrário seria a janela presa em 840 px por uma coluna que ninguém pediu
+        para ver naquele momento. ``_drawer_forced`` é o usuário pedindo a gaveta numa janela estreita demais (o item
+        Tarefas, o aviso "Ver tarefas"): ela pede então os 344 px inteiros, e a janela cresce.
         """
-        page = self._tabs.widget(_TAB_DOWNLOAD)
-        # A barra de abas entra na conta: o que o divisor reparte é o QTabWidget
-        # inteiro, não a página. A medida sai da página **visível** — a escondida
-        # guarda a geometria de antes do último redimensionamento, e a diferença
-        # ia crescendo a cada troca de aba.
-        visible = self._tabs.currentWidget()
-        chrome = (
-            max(0, self._tabs.height() - visible.height()) if visible.height() else 0
-        )
-        margins = page.layout().contentsMargins()
-        inner = margins.top() + margins.bottom()
+        querida = self._drawer_in_workspace if self._in_workspace() else self._drawer_open
+        wanted = querida and not self._narrow()
+        visible = wanted or self._drawer_forced
+        self._queue_panel.set_squeezable(not self._drawer_forced)
+        if visible == self._drawer_shown:
+            return
+        self._drawer_shown = visible
+        self._queue_panel.setVisible(visible)
+        blocked = self._nav_tasks.blockSignals(True)
+        self._nav_tasks.setChecked(visible)
+        self._nav_tasks.blockSignals(blocked)
 
-        controls = max(
-            self._pane_height(self._left_pane),
-            self._pane_height(self._right_pane),
-        )
-        download = inner + self._header.sizeHint().height() + _TAB_SPACING + controls
-        convert = inner + self._pane_height(self._convert)
-        edit = inner + self._pane_height(self._edit)
-        return chrome + max(download, convert, edit)
+    def _narrow(self) -> bool:
+        """Se falta largura para a gaveta ao lado do conteúdo: o menu, o mínimo que o conteúdo pede e os 344 px dela.
 
-    @staticmethod
-    def _pane_height(pane: QWidget) -> int:
-        """Altura de que o painel precisa na largura que ele tem agora.
-
-        O ``sizeHint`` de um painel com texto que quebra linha é calculado numa
-        largura estreita, e sobra altura: o título do card cabe numa linha só na
-        largura real. Perguntar pela largura de agora evita reservar espaço em
-        cima que a fila usaria melhor.
+        O mínimo do conteúdo muda com o que está na tela (analisar um vídeo o alarga em ~100 px), por isso o limiar é
+        medido a cada vez e não é um número fixo.
         """
-        layout = pane.layout()
-        if layout is not None and layout.hasHeightForWidth() and pane.width() > 0:
-            return layout.heightForWidth(pane.width())
-        return pane.sizeHint().height()
+        return self.width() < LARGURA_DO_MENU + self._content.minimumSizeHint().width() + DRAWER_WIDTH
+
+    def _in_workspace(self) -> bool:
+        """Se a aba à vista é de trabalho (Editar, Metadados): onde a gaveta tem a vontade própria, vinda da aba anterior."""
+        return self._tabs.currentIndex() in (_TAB_EDIT, _TAB_METADATA)
+
+    def _set_drawer(self, open_: bool) -> None:
+        # A vontade do usuário vale na aba em que ele a deu: em Download e Converter é a preferência delas, no editor e nos
+        # Metadados é a de lá. Fechar no editor não revoga a de Download e Converter (decisão Q1 da revisão de b829156).
+        if self._in_workspace():
+            self._drawer_in_workspace = open_
+        else:
+            self._drawer_open = open_
+        self._drawer_forced = open_ and self._narrow()
+        self._apply_drawer()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self._drawer_shown is not None:
+            self._apply_drawer()
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
-        # A geometria de verdade do divisor só existe no primeiro redimensiona-
-        # mento — nem no showEvent, nem num timer logo depois dele.
-        if watched is self._vertical and event.type() == QEvent.Type.Resize:
-            self._balance_panes()
-        return super().eventFilter(watched, event)
+        # O mínimo do conteúdo pode mudar sem a janela mudar de tamanho (um vídeo analisado, outro idioma). É um filtro
+        # de si mesma, e não um ``event()`` sobrescrito, de propósito: o ``DeferredDelete`` que apaga a janela passa
+        # por ``event()``, e o destrutor do ``QThreadPool`` espera os workers lá dentro. Com o override em Python esse
+        # ``delete this`` rodava num quadro que segura o GIL, e um worker ainda vivo, que precisa dele para terminar,
+        # travava o fechamento para sempre (reproduzido: a janela apagada com um worker dormindo trava, sem o override
+        # não). O filtro devolve antes de o evento chegar ao Qt, e o layout só termina de assentar no tique seguinte (um temporizador de 0 ms, que também junta pedidos em sequência).
+        if watched is self:
+            tipo = event.type()
+            if tipo == QEvent.Type.LayoutRequest and self._drawer_shown is not None:
+                self._drawer_timer.start()
+            elif tipo in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease) and event.key() == Qt.Key.Key_Alt:
+                self._set_alt(tipo == QEvent.Type.KeyPress)
+            elif tipo == QEvent.Type.WindowDeactivate:
+                # Alt+Tab não manda a soltura do Alt a esta janela: sem isto o sublinhado ficava preso.
+                self._set_alt(False)
+        return False
 
-    def _balance_panes(self) -> None:
-        """Dá aos controles a altura que eles pedem e a sobra para a fila.
-
-        O ``QSplitter`` reparte o espaço em proporção ao tamanho corrente de
-        cada painel, e não ao que cada um pede: sem esta correção os controles
-        nasciam cortados no meio de uma linha, com a fila vazia logo abaixo.
-        Quando a janela é baixa demais para os dois, a fila fica com o mínimo
-        dela e os controles passam a rolar.
-
-        **Na aba de edição não há divisão**: a fila fica escondida (ver
-        :meth:`_on_tab_changed`) e a janela inteira é do editor, onde toda
-        altura sobrando vira prévia maior. Nas outras duas, sobra vira espaço
-        vazio — os controles têm tamanho natural e param de crescer.
-
-        Vale enquanto o usuário não arrastar o divisor: a partir daí a divisão é
-        escolha dele e não se mexe mais.
-        """
-        if self._split_by_user or self._balancing:
-            return
-        self._balancing = True
-        try:
-            # Mostrar ou esconder uma linha (a trilha de áudio, um aviso) só
-            # muda a altura pedida quando o pedido de layout é entregue. Sem
-            # entregá-lo aqui, mede-se o painel de antes da mudança.
-            QApplication.sendPostedEvents(None, int(QEvent.Type.LayoutRequest))
-            if not self._queue_panel.isVisible():
-                # Fila escondida (aba de edição): não há divisão a fazer, o
-                # painel de cima recebe a janela toda.
-                self._vertical.setSizes([self._vertical.height(), 0])
-                return
-            total = self._vertical.height() - self._vertical.handleWidth()
-            available = total - self._queue_panel.minimumSizeHint().height()
-            top = max(0, min(self._tabs_height(), available))
-            self._vertical.setSizes([top, total - top])
-        finally:
-            self._balancing = False
+    def _set_alt(self, apertado: bool) -> None:
+        if self._menu_style.alt_apertado != apertado:
+            self._menu_style.alt_apertado = apertado
+            self.menuBar().update()
 
     @staticmethod
     def _wrap_scrollable(inner: QWidget, *, horizontal: bool = False) -> QScrollArea:
@@ -407,90 +471,64 @@ class MainWindow(QMainWindow):
         return area
 
     def _build_header(self) -> QWidget:
-        """Endereço e destino: duas linhas na mesma grade, tudo alinhado."""
+        """Endereço (uma barra só) e, embaixo, a pasta de destino em linha corrida."""
         box = QWidget()
-        grid = QGridLayout(box)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(8)
-        # Só a coluna dos campos cresce; rótulos e botões ficam no tamanho deles,
-        # nas mesmas colunas nas duas linhas.
-        grid.setColumnStretch(1, 1)
+        box.setProperty("role", "plain")
+        coluna = QVBoxLayout(box)
+        coluna.setContentsMargins(0, 0, 0, 0)
+        coluna.setSpacing(12)
 
-        url_label = bind(QLabel(), "setText", lambda: strings.URL_LABEL)
-        grid.addWidget(url_label, 0, 0)
-        self._url = bind(QLineEdit(), "setPlaceholderText", lambda: strings.URL_PLACEHOLDER)
-        self._url.setClearButtonEnabled(True)
+        self._address = AddressBar()
+        self._url = self._address.edit
         self._url.returnPressed.connect(self._analyze)
-        grid.addWidget(self._url, 0, 1)
-
-        self._paste = bind(QPushButton(), "setText", lambda: strings.URL_PASTE_AND_ANALYZE)
+        self._paste = self._address.paste
         self._paste.clicked.connect(self._paste_and_analyze)
-        grid.addWidget(self._paste, 0, 2)
-
-        self._analyze_button = bind(QPushButton(), "setText", lambda: strings.URL_ANALYZE)
-        self._analyze_button.setProperty("role", "primary")
-        self._analyze_button.setDefault(True)
+        self._analyze_button = self._address.analyze
         self._analyze_button.clicked.connect(self._analyze)
-        grid.addWidget(self._analyze_button, 0, 3)
+        coluna.addWidget(self._address)
 
+        # "Salvar em  /pasta  Alterar": o caminho é texto corrido (o campo é editável, mas sem moldura), e o "Alterar"
+        # vem logo depois dele.
+        destino = QHBoxLayout()
+        destino.setContentsMargins(4, 0, 0, 0)
+        destino.setSpacing(8)
+        self._dest_icon = QLabel()
+        self._dest_icon.setProperty("role", "plain")
+        destino.addWidget(self._dest_icon)
         dest_label = bind(QLabel(), "setText", lambda: strings.DEST_LABEL)
-        grid.addWidget(dest_label, 1, 0)
+        dest_label.setProperty("role", "dim")
+        destino.addWidget(dest_label)
         self._dest = bind(QLineEdit(self._settings.download_dir), "setToolTip", lambda: strings.DEST_TOOLTIP)
+        self._dest.setProperty("role", "path")
         self._dest.editingFinished.connect(self._on_dest_edited)
-        grid.addWidget(self._dest, 1, 1)
-
-        browse = bind(QPushButton(), "setText", lambda: strings.DEST_BROWSE)
+        self._dest.textChanged.connect(self._fit_dest)
+        destino.addWidget(self._dest, 1000)
+        browse = bind(QPushButton(), "setText", lambda: strings.DEST_CHANGE)
+        browse.setProperty("role", "link")
+        browse.setCursor(Qt.CursorShape.PointingHandCursor)
         browse.clicked.connect(self._choose_dest)
-        # Logo abaixo de "Colar e analisar", na mesma coluna e com a mesma
-        # largura: os dois botões formam uma pilha só, ao lado dos dois campos.
-        grid.addWidget(browse, 1, 2)
-
+        destino.addWidget(browse)
+        destino.addStretch(1)
+        coluna.addLayout(destino)
+        self._fit_dest()
+        self._retheme_header()
+        theme.on_theme_change(self._retheme_header)
         return box
 
-    def _build_left_pane(self) -> QWidget:
-        pane = QWidget()
-        layout = QVBoxLayout(pane)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        self._card = MediaCard(runtime=self._runtime)
-        layout.addWidget(self._card)
-
-        self._quality = QualityPanel(self._settings)
-        self._quality.changed.connect(self._update_add_button)
-        # Trocar de modo ou fazer aparecer um aviso muda a altura do painel; a
-        # divisão da janela acompanha, para nada ficar cortado.
-        self._quality.changed.connect(self._balance_panes)
-        layout.addWidget(self._quality)
-
-        layout.addStretch(1)
-        return pane
-
-    def _build_right_pane(self) -> QWidget:
-        pane = QWidget()
-        layout = QVBoxLayout(pane)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        self._profiles = ProfilesPanel()
-        self._profiles.profile_chosen.connect(self._on_profile)
-        layout.addWidget(self._profiles, 1)
-
-        self._add_button = bind(QPushButton(), "setText", lambda: strings.ADD_TO_QUEUE)
-        self._add_button.setProperty("role", "primary")
-        self._add_button.setEnabled(False)
-        bind(self._add_button, "setToolTip", lambda: strings.ADD_TO_QUEUE_TIP)
-        self._add_button.clicked.connect(self._add_current_to_queue)
-        layout.addWidget(self._add_button)
-
-        return pane
+    def _fit_dest(self) -> None:
+        """O campo do caminho tem a largura do texto: o "Alterar" fica colado nele, e não na ponta da linha."""
+        largura = self._dest.fontMetrics().horizontalAdvance(self._dest.text()) + 6
+        self._dest.setMaximumWidth(max(60, largura))
 
     def _build_menu(self) -> None:
         self._file_menu = bind(self.menuBar().addMenu(""), "setTitle", lambda: strings.MENU_FILE)
         self._file_menu.aboutToShow.connect(self._on_file_menu_about_to_show)
         self._tools_menu = bind(self.menuBar().addMenu(""), "setTitle", lambda: strings.MENU_TOOLS)
         self._help_menu = bind(self.menuBar().addMenu(""), "setTitle", lambda: strings.MENU_HELP)
+        self.menuBar().setStyle(self._menu_style)
+        # Alt+letra abre o menu e a soltura do Alt vai para o menu aberto: o sublinhado sai quando o menu fecha.
+        for menu in (self._file_menu, self._tools_menu, self._help_menu):
+            menu.aboutToHide.connect(lambda: self._set_alt(False))
 
         # Ações universais
         self._quit_action = bind(QAction(self), "setText", lambda: strings.ACTION_QUIT)
@@ -571,7 +609,7 @@ class MainWindow(QMainWindow):
         # Configurações gerais sempre presentes em Ferramentas
         self._tools_menu.addAction(self._settings_action)
         # O mesmo atalho vale uma coisa em cada aba (Ctrl+O abre arquivos na
-        # Convert, projeto no editor e arquivo nos Metadados): só os da aba atual
+        # Converter, projeto no editor e arquivo nos Metadados): só os da aba atual
         # ficam ligados, senão o Qt acusa atalho ambíguo e nenhum dispara.
         for action in (self._meta_open_action, self._meta_save_action):
             action.setShortcut(QKeySequence())
@@ -655,7 +693,6 @@ class MainWindow(QMainWindow):
     def bootstrap(self) -> None:
         """Garante o ffmpeg. Chamado depois de a janela aparecer."""
         self._tools = ensure_ffmpeg(self, runtime=self._runtime)
-        self._update_status()
 
     # ------------------------------------------------------------------
     # Análise
@@ -708,10 +745,11 @@ class MainWindow(QMainWindow):
         self._card.set_media(result)
         self._quality.set_matrix(result.matrix, duration=result.duration)
         self._profiles.set_enabled(True)
+        self._profiles.set_estimates([
+            estimate_profile_size(result.matrix, p.mode, max_height=p.height, audio_codec=p.audio_codec,
+                                  audio_quality=p.audio_quality, duration=result.duration)
+            for p in PROFILES])
         self._update_add_button()
-        # A análise pode acrescentar a linha de trilha de áudio; a divisão da
-        # janela é refeita para o painel continuar inteiro.
-        self._balance_panes()
 
     def _on_probe_failed(self, message: object) -> None:
         self._probe_worker = None
@@ -726,6 +764,13 @@ class MainWindow(QMainWindow):
         self._add_button.setEnabled(self._media is not None)
         if self._media is not None:
             self._add_button.setToolTip("")
+        self._update_footer()
+
+    def _update_footer(self) -> None:
+        """O resultado e o tamanho, lidos do que os campos mostram agora."""
+        analyzed = self._media is not None
+        self._result_summary.setText(self._quality.summary() if analyzed else DASH)
+        self._result_size.setText(self._quality.estimated_size() if analyzed else DASH)
 
     def _on_profile(self, profile: Profile) -> None:
         """Aplica o perfil e enfileira em seguida — um clique só."""
@@ -769,7 +814,6 @@ class MainWindow(QMainWindow):
         if self._tools is not None:
             return True
         self._tools = ensure_ffmpeg(self, runtime=self._runtime)
-        self._update_status()
         # O ffmpeg acabou de aparecer: a sondagem da placa, que na abertura não
         # tinha o que sondar, passa a ter.
         self._warm_hardware_probe()
@@ -849,14 +893,12 @@ class MainWindow(QMainWindow):
             self._queue.submit(job)
         if not jobs:
             return
-        # Aviso na barra de status porque na aba de edição a fila está
-        # escondida: sem ele, clicar em "Adicionar à fila" não teria resposta
-        # nenhuma na tela. O texto sai depois de alguns segundos e a barra volta
-        # a mostrar as contagens.
-        self.statusBar().showMessage(
-            strings.STATUS_ENQUEUED.format(count=len(jobs)), _ENQUEUED_MS
+        # Aviso na tela porque a gaveta pode estar fechada (ou a janela estreita demais para ela): sem ele, clicar em
+        # "Adicionar à fila" não teria resposta nenhuma. "Ver tarefas" abre a gaveta onde quer que o usuário esteja.
+        self._toasts.mostrar(
+            strings.STATUS_ENQUEUED.format(count=len(jobs)), ms=_ENQUEUED_MS,
+            acao=(strings.TOAST_VIEW_TASKS, lambda: self._set_drawer(True)),
         )
-        QTimer.singleShot(_ENQUEUED_MS + 100, self._update_status)
 
     # ------------------------------------------------------------------
     # Configurações e engine
@@ -875,10 +917,10 @@ class MainWindow(QMainWindow):
         self._save_settings()
 
     def _open_settings(self) -> None:
-        dialog = SettingsDialog(self._settings, self, runtime=self._runtime)
+        dialog = SettingsDialog(self._settings, self, runtime=self._runtime, tools=self._tools)
         if dialog.exec() != SettingsDialog.DialogCode.Accepted:
             return
-        previous_theme = self._settings.theme
+        previous_theme, previous_palette = self._settings.theme, self._settings.palette
         self._settings = dialog.result_settings()
         self._save_settings()
         self._queue.apply_settings(self._settings)
@@ -887,13 +929,11 @@ class MainWindow(QMainWindow):
         if self._metadata is not None:
             self._metadata.apply_settings(self._settings)
         self._dest.setText(self._settings.download_dir)
-        if self._settings.theme != previous_theme:
+        if (self._settings.theme, self._settings.palette) != (previous_theme, previous_palette):
             app = QApplication.instance()
             if app is not None:
-                app.setPalette(qpalette(self._settings.theme))
-                app.setStyleSheet(stylesheet(self._settings.theme))
+                aplicar_tema(app, self._settings.theme, self._settings.palette)
         apply_language(self._settings.language)
-        self._update_status()
 
     def _update_engine(self) -> None:
         if self._runtime.is_packaged():
@@ -962,15 +1002,16 @@ class MainWindow(QMainWindow):
     # Status e encerramento
     # ------------------------------------------------------------------
 
-    def _update_status(self) -> None:
+    def _update_tasks_badge(self) -> None:
+        """O número de tarefas em aberto no item Tarefas, e a contagem completa na dica.
+
+        É o que sobrou da barra de status, que contava as tarefas mas só aparecia nas abas onde a fila já estava
+        à vista. O selo vale nas quatro, inclusive no editor e nos Metadados, onde a gaveta está recolhida.
+        """
         active = self._queue.count_by_status(JobStatus.RUNNING, JobStatus.PROCESSING)
         pending = self._queue.count_by_status(JobStatus.PENDING)
         done = self._queue.count_by_status(JobStatus.DONE)
-        parts = [strings.STATUS_COUNTS.format(active=active, pending=pending, done=done)]
-        if self._tools is not None:
-            source = strings.FFMPEG_SOURCES.get(self._tools.source, self._tools.source)
-            parts.append(strings.STATUS_FFMPEG.format(source=source))
-        self.statusBar().showMessage("  |  ".join(parts))
+        self._nav_tasks.set_selo(active + pending, strings.STATUS_COUNTS.format(active=active, pending=pending, done=done))
 
     def _new_project(self) -> None:
         self._tabs.setCurrentIndex(_TAB_EDIT)
@@ -1043,6 +1084,4 @@ class MainWindow(QMainWindow):
         try:
             self._runtime.save_settings(self._settings)
         except OSError as exc:
-            self.statusBar().showMessage(
-                strings.STATUS_SETTINGS_FAILED.format(error=exc), _ENQUEUED_MS
-            )
+            self._toasts.mostrar(strings.STATUS_SETTINGS_FAILED.format(error=exc), tipo="error", ms=_ENQUEUED_MS)
