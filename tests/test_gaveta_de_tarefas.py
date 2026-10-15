@@ -274,12 +274,14 @@ def abrir(desktop_app):
 
 @pytest.mark.parametrize("origem", ["empacotado", "gerenciado", "sistema"])
 def test_ajustes_mostra_de_onde_veio_o_ffmpeg_e_o_caminho(abrir, origem):
-    dialogo = abrir(FFmpegTools(Path("/opt/vm/ffmpeg"), Path("/opt/vm/ffprobe"), origem))
+    caminho = Path("/opt/vm/ffmpeg")
+    dialogo = abrir(FFmpegTools(caminho, Path("/opt/vm/ffprobe"), origem))
     # A origem é uma pastilha (o nome) com a nota ao lado, e o caminho vem embaixo.
     nome, nota = strings.FFMPEG_SOURCES[origem]
     assert dialogo._ffmpeg_source.text() == nome and not dialogo._ffmpeg_source.isHidden()
     assert dialogo._ffmpeg_note.text() == nota
-    assert dialogo._ffmpeg_path.text() == "/opt/vm/ffmpeg"
+    # O caminho que o sistema escreve: com barras invertidas no Windows (a CI de lá achou o "/opt/vm/ffmpeg" fixo).
+    assert dialogo._ffmpeg_path.text() == str(caminho)
     assert not dialogo._ffmpeg_path.isHidden()
 
 
