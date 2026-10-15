@@ -145,6 +145,7 @@ LABEL_AUDIO_FORMAT = "Formato"
 LABEL_AUDIO_QUALITY = "Bitrate"
 AUDIO_CODEC_BEST = "Original (sem perda, mais rápido)"
 AUDIO_SOURCE_INFO = "Melhor trilha da origem: {bitrate}"
+AUDIO_SOURCE_CHOSEN = "Trilha escolhida: {bitrate}"
 
 TIP_AUDIO_FORMAT = (
     "“Original” apenas extrai o áudio do arquivo, sem recodificar: é instantâneo "
