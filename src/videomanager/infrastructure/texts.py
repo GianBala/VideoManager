@@ -25,6 +25,7 @@ register({
     "PHASE_CONVERTING_VIDEO": ("Convertendo vídeo", "Converting video"),
     "PHASE_REMUXING": ("Trocando o container", "Changing the container"),
     "PHASE_RECODING_VIDEO": ("Recodificando o vídeo no bitrate escolhido", "Re-encoding the video at the chosen bitrate"),
+    "PHASE_WAITING_RECODE": ("Aguardando a vez de recodificar", "Waiting for its turn to re-encode"),
     "PHASE_METADATA": ("Gravando metadados", "Writing metadata"),
     "PHASE_THUMBNAIL": ("Embutindo a capa", "Embedding the thumbnail"),
     "PHASE_SUBTITLES": ("Embutindo legendas", "Embedding subtitles"),
