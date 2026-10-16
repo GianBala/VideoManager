@@ -54,3 +54,21 @@ def test_submeter_mesmo_id_duas_vezes_falha():
     with pytest.raises(ValueError):
         service.add(job)
     assert service.jobs == [job]
+
+
+def test_download_concluido_com_aviso_guarda_o_aviso_e_o_diz_na_descricao():
+    """O arquivo foi entregue, mas algo do que foi pedido não foi aplicado (ex.: o bitrate): o cartão diz."""
+    from videomanager.application.events import DownloadResult
+    from videomanager.domain.i18n import Text
+
+    service, job = prepared()
+    aviso = Text("RECODE_FALLBACK", error="sem encoder")
+    service.finish(job.job_id, 1, DownloadResult(Path('final.mp4'), 'Título', (), (aviso,)), size=20)
+    assert job.status is JobStatus.DONE and job.warnings == (aviso,)
+    assert str(job.description).startswith('Descrição') and 'aviso' in str(job.description)
+
+    sem_aviso = Job('url2', 'Outro', 'Outra')
+    service.add(sem_aviso)
+    service.begin(sem_aviso)
+    service.finish(sem_aviso.job_id, 1, DownloadResult(Path('x.mp4'), 'Outro', ()), size=1)
+    assert sem_aviso.warnings == () and str(sem_aviso.description) == 'Outra'

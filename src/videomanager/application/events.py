@@ -39,3 +39,5 @@ class DownloadResult:
     path: Path | None
     title: str
     log: tuple[str, ...] = ()
+    # O arquivo foi entregue, mas algo do que foi pedido não pôde ser aplicado (ex.: o bitrate escolhido).
+    warnings: tuple[Text, ...] = ()

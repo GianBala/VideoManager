@@ -13,11 +13,17 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.application.errors import DownloadFailedError, JobCancelled
+from videomanager.application.errors import JobCancelled
 from videomanager.domain.selection import VideoRequest
 from videomanager.infrastructure.ffmpeg import recode
 from videomanager.infrastructure.ffmpeg.recode import SourceVideo
 from videomanager.infrastructure.yt_dlp.downloader import Downloader, RecodePlan
+
+
+def _e_o_aviso_de_fallback(aviso) -> bool:
+    """O ``Text`` guarda a chave por dentro; o que se vê é o texto do catálogo, no idioma do momento."""
+    from videomanager.domain.i18n import t
+    return str(aviso).startswith(t("RECODE_FALLBACK", error="\0").split("\0")[0])
 
 
 def _fonte(family="h264", container="mp4", kbps=4000.0, duration=10.0) -> SourceVideo:
@@ -150,13 +156,51 @@ def test_cancelar_a_recodificacao_deixa_a_fonte_intacta_e_nao_sobra_arquivo(tool
 
 
 @pytest.mark.ffmpeg
-def test_o_ffmpeg_que_falha_levanta_erro_claro_e_deixa_a_fonte(tools, tmp_path, monkeypatch):
+def test_o_ffmpeg_que_falha_entrega_o_original_com_aviso(tools, tmp_path, monkeypatch):
+    """Decisão Q2 da revisão de efeed31 a 087f775: o download já está completo; a recodificação é um acabamento, e a
+    falha dela não pode descartá-lo. (Antes: ``DownloadFailedError``, e o arquivo ficava preso na pasta temporária.)"""
     baixador, fonte, _ = _baixado(tools, tmp_path, kbps=800)
     antes = fonte.read_bytes()
     monkeypatch.setattr(recode, "build_args", lambda *a, **k: [[tools.ffmpeg_str, "-nostdin", "-i", "/nao/existe.mp4", "x.mp4"]])
-    with pytest.raises(DownloadFailedError):
-        baixador._recode_video()
+    baixador._recode_video()  # não levanta
     assert fonte.read_bytes() == antes
+    assert len(baixador.warnings) == 1 and _e_o_aviso_de_fallback(baixador.warnings[0])
+    assert any("entregue" in linha or "delivered" in linha for linha in baixador.log)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["fonte.mp4"]  # nenhuma sobra da recodificação
+
+
+@pytest.mark.ffmpeg
+def test_run_entrega_o_arquivo_e_o_aviso_quando_a_recodificacao_falha(tools, tmp_path, monkeypatch):
+    fonte = _sintetico(tools, tmp_path)
+    _com_yt_dlp_falso(monkeypatch, fonte)
+    monkeypatch.setattr(recode, "build_args", lambda *a, **k: [[tools.ffmpeg_str, "-nostdin", "-i", "/nao/existe.mp4", "x.mp4"]])
+    resultado = Downloader({}, recode_plan=RecodePlan(kbps=800, tools=tools)).run("https://exemplo.invalido/v")
+    assert resultado.path == fonte and len(resultado.warnings) == 1 and _e_o_aviso_de_fallback(resultado.warnings[0])
+
+
+@pytest.mark.ffmpeg
+def test_arquivo_sem_video_nao_e_recodificado_nem_falha(tools, tmp_path):
+    """Num lote em "Vídeo com áudio", um item só de áudio chegava ao ffmpeg com ``-map 0:v:0`` e a tarefa falhava."""
+    audio = tmp_path / "so_audio.m4a"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=duration=3", "-c:a", "aac",
+                    str(audio)], check=True)
+    antes = audio.read_bytes()
+    baixador = Downloader({}, recode_plan=RecodePlan(kbps=800, tools=tools))
+    baixador._final_path = audio
+    baixador._recode_video()
+    assert audio.read_bytes() == antes and baixador.warnings == ()
+    assert any("vídeo" in linha or "video" in linha for linha in baixador.log)
+    assert [p.name for p in tmp_path.iterdir()] == ["so_audio.m4a"]
+
+
+@pytest.mark.ffmpeg
+def test_a_sondagem_distingue_o_arquivo_sem_video_do_com_video(tools, tmp_path):
+    audio = tmp_path / "so_audio.m4a"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=duration=3", "-c:a", "aac",
+                    str(audio)], check=True)
+    assert not recode.probe_video(audio, tools).has_video
+    assert recode.probe_video(_sintetico(tools, tmp_path), tools).has_video
+    assert SourceVideo("h264", "mp4", 4000.0, 10.0).has_video  # o padrão: quem monta à mão não muda
 
 
 # -- a ligação com o download e o cancelamento de verdade ------------------------------------------------------
