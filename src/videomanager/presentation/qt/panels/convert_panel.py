@@ -729,7 +729,10 @@ class ConvertPanel(QWidget):
                 after = DASH if skipped else (
                     strings.CONVERT_MEASURING if estimated is None else format_size(estimated, estimated=True))
                 item.setText(self._describe(media, after))
-                item.setData(convert_rows.ROLE_AFTER, {"size": estimated, "approximate": approximate, "skipped": skipped})
+                after = {"size": estimated, "approximate": approximate, "skipped": skipped}
+                if not skipped and self._tools is not None and not needs_sample(media, target):
+                    after["exact"] = True  # copiar, MP3 e WAV: sai por conta, sem o erro de uma medida
+                item.setData(convert_rows.ROLE_AFTER, after)
 
     def _remove_selected(self) -> None:
         self._remove_rows([self._list.row(item) for item in self._list.selectedItems()])
