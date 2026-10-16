@@ -177,6 +177,9 @@ def main() -> int:
     conversao._video_codec.setCurrentIndex(max(0, conversao._video_codec.findData("h264")))
     conversao._resize.setCurrentIndex(max(0, conversao._resize.findData(720)))
     processar(1.0)
+    # O tamanho é medido em trechos, em segundo plano: a imagem espera os números chegarem em vez de mostrar "medindo…".
+    esperar(lambda: not conversao._sampling and conversao._sampling_runner.active == 0, prazo=120.0)
+    processar(0.5)
     salvar("convert.png", 1280)
 
     # --- aba Editar ----------------------------------------------------------
