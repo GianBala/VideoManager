@@ -58,6 +58,10 @@ Uma cadeia de combos em cascata, cada um populado só com o que a mídia
    para cima só aumentaria o arquivo (o painel avisa antes de baixar). Os perfis
    rápidos voltam o bitrate ao da fonte. O campo do valor livre aparece numa
    fileira abaixo, só com "Personalizado…" escolhido.
+
+   A recodificação usa todos os núcleos e de 1,2 GB a 4 GB de memória por vídeo, e por isso
+   acontece **uma por vez**: os downloads seguintes terminam de baixar e esperam a vez (a tarefa diz
+   "Aguardando a vez de recodificar"), em vez de somar três encodes na mesma máquina.
 6. **Trilha de áudio** — "Melhor disponível" ou uma das trilhas que o site
    oferece (idioma, codec, bitrate). O campo está sempre à vista; só se
    escolhe quando o site separa vídeo e áudio em streams diferentes (o YouTube
