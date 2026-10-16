@@ -49,6 +49,8 @@ class SourceVideo:
     container: str
     kbps: float | None
     duration: float | None
+    # Falso num arquivo só de áudio (um item de áudio num lote em "Vídeo com áudio"): não há imagem a recodificar.
+    has_video: bool = True
 
 
 def probe_video(path: Path, tools: FFmpegTools, *, timeout: float = 60.0) -> SourceVideo:
@@ -75,6 +77,7 @@ def probe_video(path: Path, tools: FFmpegTools, *, timeout: float = 60.0) -> Sou
         container=path.suffix.lower().lstrip("."),
         kbps=kbps,
         duration=duration,
+        has_video=video is not None,
     )
 
 
