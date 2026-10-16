@@ -1324,6 +1324,7 @@ class _ClipPropertiesWidget(QWidget):
         names = QVBoxLayout()
         names.setSpacing(1)
         self._title_lbl = QLabel(strings.PROP_TITLE)
+        self._title_lbl.setTextFormat(Qt.TextFormat.PlainText)  # o nome do bloco é o do arquivo ou o texto que o usuário digitou
         self._title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._title_lbl.setMinimumWidth(0)
         self._title_lbl.setProperty("role", "section-title")
