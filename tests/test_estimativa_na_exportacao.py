@@ -163,3 +163,51 @@ def test_fechar_a_janela_interrompe_a_medida(qapp, tmp_path) -> None:
     assert not dialogo._sampling
     _esperar(qapp, dialogo)
     assert dialogo._sampling_runner.active == 0
+
+
+def _dialogo_contando(tmp_path: Path, sondado: bool = True):
+    """Uma janela cujo ``ensure_tools`` conta as chamadas (o de verdade pode abrir a caixa "Baixar o ffmpeg?")."""
+    caminho = tmp_path / "orig.mp4"
+    caminho.write_bytes(b"data")
+    ref = MediaRef(path=caminho, kind=MediaKind.VIDEO, duration=120.0, width=1920, height=1080, fps=30.0, has_audio=True)
+    local = LocalMedia(path=caminho, duration=120.0, format_name="mp4", size=40 * 1024 * 1024, streams=(
+        LocalStream(index=0, kind="video", codec="h264", width=1920, height=1080, fps=30.0),
+        LocalStream(index=1, kind="audio", codec="aac")))
+    projeto = new_project().with_track(TrackKind.VIDEO, name="Vídeo 1").with_clip(0, Clip(media=ref, start=0.0, duration=120.0))
+    chamadas: list[int] = []
+    runtime = _AmostrasFalsas(build_desktop_runtime())
+
+    def ferramentas():
+        chamadas.append(1)
+        return TOOLS
+
+    dialogo = ExportDialog(project=projeto, settings=Settings(), pool=[ref], probed={caminho: local} if sondado else {},
+                           ensure_tools=ferramentas, processing=build_processing_service(), runtime=runtime)
+    return dialogo, chamadas
+
+
+def test_a_janela_so_pede_as_ferramentas_quando_vai_medir(qapp, tmp_path) -> None:
+    """``ensure_tools`` pode abrir a caixa "Baixar o ffmpeg?"; a conta do tamanho roda a cada troca de opção."""
+    dialogo, chamadas = _dialogo_contando(tmp_path, sondado=False)
+    try:
+        dialogo._quality_box.setCurrentIndex(1)
+        dialogo._quality_box.setCurrentIndex(0)
+        dialogo._audio_only_check.setChecked(True)
+        assert chamadas == []  # sem mídia sondada não há o que medir, e nada pergunta pelas ferramentas
+    finally:
+        dialogo.reject()
+
+
+def test_pede_as_ferramentas_uma_vez_por_medida_e_nao_a_cada_atualizacao(qapp, tmp_path) -> None:
+    dialogo, chamadas = _dialogo_contando(tmp_path)
+    try:
+        assert chamadas == [1]  # a medida que a montagem da janela pede
+        dialogo._update_plan()
+        dialogo._update_plan()
+        assert chamadas == [1]  # a mesma medida já está no ar: nada a perguntar
+        dialogo._quality_box.setCurrentIndex(dialogo._quality_box.findData("high"))
+        assert chamadas == [1, 1]  # outra escolha, outra medida
+        dialogo._audio_only_check.setChecked(True)
+        assert chamadas == [1, 1]  # só áudio não mede
+    finally:
+        dialogo.reject()
