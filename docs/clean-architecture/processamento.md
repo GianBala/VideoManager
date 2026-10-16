@@ -95,6 +95,8 @@ Estas regras saíram de um checkup da conversão e têm teste em
   Medido: o encode de duas passadas pede 1,2 GB (1080p60) a 4 GB (4K) e todos os núcleos, e três juntos somavam ~12 GB.
   Por isso `downloader._RECODE_SLOT` (um `Semaphore(1)` do processo) deixa uma recodificação por vez; quem espera mantém
   a vaga de download, mostra "Aguardando a vez de recodificar" e é alcançado pelo cancelamento. A vaga volta no `finally`.
+  A falha da recodificação (ou um arquivo sem vídeo) não derruba o download: `DownloadResult.warnings` leva o aviso até
+  `Job.warnings` e a descrição do cartão passa a dizer "com aviso".
 - **Capa.** O remux que embute a capa mantém metadados e capítulos
   (`-map_metadata 0 -map_chapters 0`).
 - **Processo.** O stderr do ffmpeg é lido em UTF-8 com `errors="replace"`: em

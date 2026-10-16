@@ -356,9 +356,13 @@ register({
         "Falha ao gravar o arquivo: {error}. Verifique espaço em disco e permissões da pasta de destino.",
         "Couldn't write the file: {error}. Check the disk space and the destination folder's permissions.",
     ),
-    "RECODE_FAILED": (
-        "Não foi possível recodificar o vídeo no bitrate escolhido: {error}",
-        "Couldn't re-encode the video at the chosen bitrate: {error}",
+    "RECODE_FALLBACK": (
+        "Não foi possível recodificar o vídeo no bitrate escolhido ({error}): o arquivo foi entregue como veio.",
+        "Couldn't re-encode the video at the chosen bitrate ({error}): the file was delivered as it came.",
+    ),
+    "LOG_RECODE_NO_VIDEO": (
+        "O arquivo baixado não tem vídeo: nada a recodificar no bitrate pedido.",
+        "The downloaded file has no video: nothing to re-encode at the requested bitrate.",
     ),
     "LOG_RECODE_SKIPPED": (
         "O vídeo baixado já tem {source} kbps, no bitrate pedido ({requested} kbps) ou abaixo: mantido sem recodificar.",

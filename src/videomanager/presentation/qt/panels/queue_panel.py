@@ -120,7 +120,8 @@ class QueueModel(QAbstractTableModel):
             if column == _COL_STATUS and job.error:
                 return str(job.error)
             if column == _COL_TITLE:
-                return job.url
+                # O cartão é uma coluna só: os avisos da tarefa moravam na dica da coluna "destino", que ele nunca mostra.
+                return "\n".join((job.url, *map(str, job.warnings)))
             if column == _COL_OUTPUT and job.warnings:
                 return "\n".join(map(str, job.warnings))
 

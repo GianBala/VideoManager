@@ -66,6 +66,14 @@ class RecodePlan:
     tools: FFmpegTools
 
 
+class _RecodeFailed(Exception):
+    """A recodificação não saiu; o arquivo baixado continua como veio (``detail``: a última linha do ffmpeg)."""
+
+    def __init__(self, detail: str, log: str = "") -> None:
+        super().__init__(detail)
+        self.detail, self.log = detail, log
+
+
 class _JobLogger:
     """Captura as mensagens do yt-dlp para a aba de detalhes da tarefa."""
 
@@ -152,6 +160,7 @@ class Downloader:
         self._opts = dict(opts)
         self._on_progress = on_progress
         self._recode_plan = recode_plan
+        self._warnings: list[Text] = []
         self._cancelled = False
         self._logger = _JobLogger()
         self._final_path: Path | None = None
@@ -187,6 +196,11 @@ class Downloader:
     @property
     def cancelled(self) -> bool:
         return self._cancelled
+
+    @property
+    def warnings(self) -> tuple[Text, ...]:
+        """O que não pôde ser aplicado ao arquivo entregue (ver :meth:`_recode_video`)."""
+        return tuple(self._warnings)
 
     @property
     def log(self) -> tuple[str, ...]:
@@ -283,7 +297,12 @@ class Downloader:
             self._final_path = Path(str(path))
 
     def _recode_video(self) -> None:
-        """Recodifica o vídeo baixado ao bitrate pedido, trocando o arquivo no lugar (nada se perde se falhar)."""
+        """Recodifica o vídeo baixado ao bitrate pedido, trocando o arquivo no lugar.
+
+        O download já está completo: a recodificação é o acabamento, e a falha dela (sem encoder no ffmpeg, disco cheio,
+        o ffmpeg que cai) não descarta o arquivo. Ele é entregue como veio, com um aviso na tarefa e no log — o
+        cancelamento, esse sim, interrompe tudo.
+        """
         plan, path = self._recode_plan, self._final_path
         if plan is None or path is None or not path.is_file():
             return
@@ -291,15 +310,28 @@ class Downloader:
         try:
             source = recode.probe_video(path, tools)
         except (OSError, subprocess.SubprocessError, ValueError) as exc:
-            raise DownloadFailedError(Text("RECODE_FAILED", error=str(exc))) from exc
+            self._recode_fallback(str(exc))
+            return
+        if not source.has_video:
+            self._logger.lines.append(t("LOG_RECODE_NO_VIDEO"))
+            return
         if not recode.needs_recode(source, plan.kbps):
             self._logger.lines.append(t("LOG_RECODE_SKIPPED", source=round(source.kbps or 0), requested=plan.kbps))
             return
         self._wait_for_recode_slot()
         try:
             self._recode(path, source, plan)
+        except _RecodeFailed as exc:
+            self._recode_fallback(exc.detail, exc.log)
+        except OSError as exc:  # o ffmpeg que não abre, o disco cheio, a troca do arquivo que o sistema recusa
+            self._recode_fallback(str(exc))
         finally:
             _RECODE_SLOT.release()
+
+    def _recode_fallback(self, detail: str, log: str = "") -> None:
+        """Registra que o arquivo vai como veio: o aviso da tarefa e uma linha no log (com o fim do stderr, se houver)."""
+        self._warnings.append(Text("RECODE_FALLBACK", error=detail))
+        self._logger.lines.append(t("RECODE_FALLBACK", error=log or detail))
 
     def _wait_for_recode_slot(self) -> None:
         """Espera a vez de recodificar (ver ``_RECODE_SLOT``); desistir enquanto espera não segura a vaga."""
@@ -354,7 +386,9 @@ class Downloader:
         if self._cancelled:
             raise JobCancelled("Download cancelado.")
         if process.returncode != 0:
-            raise DownloadFailedError(Text("RECODE_FAILED", error="".join(errors).strip()[-400:] or f"ffmpeg {process.returncode}"))
+            tail = "".join(errors).strip()
+            last = next((line.strip() for line in reversed(tail.splitlines()) if line.strip()), "")
+            raise _RecodeFailed((last or f"ffmpeg {process.returncode}")[:200], tail[-400:])
 
     def run(self, url: str) -> DownloadResult:
         """Baixa a URL. Levanta :class:`JobCancelled` se cancelado."""
@@ -392,7 +426,7 @@ class Downloader:
         if self._cancelled:
             raise JobCancelled("Download cancelado.")
 
-        return DownloadResult(path=self._final_path, title=title, log=self.log)
+        return DownloadResult(path=self._final_path, title=title, log=self.log, warnings=self.warnings)
 
 def _terminate(process: Popen) -> None:
     try:
