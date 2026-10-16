@@ -103,6 +103,13 @@ class _JobLogger:
 # construção alcança cada um; quem os recebe é o ``Downloader`` da thread.
 # ``test_downloader`` falha se o yt-dlp deixar de abrir processos assim.
 _owner = threading.local()
+
+# Uma recodificação por vez no processo. O encode de duas passadas usa todos os núcleos e pede de 1,2 GB (1080p60) a 4 GB
+# (4K) de memória; o download roda na fila de rede (``max_concurrent_jobs``, 3 por padrão), e três recodificações juntas
+# somavam ~12 GB num 4K — fora do limite de uma tarefa pesada por vez que a fila local aplica à conversão, e a conta que
+# derrubou a sessão pelo OOM killer. Quem espera a vez mantém a vaga de download, e o cancelamento o alcança.
+_RECODE_SLOT = threading.Semaphore(1)
+_SLOT_POLL = 0.25
 _popen_init = getattr(Popen.__init__, "__wrapped__", Popen.__init__)
 
 
@@ -288,6 +295,27 @@ class Downloader:
         if not recode.needs_recode(source, plan.kbps):
             self._logger.lines.append(t("LOG_RECODE_SKIPPED", source=round(source.kbps or 0), requested=plan.kbps))
             return
+        self._wait_for_recode_slot()
+        try:
+            self._recode(path, source, plan)
+        finally:
+            _RECODE_SLOT.release()
+
+    def _wait_for_recode_slot(self) -> None:
+        """Espera a vez de recodificar (ver ``_RECODE_SLOT``); desistir enquanto espera não segura a vaga."""
+        announced = False
+        while not _RECODE_SLOT.acquire(timeout=_SLOT_POLL):
+            if self._cancelled:
+                raise JobCancelled("Download cancelado.")
+            if not announced and self._on_progress is not None:
+                self._on_progress(Progress(phase=Text("PHASE_WAITING_RECODE"), indeterminate=True))
+                announced = True
+        if self._cancelled:  # a desistência pode ter chegado entre a vaga livre e a conferência
+            _RECODE_SLOT.release()
+            raise JobCancelled("Download cancelado.")
+
+    def _recode(self, path: Path, source: recode.SourceVideo, plan: RecodePlan) -> None:
+        tools = plan.tools
         family = recode.target_family(source)
         tag = uuid.uuid4().hex[:8]
         output = path.with_name(f".recodificando-{tag}{path.suffix}")
