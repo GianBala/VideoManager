@@ -247,6 +247,16 @@ def test_a_fracao_do_zoom_e_logaritmica_vai_de_zero_na_janela_mais_aberta_a_um_n
     assert espans == sorted(espans, reverse=True)
 
 
+def test_a_fracao_do_zoom_faz_a_ida_e_a_volta_no_meio_do_curso(linha):
+    """``set_zoom_fraction`` e ``zoom_fraction`` são a mesma escala: a barra de zoom mostra o que a janela está de fato. Só as pontas
+    (0 e 1) coincidem em qualquer escala; no meio, uma escala linear no getter deixava a barra no lugar errado depois de um zoom
+    pela roda do mouse."""
+    timeline, _ = linha
+    for passo in range(1, 10):
+        timeline.set_zoom_fraction(passo / 10)
+        assert timeline.zoom_fraction() == pytest.approx(passo / 10, abs=1e-6), passo
+
+
 def test_o_zoom_pelo_controle_mantem_o_cursor_no_mesmo_lugar_da_tela(linha):
     timeline, _ = linha
     timeline.set_view(0.0, 8.0)
