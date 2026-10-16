@@ -45,7 +45,9 @@ não pelo da trilha: um AAC de 191 kbps copiado saía 34% acima do anunciado.
 ## O que o aplicativo faz agora
 
 Tudo o que recodifica é medido: vídeo (qualquer codec, qualquer modo da aba Converter, e a exportação), e o áudio dos
-codecs de taxa variável (AAC, Opus, Vorbis, FLAC, ALAC). Copiar não precisa (sai o que está lá), e MP3 e WAV (taxa
+codecs de taxa variável (AAC, Opus, Vorbis, FLAC, ALAC). O que conta é o que a conversão **vai fazer**, e não o nome do
+codec pedido: a "Cópia" que redimensiona, muda a taxa ou troca para um container que não aceita o codec recodifica, e é
+medida (sem isso a conta por pixels errava de −39% a +609% nesses casos). Copiar de verdade não precisa (sai o que está lá), e MP3 e WAV (taxa
 constante e PCM) saem por conta. A medida codifica trechos com o **mesmo** comando da conversão, em segundo plano, e a
 tela mostra "medindo…" até o número chegar.
 
