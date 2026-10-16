@@ -32,6 +32,12 @@ def _fonte(family="h264", container="mp4", kbps=4000.0, duration=10.0) -> Source
 
 # -- a decisão ------------------------------------------------------------------------------------------------
 
+@pytest.mark.parametrize("fonte", [4000.0, 2500.0, 2550.0, 2551.0, 900.0, None])
+def test_o_ffmpeg_decide_pela_mesma_regra_do_painel_e_da_estimativa(fonte):
+    from videomanager.domain.selection import keeps_source
+    assert recode.needs_recode(_fonte(kbps=fonte), 2500) is (not keeps_source(fonte, 2500))
+
+
 def test_o_pedido_de_video_sem_bitrate_e_igual_a_fonte():
     assert VideoRequest().video_kbps is None
 
