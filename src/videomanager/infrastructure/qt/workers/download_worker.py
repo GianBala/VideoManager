@@ -18,6 +18,7 @@ from videomanager.application.errors import JobCancelled
 from videomanager.application.errors import VideoManagerError
 from videomanager.application.errors import error_message
 from videomanager.domain.i18n import Text
+from videomanager.domain.selection import VideoRequest
 from videomanager.application.jobs.models import Job
 from videomanager.infrastructure.qt.workers.signals import DownloadSignals
 from videomanager.infrastructure.qt.workers.signals import emit_safely
@@ -53,7 +54,7 @@ class DownloadWorker(QRunnable):
         self._staging = self._temp / "pronto"
         opts, _ = build_opts(request.selection, request.media, request.preferences, tools, self._staging, self._temp)
         # Pedir um bitrate de vídeo é o consentimento de recodificar: depois do download o vídeo é codificado de novo a ele.
-        kbps = getattr(request.selection, "video_kbps", None)
+        kbps = request.selection.video_kbps if isinstance(request.selection, VideoRequest) else None
         recode_plan = RecodePlan(kbps=kbps, tools=tools) if kbps else None
         self._downloader = Downloader(opts, on_progress=self._emit_progress, recode_plan=recode_plan)
         self._cancel_requested = False

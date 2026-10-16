@@ -22,6 +22,18 @@ AUDIO_BITRATES = ("320", "256", "192", "160", "128", "96", "64")
 VIDEO_BITRATE_PRESETS = (500, 1000, 2500, 5000, 8000, 12000)
 VIDEO_BITRATE_MIN = 100
 VIDEO_BITRATE_MAX = 100_000
+# Folga abaixo da qual a fonte conta como "já no bitrate pedido": o bitrate que o ffprobe lê da fonte oscila uns pontos, e
+# recodificar para ganhar 2% é desperdício.
+SOURCE_BITRATE_TOLERANCE = 1.02
+
+
+def keeps_source(source_kbps: float | None, requested_kbps: float) -> bool:
+    """Se a fonte já está no bitrate pedido (ou abaixo): ali recodificar só aumentaria o arquivo, e o vídeo fica como veio.
+
+    Uma só regra para o aviso do painel, a estimativa do tamanho e o ffmpeg (``recode.needs_recode``): três contas que
+    discordassem prometeriam "mantido" e recodificariam, ou o contrário. Fonte de bitrate desconhecido não é mantida.
+    """
+    return source_kbps is not None and source_kbps <= requested_kbps * SOURCE_BITRATE_TOLERANCE
 
 
 @dataclass(frozen=True)
