@@ -159,5 +159,5 @@ reiniciar.
 ## Acompanhando a conversão
 
 O progresso de cada arquivo aparece na
-[fila de tarefas](interface-geral.md#a-fila-de-tarefas), junto com downloads
+[fila de tarefas](interface-geral.md#a-gaveta-de-tarefas), junto com downloads
 e exportações de edição em andamento.
