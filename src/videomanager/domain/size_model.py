@@ -199,15 +199,23 @@ def needs_sample(media: LocalMedia, target: VideoTarget | AudioTarget) -> bool:
     Copiar não precisa: sai o que já está lá. Recodificar o vídeo precisa sempre, porque o conteúdo decide o quanto o
     encoder gasta (medido: de 0,03× a 2,5× o bitrate da fonte no mesmo H.264). Recodificar áudio, só nos codecs de taxa
     variável.
+
+    "Recodificar o vídeo" é o que a conversão **vai fazer**, e não o nome do codec pedido: a aba nasce em "Cópia", e
+    redimensionar, mudar a taxa ou trocar para um container que não aceita o codec recodifica do mesmo jeito (medido: a
+    conta por pixels errou de −39% a +609% nesses casos). É a regra única de ``needs_video_reencode``, a mesma de
+    ``build_video_args`` e de ``describe_target``.
     """
     from videomanager.domain.compatibility import copies_audio
+    from videomanager.domain.compatibility import needs_video_reencode
     from videomanager.domain.media import AudioTarget
 
     if not media.duration or media.duration <= 0:
         return False
     if isinstance(target, AudioTarget):
         return media.has_audio and not copies_audio(media, target) and target.codec not in AUDIO_EXACT
-    return target.video_codec != "copy" and media.video is not None and not media.is_image and not media.video_is_cover
+    if media.video is None or media.is_image or media.video_is_cover:
+        return False
+    return needs_video_reencode(media, target)
 
 
 # O PCM que o compositor entrega ao encoder de áudio da exportação: 48 kHz, estéreo, 16 bits.
