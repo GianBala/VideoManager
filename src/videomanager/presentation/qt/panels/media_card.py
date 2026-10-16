@@ -139,13 +139,17 @@ class MediaCard(QFrame):
         info.setSpacing(6)
         info.addStretch(1)
 
+        # O título e o autor vêm do site: texto puro, e não HTML. Com o formato automático do QLabel, "Aula <b>1</b>" saía em
+        # negrito e "<br>" quebrava a linha do cartão.
         self._title = QLabel()
+        self._title.setTextFormat(Qt.TextFormat.PlainText)
         self._title.setProperty("role", "media-title")
         self._title.setWordWrap(True)
         self._title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         info.addWidget(self._title)
 
         self._meta = QLabel("")
+        self._meta.setTextFormat(Qt.TextFormat.PlainText)
         self._meta.setProperty("role", "media-meta")
         self._meta.setWordWrap(True)
         info.addWidget(self._meta)
