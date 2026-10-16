@@ -115,6 +115,8 @@ QListWidget[role="media"] {{ background: transparent; border: none; padding: 0px
 
 QLabel {{ background: transparent; }}
 QLabel[role="dim"] {{ color: {t2}; }}
+/* Texto que fica sobre o plano da prévia, escuro nos dois modos: a cor do texto discreto da versão escura da paleta. */
+QLabel[role="screen-dim"] {{ color: {t2_tela}; }}
 /* Nota ao pé de uma coluna estreita (aba Transições): menor que o texto dos
    controles, para a coluna não pedir altura que a prévia ao lado perderia. */
 QLabel[role="note"] {{ color: {t2}; font-size: 11px; }}
@@ -268,7 +270,7 @@ QPushButton[role="play"]:hover {{ border-color: {on_fill}; }}
 QPushButton[role="play"]:focus {{ border-color: {focus}; }}
 QLabel[role="clock"] {{ color: {text}; font-size: 22px; font-weight: 500; }}
 QLabel[role="clock-total"] {{ color: {t2}; font-size: 13px; }}
-QLabel[role="overlay-note"] {{ background: {screen82}; color: {t2}; border-radius: 8px; padding: 3px 10px; }}
+QLabel[role="overlay-note"] {{ background: {screen82}; color: {t2_tela}; border-radius: 8px; padding: 3px 10px; }}
 QComboBox[role="field"][compact="true"] {{ min-height: 32px; border-radius: 10px; }}
 QFrame[role="segments"][compact="true"] {{ border-radius: 10px; }}
 QToolButton[role="icon"][danger="true"]:hover {{ background: {err16}; }}
@@ -696,6 +698,10 @@ def _cores_do_estilo(theme: str, nome: str) -> dict[str, str]:
     # O plano da prévia a 82%: o aviso que fica sobre o quadro ("Carregando quadro…") precisa ler-se sobre qualquer imagem.
     tela = QColor(cores["screen"])
     cores["screen82"] = f"rgba({tela.red()}, {tela.green()}, {tela.blue()}, 0.82)"
+    # O ``screen`` é escuro nos dois modos, e o texto discreto do modo claro é escuro: sobre ele dava 2,3 : 1. O texto que cai
+    # sobre o plano da prévia (o estado vazio e o aviso sobre o quadro) usa o ``t2`` da versão escura da mesma paleta, que
+    # já foi conferido contra superfícies escuras.
+    cores["t2_tela"] = papeis("dark", nome)["t2"]
     # O ladrilho do arquivo de áudio: o verde de áudio da linha do tempo, a 16%.
     verde = QColor(TIPOS_DE_BLOCO["audio"])
     cores["audio16"] = f"rgba({verde.red()}, {verde.green()}, {verde.blue()}, 0.16)"

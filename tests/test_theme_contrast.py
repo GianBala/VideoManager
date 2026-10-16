@@ -98,3 +98,25 @@ def test_texto_e_indicadores_tem_o_contraste_minimo(tema, nome):
     fracos += [f"{a}/{b}: {contraste(cores[a], cores[b]):.2f}" for a, b in _INDICADOR
                if contraste(cores[a], cores[b]) < 3.0]
     assert fracos == []
+
+
+@pytest.mark.parametrize("nome", paletas.nomes())
+@pytest.mark.parametrize("tema", ["dark", "light"])
+def test_texto_sobre_o_plano_da_previa_se_le_em_cada_paleta_e_modo(tema, nome):
+    """O plano ``screen`` é escuro nos dois modos; o texto que cai sobre ele não pode ser o ``t2`` do modo claro (2,3 : 1)."""
+    from videomanager.presentation.qt.theme import _cores_do_estilo
+    cores = _cores_do_estilo(tema, nome)
+    assert contraste(cores["t2_tela"], cores["screen"]) >= 4.5, (
+        f"{nome}/{tema}: t2_tela {cores['t2_tela']} sobre screen {cores['screen']}")
+
+
+@pytest.mark.parametrize("nome", paletas.nomes())
+@pytest.mark.parametrize("tema", ["dark", "light"])
+def test_o_estado_vazio_e_o_aviso_da_previa_usam_a_cor_de_texto_sobre_o_plano(tema, nome):
+    import re
+    from videomanager.presentation.qt.theme import _cores_do_estilo
+    folha = stylesheet(tema, nome)
+    esperada = _cores_do_estilo(tema, nome)["t2_tela"]
+    for papel in ("screen-dim", "overlay-note"):
+        regra = re.search(r'QLabel\[role="' + papel + r'"\]\s*\{[^}]*?[^-]color:\s*(#[0-9a-fA-F]{6})', folha)
+        assert regra is not None and regra.group(1).lower() == esperada.lower(), (papel, regra and regra.group(1), esperada)
