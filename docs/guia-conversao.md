@@ -106,8 +106,9 @@ primeira faixa de áudio, e o plano avisa quando algo fica de fora. Legendas
 
 Cada arquivo da lista mostra "antes → depois" e a variação. O que **recodifica** (vídeo para H.264, HEVC, VP9 ou AV1,
 áudio para Opus, Vorbis, AAC, FLAC ou ALAC, e qualquer nível de Comprimir) é **medido**: o aplicativo codifica trechos do
-arquivo, com o mesmo comando da conversão, e mostra "medindo…" até o número chegar. O que só copia (remux, áudio no mesmo
-codec) tem o tamanho que já está lá, e MP3 e WAV, de taxa constante, saem por conta.
+arquivo, com o mesmo comando da conversão, e mostra "medindo…" até o número chegar. Isso vale também para a "Cópia" que
+recodifica de fato — redimensionar, mudar a taxa de quadros ou trocar para um container que não aceita o codec do arquivo.
+O que só copia (remux, áudio no mesmo codec) tem o tamanho que já está lá, e MP3 e WAV, de taxa constante, saem por conta.
 
 - **Quanto se mede depende de quanto custa.** Um piloto de 4 s mede a velocidade do encoder neste conteúdo. Se o arquivo
   inteiro cabe em 20 s de relógio (uma gravação de tela, por exemplo), ele é codificado inteiro e o número é o da
