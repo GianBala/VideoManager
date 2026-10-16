@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QApplication, QFrame
 
 from test_linha_do_tempo_tipos import _projeto
 from videomanager.domain.project import Clip, MediaKind, MediaRef
-from videomanager.presentation.qt import strings, theme
+from videomanager.presentation.qt import paletas, strings, theme
 from videomanager.presentation.qt.panels import timeline as modulo
 from videomanager.presentation.qt.panels.timeline import (
     AUDIO_TRACK_HEIGHT, FILM_CELL_WIDTH, HEADER_WIDTH, THUMB_HEIGHT, TRACK_GAP, Timeline, VIDEO_TRACK_HEIGHT, WAVE_HEIGHT,
@@ -387,3 +387,44 @@ def test_o_controle_de_zoom_acompanha_a_edicao_que_encurta_ou_alonga_sem_mexer_n
     assert barra.value() == round(linha.zoom_fraction() * 1000)
     linha.set_project(painel._project)
     assert barra.value() == round(linha.zoom_fraction() * 1000)
+
+
+def _luminancia(cor: QColor) -> float:
+    canal = lambda v: (v / 255) / 12.92 if v / 255 <= 0.03928 else (((v / 255) + 0.055) / 1.055) ** 2.4
+    return 0.2126 * canal(cor.red()) + 0.7152 * canal(cor.green()) + 0.0722 * canal(cor.blue())
+
+
+def _contraste(a: QColor, b: QColor) -> float:
+    claro, escuro = sorted((_luminancia(a), _luminancia(b)), reverse=True)
+    return (claro + 0.05) / (escuro + 0.05)
+
+
+@pytest.mark.parametrize("calado", [False, True])
+@pytest.mark.parametrize("modo", ["dark", "light"])
+@pytest.mark.parametrize("nome", paletas.nomes())
+def test_o_nome_do_bloco_se_le_sobre_a_pastilha_em_qualquer_paleta_e_modo(linha, nome, modo, calado):
+    """``FRT-001``: a pastilha é o plano ``screen`` (escuro nos dois modos) e o texto era o ``text`` do tema, escuro no modo
+    claro: 1,1 : 1 em todas as paletas claras, sem exceção nenhuma."""
+    timeline, blocos = linha
+    antes, cores_antes = theme.atual(), dict(timeline._c)
+    theme._atual = (modo, nome)
+    # O painel mantém o dicionário legado em dia a cada troca de tema (``EditPanel._retheme``): a linha do tempo lê dele o âmbar.
+    timeline._c.clear()
+    timeline._c.update(theme.palette(modo, nome))
+    try:
+        if calado:
+            timeline.set_project(timeline._project.with_updated_clip(blocos["text"].clip_id, muted=True))
+        timeline.update()
+        imagem = timeline.grab().toImage()
+        caixa = timeline._clip_rect(0, timeline._project.tracks[0].clips[0])
+        topo = int(caixa.top()) + 3 + 5
+        fundo = imagem.pixelColor(int(caixa.left()) + 11, topo + 11)
+        # O texto começa depois do ícone: margem de 8 + 8, o ícone de 13 e o vão de 5.
+        inicio = int(caixa.left()) + 8 + 8 + modulo._ICONE_ROTULO + 5
+        melhor = max(_contraste(imagem.pixelColor(x, y), fundo)
+                     for y in range(topo + 4, topo + 18) for x in range(inicio, inicio + 18))
+        assert melhor >= 4.5, f"{nome}/{modo}{' calado' if calado else ''}: o texto do bloco tem {melhor:.2f} : 1"
+    finally:
+        theme._atual = antes
+        timeline._c.clear()
+        timeline._c.update(cores_antes)

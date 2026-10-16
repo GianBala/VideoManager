@@ -365,7 +365,8 @@ class _Preview(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.setFrameShape(QFrame.Shape.NoFrame)
         bind(self, "setText", lambda: strings.EDIT_EMPTY)
-        self.setProperty("role", "dim")
+        # O estado vazio é texto sobre o plano ``screen``, escuro nos dois modos: o ``dim`` (escuro no modo claro) sumia nele.
+        self.setProperty("role", "screen-dim")
         self._pixmap: QPixmap | None = None
         self._interaction_layers: tuple[QPixmap, ...] | None = None
         self._interaction_visible = False
