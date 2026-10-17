@@ -1043,7 +1043,11 @@ class Timeline(QWidget):
                 painter, QRect(int(x), int(pastilha.center().y() - _ICONE_ROTULO / 2), _ICONE_ROTULO, _ICONE_ROTULO))
             x += _ICONE_ROTULO + gap
         painter.setFont(font)
-        painter.setPen(self._color("warn") if silenced else self._papel("text"))
+        # A pastilha é o plano ``screen``, escuro nos dois modos: o texto e o aviso do bloco calado são os papéis da versão
+        # **escura** da mesma paleta. Com o ``text`` do tema, o modo claro dava 1,1 : 1 (escuro sobre escuro); no escuro as
+        # duas versões são a mesma, e a pintura não muda um pixel.
+        sobre_a_tela = theme.papeis("dark", theme.atual()[1])
+        painter.setPen(QColor(sobre_a_tela["warn" if silenced else "text"]))
         painter.drawText(
             QRectF(x, pastilha.top(), pastilha.right() - x, pastilha.height()),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),

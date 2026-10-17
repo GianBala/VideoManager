@@ -334,6 +334,20 @@ def test_a_dica_do_erro_traz_o_texto_inteiro(painel, fila, desktop_app):
     assert cartao.regiao_em(cartao.erro.center()) == "erro"
 
 
+def test_a_dica_do_cartao_traz_os_avisos_da_tarefa(painel, fila, desktop_app):
+    """Os avisos moravam na dica da coluna "destino", que o cartão (uma coluna só) nunca mostra."""
+    from videomanager.domain.i18n import Text
+
+    tarefa = _tarefa("a", JobStatus.DONE)
+    tarefa.warnings = (Text("RECODE_FALLBACK", error="sem encoder"),)
+    sem_aviso = _tarefa("b", JobStatus.DONE)
+    _adicionar(fila, desktop_app, tarefa, sem_aviso)
+    modelo = painel._list.model()
+    dica = modelo.data(modelo.index(0, 0), Qt.ItemDataRole.ToolTipRole)
+    assert tarefa.url in dica and str(tarefa.warnings[0]) in dica
+    assert modelo.data(modelo.index(1, 0), Qt.ItemDataRole.ToolTipRole) == sem_aviso.url
+
+
 # -- botões de baixo -----------------------------------------------------------------------------------------
 
 def test_cancelar_todos_e_limpar_so_ficam_a_mao_quando_ha_o_que_fazer(painel, fila, desktop_app, tmp_path):

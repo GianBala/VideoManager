@@ -58,6 +58,14 @@ Uma cadeia de combos em cascata, cada um populado só com o que a mídia
    para cima só aumentaria o arquivo (o painel avisa antes de baixar). Os perfis
    rápidos voltam o bitrate ao da fonte. O campo do valor livre aparece numa
    fileira abaixo, só com "Personalizado…" escolhido.
+
+   A recodificação usa todos os núcleos e de 1,2 GB a 4 GB de memória por vídeo, e por isso
+   acontece **uma por vez**: os downloads seguintes terminam de baixar e esperam a vez (a tarefa diz
+   "Aguardando a vez de recodificar"), em vez de somar três encodes na mesma máquina.
+
+   Se a recodificação não sair (o ffmpeg sem o encoder, o disco cheio) ou o arquivo baixado não tiver vídeo (um item só de
+   áudio num lote), o download **não é descartado**: o arquivo é entregue como veio, a tarefa termina "com aviso" e a
+   dica do cartão e o log dizem o que não foi aplicado.
 6. **Trilha de áudio** — "Melhor disponível" ou uma das trilhas que o site
    oferece (idioma, codec, bitrate). O campo está sempre à vista; só se
    escolhe quando o site separa vídeo e áudio em streams diferentes (o YouTube
@@ -132,4 +140,4 @@ podem não aparecer.
 ## Acompanhando o download
 
 Depois de **Adicionar à fila**, o progresso aparece na
-[fila de tarefas](interface-geral.md#a-fila-de-tarefas), comum às abas Download, Converter e Editar.
+[fila de tarefas](interface-geral.md#a-gaveta-de-tarefas), comum às abas Download, Converter e Editar.

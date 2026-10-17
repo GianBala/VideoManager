@@ -317,6 +317,23 @@ cujo container distorce; e o `start_time` do `ffprobe` vem **depois** dos pacote
 afirma que o arquivo cresce nem que encolhe. Método, números e limites em
 [Estimativas de tamanho](estimativas-de-tamanho.md).
 
+## A troca de paleta reaplica o QSS inteiro
+
+**`presentation/qt/theme.py`, `apply`.** Trocar o modo ou a paleta com a janela aberta chama `app.setPalette` e
+`app.setStyleSheet` e, em seguida, avisa quem pintou cor por conta própria (`on_theme_change`). O Qt reaplica a folha a
+todos os widgets, e isso custa **~0,9 s** numa janela com as quatro abas montadas (medido: 939 ms com 816 widgets; com os 692
+da versão anterior à renovação visual, 720 ms), uma vez, ao confirmar em Ajustes. A troca de idioma, que só refaz texto,
+leva 34 ms. A partida também ficou mais cara com a renovação, sem que a causa tenha sido isolada: +59 ms (1,003 → 1,062 s)
+e +9 MiB de pico do Python (149,1 → 158,0).
+
+Foi aceito porque a ação é rara e a alternativa é arriscada: reaplicar a folha só aos widgets que mudam, ou dividir o QSS por
+painel, mexe em seis paletas e dois modos, e o que a suíte não vê é justamente a cor que ficou na paleta antiga: nenhum teste
+compara a janela trocada ao vivo com a que já nasce na paleta, quem faz isso é a captura (`QT_QPA_PLATFORM=offscreen`, `grab()`
+nas abas, a troca feita com a janela aberta contra a janela aberta já na paleta), que deu 0 pixel de diferença em 18
+comparações. Qualquer otimização precisa repetir essa captura. Se o tempo virar queixa, o primeiro passo é medir o QSS por
+papel (`QLabel[role=…]`) e cortar o que as seis paletas
+repetem, com a conta `setPalette` + `setStyleSheet` em menos de 500 ms como critério.
+
 ## Fixtures reais em vez de suposições
 
 O que sustenta a promessa de funcionar em plataformas diversas são **fixtures

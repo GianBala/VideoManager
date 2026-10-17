@@ -5,6 +5,7 @@ from videomanager.application.jobs.models import JobStatus
 from videomanager.application.events import DownloadResult
 from videomanager.application.events import Progress
 from videomanager.application.events import ProgressStage
+from videomanager.application.formatting import DASH
 from videomanager.domain.i18n import Text
 
 
@@ -55,6 +56,11 @@ class JobService:
                 job.result_path, job.log = result.path, result.log
                 if result.title and job.title in ('', job.url):
                     job.title = result.title
+                if result.warnings:
+                    job.warnings = (*job.warnings, *result.warnings)
+                    # O cartão mostra a descrição na linha de situação: é onde quem olha a fila vê que houve aviso.
+                    if str(job.description).strip() not in ('', DASH):
+                        job.description = Text('DESC_WITH_WARNING', description=job.description)
             else:
                 job.result_path = result
             job.result_size = size

@@ -20,10 +20,13 @@ _POEM_TEXTO = {"setText", "setToolTip", "setWindowTitle", "setPlaceholderText", 
 # Onde está o texto em cada chamada: nas outras posições vão dado da lista
 # (identificador como "dark"), índice ou retângulo.
 _POSICAO_DO_TEXTO = {"setItemText": 1, "setTabText": 1, "insertItem": 1}
+# Os construtores que recebem o texto como primeiro argumento: ``QLabel("Perfis")`` também põe texto na tela, e a catraca só via
+# as chamadas acima.
+_CONSTRUTORES = {"QLabel", "QPushButton", "QCheckBox", "QRadioButton", "QToolButton", "QGroupBox", "QAction", "SegmentButton"}
 # Letra de verdade, fora de marcadores de formato ({nome}, %s).
 _PALAVRA = re.compile(r"[^\W\d_]{2,}")
 # Unidades, iguais nas duas línguas.
-_UNIDADE = re.compile(r"^\s*(kbps|fps|dB|ms|px|KB|MB|GB)\s*$")
+_UNIDADE = re.compile(r"^\s*(kbps|fps|dB|ms|px|KB|MB|GB)\s*$|^\.\w+$")  # a extensão de arquivo (".mp4") é igual nas duas línguas
 
 
 def _literais(no: ast.AST):
@@ -42,8 +45,18 @@ def test_nenhum_literal_com_palavras_vai_direto_para_a_tela():
             continue
         arvore = ast.parse(arquivo.read_text(encoding="utf-8"))
         for no in ast.walk(arvore):
-            if not (isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute)
-                    and no.func.attr in _POEM_TEXTO):
+            if not isinstance(no, ast.Call):
+                continue
+            nome = no.func.id if isinstance(no.func, ast.Name) else getattr(no.func, "attr", None)
+            if nome in _CONSTRUTORES:
+                argumentos = no.args[:1]
+                for argumento in argumentos:
+                    for texto in _literais(argumento):
+                        sem_formato = re.sub(r"\{[^}]*\}|%[sd]", "", texto)
+                        if _PALAVRA.search(sem_formato) and not _UNIDADE.match(sem_formato):
+                            achados.append(f"{arquivo.relative_to(_APRESENTACAO)}:{no.lineno}: {nome}({texto!r})")
+                continue
+            if not (isinstance(no.func, ast.Attribute) and no.func.attr in _POEM_TEXTO):
                 continue
             if no.func.attr == "drawText":
                 argumentos = no.args

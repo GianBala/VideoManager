@@ -38,6 +38,49 @@ class TestContaDoEncaixe:
     def test_sem_reducao_e_a_regra_de_sempre(self) -> None:
         assert reduced_fit(1440, 1080, 640, 360, 640, 360) == fit_size(1440, 1080, 640, 360)
 
+    def test_o_encaixe_e_o_par_mais_proximo_da_conta_exata(self) -> None:
+        """Truncar ao par de baixo erra até 2 px (mídia 1920×1080 na tela 1080×1920, caixa 302×536: o exato é 169,69 de altura, e
+        o par de baixo, 168); arredondar ao par mais próximo erra no máximo 1. Os testes de antes só usavam mídia 16:9 numa tela
+        16:9, em que a conta sai exata e as duas regras coincidem."""
+        assert reduced_fit(1920, 1080, 302, 536, 1080, 1920) == (302, 170)
+        assert reduced_fit(1920, 1080, 308, 548, 1080, 1920) == (308, 174)
+        assert reduced_fit(1000, 1000, 592, 334, 1920, 1080) == (334, 334)
+        for media in ((1920, 1080), (1920, 800), (1440, 1080), (1080, 1920), (1000, 1000), (3840, 1600)):
+            for cheia in ((1920, 1080), (1280, 720), (1080, 1920)):
+                for largura in range(300, 1200, 14):
+                    altura = round(largura * cheia[1] / cheia[0]) // 2 * 2
+                    escala = min(cheia[0] / media[0], cheia[1] / media[1])
+                    exato = (media[0] * escala * largura / cheia[0], media[1] * escala * altura / cheia[1])
+                    w, h = reduced_fit(*media, largura, altura, *cheia)
+                    assert abs(w - exato[0]) <= 1.0 and abs(h - exato[1]) <= 1.0, (media, (largura, altura), cheia, (w, h), exato)
+
+    def test_a_conta_do_compositor_e_a_do_dominio_dao_o_mesmo_tamanho(self) -> None:
+        """O encaixe tem duas contas, a da caixa de seleção (``reduced_fit``) e a do ``scale`` do ffmpeg (``_fit_scale``), e duas
+        contas para a mesma decisão acabam discordando: a caixa deixava de encostar na imagem. A expressão do ffmpeg é
+        avaliada aqui (``round`` do ffmpeg arredonda a metade para longe do zero) contra a do domínio, numa grade."""
+        import math
+        import re
+        from videomanager.infrastructure.ffmpeg.composer import _fit_scale
+
+        def avaliar(expressao: str, dar: float) -> float:
+            return eval(expressao, {"__builtins__": {}}, {"min": min, "round": lambda v: math.floor(v + 0.5),
+                                                          "trunc": math.trunc, "dar": dar})
+
+        verificadas = 0
+        for media in ((1920, 1080), (1920, 800), (1440, 1080), (1080, 1920), (1000, 1000), (3840, 1600), (854, 480)):
+            for cheia in ((1920, 1080), (1280, 720), (1080, 1920)):
+                for largura in range(300, 1200, 14):
+                    altura = round(largura * cheia[1] / cheia[0]) // 2 * 2
+                    if (largura, altura) == cheia:
+                        continue
+                    partes = re.fullmatch(r"scale=w='(.+)':h='(.+)'", _fit_scale(largura, altura, cheia))
+                    assert partes is not None
+                    dar = media[0] / media[1]
+                    do_ffmpeg = (avaliar(partes.group(1), dar), avaliar(partes.group(2), dar))
+                    assert do_ffmpeg == reduced_fit(*media, largura, altura, *cheia), (media, (largura, altura), cheia)
+                    verificadas += 1
+        assert verificadas > 1000
+
     def test_largura_ou_altura_nunca_passam_da_tela(self) -> None:
         for canvas in ((592, 334), (576, 324), (568, 320), (1082, 608)):
             for media in ((1920, 1080), (1080, 1920), (1000, 1000), (3840, 1600)):
@@ -93,6 +136,17 @@ class TestQuadroDaPrevia:
             "base": not _verde(dados, (w, h), meio_x, h - 1),
         }
         assert not any(pretos.values()), f"borda preta no quadro {w}×{h}: {pretos}"
+
+    @pytest.mark.parametrize("caixa", CAIXAS)
+    def test_video_que_preenche_so_a_altura_encosta_no_topo_e_na_base(self, tools, tmp_path, caixa) -> None:
+        """Mídia quadrada numa tela 16:9 preenche a altura: encosta no topo e na base, e as barras dos lados são conteúdo. É o
+        caso fora do 16:9 em que o eixo que limita é a altura; o outro eixo (largura 333, ímpar, na caixa 592×334) é o que
+        a conta do arredondamento decide, coberto pelas comparações entre ``reduced_fit`` e o ``scale`` do ffmpeg."""
+        midia = _video(tools, tmp_path, "quadrado", (1000, 1000))
+        projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(midia, 0, 2),)),), width=1920, height=1080)
+        dados, (w, h) = _quadro(projeto, caixa, tools)
+        assert _verde(dados, (w, h), w // 2, 0) and _verde(dados, (w, h), w // 2, h - 1), f"fio preto no quadro {w}×{h}"
+        assert not _verde(dados, (w, h), 0, h // 2) and not _verde(dados, (w, h), w - 1, h // 2)  # as barras dos lados são conteúdo
 
     @pytest.mark.parametrize("caixa", CAIXAS)
     @pytest.mark.parametrize("instante", [1.0, 3.0])
