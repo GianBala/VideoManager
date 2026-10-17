@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from videomanager.domain import size_model
+from videomanager.domain.selection import keeps_source
 
 if TYPE_CHECKING:
     from videomanager.domain.media import AudioTarget
@@ -220,13 +221,12 @@ def recode_video_bytes(v_fmt, duration: float | None, video_kbps: int | None) ->
     """
     if not video_kbps or not duration or duration <= 0:
         return None
-    source = _video_only_kbps(v_fmt)
-    if source is not None and source <= video_kbps * 1.02:
+    if keeps_source(video_only_kbps(v_fmt), video_kbps):
         return None
     return int(video_kbps * 1000 / 8 * duration)
 
 
-def _video_only_kbps(v_fmt) -> float | None:
+def video_only_kbps(v_fmt) -> float | None:
     """O bitrate do vídeo da fonte, sem o áudio que um formato muxado carrega junto."""
     from videomanager.domain.formats import Kind
 

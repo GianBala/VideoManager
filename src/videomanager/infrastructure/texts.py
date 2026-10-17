@@ -25,6 +25,7 @@ register({
     "PHASE_CONVERTING_VIDEO": ("Convertendo vídeo", "Converting video"),
     "PHASE_REMUXING": ("Trocando o container", "Changing the container"),
     "PHASE_RECODING_VIDEO": ("Recodificando o vídeo no bitrate escolhido", "Re-encoding the video at the chosen bitrate"),
+    "PHASE_WAITING_RECODE": ("Aguardando a vez de recodificar", "Waiting for its turn to re-encode"),
     "PHASE_METADATA": ("Gravando metadados", "Writing metadata"),
     "PHASE_THUMBNAIL": ("Embutindo a capa", "Embedding the thumbnail"),
     "PHASE_SUBTITLES": ("Embutindo legendas", "Embedding subtitles"),
@@ -355,9 +356,13 @@ register({
         "Falha ao gravar o arquivo: {error}. Verifique espaço em disco e permissões da pasta de destino.",
         "Couldn't write the file: {error}. Check the disk space and the destination folder's permissions.",
     ),
-    "RECODE_FAILED": (
-        "Não foi possível recodificar o vídeo no bitrate escolhido: {error}",
-        "Couldn't re-encode the video at the chosen bitrate: {error}",
+    "RECODE_FALLBACK": (
+        "Não foi possível recodificar o vídeo no bitrate escolhido ({error}): o arquivo foi entregue como veio.",
+        "Couldn't re-encode the video at the chosen bitrate ({error}): the file was delivered as it came.",
+    ),
+    "LOG_RECODE_NO_VIDEO": (
+        "O arquivo baixado não tem vídeo: nada a recodificar no bitrate pedido.",
+        "The downloaded file has no video: nothing to re-encode at the requested bitrate.",
     ),
     "LOG_RECODE_SKIPPED": (
         "O vídeo baixado já tem {source} kbps, no bitrate pedido ({requested} kbps) ou abaixo: mantido sem recodificar.",

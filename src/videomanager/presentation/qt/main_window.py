@@ -147,11 +147,8 @@ class MainWindow(QMainWindow):
         # A sondagem da placa é uma vez por execução (ver
         # :meth:`_warm_hardware_probe`).
         self._probed_hardware = False
-        # Se o usuário quer a gaveta de tarefas aberta em Download e Converter, as abas que produzem tarefas; e, à parte, no
-        # editor e nos Metadados, onde ela entra como estava na aba de onde se veio (ver :meth:`_apply_drawer`).
+        # Se o usuário quer a gaveta de tarefas à vista. É uma vontade só, de todas as abas (ver :meth:`_apply_drawer`).
         self._drawer_open = True
-        self._drawer_in_workspace = True
-        self._was_workspace = False
         # A gaveta aberta numa janela estreita demais para ela (a janela cresce até caber), e o que a janela já mandou ao
         # painel (``None`` até a montagem terminar: os eventos de layout antes disso não contam).
         self._drawer_forced = False
@@ -362,12 +359,6 @@ class MainWindow(QMainWindow):
         # Na aba Metadados o painel nasce na primeira visita.
         if index == _TAB_METADATA:
             self._metadata_panel()
-        # Entrar no editor ou nos Metadados leva a gaveta como ela estava na aba de onde se veio: recolhê-la sozinha
-        # escondia a fila de quem tinha uma tarefa em andamento e ia editar. Entre as duas abas de trabalho nada muda.
-        em_trabalho = self._in_workspace()
-        if em_trabalho and not self._was_workspace:
-            self._drawer_in_workspace = self._drawer_open
-        self._was_workspace = em_trabalho
         # Abrir a gaveta numa janela estreita vale para a aba em que se pediu.
         self._drawer_forced = False
         self._apply_drawer()
@@ -378,17 +369,16 @@ class MainWindow(QMainWindow):
 
         A gaveta é uma só, e trocar de aba não a mexe: aberta numa aba, continua aberta nas outras, o editor e os
         Metadados incluídos; fechada, continua fechada. Quem baixa ou exporta e vai editar quer acompanhar a tarefa, e
-        a gaveta está fora das abas justamente para isso. Download e Converter guardam a preferência delas (``_drawer_open``);
-        o editor e os Metadados têm a sua (``_drawer_in_workspace``), que ao entrar neles vem da aba anterior. Fechar ali
-        não revoga a de Download e Converter: ao voltar, a gaveta está onde a preferência a deixou.
+        a gaveta está fora das abas justamente para isso. Houve uma vontade para Download e Converter e outra para o
+        editor e os Metadados, e fechar numa não revogava a outra: com as duas abertas, a gaveta reaparecia ao voltar de
+        uma aba para a outra, como se abrisse sozinha. Uma vontade só, e quem mexe nela em qualquer aba a muda para todas.
 
         Numa janela estreita ela também recolhe (ver :meth:`_narrow`), e a vontade do usuário fica como estava: quando
         há largura de novo, a gaveta volta. O contrário seria a janela presa em 840 px por uma coluna que ninguém pediu
         para ver naquele momento. ``_drawer_forced`` é o usuário pedindo a gaveta numa janela estreita demais (o item
         Tarefas, o aviso "Ver tarefas"): ela pede então os 344 px inteiros, e a janela cresce.
         """
-        querida = self._drawer_in_workspace if self._in_workspace() else self._drawer_open
-        wanted = querida and not self._narrow()
+        wanted = self._drawer_open and not self._narrow()
         visible = wanted or self._drawer_forced
         self._queue_panel.set_squeezable(not self._drawer_forced)
         if visible == self._drawer_shown:
@@ -407,17 +397,8 @@ class MainWindow(QMainWindow):
         """
         return self.width() < LARGURA_DO_MENU + self._content.minimumSizeHint().width() + DRAWER_WIDTH
 
-    def _in_workspace(self) -> bool:
-        """Se a aba à vista é de trabalho (Editar, Metadados): onde a gaveta tem a vontade própria, vinda da aba anterior."""
-        return self._tabs.currentIndex() in (_TAB_EDIT, _TAB_METADATA)
-
     def _set_drawer(self, open_: bool) -> None:
-        # A vontade do usuário vale na aba em que ele a deu: em Download e Converter é a preferência delas, no editor e nos
-        # Metadados é a de lá. Fechar no editor não revoga a de Download e Converter (decisão Q1 da revisão de b829156).
-        if self._in_workspace():
-            self._drawer_in_workspace = open_
-        else:
-            self._drawer_open = open_
+        self._drawer_open = open_
         self._drawer_forced = open_ and self._narrow()
         self._apply_drawer()
 

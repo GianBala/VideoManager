@@ -576,7 +576,7 @@ corte rápido está ativo mas o ponto marcado não cai exatamente num
 keyframe).
 
 **Adicionar à fila** enfileira a exportação junto com downloads e conversões
-em andamento, na mesma [fila de tarefas](interface-geral.md#a-fila-de-tarefas)
+em andamento, na mesma [fila de tarefas](interface-geral.md#a-gaveta-de-tarefas)
 — com a diferença de que, na aba Editar, a fila fica oculta e a janela
 inteira permanece dedicada à edição; o progresso da exportação continua
 visível no selo do item **Tarefas** do menu lateral e na gaveta de tarefas, que o aviso "Ver tarefas" abre.

@@ -26,12 +26,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from videomanager.application.capabilities import FFmpegTools
+from videomanager.domain.selection import keeps_source
 from videomanager.infrastructure.ffmpeg import hardware as hwaccel
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
-
-# Folga abaixo da qual a fonte conta como "já no bitrate pedido": o bitrate que o ffprobe lê da fonte oscila uns pontos, e
-# recodificar para ganhar 2% é desperdício.
-_SOURCE_TOLERANCE = 1.02
 
 _ENCODERS = {"h264": "libx264", "hevc": "libx265", "vp9": "libvpx-vp9", "av1": "libsvtav1"}
 _FAMILY_OF = {"h264": "h264", "hevc": "hevc", "h265": "hevc", "vp9": "vp9", "av1": "av1"}
@@ -49,6 +46,8 @@ class SourceVideo:
     container: str
     kbps: float | None
     duration: float | None
+    # Falso num arquivo só de áudio (um item de áudio num lote em "Vídeo com áudio"): não há imagem a recodificar.
+    has_video: bool = True
 
 
 def probe_video(path: Path, tools: FFmpegTools, *, timeout: float = 60.0) -> SourceVideo:
@@ -75,6 +74,7 @@ def probe_video(path: Path, tools: FFmpegTools, *, timeout: float = 60.0) -> Sou
         container=path.suffix.lower().lstrip("."),
         kbps=kbps,
         duration=duration,
+        has_video=video is not None,
     )
 
 
@@ -88,7 +88,7 @@ def _number(value) -> float | None:
 
 def needs_recode(source: SourceVideo, kbps: int) -> bool:
     """Falso quando a fonte já está no bitrate pedido ou abaixo: ali recodificar só aumentaria o arquivo."""
-    return source.kbps is None or source.kbps > kbps * _SOURCE_TOLERANCE
+    return not keeps_source(source.kbps, kbps)
 
 
 def target_family(source: SourceVideo) -> str:

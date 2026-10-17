@@ -94,6 +94,47 @@ def test_copiar_nao_pede_medida(desktop_app, tmp_path) -> None:
         _fechar(panel)
 
 
+def test_copiar_que_recodifica_de_fato_tambem_e_medido(desktop_app, wait_until, tmp_path) -> None:
+    """A aba nasce em "Cópia": redimensionar recodifica do mesmo jeito, e a conta por pixels errou de −39% a +609% aí."""
+    from videomanager.domain.compatibility import needs_video_reencode
+    from videomanager.presentation.qt import strings
+
+    panel, runtime, video, _ = _painel(desktop_app, tmp_path)
+    try:
+        _codec(panel, "copy")
+        assert runtime.pedidos == []  # copiar de verdade continua sem medida
+        panel._resize.setCurrentIndex(panel._resize.findData(720))
+        alvo = panel._build_target(video)
+        assert alvo.video_codec == "copy" and needs_video_reencode(video, alvo)
+        assert runtime.pedidos == [("video.mp4", "copy")]
+        assert panel._list.item(0).data(convert_rows.ROLE_AFTER)["size"] is None
+        assert strings.CONVERT_MEASURING in panel._plan.text()
+
+        runtime.liberar.set()
+        wait_until(lambda: not panel._sampling and panel._sampling_runner.active == 0, timeout=10)
+        dado = panel._list.item(0).data(convert_rows.ROLE_AFTER)
+        assert dado["size"] == estimate_convert_size(video, alvo, 3000.0) and dado["approximate"] is False
+    finally:
+        _fechar(panel)
+
+
+def test_copia_pura_mostra_0_por_cento_e_o_medido_mostra_o_til(desktop_app, wait_until, tmp_path) -> None:
+    panel, runtime, video, _ = _painel(desktop_app, tmp_path)
+    try:
+        _codec(panel, "copy")
+        dado = panel._list.item(0).data(convert_rows.ROLE_AFTER)
+        assert dado.get("exact") is True and convert_rows.change_label(video, dado) == ("0%", "t2")
+
+        runtime.kbps = 5000.0  # um H.264 medido que quase não muda o arquivo
+        _codec(panel, "h264")
+        runtime.liberar.set()
+        wait_until(lambda: not panel._sampling and panel._sampling_runner.active == 0, timeout=10)
+        medido = panel._list.item(0).data(convert_rows.ROLE_AFTER)
+        assert "exact" not in medido and medido["approximate"] is False
+    finally:
+        _fechar(panel)
+
+
 def test_recodificar_fora_da_compressao_espera_a_amostra_e_usa_o_que_ela_mediu(desktop_app, wait_until, tmp_path) -> None:
     from videomanager.presentation.qt import strings
 
@@ -204,6 +245,14 @@ class TestVariacaoNaLinha:
         for size in (97_000_000, 100_000_000, 103_000_000):
             assert convert_rows.change_label(self.MEDIA, {"size": size}) == ("≈0%", "t2")
         assert convert_rows.change_label(self.MEDIA, {"size": 104_000_000}) == ("+4%", "warn")
+
+    def test_o_que_sai_por_conta_nao_leva_o_til(self) -> None:
+        """Copiar, MP3 e WAV não têm erro de medida: o "≈" diria incerteza onde ela não existe (antes: "0%")."""
+        assert convert_rows.change_label(self.MEDIA, {"size": 100_000_000, "exact": True}) == ("0%", "t2")
+        assert convert_rows.change_label(self.MEDIA, {"size": 101_000_000, "exact": True}) == ("+1%", "warn")
+        assert convert_rows.change_label(self.MEDIA, {"size": 99_000_000, "exact": True}) == ("−1%", "ok")
+        # o medido, com a mesma variação, continua sem escolher lado
+        assert convert_rows.change_label(self.MEDIA, {"size": 101_000_000}) == ("≈0%", "t2")
 
     def test_sem_medida_ou_sem_tamanho_nao_ha_o_que_afirmar(self) -> None:
         assert convert_rows.change_label(self.MEDIA, {"size": None}) is None
