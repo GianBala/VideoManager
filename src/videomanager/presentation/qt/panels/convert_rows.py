@@ -75,13 +75,17 @@ def change_label(media: LocalMedia, after: dict) -> tuple[str, str] | None:
     """O texto da variação de tamanho e o papel de cor dele, ou ``None`` quando não há o que afirmar.
 
     Uma conta que não foi medida não afirma que o arquivo cresce nem que encolhe (anunciava +10% a arquivos que saíam
-    90% menores), e uma variação dentro do erro da medida não escolhe lado: a cor de aviso diria um.
+    90% menores), e uma variação dentro do erro da medida não escolhe lado: a cor de aviso diria um. Só vale para o que
+    foi medido: o que sai por conta (``"exact"``) não tem esse erro.
     """
     if after.get("approximate") or after.get("skipped"):
         return None
     change = change_percent(media, after["size"])
     if change is None:
         return None
+    if after.get("exact"):
+        # Copiar, MP3 e WAV saem por conta: não há erro de medida, e o "≈" diria incerteza onde ela não existe.
+        return f"{change:+d}%".replace("-", "−") if change else "0%", "warn" if change > 0 else "ok" if change < 0 else "t2"
     if abs(change) <= NEAR_ZERO:
         return "≈0%", "t2"
     return f"{change:+d}%".replace("-", "−"), "warn" if change > 0 else "ok"

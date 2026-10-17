@@ -986,12 +986,11 @@ class ExportDialog(QDialog):
             return None, False
         main = self._main_clip(proj)
         local = self._probed.get(main.media.path) if main else None
-        tools = self._ensure_tools() if self._ensure_tools else None
         target = VideoTarget(
             container=container, video_codec=family, height=min(proj.width, proj.height), fps=proj.fps,
             quality=self._quality_choice or hwaccel.QUALITY_BALANCED, hardware=self._settings.hardware_encoder,
         )
-        if local is None or tools is None or not needs_sample(local, target):
+        if local is None or not needs_sample(local, target):
             self._cancel_sampling()
             return None, False
         key = (local.path, container, family, target.quality, target.height, target.fps, target.hardware)
@@ -1001,6 +1000,11 @@ class ExportDialog(QDialog):
         if any(pedida != key for pedida in self._sampling):
             self._cancel_sampling()
         if key not in self._sampling:
+            # Só aqui, quando vai mesmo medir: ``_ensure_tools`` pode abrir a caixa "Baixar o ffmpeg?", e esta conta
+            # roda a cada troca de opção da janela (e na montagem dela).
+            tools = self._ensure_tools() if self._ensure_tools else None
+            if tools is None:
+                return None, False
             self._sampling.add(key)
             token = self._sampling_token
             worker = self._runtime.sample_worker(local, target, tools)

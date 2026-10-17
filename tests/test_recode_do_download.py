@@ -13,11 +13,17 @@ from pathlib import Path
 
 import pytest
 
-from videomanager.application.errors import DownloadFailedError, JobCancelled
+from videomanager.application.errors import JobCancelled
 from videomanager.domain.selection import VideoRequest
 from videomanager.infrastructure.ffmpeg import recode
 from videomanager.infrastructure.ffmpeg.recode import SourceVideo
 from videomanager.infrastructure.yt_dlp.downloader import Downloader, RecodePlan
+
+
+def _e_o_aviso_de_fallback(aviso) -> bool:
+    """O ``Text`` guarda a chave por dentro; o que se vê é o texto do catálogo, no idioma do momento."""
+    from videomanager.domain.i18n import t
+    return str(aviso).startswith(t("RECODE_FALLBACK", error="\0").split("\0")[0])
 
 
 def _fonte(family="h264", container="mp4", kbps=4000.0, duration=10.0) -> SourceVideo:
@@ -25,6 +31,12 @@ def _fonte(family="h264", container="mp4", kbps=4000.0, duration=10.0) -> Source
 
 
 # -- a decisão ------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("fonte", [4000.0, 2500.0, 2550.0, 2551.0, 900.0, None])
+def test_o_ffmpeg_decide_pela_mesma_regra_do_painel_e_da_estimativa(fonte):
+    from videomanager.domain.selection import keeps_source
+    assert recode.needs_recode(_fonte(kbps=fonte), 2500) is (not keeps_source(fonte, 2500))
+
 
 def test_o_pedido_de_video_sem_bitrate_e_igual_a_fonte():
     assert VideoRequest().video_kbps is None
@@ -150,10 +162,160 @@ def test_cancelar_a_recodificacao_deixa_a_fonte_intacta_e_nao_sobra_arquivo(tool
 
 
 @pytest.mark.ffmpeg
-def test_o_ffmpeg_que_falha_levanta_erro_claro_e_deixa_a_fonte(tools, tmp_path, monkeypatch):
+def test_o_ffmpeg_que_falha_entrega_o_original_com_aviso(tools, tmp_path, monkeypatch):
+    """Decisão Q2 da revisão de efeed31 a 087f775: o download já está completo; a recodificação é um acabamento, e a
+    falha dela não pode descartá-lo. (Antes: ``DownloadFailedError``, e o arquivo ficava preso na pasta temporária.)"""
     baixador, fonte, _ = _baixado(tools, tmp_path, kbps=800)
     antes = fonte.read_bytes()
     monkeypatch.setattr(recode, "build_args", lambda *a, **k: [[tools.ffmpeg_str, "-nostdin", "-i", "/nao/existe.mp4", "x.mp4"]])
-    with pytest.raises(DownloadFailedError):
-        baixador._recode_video()
+    baixador._recode_video()  # não levanta
     assert fonte.read_bytes() == antes
+    assert len(baixador.warnings) == 1 and _e_o_aviso_de_fallback(baixador.warnings[0])
+    assert any("entregue" in linha or "delivered" in linha for linha in baixador.log)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["fonte.mp4"]  # nenhuma sobra da recodificação
+
+
+@pytest.mark.ffmpeg
+def test_run_entrega_o_arquivo_e_o_aviso_quando_a_recodificacao_falha(tools, tmp_path, monkeypatch):
+    fonte = _sintetico(tools, tmp_path)
+    _com_yt_dlp_falso(monkeypatch, fonte)
+    monkeypatch.setattr(recode, "build_args", lambda *a, **k: [[tools.ffmpeg_str, "-nostdin", "-i", "/nao/existe.mp4", "x.mp4"]])
+    resultado = Downloader({}, recode_plan=RecodePlan(kbps=800, tools=tools)).run("https://exemplo.invalido/v")
+    assert resultado.path == fonte and len(resultado.warnings) == 1 and _e_o_aviso_de_fallback(resultado.warnings[0])
+
+
+@pytest.mark.ffmpeg
+def test_arquivo_sem_video_nao_e_recodificado_nem_falha(tools, tmp_path):
+    """Num lote em "Vídeo com áudio", um item só de áudio chegava ao ffmpeg com ``-map 0:v:0`` e a tarefa falhava."""
+    audio = tmp_path / "so_audio.m4a"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=duration=3", "-c:a", "aac",
+                    str(audio)], check=True)
+    antes = audio.read_bytes()
+    baixador = Downloader({}, recode_plan=RecodePlan(kbps=800, tools=tools))
+    baixador._final_path = audio
+    baixador._recode_video()
+    assert audio.read_bytes() == antes and baixador.warnings == ()
+    assert any("vídeo" in linha or "video" in linha for linha in baixador.log)
+    assert [p.name for p in tmp_path.iterdir()] == ["so_audio.m4a"]
+
+
+@pytest.mark.ffmpeg
+def test_a_sondagem_distingue_o_arquivo_sem_video_do_com_video(tools, tmp_path):
+    audio = tmp_path / "so_audio.m4a"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=duration=3", "-c:a", "aac",
+                    str(audio)], check=True)
+    assert not recode.probe_video(audio, tools).has_video
+    assert recode.probe_video(_sintetico(tools, tmp_path), tools).has_video
+    assert SourceVideo("h264", "mp4", 4000.0, 10.0).has_video  # o padrão: quem monta à mão não muda
+
+
+# -- a ligação com o download e o cancelamento de verdade ------------------------------------------------------
+
+class _YtDlpFalso:
+    """O ``YoutubeDL`` que só entrega o arquivo já "baixado": o que importa aqui é o que ``run`` faz depois."""
+
+    arquivo: Path
+
+    def __init__(self, opts):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def add_post_processor(self, *args, **kwargs):
+        pass
+
+    def extract_info(self, url, download=True):
+        return {"title": "titulo", "requested_downloads": [{"filepath": str(self.arquivo)}]}
+
+
+def _com_yt_dlp_falso(monkeypatch, arquivo: Path) -> None:
+    from videomanager.infrastructure.yt_dlp import downloader
+
+    _YtDlpFalso.arquivo = arquivo
+    monkeypatch.setattr(downloader.yt_dlp, "YoutubeDL", _YtDlpFalso)
+
+
+@pytest.mark.ffmpeg
+def test_run_recodifica_o_que_o_yt_dlp_baixou_quando_o_pedido_traz_o_bitrate(tools, tmp_path, monkeypatch):
+    """Os outros testes chamam ``_recode_video`` direto; este garante que o download passa por ele (tirar a chamada de
+    ``run`` desligava o recurso inteiro sem a suíte notar)."""
+    fonte = _sintetico(tools, tmp_path)
+    _com_yt_dlp_falso(monkeypatch, fonte)
+    antes = _sondar(tools, fonte)
+    resultado = Downloader({}, recode_plan=RecodePlan(kbps=800, tools=tools)).run("https://exemplo.invalido/v")
+    depois = _sondar(tools, fonte)
+    assert resultado.path == fonte and resultado.title == "titulo"
+    kbps = float(depois["format"]["size"]) * 8 / float(depois["format"]["duration"]) / 1000
+    assert 650 < kbps - 128 < 950, f"saiu com {kbps:.0f} kbps no total para um pedido de 800 de vídeo"
+    assert float(antes["format"]["size"]) > 2 * float(depois["format"]["size"])
+
+
+@pytest.mark.ffmpeg
+def test_run_sem_plano_deixa_o_arquivo_baixado_como_esta(tools, tmp_path, monkeypatch):
+    fonte = _sintetico(tools, tmp_path)
+    _com_yt_dlp_falso(monkeypatch, fonte)
+    antes = fonte.read_bytes()
+    Downloader({}).run("https://exemplo.invalido/v")
+    assert fonte.read_bytes() == antes
+
+
+@pytest.mark.ffmpeg
+def test_cancelar_mata_o_ffmpeg_da_recodificacao_de_verdade(tools, tmp_path, monkeypatch):
+    """O teste de cancelamento acima troca ``_run_recode`` por uma função que levanta e nunca abre um processo. Aqui o
+    ffmpeg corre de verdade, aberto pela ``Popen`` registrada do yt-dlp, e ``cancel()`` precisa alcançá-lo."""
+    import threading
+    import time
+
+    fonte = tmp_path / "fonte.mp4"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "testsrc2=size=1920x1080:rate=60:duration=40", "-c:v", "libx264", "-preset", "ultrafast",
+                    "-b:v", "20000k", "-pix_fmt", "yuv420p", str(fonte)], check=True)
+    antes = fonte.read_bytes()
+    _com_yt_dlp_falso(monkeypatch, fonte)
+    baixador = Downloader({}, recode_plan=RecodePlan(kbps=1500, tools=tools))
+    desfecho: dict = {}
+
+    def baixar():
+        try:
+            baixador.run("https://exemplo.invalido/v")
+            desfecho["fim"] = "terminou"
+        except JobCancelled:
+            desfecho["fim"] = "cancelado"
+
+    fio = threading.Thread(target=baixar)
+    fio.start()
+    prazo = time.monotonic() + 20
+    while not baixador._processes and time.monotonic() < prazo:
+        time.sleep(0.02)
+    assert baixador._processes, "o ffmpeg da recodificação não foi registrado para o cancelamento"
+    processo = baixador._processes[-1]
+    baixador.cancel()
+    fio.join(15)
+    assert not fio.is_alive() and desfecho == {"fim": "cancelado"}
+    assert processo.poll() is not None  # o ffmpeg morreu, e não só a thread esperou por ele
+    assert fonte.read_bytes() == antes
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["fonte.mp4"]
+
+
+@pytest.mark.ffmpeg
+def test_a_capa_e_a_legenda_embutidas_sobrevivem_a_recodificacao(tools, tmp_path):
+    """O docstring do arquivo promete "a capa embutida que se perde": o ``-map 0`` e a cópia do resto a guardam."""
+    capa, legenda = tmp_path / "capa.jpg", tmp_path / "l.srt"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x180:d=1",
+                    "-frames:v", "1", str(capa)], check=True)
+    legenda.write_text("1\n00:00:01,000 --> 00:00:03,000\nola\n")
+    base = _sintetico(tools, tmp_path)
+    fonte = tmp_path / "com_capa.mp4"
+    subprocess.run([tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-i", str(base), "-i", str(legenda), "-i", str(capa),
+                    "-map", "0", "-map", "1", "-map", "2", "-c", "copy", "-c:s", "mov_text", "-disposition:v:1",
+                    "attached_pic", str(fonte)], check=True)
+    baixador = Downloader({}, recode_plan=RecodePlan(kbps=800, tools=tools))
+    baixador._final_path = fonte
+    baixador._recode_video()
+    streams = _sondar(tools, fonte)["streams"]
+    tipos = [(s["codec_type"], s["codec_name"], bool((s.get("disposition") or {}).get("attached_pic"))) for s in streams]
+    assert tipos == [("video", "h264", False), ("audio", "aac", False), ("subtitle", "mov_text", False), ("video", "mjpeg", True)]

@@ -167,6 +167,20 @@ class TestNeedsSample:
         from videomanager.domain.media import VideoTarget
         assert sm.needs_sample(self._media(self._v(), self._a()), VideoTarget(video_codec="h264"))
 
+    def test_copiar_que_recodifica_de_fato_tambem_pede_medida(self) -> None:
+        """O codec pedido é "Cópia", mas redimensionar, mudar a taxa ou trocar para um container que não aceita o codec
+        recodifica: o tamanho depende do conteúdo do mesmo jeito (a conta por pixels errou −39% a +609% nesses casos)."""
+        from videomanager.domain.media import LocalStream, VideoTarget
+        h264 = self._media(self._v(), self._a())
+        assert sm.needs_sample(h264, VideoTarget(container="mp4", video_codec="copy", height=720))
+        assert sm.needs_sample(h264, VideoTarget(container="mp4", video_codec="copy", fps=24.0))
+        assert sm.needs_sample(h264, VideoTarget(container="webm", video_codec="copy"))
+        vp9 = self._media(LocalStream(0, "video", "vp9", width=1920, height=1080, fps=30.0), self._a("opus"))
+        assert sm.needs_sample(vp9, VideoTarget(container="mp4", video_codec="copy"))
+        # e a cópia que de fato copia continua sem medida
+        assert not sm.needs_sample(h264, VideoTarget(container="mp4", video_codec="copy"))
+        assert not sm.needs_sample(h264, VideoTarget(container="mkv", video_codec="copy"))
+
     def test_sem_duracao_nao_ha_o_que_medir(self) -> None:
         from videomanager.domain.media import VideoTarget
         assert not sm.needs_sample(self._media(self._v(), duration=None), VideoTarget(video_codec="h264"))

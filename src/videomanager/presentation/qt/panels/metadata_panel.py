@@ -675,7 +675,9 @@ class MetadataPanel(QWidget):
         row.addWidget(self._file_tile)
         names = QVBoxLayout()
         names.setSpacing(4)
+        # O nome do arquivo e o "Lendo {nome}…" são texto do disco: puro, e não HTML (um arquivo "a<b>.mp3" perdia o "<b>").
         self._file_name = QLabel()
+        self._file_name.setTextFormat(Qt.TextFormat.PlainText)
         self._file_name.setProperty("role", "section-title")
         names.addWidget(self._file_name)
         chips = QHBoxLayout()
@@ -690,6 +692,7 @@ class MetadataPanel(QWidget):
         row.addLayout(names)
         # O texto de ajuda (ou "Lendo…") mora à direita, junto do botão; antes de abrir um arquivo é só ele.
         self._info = QLabel()
+        self._info.setTextFormat(Qt.TextFormat.PlainText)
         self._info.setProperty("role", "dim")
         self._info.setWordWrap(True)
         self._info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)

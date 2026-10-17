@@ -90,6 +90,13 @@ Estas regras saíram de um checkup da conversão e têm teste em
   tabela não promete, e quem segura é `ConversionRequest.max_bytes`. O áudio
   abaixo do teto do nível é recusado ao enfileirar (`ERROR_ALREADY_COMPRESSED`). `ConversionRequest.max_bytes`
   faz o `Converter` recusar, antes de publicar, a compressão que não encolheu.
+- **Recodificação do download.** O bitrate escolhido no Download recodifica depois do yt-dlp (`recode.py`), dentro do
+  `DownloadWorker`, que corre na fila de rede (`max_concurrent_jobs`, 3 por padrão) e não na fila local de uma vaga.
+  Medido: o encode de duas passadas pede 1,2 GB (1080p60) a 4 GB (4K) e todos os núcleos, e três juntos somavam ~12 GB.
+  Por isso `downloader._RECODE_SLOT` (um `Semaphore(1)` do processo) deixa uma recodificação por vez; quem espera mantém
+  a vaga de download, mostra "Aguardando a vez de recodificar" e é alcançado pelo cancelamento. A vaga volta no `finally`.
+  A falha da recodificação (ou um arquivo sem vídeo) não derruba o download: `DownloadResult.warnings` leva o aviso até
+  `Job.warnings` e a descrição do cartão passa a dizer "com aviso".
 - **Capa.** O remux que embute a capa mantém metadados e capítulos
   (`-map_metadata 0 -map_chapters 0`).
 - **Processo.** O stderr do ffmpeg é lido em UTF-8 com `errors="replace"`: em

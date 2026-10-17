@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from videomanager.domain.estimator import _video_only_kbps
+from videomanager.domain.estimator import video_only_kbps
 from videomanager.domain.estimator import estimate_download_size
 from videomanager.domain.format_policy import available_families
 from videomanager.domain.format_policy import available_fps
@@ -41,6 +41,7 @@ from videomanager.domain.selection import AUDIO_CODECS
 from videomanager.domain.selection import CONTAINER_AUTO
 from videomanager.domain.selection import CONTAINERS
 from videomanager.domain.selection import LOSSLESS_AUDIO
+from videomanager.domain.selection import keeps_source
 from videomanager.domain.selection import VIDEO_BITRATE_MAX
 from videomanager.domain.selection import VIDEO_BITRATE_MIN
 from videomanager.domain.selection import VIDEO_BITRATE_PRESETS
@@ -468,7 +469,7 @@ class QualityPanel(QWidget):
     def _source_video_kbps(self) -> float | None:
         """O bitrate do vídeo que seria baixado agora, sem o áudio que um formato muxado leva junto."""
         video = self.current_video_choice() if hasattr(self, "_resolution") else None
-        return _video_only_kbps(video.best) if video is not None else None
+        return video_only_kbps(video.best) if video is not None else None
 
     def current_video_kbps(self) -> int | None:
         """O bitrate de vídeo pedido (kbps), ou ``None`` para "igual ao da fonte"."""
@@ -575,7 +576,7 @@ class QualityPanel(QWidget):
                 kbps = self.current_video_kbps()
                 if kbps:
                     source = self._source_video_kbps()
-                    if source is not None and source <= kbps * 1.02:
+                    if keeps_source(source, kbps):
                         messages.append(strings.QUALITY_WARN_BITRATE_ABOVE_SOURCE.format(
                             source=format_bitrate(source), requested=format_bitrate(kbps)))
                     else:

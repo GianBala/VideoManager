@@ -115,12 +115,9 @@ QListWidget[role="media"] {{ background: transparent; border: none; padding: 0px
 
 QLabel {{ background: transparent; }}
 QLabel[role="dim"] {{ color: {t2}; }}
-/* Nota ao pé de uma coluna estreita (aba Transições): menor que o texto dos
-   controles, para a coluna não pedir altura que a prévia ao lado perderia. */
-QLabel[role="note"] {{ color: {t2}; font-size: 11px; }}
+/* Texto que fica sobre o plano da prévia, escuro nos dois modos: a cor do texto discreto da versão escura da paleta. */
+QLabel[role="screen-dim"] {{ color: {t2_tela}; }}
 QLabel[role="title"] {{ font-size: 13pt; font-weight: 600; }}
-QLabel[role="live"] {{ color: {live_text}; background: {live};
-    border-radius: 4px; padding: 2px 6px; font-weight: 700; font-size: 8pt; }}
 QLabel[role="warn"] {{ color: {warn}; }}
 
 QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QListWidget, QTreeWidget {{
@@ -268,7 +265,7 @@ QPushButton[role="play"]:hover {{ border-color: {on_fill}; }}
 QPushButton[role="play"]:focus {{ border-color: {focus}; }}
 QLabel[role="clock"] {{ color: {text}; font-size: 22px; font-weight: 500; }}
 QLabel[role="clock-total"] {{ color: {t2}; font-size: 13px; }}
-QLabel[role="overlay-note"] {{ background: {screen82}; color: {t2}; border-radius: 8px; padding: 3px 10px; }}
+QLabel[role="overlay-note"] {{ background: {screen82}; color: {t2_tela}; border-radius: 8px; padding: 3px 10px; }}
 QComboBox[role="field"][compact="true"] {{ min-height: 32px; border-radius: 10px; }}
 QFrame[role="segments"][compact="true"] {{ border-radius: 10px; }}
 QToolButton[role="icon"][danger="true"]:hover {{ background: {err16}; }}
@@ -323,33 +320,6 @@ QPushButton[role="toast-action"]:hover {{ background: {raised}; border-color: {r
 QPushButton[role="toast-close"] {{ background: transparent; border: 1px solid transparent; padding: 4px; }}
 QPushButton[role="toast-close"]:hover {{ background: {raised}; border-color: {raised}; }}
 QPushButton[role="palette"]:checked {{ background: {soft16}; border-color: {accent}; }}
-
-QPushButton[role="transport"] {{
-    background: {raised};
-    border: 1px solid {raised};
-    border-radius: 6px;
-    padding: 2px 6px;
-    font-size: 13px;
-}}
-QPushButton[role="transport"]:hover {{ background: {raised2}; border-color: {raised2}; }}
-QPushButton[role="transport"]:checked {{ background: {fill_a}; color: {on_fill}; border-color: {fill_a}; }}
-QPushButton[role="transport"]:disabled {{ color: {t2}; border-color: {raised}; }}
-
-QPushButton[role="spin-tool"] {{
-    background: {raised};
-    border: 1px solid {raised};
-    border-radius: 4px;
-    padding: 0px;
-    margin: 0px;
-    min-width: 28px;
-    max-width: 28px;
-    min-height: 28px;
-    max-height: 28px;
-    font-size: 16px;
-    font-weight: bold;
-}}
-QPushButton[role="spin-tool"]:hover {{ background: {raised2}; border-color: {raised2}; }}
-QPushButton[role="spin-tool"]:pressed {{ background: {fill_a}; color: {on_fill}; }}
 
 /* Escolha entre opções (filtros, transições, fonte): texto à esquerda e a
    marcada com a borda da cor de destaque. Letra de 12 px: com a do resto da
@@ -531,8 +501,7 @@ QTabBar::tab:focus {{ border-color: {focus}; }}
    entre o botão com e sem foco, onde a referência pede 3:1, e quem navega
    por Tab não sabia em que botão o Enter ia cair. No fim do estilo para
    valer sobre o :hover e os papéis. */
-QPushButton:focus, QPushButton[role="transport"]:focus,
-QPushButton[role="spin-tool"]:focus, QPushButton[role="palette"]:focus {{ border-color: {focus}; }}
+QPushButton:focus, QPushButton[role="palette"]:focus {{ border-color: {focus}; }}
 /* O anel de foco do botão primário é a cor do texto dele: o foco branco ou preto some sobre um
    preenchimento claro, escuro ou âmbar (medido nas paletas Estúdio e Cinema). */
 QPushButton[role="primary"]:focus {{ border-color: {on_fill}; }}
@@ -683,19 +652,20 @@ def _imagem(nome: str, cor: str, desenho, espessura: float = 1.6) -> str:
 
 def _cores_do_estilo(theme: str, nome: str) -> dict[str, str]:
     """O que o QSS interpola: os papéis, o foco e o selo, e o acento a 16% de opacidade."""
-    cores = {**papeis(theme, nome), **{k: palette(theme, nome)[k] for k in ("focus", "live")}}
+    cores = {**papeis(theme, nome), "focus": palette(theme, nome)["focus"]}
     vermelho, verde, azul = (int(cores["soft"][i:i + 2], 16) for i in (1, 3, 5))
     cores["soft16"] = f"rgba({vermelho}, {verde}, {azul}, 0.16)"
     erro_r, erro_g, erro_b = (int(cores["err"][i:i + 2], 16) for i in (1, 3, 5))
     cores["err16"] = f"rgba({erro_r}, {erro_g}, {erro_b}, 0.16)"
     aviso_r, aviso_g, aviso_b = (int(cores["warn"][i:i + 2], 16) for i in (1, 3, 5))
     cores["warn16"] = f"rgba({aviso_r}, {aviso_g}, {aviso_b}, 0.16)"
-    # O selo "ao vivo" tem fundo vermelho fixo nos dois modos; o texto dele é sempre branco, e não o
-    # texto do botão primário, que nas paletas de botão claro ou âmbar é escuro.
-    cores["live_text"] = "#ffffff"
     # O plano da prévia a 82%: o aviso que fica sobre o quadro ("Carregando quadro…") precisa ler-se sobre qualquer imagem.
     tela = QColor(cores["screen"])
     cores["screen82"] = f"rgba({tela.red()}, {tela.green()}, {tela.blue()}, 0.82)"
+    # O ``screen`` é escuro nos dois modos, e o texto discreto do modo claro é escuro: sobre ele dava 2,3 : 1. O texto que cai
+    # sobre o plano da prévia (o estado vazio e o aviso sobre o quadro) usa o ``t2`` da versão escura da mesma paleta, que
+    # já foi conferido contra superfícies escuras.
+    cores["t2_tela"] = papeis("dark", nome)["t2"]
     # O ladrilho do arquivo de áudio: o verde de áudio da linha do tempo, a 16%.
     verde = QColor(TIPOS_DE_BLOCO["audio"])
     cores["audio16"] = f"rgba({verde.red()}, {verde.green()}, {verde.blue()}, 0.16)"

@@ -12,6 +12,9 @@ register({
     "ERROR_NO_AUDIO_TRACK": ("não tem trilha de áudio", "has no audio track"),
     "ERROR_CODEC_NOT_IN_CONTAINER": ("{codec} não cabe em .{container}", "{codec} doesn't fit in .{container}"),
 
+    # A situação de uma tarefa concluída com aviso (ver ``JobService.finish``).
+    "DESC_WITH_WARNING": ("{description} · com aviso", "{description} · with a warning"),
+
     # --- codificação ---------------------------------------------------------------
     "QUALITY_BALANCED": ("qualidade equilibrada", "balanced quality"),
     "QUALITY_HIGH": ("alta qualidade", "high quality"),

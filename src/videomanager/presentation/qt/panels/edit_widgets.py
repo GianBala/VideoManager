@@ -365,7 +365,8 @@ class _Preview(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.setFrameShape(QFrame.Shape.NoFrame)
         bind(self, "setText", lambda: strings.EDIT_EMPTY)
-        self.setProperty("role", "dim")
+        # O estado vazio é texto sobre o plano ``screen``, escuro nos dois modos: o ``dim`` (escuro no modo claro) sumia nele.
+        self.setProperty("role", "screen-dim")
         self._pixmap: QPixmap | None = None
         self._interaction_layers: tuple[QPixmap, ...] | None = None
         self._interaction_visible = False
@@ -1323,6 +1324,7 @@ class _ClipPropertiesWidget(QWidget):
         names = QVBoxLayout()
         names.setSpacing(1)
         self._title_lbl = QLabel(strings.PROP_TITLE)
+        self._title_lbl.setTextFormat(Qt.TextFormat.PlainText)  # o nome do bloco é o do arquivo ou o texto que o usuário digitou
         self._title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._title_lbl.setMinimumWidth(0)
         self._title_lbl.setProperty("role", "section-title")
