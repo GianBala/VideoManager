@@ -82,34 +82,41 @@ def test_a_gaveta_fechada_continua_fechada_ao_trocar_de_aba_e_volta_pelo_item_ta
         assert janela._queue_panel.isVisible(), indice
 
 
-@pytest.mark.parametrize("aba_de_trabalho", [_TAB_EDIT, _TAB_METADATA])
-def test_fechar_numa_aba_de_trabalho_nao_tira_a_gaveta_de_download_e_convert(janela, desktop_app, aba_de_trabalho):
-    """``REG-003`` (decisão Q1): fechar a gaveta no editor ou nos Metadados não revoga a de Download e Converter.
+_ABAS = [_TAB_DOWNLOAD, _TAB_CONVERT, _TAB_EDIT, _TAB_METADATA]
 
-    A gaveta chega aberta lá (a preferência das abas que produzem tarefas); quem a fecha ali a fechou para o trabalho, e
-    ao voltar a Download ou Converter ela está onde a preferência a deixou.
+
+@pytest.mark.parametrize("onde", _ABAS)
+def test_fechar_a_gaveta_em_qualquer_aba_a_fecha_em_todas(janela, desktop_app, onde):
+    """O relato: fechada no Editar, a gaveta reabria sozinha ao ir para Download ou Converter (e ao voltar ao Editar).
+
+    Havia duas vontades, a de Download e Converter e a do Editar e dos Metadados, e fechar numa não revogava a outra.
+    Com a gaveta aberta nas duas, o resultado dependia da última aba em que se mexeu: parecia que ela abria e fechava
+    por conta própria. É uma gaveta só: o que se pediu vale até o usuário pedir outra coisa, em qualquer aba.
     """
-    _ir(janela, desktop_app, aba_de_trabalho)
+    _ir(janela, desktop_app, onde)
     assert janela._queue_panel.isVisible()
     janela._queue_panel._hide_button.click()
     assert not janela._queue_panel.isVisible() and not janela._nav_tasks.isChecked()
-    for indice in (_TAB_DOWNLOAD, _TAB_CONVERT):
+    for indice in _ABAS + _ABAS[::-1]:
         _ir(janela, desktop_app, indice)
-        assert janela._queue_panel.isVisible() and janela._nav_tasks.isChecked(), indice
+        assert not janela._queue_panel.isVisible() and not janela._nav_tasks.isChecked(), (onde, indice)
 
 
-def test_abrir_numa_aba_de_trabalho_nao_desfaz_o_recolher_de_download(janela, desktop_app):
-    """A regra é simétrica: quem recolheu a gaveta em Download e a abre no editor a recolheu para as abas dela."""
+@pytest.mark.parametrize("onde", _ABAS)
+def test_abrir_a_gaveta_em_qualquer_aba_a_abre_em_todas(janela, desktop_app, onde):
+    """A regra é simétrica: quem a recolheu em Download e a abre no Editar a quer aberta nas outras abas também."""
     janela._queue_panel._hide_button.click()
     assert not janela._queue_panel.isVisible()
-    _ir(janela, desktop_app, _TAB_EDIT)
-    assert not janela._queue_panel.isVisible()
-    janela._nav_tasks.click()
-    assert janela._queue_panel.isVisible()
-    _ir(janela, desktop_app, _TAB_METADATA)
-    assert janela._queue_panel.isVisible(), "aberta no editor, continua nos Metadados"
-    _ir(janela, desktop_app, _TAB_DOWNLOAD)
-    assert not janela._queue_panel.isVisible() and not janela._nav_tasks.isChecked()
+    _ir(janela, desktop_app, onde)
+    if onde == _TAB_DOWNLOAD:
+        janela._nav_tasks.click()
+    else:
+        assert not janela._queue_panel.isVisible()
+        janela._nav_tasks.click()
+    assert janela._queue_panel.isVisible() and janela._nav_tasks.isChecked()
+    for indice in _ABAS + _ABAS[::-1]:
+        _ir(janela, desktop_app, indice)
+        assert janela._queue_panel.isVisible() and janela._nav_tasks.isChecked(), (onde, indice)
 
 
 def test_o_item_tarefas_liga_e_desliga_a_gaveta_no_editor(janela, desktop_app):
