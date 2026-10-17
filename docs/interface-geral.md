@@ -60,8 +60,8 @@ acompanhar uma tarefa enquanto se edita; fechada, continua fechada. O item
 **Tarefas** a liga e desliga, e o selo dele conta as tarefas em andamento mesmo
 com a gaveta fechada. Ao enfileirar uma exportação, um aviso flutuante diz que
 a tarefa entrou na fila e oferece **Ver tarefas**, que abre a gaveta ali mesmo.
-Fechar a gaveta no Editar ou nos Metadados não muda a escolha de Download e
-Converter: ao voltar a elas, a gaveta está onde estava.
+A escolha é uma só, de todas as abas: fechar a gaveta no Editar a fecha também ao
+voltar a Download ou Converter, e abri-la em qualquer uma a abre nas outras.
 
 **Em janela estreita a gaveta recolhe sozinha.** Quando a janela é mais estreita
 que o menu, o conteúdo da aba e os 344 px da gaveta somados, a gaveta sai de
