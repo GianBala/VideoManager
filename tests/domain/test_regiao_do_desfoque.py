@@ -112,15 +112,15 @@ def test_a_regiao_segue_a_posicao_dos_quadros_chave_e_nao_o_tamanho():
     assert inicio[2:] == meio[2:] == fim[2:] == (384, 216)
 
 
-def test_redimensionar_muda_todos_os_quadros_chave_e_nao_toca_na_posicao():
+def test_redimensionar_muda_todos_os_quadros_chave_e_nao_toca_na_posicao_que_cabe():
     clip = _filtro(keyframes=(
-        Keyframe(0.0, x=0.2, y=0.3, scale_x=0.3, scale_y=0.3),
-        Keyframe(2.0, x=0.8, y=0.6, scale_x=0.3, scale_y=0.3),
+        Keyframe(0.0, x=0.4, y=0.3, scale_x=0.3, scale_y=0.3),
+        Keyframe(2.0, x=0.6, y=0.6, scale_x=0.3, scale_y=0.3),
     ))
     novo = clip.with_region_size(0.5, 0.25)
     assert (novo.scale_x, novo.scale_y) == (0.5, 0.25)
     assert [(k.scale_x, k.scale_y) for k in novo.keyframes] == [(0.5, 0.25), (0.5, 0.25)]
-    assert [(k.x, k.y) for k in novo.keyframes] == [(0.2, 0.3), (0.8, 0.6)]
+    assert [(k.x, k.y) for k in novo.keyframes] == [(0.4, 0.3), (0.6, 0.6)]
     assert (novo.x, novo.y) == (clip.x, clip.y)
 
 
@@ -160,3 +160,16 @@ def test_o_projeto_troca_o_filtro_de_um_bloco_pelo_id():
     novo = projeto.with_filter(sepia.clip_id, REGION_BLUR).find(sepia.clip_id)[1]
     assert novo.has_region and novo.scale_x == REGION_BLUR_DEFAULT_SCALE
     assert projeto.with_filter(9999, REGION_BLUR) is projeto           # id que não existe: nada muda
+
+
+def test_ampliar_a_regiao_colada_na_borda_nao_a_deixa_para_fora():
+    colada = _filtro(x=0.95, y=0.5, scale_x=0.1, scale_y=0.1, scale=0.1,
+                     keyframes=(Keyframe(0.0, x=0.95, y=0.5, scale_x=0.1, scale_y=0.1),
+                                Keyframe(2.0, x=0.05, y=0.5, scale_x=0.1, scale_y=0.1)))
+    maior = colada.with_region_size(0.4, 0.4)
+    assert maior.x == pytest.approx(0.8)                                   # 1 − 0,4/2
+    assert [k.x for k in maior.keyframes] == [pytest.approx(0.8), pytest.approx(0.2)]
+    (x_min, x_max), (y_min, y_max) = maior.region_center_limits()
+    assert (x_min, x_max) == (pytest.approx(0.2), pytest.approx(0.8))
+    assert (y_min, y_max) == (pytest.approx(0.2), pytest.approx(0.8))
+    assert all(x_min <= k.x <= x_max for k in maior.keyframes)

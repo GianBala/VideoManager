@@ -58,6 +58,7 @@ from videomanager.application.formatting import format_duration
 from videomanager.domain.geometry import image_base_size
 from videomanager.domain.timing import last_frame_time
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
+from videomanager.domain.constants import REGION_MIN_SCALE
 
 from videomanager.domain.preview import fit_size
 from videomanager.domain.preview import reduced_fit
@@ -98,6 +99,16 @@ _COMBO_LABEL = 92
 _VALUE_BOX = 62
 # Faixa do controle deslizante da escala: o campo vai a 10×, mas é nos primeiros 2,5× que a escala se ajusta.
 _SCALE_SLIDER_MAX = 250
+
+
+def _has_handles(clip: Clip | None) -> bool:
+    """Se o bloco tem caixa e alças na prévia: o que tem imagem própria, e o filtro que tem região.
+
+    Os demais filtros agem no quadro todo e não têm o que mover; transição também não.
+    """
+    if clip is None or not clip.has_image or clip.audio_only or clip.overlay_type is OverlayType.TRANSITION:
+        return False
+    return clip.overlay_type is not OverlayType.FILTER or clip.has_region
 
 
 def _filter_label(filter_name: object) -> str | None:
@@ -578,6 +589,22 @@ class _Preview(QLabel):
             item_h * scale_y,
         )
 
+    def _region_geometry(self, clip: Clip, t_offset: float, vrect: QRect) -> tuple[float, float, float, float]:
+        """A região do desfoque na prévia, pela **mesma conta** do compositor (``Clip.region_rect``).
+
+        Na tela reduzida em que o quadro parado é composto (a mesma de ``_image_overlay_geometry``), e só
+        então levada à área do vídeo: a caixa cai em cima do retângulo que o ffmpeg borrou.
+        """
+        if self._pixmap is not None and not self._pixmap.isNull():
+            output_w, output_h = self._pixmap.width(), self._pixmap.height()
+        else:
+            output_w, output_h = self._proj_w, self._proj_h
+        compose_w, compose_h = fit_size(self._proj_w, self._proj_h, min(self._proj_w, output_w),
+                                        min(self._proj_h, output_h))
+        left, top, w, h = clip.region_rect(compose_w, compose_h, t_offset)
+        rx, ry = vrect.width() / compose_w, vrect.height() / compose_h
+        return (vrect.x() + (left + w / 2) * rx, vrect.y() + (top + h / 2) * ry, w * rx, h * ry)
+
     def _clip_geometry(self, clip: Clip) -> tuple[float, float, float, float] | None:
         vrect = self._video_rect()
         if vrect.width() <= 0 or vrect.height() <= 0:
@@ -586,6 +613,8 @@ class _Preview(QLabel):
         transform = clip.transform_at(t_offset)
         if clip.overlay_type is OverlayType.IMAGE or clip.is_image:
             return self._image_overlay_geometry(clip, transform, vrect)
+        if clip.has_region:
+            return self._region_geometry(clip, t_offset, vrect)
         sx = max(0.05, transform.scale_x)
         sy = max(0.05, transform.scale_y)
 
@@ -646,7 +675,7 @@ class _Preview(QLabel):
     ) -> tuple[str | None, tuple[float, float, float, float] | None]:
         if (
             clip is None
-            or clip.overlay_type is OverlayType.FILTER
+            or (clip.overlay_type is OverlayType.FILTER and not clip.has_region)
             or not clip.contains(self._position)
         ):
             return None, None
@@ -659,7 +688,8 @@ class _Preview(QLabel):
         cx, cy, w, h = geom
         dx = pos.x() - cx
         dy = pos.y() - cy
-        rad = -math.radians(transform.rotation)
+        # A região é um retângulo reto: o ``crop`` não gira, e o que o .vmp guardar de rotação não vale.
+        rad = -math.radians(0.0 if clip.has_region else transform.rotation)
         lx = dx * math.cos(rad) - dy * math.sin(rad)
         ly = dx * math.sin(rad) + dy * math.cos(rad)
 
@@ -667,9 +697,9 @@ class _Preview(QLabel):
             self._active_clip is not None and clip.clip_id == self._active_clip.clip_id
         )
         if is_active:
-            # 1. Alça de rotação (topo em y = -h/2 - 24)
+            # 1. Alça de rotação (topo em y = -h/2 - 24); a região não gira
             rot_handle_y = -h / 2.0 - 24.0
-            if math.hypot(lx, ly - rot_handle_y) <= 14.0:
+            if not clip.has_region and math.hypot(lx, ly - rot_handle_y) <= 14.0:
                 return "rotate", geom
 
             # 2. Alças de escala nos 4 cantos
@@ -730,7 +760,7 @@ class _Preview(QLabel):
                     self._drag_init_scale = (transform.scale_x + transform.scale_y) / 2.0
                     self._drag_init_scale_x = transform.scale_x
                     self._drag_init_scale_y = transform.scale_y
-                    self._drag_init_rot = transform.rotation
+                    self._drag_init_rot = 0.0 if self._active_clip.has_region else transform.rotation
                     self._drag_init_opacity = transform.opacity
                     self._drag_init_time_offset = t_offset
                     self._drag_init_keyframes = self._active_clip.keyframes if self._active_clip.has_keyframes else ()
@@ -756,7 +786,7 @@ class _Preview(QLabel):
 
                         ox_local = -sx * (w / 2.0)
                         oy_local = -sy * (h / 2.0)
-                        theta_rad = math.radians(transform.rotation)
+                        theta_rad = math.radians(self._drag_init_rot)
                         cos_t = math.cos(theta_rad)
                         sin_t = math.sin(theta_rad)
 
@@ -785,6 +815,11 @@ class _Preview(QLabel):
             vrect = self._video_rect()
             geom = self._clip_geometry(self._active_clip)
             if not geom or vrect.width() <= 0 or vrect.height() <= 0:
+                return
+
+            if self._active_clip.has_region:
+                self._drag_region(pos, vrect, geom)
+                event.accept()
                 return
 
             cx, cy, w, h = geom
@@ -989,6 +1024,48 @@ class _Preview(QLabel):
             self.setCursor(Qt.CursorShape.ArrowCursor)
         super().mouseMoveEvent(event)
 
+    def _drag_region(self, pos: QPoint, vrect: QRect, geom: tuple[float, float, float, float]) -> None:
+        """Mover ou redimensionar a região do desfoque.
+
+        Diferente das imagens: os cantos mudam largura e altura **independentes** (a região não tem
+        proporção a guardar), ela não gira e nunca sai do quadro. O tamanho vai por ``with_region_size``,
+        que o mantém igual em todos os quadros-chave e **prende os centros** (é a única trava do mover:
+        a conta de "dentro do quadro" mora no domínio, e não aqui); a posição, por ``with_edited_transform``,
+        que é a que anima.
+        """
+        cx, cy, w, h = geom
+        vw, vh = float(vrect.width()), float(vrect.height())
+        left, top = float(vrect.x()), float(vrect.y())
+        right, bottom = left + vw, top + vh
+        original = replace(self._active_clip, keyframes=getattr(self, "_drag_init_keyframes", ()) or ())
+        size = (original.scale_x, original.scale_y)
+        self._snap_guide_x = self._snap_guide_y = None
+        if self._drag_mode == "move":
+            raw_cx = left + self._drag_init_x * vw + (pos.x() - self._drag_start_pos.x())
+            raw_cy = top + self._drag_init_y * vh + (pos.y() - self._drag_start_pos.y())
+            new_cx, new_cy = raw_cx, raw_cy
+            if self._snap_enabled:
+                def snap(raw: float, half: float, low: float, high: float) -> tuple[float, float | None]:
+                    near = min((abs(low - (raw - half)), low + half, low), (abs(high - (raw + half)), high - half, high),
+                               (abs((low + high) / 2 - raw), (low + high) / 2, (low + high) / 2), key=lambda c: c[0])
+                    return (near[1], near[2]) if near[0] <= 14.0 else (raw, None)
+                new_cx, self._snap_guide_x = snap(raw_cx, w / 2, left, right)
+                new_cy, self._snap_guide_y = snap(raw_cy, h / 2, top, bottom)
+        else:   # scale_*: o canto oposto fica parado e o que foi pego segue o mouse, preso ao quadro
+            sx, sy = self._drag_sx, self._drag_sy
+            ox, oy = self._drag_opp_x, self._drag_opp_y
+            new_w = min(max(sx * (pos.x() - ox), REGION_MIN_SCALE * vw), (right - ox) if sx > 0 else (ox - left))
+            new_h = min(max(sy * (pos.y() - oy), REGION_MIN_SCALE * vh), (bottom - oy) if sy > 0 else (oy - top))
+            new_cx, new_cy = ox + sx * new_w / 2, oy + sy * new_h / 2
+            size = (new_w / vw, new_h / vh)
+        moved = original.with_edited_transform(
+            self._drag_init_time_offset, {"x": (new_cx - left) / vw, "y": (new_cy - top) / vh},
+            fps=self._fps, whole_animation=self._whole_animation)
+        self._active_clip = moved.with_region_size(*size)
+        pose = self._active_clip.transform_at(self._drag_init_time_offset)
+        self.overlay_transformed.emit(self._drag_clip_id, pose.x, pose.y, (size[0] + size[1]) / 2, 0.0)
+        self.update()
+
     def end_transform(self) -> None:
         """Encerra a captura lógica quando outro comando confirma o gesto."""
         self._drag_mode, self._drag_clip_id = None, -1
@@ -1078,10 +1155,7 @@ class _Preview(QLabel):
         has_active = (
             self._clip_visible
             and not self._is_playing
-            and clip is not None
-            and clip.has_image
-            and not clip.audio_only
-            and clip.overlay_type not in (OverlayType.FILTER, OverlayType.TRANSITION)
+            and _has_handles(clip)
             and clip.contains(self._position)
         )
 
@@ -1157,17 +1231,18 @@ class _Preview(QLabel):
                 cx, cy, w, h = geom
                 painter.save()
                 painter.translate(cx, cy)
-                painter.rotate(transform.rotation)
+                painter.rotate(0.0 if clip.has_region else transform.rotation)
 
                 pen = QPen(QColor("#00e5ff"), 1.5, Qt.PenStyle.DashLine)
                 painter.setPen(pen)
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(QRectF(-w / 2, -h / 2, w, h))
 
-                painter.setPen(QPen(QColor("#00e5ff"), 1.5, Qt.PenStyle.SolidLine))
-                painter.drawLine(QPointF(0, -h / 2), QPointF(0, -h / 2 - 24))
-                painter.setBrush(QColor("#00e5ff"))
-                painter.drawEllipse(QPointF(0, -h / 2 - 24), 5, 5)
+                if not clip.has_region:   # a região não gira: sem a alça de rotação
+                    painter.setPen(QPen(QColor("#00e5ff"), 1.5, Qt.PenStyle.SolidLine))
+                    painter.drawLine(QPointF(0, -h / 2), QPointF(0, -h / 2 - 24))
+                    painter.setBrush(QColor("#00e5ff"))
+                    painter.drawEllipse(QPointF(0, -h / 2 - 24), 5, 5)
 
                 if self._snap_guide_rot is not None:
                     painter.save()
@@ -1213,6 +1288,8 @@ class _ClipPropertiesWidget(QWidget):
         self._base_h: float = 1080.0
         self._aspect_ratio: float = 16.0 / 9.0
         self._updating: bool = False
+        # A trava de proporção que valia antes de a região de um filtro ser carregada (ver ``load_clip``).
+        self._lock_before_region: bool | None = None
         self._last_w: int = 100
         self._last_h: int = 100
         self._last_x: float = 0.5
@@ -1435,6 +1512,8 @@ class _ClipPropertiesWidget(QWidget):
         self._link(self._slider_rot, self._spin_rot, to_slider=lambda v: round(v if v <= 180 else v - 360),
                    to_spin=lambda v: v % 360)
 
+        # As linhas de opacidade e de rotação saem juntas quando o bloco é a região de um filtro (``_pose_for_region``).
+        self._region_hidden: list[QWidget] = []
         for row, (label, slider, spin) in enumerate((
                 (lambda: strings.PROP_SCALE, self._slider_scale, self._spin_scale),
                 (lambda: strings.EDIT_OPACITY, self._slider_opacity, self._spin_opacity),
@@ -1445,6 +1524,8 @@ class _ClipPropertiesWidget(QWidget):
             sliders.addWidget(slider, row, 1)
             box = FieldBox(spin, height=30)
             box.setFixedWidth(_VALUE_BOX)
+            if row:
+                self._region_hidden += [name, slider, box]
             # Alinhada à direita numa coluna 10 px mais larga: é o vão entre o controle deslizante e a caixa.
             sliders.addWidget(box, row, 2, Qt.AlignmentFlag.AlignRight)
             sliders.setColumnMinimumWidth(2, _VALUE_BOX + 10)
@@ -1460,7 +1541,9 @@ class _ClipPropertiesWidget(QWidget):
             btn_ang.setAutoExclusive(False)
             btn_ang.clicked.connect(lambda _, a=ang: self._set_preset_rotation(a))
             self._rotation_presets.append((ang, btn_ang))
-        column.addWidget(segmented([button for _, button in self._rotation_presets], compact=True))
+        self._rotation_presets_box = segmented([button for _, button in self._rotation_presets], compact=True)
+        self._region_hidden.append(self._rotation_presets_box)
+        column.addWidget(self._rotation_presets_box)
         self._spin_rot.valueChanged.connect(self._sync_rotation_presets)
         self._sync_rotation_presets()
 
@@ -1812,12 +1895,27 @@ class _ClipPropertiesWidget(QWidget):
             # desfocado, logo abaixo). Olhar a mídia mostrava o Fundo Verde num áudio.
             can_chroma = clip.has_image and clip.has_media_file
 
-            can_pose = clip.overlay_type not in (OverlayType.TRANSITION, OverlayType.FILTER) and (clip.has_image or clip.is_additional)
+            can_pose = (clip.overlay_type is not OverlayType.TRANSITION
+                        and (clip.has_region or clip.overlay_type is not OverlayType.FILTER)
+                        and (clip.has_image or clip.is_additional))
             # Um bloco de áudio não tem pose, mas tem volume: a animação é a mesma e anima o que ele tem.
             can_animate = can_pose or clip.can_adjust_sound
             self._transform_group.setVisible(can_pose)
             self._animation_group.setVisible(can_animate)
-            self._fill_presets(image=can_pose)
+            # A região só se move e se redimensiona: girar, surgir e a opacidade não se aplicam a um ``crop``.
+            for widget in self._region_hidden:
+                widget.setVisible(not clip.has_region)
+            # A região não tem proporção a guardar: o controle some e os dois lados ficam livres, e o que o
+            # usuário tinha escolhido para imagens e vídeos volta ao selecionar outro tipo de bloco.
+            if clip.has_region:
+                if self._lock_before_region is None:
+                    self._lock_before_region = self._chk_lock_ratio.isChecked()
+                self._chk_lock_ratio.setChecked(False)
+            elif self._lock_before_region is not None:
+                self._chk_lock_ratio.setChecked(self._lock_before_region)
+                self._lock_before_region = None
+            self._chk_lock_ratio.setVisible(not clip.has_region)
+            self._fill_presets(image=can_pose and not clip.has_region)
             self._chromakey_group.setVisible(can_chroma)
             # Só mídia de arquivo com imagem: texto, filtro, transição e o bloco
             # de "separar áudio" não têm o que desfocar.
@@ -2189,13 +2287,31 @@ class _ClipPropertiesWidget(QWidget):
         if self._clip_id < 0 or self._clip is None:
             return
         offset = self._playhead_pos - self._clip.start
-        updated = self._clip.with_edited_transform(offset, changes, fps=self._fps,
-                                                   whole_animation=self._whole_animation.isChecked())
+        if self._clip.has_region:
+            updated = self._edited_region(offset, changes)
+        else:
+            updated = self._clip.with_edited_transform(offset, changes, fps=self._fps,
+                                                       whole_animation=self._whole_animation.isChecked())
         self._clip = updated
         result = {name: getattr(updated, name) for name in
                   ("x", "y", "scale", "scale_x", "scale_y", "rotation", "opacity", "keyframes")}
         self.property_changed.emit(self._clip_id, result)
         self._refresh_keyframe_controls()
+
+    def _edited_region(self, offset: float, changes: dict) -> Clip:
+        """A edição de um campo na região do desfoque: posição anima, tamanho é um só e tudo fica dentro da tela.
+
+        A posição vai primeiro, pelo caminho dos quadros-chave; o tamanho depois, por ``with_region_size``,
+        que o repete em todos os pontos e prende o centro de cada um aos limites do tamanho novo. Sem esse
+        segundo passo, um X digitado perto da borda deixava o campo dizendo uma posição que a tela e a
+        exportação deslocavam sozinhas.
+        """
+        clip = self._clip
+        moves = {name: value for name, value in changes.items() if name in ("x", "y")}
+        if moves:
+            clip = clip.with_edited_transform(offset, moves, fps=self._fps,
+                                              whole_animation=self._whole_animation.isChecked())
+        return clip.with_region_size(changes.get("scale_x", clip.scale_x), changes.get("scale_y", clip.scale_y))
 
     def update_transform_fields(
         self, x: float, y: float, scale_x: float, scale_y: float | None = None, rotation: float = 0.0
@@ -2285,6 +2401,8 @@ class _ClipPropertiesWidget(QWidget):
         return sx * factor, sy * factor
 
     def _apply_size(self, sx: float, sy: float) -> None:
+        if self._clip is not None and self._clip.has_region:
+            sx, sy = (max(REGION_MIN_SCALE, min(1.0, value)) for value in (sx, sy))
         new_w = max(1, round(self._base_w * sx))
         new_h = max(1, round(self._base_h * sy))
         new_x, new_y = self._calc_anchor_shift(new_w, new_h)
