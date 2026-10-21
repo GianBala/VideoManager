@@ -606,12 +606,14 @@ EDIT_FILTER_SEPIA = "Sepia"
 EDIT_FILTER_VIGNETTE = "Vignette"
 EDIT_FILTER_INVERT = "Invert"
 EDIT_FILTER_CONTRAST = "High Contrast"
+EDIT_FILTER_BLUR = "Blur"
 EDIT_FILTERS = {
     "pb": ("🎬", EDIT_FILTER_BW),
     "sepia": ("☕", EDIT_FILTER_SEPIA),
     "contraste": ("⚡", EDIT_FILTER_CONTRAST),
     "vinheta": ("🎯", EDIT_FILTER_VIGNETTE),
     "inverter": ("🔄", EDIT_FILTER_INVERT),
+    "desfoque": ("🔲", EDIT_FILTER_BLUR),
 }
 EDIT_TRANSITIONS = {
     "fade": ("🌑", "Fade"),
@@ -623,6 +625,7 @@ EDIT_TRANSITIONS = {
     "slideleft": ("◀", "Slide Left"),
     "slideright": ("▶", "Slide Right"),
 }
+EDIT_BLUR_HINT = "Drag the rectangle on the preview over what you want to blur. The corners resize it."
 EDIT_CHOOSE_FILTER = "Choose a visual effect"
 EDIT_CHOOSE_TRANSITION = "Choose a video transition"
 EDIT_EXTRA_DURATION = "Duration"

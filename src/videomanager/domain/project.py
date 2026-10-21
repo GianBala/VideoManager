@@ -1321,6 +1321,16 @@ class Project:
             updated_project = updated_project._sync_transition_markers(clip_id)
         return updated_project
 
+    def with_filter(self, clip_id: int, name: str) -> Project:
+        """Troca o filtro do bloco ``clip_id`` (ver :meth:`Clip.with_filter`, que ajusta a pose)."""
+        found = self.find(clip_id)
+        if found is None:
+            return self
+        changed = found[1].with_filter(name)
+        return self.with_updated_clip(clip_id, **{
+            field: getattr(changed, field)
+            for field in ("filter_name", "x", "y", "scale", "scale_x", "scale_y", "keyframes")})
+
     def _sync_transition_markers(self, clip_id: int) -> Project:
         """Mantém marcadores ligados ao corte ou remove os que ficaram órfãos."""
         tracks = []
