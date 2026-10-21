@@ -91,6 +91,7 @@ from videomanager.application.media.preview import FrameContext, PreviewFrameInb
 from videomanager.application.media.interaction import interaction_plan
 from videomanager.application.media.scrub import ScrubFrameCache
 from videomanager.domain.export_policy import reference_clip
+from videomanager.domain.project import filter_pose
 from videomanager.domain.project import pseudo_media
 from videomanager.domain.project import OverlayType
 from videomanager.domain.scrub import render_signature, signature_at, signature_segments
@@ -112,6 +113,7 @@ from videomanager.domain.project import auto_canvas
 from videomanager.domain.project import next_clip_id
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.domain.constants import MIN_SEGMENT
+from videomanager.domain.constants import REGION_BLUR
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.i18n import decimal
 from videomanager.domain.timing import format_span
@@ -1424,6 +1426,15 @@ class EditPanel(QWidget):
         self._filter_dur.valueChanged.connect(self._on_filter_dur_changed)
         layout.addLayout(self._duration_row(self._filter_dur))
 
+        # Só quando o desfoque é a opção marcada: é o único filtro com retângulo para mexer na prévia. Fica depois da
+        # duração para o que está acima não se mexer quando ela aparece.
+        self._blur_hint = bind(QLabel(), "setText", lambda: strings.EDIT_BLUR_HINT)
+        self._blur_hint.setWordWrap(True)
+        self._blur_hint.setProperty("role", "hint")
+        self._blur_hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._blur_hint.setVisible(self._selected_filter_name == REGION_BLUR)
+        layout.addWidget(self._blur_hint)
+
         layout.addStretch(1)
 
         self._apply_filter_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_APPLY_FILTER)
@@ -1447,10 +1458,11 @@ class EditPanel(QWidget):
             if i < len(self._filter_buttons):
                 self._filter_buttons[i].setChecked(fid == filter_name)
         _restyle(self._filter_buttons)
+        self._blur_hint.setVisible(filter_name == REGION_BLUR)
         clip = self._timeline.selected_clip
         if not self._syncing and clip is not None and clip.overlay_type is OverlayType.FILTER:
             self._remember()
-            self._apply(self._project.with_updated_clip(clip.clip_id, filter_name=filter_name))
+            self._apply(self._project.with_filter(clip.clip_id, filter_name))
 
     def _on_filter_dur_changed(self, dur: float) -> None:
         clip = self._timeline.selected_clip
@@ -1478,7 +1490,7 @@ class EditPanel(QWidget):
         if clip is not None and clip.overlay_type is OverlayType.FILTER:
             self._remember()
             project = self._filter_resized(clip, self._filter_dur.value())
-            self._apply(project.with_updated_clip(clip.clip_id, filter_name=self._selected_filter_name))
+            self._apply(project.with_filter(clip.clip_id, self._selected_filter_name))
         else:
             self._insert_filter_clip(self._selected_filter_name)
 
@@ -1598,6 +1610,7 @@ class EditPanel(QWidget):
             duration=duration,
             overlay_type=OverlayType.FILTER,
             filter_name=fname,
+            **filter_pose(fname),
         )
         self._place_clip(clip)
 
@@ -1837,6 +1850,7 @@ class EditPanel(QWidget):
                     self._filter_buttons[i].setChecked(fid == fname)
             _restyle(self._filter_buttons)
             self._filter_dur.setValue(clip.duration)
+            self._blur_hint.setVisible(fname == REGION_BLUR)
             self._insert_new_filter_btn.setVisible(True)
             self._insert_new_text_btn.setVisible(False)
             if hasattr(self, "_apply_trans_btn"):

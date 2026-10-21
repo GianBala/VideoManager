@@ -606,6 +606,7 @@ EDIT_FILTER_SEPIA = "Sépia"
 EDIT_FILTER_VIGNETTE = "Vinheta"
 EDIT_FILTER_INVERT = "Inversão"
 EDIT_FILTER_CONTRAST = "Alto Contraste"
+EDIT_FILTER_BLUR = "Desfoque"
 # Filtros e transições por identificador gravado no projeto, com o ícone que os
 # acompanha nos botões. Uma tabela só para a aba de Adicionais, a linha do tempo
 # e a aba Propriedades: eram quatro cópias, e acrescentar uma transição exigia
@@ -616,6 +617,7 @@ EDIT_FILTERS = {
     "contraste": ("⚡", EDIT_FILTER_CONTRAST),
     "vinheta": ("🎯", EDIT_FILTER_VIGNETTE),
     "inverter": ("🔄", EDIT_FILTER_INVERT),
+    "desfoque": ("🔲", EDIT_FILTER_BLUR),
 }
 EDIT_TRANSITIONS = {
     "fade": ("🌑", "Fade"),
@@ -627,6 +629,7 @@ EDIT_TRANSITIONS = {
     "slideleft": ("◀", "Slide para Esquerda"),
     "slideright": ("▶", "Slide para Direita"),
 }
+EDIT_BLUR_HINT = "Arraste o retângulo na prévia sobre o que quer borrar. Os cantos mudam o tamanho."
 EDIT_CHOOSE_FILTER = "Escolha um efeito visual"
 EDIT_CHOOSE_TRANSITION = "Escolha uma transição de vídeo"
 EDIT_EXTRA_DURATION = "Duração"
