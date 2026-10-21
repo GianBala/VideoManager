@@ -36,9 +36,12 @@ from typing import TYPE_CHECKING
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.constants import GAIN_EPSILON
+from videomanager.domain.constants import REGION_BLUR
+from videomanager.domain.constants import REGION_BLUR_DEFAULT_SCALE
+from videomanager.domain.constants import REGION_MIN_SCALE
 from videomanager.domain.keyframe import ClipTransform
 from videomanager.domain.keyframe import FULL_TURN
-from videomanager.domain.geometry import image_base_size, natural_image_size
+from videomanager.domain.geometry import image_base_size, natural_image_size, region_origin, region_size
 from videomanager.domain.i18n import decimal, t, variants
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.keyframe import interpolate_keyframes
@@ -200,6 +203,16 @@ PSEUDO_PREFIXES = {OverlayType.TEXT: "Texto_", OverlayType.FILTER: "Filtro_", Ov
 def pseudo_media(overlay: OverlayType | str, label: str, duration: float) -> MediaRef:
     """A "mídia" de um bloco sem arquivo: caminho-identificador e duração."""
     return MediaRef(path=Path(f"{PSEUDO_PREFIXES[overlay]}{label}"), kind=MediaKind.IMAGE, duration=duration)
+
+
+def filter_pose(name: str) -> dict[str, float]:
+    """A escala com que um filtro nasce: tela cheia, salvo o desfoque de região.
+
+    O desfoque nasce pequeno porque a região é o que se vai mexer; os demais filtros
+    agem no quadro todo, que é a pose padrão (centro 0,5 e escala 1).
+    """
+    scale = REGION_BLUR_DEFAULT_SCALE if name == REGION_BLUR else 1.0
+    return {"scale": scale, "scale_x": scale, "scale_y": scale}
 
 
 def is_pseudo_path(path: Path | str) -> bool:
@@ -410,6 +423,54 @@ class Clip:
     def is_overlay(self) -> bool:
         """Texto e filtro: o que vive nas trilhas de Adicionais."""
         return self.overlay_type in (OverlayType.TEXT, OverlayType.FILTER)
+
+    @property
+    def has_region(self) -> bool:
+        """Se este bloco age só num retângulo da tela, e não nela inteira.
+
+        É o **único** teste de "este filtro tem região": alças da prévia, aba
+        Propriedades e compositor perguntam por aqui, e nenhum outro código olha o
+        nome do filtro. Hoje só o desfoque de região responde sim; estender a
+        região aos demais filtros é mudar o corpo desta propriedade.
+        """
+        return self.overlay_type is OverlayType.FILTER and self.filter_name == REGION_BLUR
+
+    def region_rect(self, canvas_w: int, canvas_h: int, time_offset: float = 0.0) -> tuple[int, int, int, int]:
+        """``(esquerda, topo, largura, altura)`` da região, em pixels da tela dada.
+
+        O tamanho é o do bloco (um só, que os quadros-chave não mudam); a posição
+        é a do instante, porque só ela anima.
+        """
+        w, h = region_size(self.scale_x, self.scale_y, canvas_w, canvas_h)
+        pose = self.transform_at(time_offset)
+        left, top = region_origin(pose.x, pose.y, w, h, canvas_w, canvas_h)
+        return left, top, w, h
+
+    def with_region_size(self, scale_x: float, scale_y: float) -> Clip:
+        """Muda o tamanho da região no bloco **e em todos os quadros-chave**.
+
+        O ``crop`` do ffmpeg lê a largura e a altura uma vez só, então o tamanho
+        não pode animar. Redimensionar por ``with_edited_transform`` com quadros-chave
+        gravaria um ponto de escala diferente dos outros, e o tamanho passaria a
+        variar sem que o compositor soubesse mostrar isso.
+        """
+        sx = max(REGION_MIN_SCALE, min(1.0, scale_x))
+        sy = max(REGION_MIN_SCALE, min(1.0, scale_y))
+        return replace(self, scale=(sx + sy) / 2, scale_x=sx, scale_y=sy,
+                       keyframes=tuple(replace(k, scale_x=sx, scale_y=sy) for k in self.keyframes))
+
+    def with_filter(self, name: str) -> Clip:
+        """Troca o filtro do bloco, ajustando a pose ao que o filtro novo faz dela.
+
+        Quem vira desfoque nasce com o tamanho inicial; quem deixa de ser desfoque
+        volta à pose padrão, senão o bloco guardaria uma região que nenhum filtro
+        mais mostra nem deixa mexer.
+        """
+        if name == REGION_BLUR and not self.has_region:
+            return replace(self, filter_name=name, **filter_pose(name))
+        if self.has_region and name != REGION_BLUR:
+            return replace(self, filter_name=name, x=0.5, y=0.5, keyframes=(), **filter_pose(name))
+        return replace(self, filter_name=name)
 
     @property
     def is_transition(self) -> bool:
