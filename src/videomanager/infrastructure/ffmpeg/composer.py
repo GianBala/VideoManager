@@ -42,6 +42,9 @@ from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
 from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.constants import GAIN_EPSILON
+from videomanager.domain.constants import REGION_BLUR_SIGMA_RATIO
+from videomanager.domain.constants import REGION_BLUR_STEPS
+from videomanager.domain.constants import REGION_BLUR_WORK_SIDE
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import BYTES_PER_PIXEL
@@ -62,6 +65,8 @@ from videomanager.domain.timing import frame_time
 from videomanager.domain.timing import last_frame_time
 from videomanager.infrastructure.ffmpeg.trimmer import tail_args
 from videomanager.domain.geometry import image_base_size
+from videomanager.domain.geometry import region_origin_expr
+from videomanager.domain.geometry import region_size
 from videomanager.domain.render_cost import interpolation_bytes
 from videomanager.domain.render_cost import reverse_cuts
 from videomanager.domain.reversal import MAX_REVERSE_BYTES, PREVIEW_WINDOW_SECONDS
@@ -1541,6 +1546,74 @@ def _xfade_name(name: str) -> str:
     }.get(name, "fade")
 
 
+def _compose_region_blur(
+    filters: list[str],
+    current: str,
+    piece: _Piece,
+    project: Project,
+    fps: float,
+    order: int | str,
+    enable: str,
+) -> str:
+    """O desfoque de região: recorta o retângulo, borra numa tela de trabalho e cola de volta.
+
+    A região é a do bloco (``domain.geometry.region_*``, a mesma conta da prévia). O
+    tamanho é um só por bloco e a posição pode animar: ``crop`` lê ``w`` e ``h`` uma
+    vez, mas reavalia ``x`` e ``y`` a cada quadro. O ``crop`` e o ``overlay`` recebem
+    **o mesmo texto** de posição, já par e presa por dentro da tela.
+
+    O desfoque é feito num recorte de lado menor fixo (``REGION_BLUR_WORK_SIDE``),
+    com σ proporcional a esse lado, e só então ampliado de volta: assim a força é
+    relativa à região e prévia e exportação saem do mesmo desenho, como no fundo
+    desfocado (``_BLUR_SHORT_SIDE``). Três coisas foram medidas e estão presas em teste:
+
+    * o ``gblur`` roda em ``gbrp``. Em ``yuv420p``, num recorte de 16 px, os planos de
+      cor saem com verde nas bordas (excesso de 135 contra −127 do original);
+    * o quadro principal é ``rgba`` (todo bloco termina em ``format=rgba``), e o ``overlay``
+      daqui precisa de ``format=auto`` como os demais: o padrão dele é ``yuv420``, que
+      convertia o quadro **inteiro** de ``rgba`` para ``yuva420p`` (croma subamostrado,
+      faixa de vídeo) e mudava pixels de fora do retângulo, sem erro nenhum. A cadeia
+      devolve ``rgba`` pelo mesmo motivo; passar por ``gbrp`` e voltar a ``rgba`` não toca
+      no alfa, então não cai na divisão pelo alfa do ffmpeg 9;
+    * ``steps=3``. Com um passo só a aproximação gaussiana tem cauda pesada, e o texto
+      de uma placa ainda se lê com σ de 0,35 do lado;
+    * a ramificação é aparada (``trim``) à janela do bloco. Sem isso ela borra todo
+      quadro do projeto para usar só a janela, e o custo cresce além do linear com o
+      número de blocos (+3,0 s com 8 blocos em 24 s de 1080p, contra +0,7 s aparada).
+      O ``trim`` descarta o quadro cujo **fim** passa de ``end``, então a janela que
+      termina entre dois quadros perdia o desfoque do último; por isso a folga de
+      dois quadros dos dois lados, e quem liga e desliga o efeito é só o ``enable``.
+    """
+    clip = piece.clip
+    width, height = project.width, project.height
+    w, h = region_size(clip.scale_x, clip.scale_y, width, height)
+    if clip.has_pose_keyframes:
+        origin = _clip_stream_origin(piece)
+        cx = _keyframe_expr(clip.keyframes, "x", origin, clip.x)
+        cy = _keyframe_expr(clip.keyframes, "y", origin, clip.y)
+    else:
+        cx, cy = f"{clip.x:.6f}", f"{clip.y:.6f}"
+    x, y = region_origin_expr(cx, width, w), region_origin_expr(cy, height, h)
+
+    # Região menor que a tela de trabalho não é ampliada para ser borrada.
+    side = min(REGION_BLUR_WORK_SIDE, w, h)
+    work_w = max(2, round(w * side / min(w, h) / 2) * 2)
+    work_h = max(2, round(h * side / min(w, h) / 2) * 2)
+    margin = 2.0 / fps
+    start, end = piece.offset, piece.offset + piece.duration
+    keep, branch, blurred, label = f"[rb{order}a]", f"[rb{order}b]", f"[rb{order}c]", f"[f{order}]"
+    filters.append(f"{current}split=2{keep}{branch}")
+    filters.append(
+        f"{branch}trim=start={max(0.0, start - margin):.6f}:end={end + margin:.6f},"
+        f"crop=w={w}:h={h}:x='{x}':y='{y}',"
+        f"scale={work_w}:{work_h}:flags=bilinear,format=gbrp,"
+        f"gblur=sigma={REGION_BLUR_SIGMA_RATIO * side:.4f}:steps={REGION_BLUR_STEPS},format=rgba,"
+        f"scale={w}:{h}:flags=bilinear{blurred}"
+    )
+    filters.append(f"{keep}{blurred}overlay=x='{x}':y='{y}':eof_action=pass:format=auto:enable='{enable}'{label}")
+    return label
+
+
 def _compose_video_piece(
     filters: list[str],
     current: str,
@@ -1564,6 +1637,8 @@ def _compose_video_piece(
             f"*not(gte(t,{excluded_start:.6f})*lt(t,{excluded_end:.6f}))"
         )
     if piece.clip.overlay_type is OverlayType.FILTER:
+        if piece.clip.has_region:
+            return _compose_region_blur(filters, current, piece, project, fps, order, enable)
         name = piece.clip.filter_name
         if name == "pb":
             expression = f"hue=s=0:enable='{enable}'"
