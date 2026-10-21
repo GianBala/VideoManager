@@ -314,3 +314,15 @@ def test_a_exportacao_paralela_com_interpolacao_borra_a_regiao_como_a_serial(too
         referencia = _detalhe(_quadro_do_arquivo(tools, base, indice), retangulo)
         for arquivo in (serial, paralelo):
             assert _detalhe(_quadro_do_arquivo(tools, arquivo, indice), retangulo) < referencia / 4, (arquivo.name, indice)
+
+
+def test_dividir_o_bloco_com_quadros_chave_nao_muda_onde_a_regiao_esta(tools, ruido) -> None:
+    """A tesoura desloca os quadros-chave da metade de trás; a região tem de continuar no mesmo pixel dos dois lados."""
+    filtro = _desfoque(1.0, 2.0, x=0.25, escala=0.25, keyframes=(
+        Keyframe(0.0, x=0.25, y=0.5, scale_x=0.25, scale_y=0.25),
+        Keyframe(2.0, x=0.75, y=0.5, scale_x=0.25, scale_y=0.25)))
+    inteiro = _projeto(tools, ruido, filtro)
+    dividido = inteiro.split(filtro.clip_id, 2.0)
+    assert sum(len(t.clips) for t in dividido.additional_tracks) == 2
+    for indice in (31, 44, 59, 60, 61, 74, 88):                # antes, na emenda (2,0 s = quadro 60) e depois
+        assert _quadro(tools, dividido, indice) == _quadro(tools, inteiro, indice), indice

@@ -3557,7 +3557,7 @@ class EditPanel(QWidget):
             c for t in reversed(self._project.tracks) if t.visible
             for c in sorted(t.clips, key=lambda c: (c.start, c.clip_id))
             if t.kind is not TrackKind.AUDIO and c.has_image and not c.audio_only
-            and c.overlay_type not in (OverlayType.FILTER, OverlayType.TRANSITION)
+            and (c.overlay_type is not OverlayType.FILTER or c.has_region) and not c.is_transition
             and c.contains(self._preview._position)
             and c.transform_at(self._preview._position - c.start).opacity > 0
         )

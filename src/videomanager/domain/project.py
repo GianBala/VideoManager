@@ -446,18 +446,27 @@ class Clip:
         left, top = region_origin(pose.x, pose.y, w, h, canvas_w, canvas_h)
         return left, top, w, h
 
+    def region_center_limits(self) -> tuple[tuple[float, float], tuple[float, float]]:
+        """Onde o centro da região pode ficar para ela não sair da tela: ``((x_min, x_max), (y_min, y_max))``."""
+        return ((self.scale_x / 2, 1 - self.scale_x / 2), (self.scale_y / 2, 1 - self.scale_y / 2))
+
     def with_region_size(self, scale_x: float, scale_y: float) -> Clip:
-        """Muda o tamanho da região no bloco **e em todos os quadros-chave**.
+        """Muda o tamanho da região no bloco **e em todos os quadros-chave**, e a mantém dentro da tela.
 
         O ``crop`` do ffmpeg lê a largura e a altura uma vez só, então o tamanho
         não pode animar. Redimensionar por ``with_edited_transform`` com quadros-chave
         gravaria um ponto de escala diferente dos outros, e o tamanho passaria a
-        variar sem que o compositor soubesse mostrar isso.
+        variar sem que o compositor soubesse mostrar isso. O centro de cada ponto
+        é preso aos limites do tamanho novo: ampliar uma região colada na borda
+        não pode deixá-la para fora, onde a tela e a exportação a deslocariam sozinhas.
         """
         sx = max(REGION_MIN_SCALE, min(1.0, scale_x))
         sy = max(REGION_MIN_SCALE, min(1.0, scale_y))
-        return replace(self, scale=(sx + sy) / 2, scale_x=sx, scale_y=sy,
-                       keyframes=tuple(replace(k, scale_x=sx, scale_y=sy) for k in self.keyframes))
+
+        def inside(x: float, y: float) -> dict[str, float]:
+            return {"x": max(sx / 2, min(1 - sx / 2, x)), "y": max(sy / 2, min(1 - sy / 2, y))}
+        return replace(self, scale=(sx + sy) / 2, scale_x=sx, scale_y=sy, **inside(self.x, self.y),
+                       keyframes=tuple(replace(k, scale_x=sx, scale_y=sy, **inside(k.x, k.y)) for k in self.keyframes))
 
     def with_filter(self, name: str) -> Clip:
         """Troca o filtro do bloco, ajustando a pose ao que o filtro novo faz dela.
