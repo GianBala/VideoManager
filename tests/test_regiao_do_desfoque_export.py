@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 from dataclasses import replace
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,7 @@ from videomanager.domain.project import Track
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import media_ref
 from videomanager.domain.project import pseudo_media
+from videomanager.infrastructure.ffmpeg.composer import build_graph
 from videomanager.infrastructure.ffmpeg.composer import export_args
 from videomanager.infrastructure.ffmpeg.composer import frame_command
 from videomanager.infrastructure.ffmpeg.composer import playback_command
@@ -86,8 +88,8 @@ def _quadro(tools, projeto: Project, indice: int, tela: tuple[int, int] = TELA) 
     return dados
 
 
-def _caixa_que_mudou(a: bytes, b: bytes, tela: tuple[int, int] = TELA) -> tuple[int, int, int, int] | None:
-    """``(esquerda, topo, direita, base)`` dos pixels que diferem entre os dois quadros, ou ``None``."""
+def _caixa_que_mudou(a: bytes, b: bytes, tela: tuple[int, int] = TELA, limiar: int = 0) -> tuple[int, int, int, int] | None:
+    """``(esquerda, topo, direita, base)`` dos pixels que diferem em mais de ``limiar`` níveis, ou ``None``."""
     largura, altura = tela
     esq, topo, dir_, base = largura, altura, -1, -1
     for y in range(altura):
@@ -95,7 +97,10 @@ def _caixa_que_mudou(a: bytes, b: bytes, tela: tuple[int, int] = TELA) -> tuple[
         ra, rb = a[linha], b[linha]
         if ra == rb:
             continue
-        diferentes = [x for x in range(largura) if ra[x * 3:x * 3 + 3] != rb[x * 3:x * 3 + 3]]
+        diferentes = [x for x in range(largura)
+                      if max(abs(ra[x * 3 + c] - rb[x * 3 + c]) for c in range(3)) > limiar]
+        if not diferentes:
+            continue
         topo, base = min(topo, y), max(base, y)
         esq, dir_ = min(esq, diferentes[0]), max(dir_, diferentes[-1])
     return None if dir_ < 0 else (esq, topo, dir_ + 1, base + 1)
@@ -391,3 +396,122 @@ def test_o_pico_de_memoria_da_reproducao_nao_cresce_com_o_desfoque_adiante(tools
         projeto = _projeto(tools, fonte_longa, _desfoque(inicio, 3.0), duracao=45.0)
         return _pico_de_memoria_mb(playback_command(projeto, 0.0, TELA, tools, fps=FPS))
     assert pico(40.0) < pico(0.0) + FOLGA_MB
+
+
+# -- a exportação em pts, medida no grafo (sem codificar) ---------------------------------------
+
+def _quadros_exportados(tools, projeto: Project, tela: tuple[int, int] = TELA) -> list[bytes]:
+    """Os quadros que a exportação compõe, em rgb24 cru: o grafo de ``export_args``, medido no pts de cada quadro."""
+    grafo = build_graph(projeto.for_export())
+    filtros = ";".join([*grafo.filters, f"{grafo.video_label}format=rgb24[saida]"])
+    saida = subprocess.run(
+        [tools.ffmpeg_str, "-nostdin", "-v", "error", *grafo.inputs, "-filter_complex", filtros, "-map", "[saida]",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True, timeout=120).stdout
+    tamanho = tela[0] * tela[1] * 3
+    assert saida and len(saida) % tamanho == 0
+    return [saida[i:i + tamanho] for i in range(0, len(saida), tamanho)]
+
+
+def _ruido_em(tools, pasta: Path, taxa: str, segundos: int = 2) -> Path:
+    path = pasta / f"ruido_{taxa.replace('/', '_')}.mkv"
+    subprocess.run(
+        [tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+         f"color=c=gray:s=320x180:r={taxa}:d={segundos},noise=alls=90:allf=t+u",
+         "-c:v", "ffv1", "-pix_fmt", "yuv420p", str(path)],
+        check=True, timeout=60, **subprocess_kwargs())
+    return path
+
+
+@pytest.mark.parametrize("taxa", ["24000/1001", "30000/1001", "60000/1001"])
+def test_a_exportacao_cai_no_retangulo_do_dominio_em_taxa_fracionaria(tools, tmp_path: Path, taxa: str) -> None:
+    """O plano pedia taxa inteira **e** NTSC. A exportação compõe no pts do quadro (i·1001/30000 s, e não i/30), então a
+    posição animada e a janela do bloco têm de continuar no pixel certo com taxas que não fecham em igualdade."""
+    fps = float(Fraction(taxa))
+    fonte = _ruido_em(tools, tmp_path, taxa)
+    filtro = _desfoque(0.4, 1.2, x=0.25, escala=0.25, keyframes=(
+        Keyframe(0.0, x=0.25, y=0.5, scale_x=0.25, scale_y=0.25),
+        Keyframe(1.2, x=0.75, y=0.5, scale_x=0.25, scale_y=0.25)))
+    com = replace(_projeto(tools, fonte, filtro, duracao=2.0), fps=fps)
+    sem = replace(_projeto(tools, fonte, duracao=2.0), fps=fps)
+    quadros_com, quadros_sem = _quadros_exportados(tools, com), _quadros_exportados(tools, sem)
+    assert len(quadros_com) == len(quadros_sem) > 0
+    dentro = 0
+    for indice, (a, b) in enumerate(zip(quadros_com, quadros_sem)):
+        instante = indice / fps
+        caixa = _caixa_que_mudou(a, b)
+        if filtro.start <= instante < filtro.start + filtro.duration:
+            esq, topo, w, h = filtro.region_rect(TELA[0], TELA[1], instante - filtro.start)
+            assert caixa == (esq, topo, esq + w, topo + h), (indice, instante)
+            dentro += 1
+        else:
+            assert caixa is None, (indice, instante)
+    assert dentro >= int(1.2 * fps) - 1
+
+
+@pytest.mark.parametrize("inicio, duracao", [(1.0, 2.0), (1.0, 0.8), (2.1, 1.0)],
+                         ids=["atravessa o corte", "termina dentro da janela", "começa dentro da janela"])
+def test_o_desfoque_na_transicao_que_afeta_adicionais_fica_no_retangulo(tools, ruido, inicio, duracao) -> None:
+    """Com "Afetar itens adicionais" cada lado da transição recebe os pixels já compostos e o filtro age sobre eles: é o
+    caminho que recompõe o quadro. O desfoque tem de seguir no mesmo retângulo. O limiar de 2 níveis é do ffmpeg 9,
+    que arredonda o resto do quadro em ±1 (``premultiply``/``unpremultiply``) com e sem o desfoque."""
+    esquerda = Clip(media_ref(probe_file(ruido, tools)), 0.0, 2.0)
+    direita = Clip(media_ref(probe_file(ruido, tools)), 2.0, 2.0)
+    marca = Clip(pseudo_media(OverlayType.TRANSITION, "Dissolve", 1.0), 1.5, 1.0, overlay_type="transition",
+                 transition_name="dissolve", transition_left_id=esquerda.clip_id, transition_right_id=direita.clip_id,
+                 transition_affects_additionals=True)
+    filtro = _desfoque(inicio, duracao)
+    video = Track(TrackKind.VIDEO, clips=(esquerda, marca, direita), name="Vídeo 1")
+    com = Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(filtro,), name="Adicionais 1"), video),
+                  width=TELA[0], height=TELA[1], fps=FPS)
+    sem = replace(com, tracks=(video,))
+    quadros_com, quadros_sem = _quadros_exportados(tools, com), _quadros_exportados(tools, sem)
+    assert len(quadros_com) == len(quadros_sem) > 0
+    esq, topo, w, h = filtro.region_rect(TELA[0], TELA[1], 0.0)
+    for indice, (a, b) in enumerate(zip(quadros_com, quadros_sem)):
+        instante = indice / FPS
+        esperado = (esq, topo, esq + w, topo + h) if inicio <= instante < inicio + duracao - 1e-9 else None
+        assert _caixa_que_mudou(a, b, limiar=2) == esperado, (indice, instante)
+
+
+# -- a força: um traço de letra some, e nenhuma cor nasce --------------------------------------------
+
+@pytest.fixture(scope="module")
+def listras(tools, tmp_path_factory) -> Path:
+    """Listras vermelhas e azuis de 15 px: o contraste de um traço de letra, em cores que acusam um canal que se mexe sozinho."""
+    path = tmp_path_factory.mktemp("listras") / "listras.mkv"
+    subprocess.run(
+        [tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+         "color=c=black:s=320x180:r=30:d=2,format=rgb24,"
+         "geq=r='if(lt(mod(X,30),15),255,0)':g='0':b='if(lt(mod(X,30),15),0,255)'",
+         "-c:v", "ffv1", "-pix_fmt", "yuv420p", str(path)],
+        check=True, timeout=60, **subprocess_kwargs())
+    return path
+
+
+def _miolo(quadro: bytes, retangulo: tuple[int, int, int, int], folga: int = 12) -> tuple[float, int]:
+    """``(contraste médio entre pixels vizinhos nos três canais, maior verde)`` do miolo do retângulo."""
+    esq, topo, w, h = retangulo
+    total, pares, verde = 0, 0, 0
+    for y in range(topo + folga, topo + h - folga):
+        for x in range(esq + folga, esq + w - folga - 1):
+            i = (y * TELA[0] + x) * 3
+            total += sum(abs(quadro[i + c] - quadro[i + 3 + c]) for c in range(3))
+            pares += 1
+            verde = max(verde, quadro[i + 1])
+    return total / pares, verde
+
+
+def test_o_desfoque_apaga_um_traco_de_letra_e_nao_inventa_cor(tools, listras) -> None:
+    """Medido na imagem (a fonte de ruído dos outros testes é destruída por qualquer desfoque, até por um fraco demais).
+
+    Com as constantes certas o contraste do miolo cai a ~3% e a fonte, que não tem verde, continua sem verde (máximo 1).
+    Com σ de 0,1 do lado sobram ~57% do contraste (o texto de uma placa ainda se lê); com o ``gblur`` em ``yuv420p``
+    nascem faixas verdes de até 205 num recorte de 16 px.
+    """
+    filtro = _desfoque(0.5, 1.0)
+    com, sem = _projeto(tools, listras, filtro, duracao=2.0), _projeto(tools, listras, duracao=2.0)
+    retangulo = _retangulo(filtro, 30)
+    contraste_antes, _ = _miolo(_quadro(tools, sem, 30), retangulo)
+    contraste_depois, verde = _miolo(_quadro(tools, com, 30), retangulo)
+    assert contraste_depois < contraste_antes * 0.1
+    assert verde <= 10
