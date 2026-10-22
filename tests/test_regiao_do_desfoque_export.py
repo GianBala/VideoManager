@@ -14,7 +14,9 @@ duração, quadros e energia de detalhe).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -29,7 +31,9 @@ from videomanager.domain.project import Track
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import media_ref
 from videomanager.domain.project import pseudo_media
+from videomanager.infrastructure.ffmpeg.composer import export_args
 from videomanager.infrastructure.ffmpeg.composer import frame_command
+from videomanager.infrastructure.ffmpeg.composer import playback_command
 from videomanager.infrastructure.ffmpeg.converter import Converter
 from videomanager.infrastructure.ffmpeg.converter import probe_file
 from videomanager.infrastructure.system.binaries import find_tools
@@ -230,11 +234,12 @@ def test_a_exportacao_preserva_duracao_e_quadros_e_borra_so_a_regiao(tools, ruid
 
 
 def test_a_janela_que_termina_entre_dois_quadros_borra_o_ultimo(tools, ruido, tmp_path: Path) -> None:
-    """O ``trim`` descarta o quadro cujo **fim** passa de ``end``: sem folga, o último quadro perdia o desfoque.
+    """O último quadro da janela continua borrado quando ela termina entre dois quadros.
 
-    Medido na sonda: 4 de 10 janelas de borda arbitrária perdiam exatamente um quadro de região,
-    e a duração, a contagem de quadros e o código de saída não mostravam nada. Só a exportação
-    mede o quadro pelo pts (a prévia compõe no instante pedido), então é aqui que o caso aparece.
+    O ramo já foi aparado por um ``trim``, que descarta o quadro cujo **fim** passa de ``end``: 4 de 10 janelas de borda
+    arbitrária perdiam exatamente um quadro de região, e a duração, a contagem de quadros e o código de saída não
+    mostravam nada. Sem o ``trim`` quem liga e desliga o efeito é só o ``enable``; o caso fica medido porque só a
+    exportação mede o quadro pelo pts (a prévia compõe no instante pedido).
     """
     filtro = _desfoque(1.016, 1.967)                     # termina em 2,983 s: entre os quadros 89 e 90
     com = _exportar(tools, _projeto(tools, ruido, filtro), ruido, tmp_path / "com.mp4")
@@ -326,3 +331,63 @@ def test_dividir_o_bloco_com_quadros_chave_nao_muda_onde_a_regiao_esta(tools, ru
     assert sum(len(t.clips) for t in dividido.additional_tracks) == 2
     for indice in (31, 44, 59, 60, 61, 74, 88):                # antes, na emenda (2,0 s = quadro 60) e depois
         assert _quadro(tools, dividido, indice) == _quadro(tools, inteiro, indice), indice
+
+
+# -- memória: o desfoque no fim do projeto não custa mais que no começo ------------------------------
+
+SEM_WAIT4 = pytest.mark.skipif(not hasattr(os, "wait4"), reason="o pico do filho vem do wait4 (só Unix)")
+# O ruído entre duas execuções do mesmo ffmpeg é de poucos MB; o defeito que isto pega somava ~265 MB.
+FOLGA_MB = 100
+
+
+@pytest.fixture(scope="module")
+def fonte_longa(tools, tmp_path_factory) -> Path:
+    path = tmp_path_factory.mktemp("longa") / "longa.mp4"
+    subprocess.run(
+        [tools.ffmpeg_str, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=45",
+         "-c:v", "libx264", "-preset", "ultrafast", "-g", "60", str(path)],
+        check=True, timeout=60, **subprocess_kwargs())
+    return path
+
+
+# O ``ru_maxrss`` de um filho tem como piso o pico histórico do pai (o Linux o herda no ``exec``), e o pytest já
+# passou de 300 MB lendo fluxos: por isso quem mede é um interpretador pequeno e limpo, não o próprio teste.
+_MEDIDOR = """
+import json, os, subprocess, sys
+p = subprocess.Popen(json.loads(sys.argv[1]), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+while p.stdout.read(1 << 20):    # a reprodução despeja os quadros no cano; a exportação não escreve nada nele
+    pass
+_, estado, uso = os.wait4(p.pid, 0)
+p.stdout.close()
+print(os.waitstatus_to_exitcode(estado), uso.ru_maxrss / 1024)
+"""
+
+
+def _pico_de_memoria_mb(comando: list[str]) -> float:
+    """Pico de memória do ffmpeg, em MB: o ``ru_maxrss`` do próprio filho, que o ``wait4`` devolve."""
+    saida = subprocess.run([sys.executable, "-I", "-c", _MEDIDOR, json.dumps([str(a) for a in comando])],
+                           capture_output=True, text=True, check=True, timeout=120).stdout
+    codigo, pico = saida.split()
+    assert int(codigo) == 0, "o ffmpeg falhou"
+    return float(pico)
+
+
+@SEM_WAIT4
+def test_o_pico_de_memoria_da_exportacao_nao_cresce_com_o_instante_do_desfoque(tools, fonte_longa, tmp_path: Path) -> None:
+    """O ``trim`` do ramo fazia o ``overlay`` guardar todo quadro anterior ao bloco: ~228 MB por segundo de
+    antecedência a 1080p (medido), ou seja, ~14 GB para um desfoque aos 60 s. Os outros testes põem o bloco
+    entre 0 e 1,5 s e não enxergam isto."""
+    def pico(inicio: float) -> float:
+        projeto = _projeto(tools, fonte_longa, _desfoque(inicio, 3.0), duracao=45.0)
+        return _pico_de_memoria_mb(export_args(projeto, tmp_path / "saida.mp4", tools))
+    assert pico(40.0) < pico(0.0) + FOLGA_MB
+
+
+@SEM_WAIT4
+def test_o_pico_de_memoria_da_reproducao_nao_cresce_com_o_desfoque_adiante(tools, fonte_longa) -> None:
+    """O mesmo defeito na reprodução, que parte da agulha: o primeiro quadro só saía depois de o ffmpeg
+    decodificar toda a antecedência, e ele a guardava."""
+    def pico(inicio: float) -> float:
+        projeto = _projeto(tools, fonte_longa, _desfoque(inicio, 3.0), duracao=45.0)
+        return _pico_de_memoria_mb(playback_command(projeto, 0.0, TELA, tools, fps=FPS))
+    assert pico(40.0) < pico(0.0) + FOLGA_MB

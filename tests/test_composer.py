@@ -1443,11 +1443,12 @@ class TestDesfoqueDeRegiao:
         assert "format=auto" in texto and "eof_action=pass" in texto
         assert "enable='gte(t,2.000000)*lt(t,5.000000)'" in texto
 
-    def test_a_ramificacao_e_aparada_a_janela_com_folga_de_dois_quadros(self) -> None:
-        # Sem o trim o ramo borra todo quadro do projeto; sem a folga a janela que termina entre
-        # dois quadros perde o desfoque do último (o trim descarta o quadro cujo fim passa de ``end``).
+    def test_a_ramificacao_nao_e_aparada_para_o_overlay_nao_reter_quadros(self) -> None:
+        # O trim fazia o overlay guardar, na fila, todo quadro do ramo principal anterior ao bloco (o ramo aparado só
+        # entrega o primeiro depois dele): o pico de memória do ffmpeg crescia ~228 MB por segundo de antecedência a
+        # 1080p. A medida está em test_regiao_do_desfoque_export.py; aqui, que o ramo não descarta quadro nenhum.
         ramo = self.ramo(build_graph(self.com(self.desfoque())))
-        assert f"trim=start={2.0 - 2 / 30:.6f}:end={5.0 + 2 / 30:.6f}," in ramo
+        assert "trim=" not in ramo and "select=" not in ramo
 
     def test_crop_e_overlay_recebem_a_mesma_posicao(self) -> None:
         from videomanager.domain.keyframe import Keyframe
