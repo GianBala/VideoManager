@@ -61,7 +61,9 @@ def region_size(scale_x: float, scale_y: float, canvas_w: int, canvas_h: int) ->
     ímpar deixa o croma desalinhado.
     """
     def side(scale: float, canvas: int) -> int:
-        return max(2, min(canvas // 2 * 2, 2 * _half_away(scale * canvas / 2)))
+        # Limitada a 1 antes de multiplicar: o arquivo aceita qualquer escala finita, e ``escala * tela`` estoura para
+        # o infinito, que ``_half_away`` não converte em inteiro.
+        return max(2, min(canvas // 2 * 2, 2 * _half_away(min(1.0, scale) * canvas / 2)))
     return side(scale_x, canvas_w), side(scale_y, canvas_h)
 
 

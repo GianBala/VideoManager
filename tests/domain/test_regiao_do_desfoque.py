@@ -43,6 +43,12 @@ def test_o_tamanho_e_par_e_cabe_na_tela(escala, tela, esperado):
     assert w % 2 == 0 and 2 <= w <= tela
 
 
+@pytest.mark.parametrize("escala", [1e300, 1e308, float("inf")])
+def test_uma_escala_absurda_limita_a_regiao_a_tela(escala):
+    # O arquivo aceita qualquer escala positiva e finita; ``escala * tela`` estoura para o infinito, que não vira inteiro.
+    assert region_size(escala, escala, 1920, 1080) == (1920, 1080)
+
+
 def test_largura_e_altura_sao_independentes():
     assert region_size(0.5, 0.1, 1280, 720) == (640, 72)
 
