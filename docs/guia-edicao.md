@@ -311,8 +311,11 @@ trilha de Adicionais, com a duração do campo, e na prévia aparece o retângul
   suportada, em vez de mostrar o quadro inteiro em Preto e Branco sem desfocar nada; os projetos que
   não têm Desfoque continuam abrindo nela. Ao gravar a versão 7 sobre um arquivo mais antigo, o
   aplicativo guarda o original numa cópia `.v6.bak` ao lado; tirar o último Desfoque e salvar volta a
-  gravar o formato antigo. Com o ffmpeg 6 vale a mesma limitação dos outros filtros: uma transição que
-  atravessa o bloco o perde durante a passagem.
+  gravar o formato antigo.
+- **ffmpeg 6 e transições** — com o ffmpeg 6 (o do Ubuntu 24.04; o aplicativo empacotado traz o 7), uma
+  transição com **Afetar itens adicionais** que atravessa o bloco o perde durante a passagem, como
+  acontece com os demais filtros: a área que ele esconderia aparece. A exportação avisa na fila quando
+  encontra essa combinação; desligar a opção na transição, ou usar o ffmpeg 7 ou mais novo, resolve.
 
 ### Propriedades e animação
 

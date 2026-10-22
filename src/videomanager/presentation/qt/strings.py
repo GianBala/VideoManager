@@ -417,6 +417,10 @@ EXPORT_GIF_NOTE = (
     "quadro é uma imagem inteira, e na tela do projeto o arquivo fica dez "
     "vezes maior. Escolher tela ou taxa na mão continua valendo."
 )
+EXPORT_BLUR_TRANSITION_WARN = (
+    "O ffmpeg {version} desta máquina perde o desfoque durante uma transição com \"Afetar itens adicionais\": "
+    "na passagem, a área que ele esconderia aparece. Desligue essa opção na transição ou use o ffmpeg 7 ou mais novo."
+)
 EXPORT_VIDEO_CODEC = "Codec de vídeo"
 EXPORT_VIDEO_CODEC_TIP = "Algoritmo de compressão de vídeo (H.264, HEVC, AV1, VP9)"
 EXPORT_QUALITY = "Qualidade do vídeo"
