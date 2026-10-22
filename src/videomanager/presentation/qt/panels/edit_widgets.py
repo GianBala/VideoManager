@@ -1033,7 +1033,7 @@ class _Preview(QLabel):
         a conta de "dentro do quadro" mora no domínio, e não aqui); a posição, por ``with_edited_transform``,
         que é a que anima.
         """
-        cx, cy, w, h = geom
+        _, _, w, h = geom
         vw, vh = float(vrect.width()), float(vrect.height())
         left, top = float(vrect.x()), float(vrect.y())
         right, bottom = left + vw, top + vh
@@ -1512,7 +1512,7 @@ class _ClipPropertiesWidget(QWidget):
         self._link(self._slider_rot, self._spin_rot, to_slider=lambda v: round(v if v <= 180 else v - 360),
                    to_spin=lambda v: v % 360)
 
-        # As linhas de opacidade e de rotação saem juntas quando o bloco é a região de um filtro (``_pose_for_region``).
+        # As linhas de opacidade e de rotação saem juntas quando o bloco é a região de um filtro (ver ``load_clip``).
         self._region_hidden: list[QWidget] = []
         for row, (label, slider, spin) in enumerate((
                 (lambda: strings.PROP_SCALE, self._slider_scale, self._spin_scale),
