@@ -1,12 +1,14 @@
 """O desfoque de região no arquivo .vmp: ida e volta, projeto da versão anterior e nenhum campo novo.
 
 A região é a pose do bloco (``x``, ``y``, ``scale_x``, ``scale_y`` e os quadros-chave), que o arquivo já grava;
-o desfoque só acrescenta um **valor** (``filter_name = "desfoque"``). Por isso o formato não sobe de versão — ver o
-relatório da mudança: uma versão antiga abriria o bloco como Preto e Branco.
+o desfoque só acrescenta um **valor** (``filter_name = "desfoque"``). Sem versão nova, uma versão antiga abriria o
+bloco como Preto e Branco no quadro **inteiro**, sem desfocar nada. Por isso o projeto que tem desfoque grava a
+versão 7 (a anterior recusa o arquivo com mensagem) e o que não tem continua na 6, igual ao de antes.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -22,7 +24,12 @@ from videomanager.domain.project import Track
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import filter_pose
 from videomanager.domain.project import pseudo_media
+from videomanager.infrastructure.storage import project_json
+from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+from videomanager.infrastructure.storage.project_json import REGION_BLUR_VERSION
+from videomanager.infrastructure.storage.project_json import SUPPORTED_VERSION
 from videomanager.infrastructure.storage.project_json import load_project
+from videomanager.infrastructure.storage.project_json import ProjectError
 from videomanager.infrastructure.storage.project_json import project_from_dict
 from videomanager.infrastructure.storage.project_json import project_to_dict
 from videomanager.infrastructure.storage.project_json import save_project
@@ -69,7 +76,51 @@ def test_o_desfoque_nao_acrescenta_campo_ao_arquivo(tmp_path: Path) -> None:
     sepia, _ = _projeto(tmp_path, "sepia")
     chaves = lambda p: set(project_to_dict(p, base_dir=tmp_path)["tracks"][0]["clips"][0])  # noqa: E731
     assert chaves(desfoque) == chaves(sepia)
-    assert project_to_dict(desfoque, base_dir=tmp_path)["version"] == project_to_dict(sepia, base_dir=tmp_path)["version"]
+
+
+def test_o_projeto_com_desfoque_grava_a_versao_7_e_o_sem_desfoque_continua_na_6(tmp_path: Path) -> None:
+    desfoque, _ = _projeto(tmp_path)
+    sepia, _ = _projeto(tmp_path, "sepia")
+    assert project_to_dict(desfoque, base_dir=tmp_path)["version"] == REGION_BLUR_VERSION == 7
+    assert project_to_dict(sepia, base_dir=tmp_path)["version"] == PROJECT_VERSION == 6
+
+
+def test_o_desfoque_na_versao_7_relê_igual(tmp_path: Path) -> None:
+    projeto, _ = _projeto(tmp_path, x=0.3, y=0.6, scale_x=0.25, scale_y=0.4, scale=0.325)
+    caminho = tmp_path / "desfoque.vmp"
+    save_project(projeto, caminho)
+    assert json.loads(caminho.read_text(encoding="utf-8"))["version"] == 7
+    carregado, _ = load_project(caminho)
+    assert carregado == projeto
+
+
+def test_a_versao_anterior_recusa_o_projeto_com_desfoque_e_abre_os_outros(tmp_path: Path, monkeypatch) -> None:
+    """Uma versão anterior lê até a 6: o arquivo com desfoque é recusado com mensagem, em vez de virar um
+    quadro todo em Preto e Branco sem desfocar nada; o que não tem desfoque abre como sempre."""
+    desfoque, _ = _projeto(tmp_path)
+    sepia, _ = _projeto(tmp_path, "sepia")
+    com, sem = (project_to_dict(p, base_dir=tmp_path) for p in (desfoque, sepia))
+    assert SUPPORTED_VERSION == 7
+    monkeypatch.setattr(project_json, "SUPPORTED_VERSION", PROJECT_VERSION)
+    with pytest.raises(ProjectError):
+        project_from_dict(com, base_dir=tmp_path)
+    lido, _ = project_from_dict(sem, base_dir=tmp_path)
+    assert lido.additional_tracks[0].clips[0].filter_name == "sepia"
+
+
+def test_gravar_a_versao_7_sobre_a_6_guarda_a_copia_e_sem_desfoque_volta_a_6(tmp_path: Path) -> None:
+    """O mecanismo de ``.vN.bak`` vale para a versão que vai ser gravada, não para a mais alta que o programa lê."""
+    sepia, _ = _projeto(tmp_path, "sepia")
+    desfoque, _ = _projeto(tmp_path)
+    caminho = tmp_path / "p.vmp"
+    save_project(sepia, caminho)
+    original = caminho.read_bytes()
+    save_project(desfoque, caminho)                                   # 6 -> 7: o original é preservado
+    assert json.loads(caminho.read_text(encoding="utf-8"))["version"] == 7
+    assert (tmp_path / "p.vmp.v6.bak").read_bytes() == original
+    save_project(sepia, caminho)                                      # 7 -> 6 (tirou o desfoque): nada a guardar
+    assert json.loads(caminho.read_text(encoding="utf-8"))["version"] == 6
+    assert sorted(f.name for f in tmp_path.glob("p.vmp*")) == ["p.vmp", "p.vmp.v6.bak"]
 
 
 def test_um_projeto_salvo_pela_versao_anterior_abre_com_o_filtro_em_tela_cheia(tmp_path: Path) -> None:

@@ -518,9 +518,9 @@ class TestBlocoInvertidoNoArquivo:
             project_from_dict(dados, base_dir=tmp_path)
 
     def test_a_versao_anterior_recusa_o_arquivo_novo(self, tmp_path):
-        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+        from videomanager.infrastructure.storage.project_json import SUPPORTED_VERSION
         dados = project_to_dict(self._projeto(tmp_path, reversed=True), base_dir=tmp_path)
-        dados['version'] = PROJECT_VERSION + 1
+        dados['version'] = SUPPORTED_VERSION + 1
         with pytest.raises(ProjectError):
             project_from_dict(dados, base_dir=tmp_path)
 
@@ -567,9 +567,9 @@ class TestVolumeAnimadoNoArquivo:
             project_from_dict(dados, base_dir=tmp_path)
 
     def test_a_versao_anterior_recusa_o_arquivo_novo(self, tmp_path):
-        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION, SUPPORTED_VERSION
         dados = project_to_dict(self._projeto(tmp_path, self.CURVA), base_dir=tmp_path)
         assert dados['version'] == PROJECT_VERSION == 6
-        dados['version'] = PROJECT_VERSION + 1
+        dados['version'] = SUPPORTED_VERSION + 1
         with pytest.raises(ProjectError):
             project_from_dict(dados, base_dir=tmp_path)

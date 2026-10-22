@@ -34,13 +34,28 @@ from videomanager.domain.project import reserve_project_ids
 # 4: o bloco ganha ``blur_background`` (fundo desfocado).
 # 5: o bloco ganha ``reversed`` (toca de trás para frente).
 # 6: o quadro-chave ganha ``gain_offset_db`` (a curva de volume, relativa ao do bloco).
+# 7: o desfoque de região (``filter_name = "desfoque"``). Não traz chave nova: a região é a pose do bloco.
 #
 # Todo campo novo no arquivo sobe esta versão. A leitura ignora chaves que não
 # conhece, então uma versão anterior que abrisse um arquivo com campo novo o
 # perderia em silêncio ao salvar — keyframes e opacity entraram assim. Com a
 # versão nova, a anterior recusa o arquivo com mensagem. O teste
 # ``test_campo_novo_no_projeto_exige_subir_a_versao`` trava as chaves da 6.
+#
+# A 7 é diferente: só entra um **valor** novo, e uma versão anterior que o abrisse não perderia
+# nada ao salvar, mas exportaria o quadro **inteiro** em Preto e Branco (nome de filtro
+# desconhecido) sem desfocar a região — o rosto ou a placa à mostra, sem erro. Por isso a 7 só é
+# gravada por quem precisa dela (``project_version``): sem desfoque o arquivo continua na 6, igual
+# ao de antes, e as versões anteriores seguem abrindo tudo o que não tem desfoque.
 PROJECT_VERSION = 6
+REGION_BLUR_VERSION = 7
+# A maior versão que a leitura aceita.
+SUPPORTED_VERSION = REGION_BLUR_VERSION
+
+
+def project_version(project: Project) -> int:
+    """A menor versão do formato em que este projeto pode ser gravado."""
+    return REGION_BLUR_VERSION if any(clip.has_region for clip in project.clips) else PROJECT_VERSION
 
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
@@ -193,7 +208,7 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
         )
 
     return {
-        "version": PROJECT_VERSION,
+        "version": project_version(project),
         "width": project.width,
         "height": project.height,
         "fps": project.fps,
@@ -236,7 +251,7 @@ def _validate_project(data: dict[str, object]) -> None:
     if not isinstance(data, dict):
         fail(Text("PROJECT_FIELD_DOCUMENT"))
     version = data.get("version", 1)
-    if type(version) is not int or not 1 <= version <= PROJECT_VERSION:
+    if type(version) is not int or not 1 <= version <= SUPPORTED_VERSION:
         raise ProjectError(Text("PROJECT_VERSION_UNSUPPORTED", version=version))
     for name in ("width", "height", "fps", "text_reference_width", "text_reference_height"):
         number(data, name, positive=True, integer=name != "fps")
@@ -359,7 +374,7 @@ def _project_from_dict(
     """Reconstrói um projeto a partir do dicionário serializado."""
     missing_files: list[Path] = []
     version = data.get("version", 1)
-    if not isinstance(version, int) or version > PROJECT_VERSION:
+    if not isinstance(version, int) or version > SUPPORTED_VERSION:
         raise ProjectError(Text("PROJECT_VERSION_UNSUPPORTED", version=version))
 
     width = int(data.get("width", 1920))
@@ -495,7 +510,7 @@ def save_project(project: Project, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = project_to_dict(project, base_dir=path.parent)
         text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
-        _backup_previous_version(path)
+        _backup_previous_version(path, int(data["version"]))
         # Temporário criado com 0666 (a máscara do usuário corta o resto), e
         # não pelo NamedTemporaryFile, que nasce 0600: a troca levava essa
         # permissão junto, e um projeto numa pasta compartilhada deixava de
@@ -523,8 +538,8 @@ def save_project(project: Project, path: Path) -> None:
                 pass
 
 
-def _backup_previous_version(path: Path) -> None:
-    """Preserva o original antes de gravá-lo num formato mais novo.
+def _backup_previous_version(path: Path, new_version: int) -> None:
+    """Preserva o original antes de gravá-lo num formato mais novo (``new_version``, o que vai ser gravado).
 
     Binários antigos não abrem o formato novo; a cópia ``.vN.bak`` é o caminho
     de volta. Nunca sobrescreve uma cópia existente.
@@ -539,7 +554,7 @@ def _backup_previous_version(path: Path) -> None:
     if not isinstance(old, dict):
         return
     version = old.get('version', 1)
-    if type(version) is not int or version >= PROJECT_VERSION:
+    if type(version) is not int or version >= new_version:
         return
     number = 0
     while True:
