@@ -306,9 +306,13 @@ trilha de Adicionais, com a duração do campo, e na prévia aparece o retângul
   Desfoque ganha o tamanho inicial, e quem deixa de ser volta à tela cheia.
 - **Corte rápido** — não vale para uma edição com Desfoque: copiar os dados entregaria o vídeo sem a
   região borrada, então a exportação recodifica.
-- **Projeto aberto em versão antiga** — o arquivo não ganha campo novo, mas uma versão do aplicativo
-  anterior ao Desfoque não conhece o filtro e mostra o bloco como Preto e Branco. Com o ffmpeg 6 vale
-  a mesma limitação dos outros filtros: uma transição que atravessa o bloco o perde durante a passagem.
+- **Projeto aberto em versão antiga** — o projeto que tem Desfoque é gravado na versão 7 do arquivo.
+  Uma versão do aplicativo anterior ao Desfoque recusa esse arquivo, com a mensagem de versão não
+  suportada, em vez de mostrar o quadro inteiro em Preto e Branco sem desfocar nada; os projetos que
+  não têm Desfoque continuam abrindo nela. Ao gravar a versão 7 sobre um arquivo mais antigo, o
+  aplicativo guarda o original numa cópia `.v6.bak` ao lado; tirar o último Desfoque e salvar volta a
+  gravar o formato antigo. Com o ffmpeg 6 vale a mesma limitação dos outros filtros: uma transição que
+  atravessa o bloco o perde durante a passagem.
 
 ### Propriedades e animação
 
