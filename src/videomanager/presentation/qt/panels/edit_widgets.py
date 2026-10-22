@@ -87,6 +87,8 @@ from videomanager.domain.i18n import decimal
 _PREVIEW_MIN_HEIGHT = 160
 # O raio do cartão da prévia, o do protótipo.
 _PREVIEW_RADIUS = 18
+# Distância, em pixels da tela, a que o bloco arrastado se encaixa nas bordas e no centro do quadro.
+_SNAP_THRESHOLD = 14.0
 
 # Os botões quadrados da aba Propriedades (quadro-chave): 30 px de lado e o ícone de 16.
 _TILE = 30
@@ -99,6 +101,20 @@ _COMBO_LABEL = 92
 _VALUE_BOX = 62
 # Faixa do controle deslizante da escala: o campo vai a 10×, mas é nos primeiros 2,5× que a escala se ajusta.
 _SCALE_SLIDER_MAX = 250
+
+
+def _snap_axis(raw: float, half: float, low: float, high: float, center: float) -> tuple[float, float | None]:
+    """Encaixe de um eixo do arrasto: ``(centro do bloco, posição da guia)``, ou ``(raw, None)`` se nada está perto.
+
+    ``raw`` é o centro que o mouse pede e ``half`` a meia extensão do bloco nesse eixo; ``low``, ``high`` e
+    ``center`` são as bordas e o meio do quadro. Vale para a imagem (com a meia extensão já projetada pelo giro) e
+    para a região do desfoque, que precisam encaixar do mesmo jeito. O ``center`` vem de quem chama: a imagem usa o
+    ``QRect.center()`` (inteiro) e a região o meio exato, e as duas posições finais não podem mudar.
+    """
+    near = min((abs(low - (raw - half)), low + half, low),
+               (abs(high - (raw + half)), high - half, high),
+               (abs(center - raw), center, center), key=lambda candidate: candidate[0])
+    return (near[1], near[2]) if near[0] <= _SNAP_THRESHOLD else (raw, None)
 
 
 def _has_handles(clip: Clip | None) -> bool:
@@ -846,35 +862,10 @@ class _Preview(QLabel):
                     hw_proj = (w / 2.0) * abs(math.cos(theta_rad)) + (h / 2.0) * abs(math.sin(theta_rad))
                     hh_proj = (w / 2.0) * abs(math.sin(theta_rad)) + (h / 2.0) * abs(math.cos(theta_rad))
 
-                    vx_left = float(vrect.x())
-                    vx_right = float(vrect.x() + vrect.width())
-                    vx_center = float(vrect.center().x())
-
-                    vy_top = float(vrect.y())
-                    vy_bottom = float(vrect.y() + vrect.height())
-                    vy_center = float(vrect.center().y())
-
-                    threshold = 14.0
-
-                    snaps_x = [
-                        (abs(vx_left - (raw_cx - hw_proj)), vx_left + hw_proj, vx_left),
-                        (abs(vx_right - (raw_cx + hw_proj)), vx_right - hw_proj, vx_right),
-                        (abs(vx_center - raw_cx), vx_center, vx_center),
-                    ]
-                    best_dist_x, best_cx, gx = min(snaps_x, key=lambda s: s[0])
-                    if best_dist_x <= threshold:
-                        final_cx = best_cx
-                        self._snap_guide_x = gx
-
-                    snaps_y = [
-                        (abs(vy_top - (raw_cy - hh_proj)), vy_top + hh_proj, vy_top),
-                        (abs(vy_bottom - (raw_cy + hh_proj)), vy_bottom - hh_proj, vy_bottom),
-                        (abs(vy_center - raw_cy), vy_center, vy_center),
-                    ]
-                    best_dist_y, best_cy, gy = min(snaps_y, key=lambda s: s[0])
-                    if best_dist_y <= threshold:
-                        final_cy = best_cy
-                        self._snap_guide_y = gy
+                    final_cx, self._snap_guide_x = _snap_axis(
+                        raw_cx, hw_proj, float(vrect.x()), float(vrect.x() + vrect.width()), float(vrect.center().x()))
+                    final_cy, self._snap_guide_y = _snap_axis(
+                        raw_cy, hh_proj, float(vrect.y()), float(vrect.y() + vrect.height()), float(vrect.center().y()))
 
                 new_x = (final_cx - vrect.x()) / max(1.0, vrect.width())
                 new_y = (final_cy - vrect.y()) / max(1.0, vrect.height())
@@ -1029,9 +1020,10 @@ class _Preview(QLabel):
 
         Diferente das imagens: os cantos mudam largura e altura **independentes** (a região não tem
         proporção a guardar), ela não gira e nunca sai do quadro. O tamanho vai por ``with_region_size``,
-        que o mantém igual em todos os quadros-chave e **prende os centros** (é a única trava do mover:
-        a conta de "dentro do quadro" mora no domínio, e não aqui); a posição, por ``with_edited_transform``,
-        que é a que anima.
+        que o mantém igual em todos os quadros-chave e **prende os centros**: ao mover, a trava de "dentro do
+        quadro" é só essa, do domínio. Ao redimensionar, o canto pego também é limitado ao quadro aqui, porque é este
+        gesto que sabe qual canto está parado. A posição vai por ``with_edited_transform``, que é a que anima, e o
+        encaixe nas bordas e no centro é o mesmo da imagem (``_snap_axis``).
         """
         _, _, w, h = geom
         vw, vh = float(vrect.width()), float(vrect.height())
@@ -1045,12 +1037,8 @@ class _Preview(QLabel):
             raw_cy = top + self._drag_init_y * vh + (pos.y() - self._drag_start_pos.y())
             new_cx, new_cy = raw_cx, raw_cy
             if self._snap_enabled:
-                def snap(raw: float, half: float, low: float, high: float) -> tuple[float, float | None]:
-                    near = min((abs(low - (raw - half)), low + half, low), (abs(high - (raw + half)), high - half, high),
-                               (abs((low + high) / 2 - raw), (low + high) / 2, (low + high) / 2), key=lambda c: c[0])
-                    return (near[1], near[2]) if near[0] <= 14.0 else (raw, None)
-                new_cx, self._snap_guide_x = snap(raw_cx, w / 2, left, right)
-                new_cy, self._snap_guide_y = snap(raw_cy, h / 2, top, bottom)
+                new_cx, self._snap_guide_x = _snap_axis(raw_cx, w / 2, left, right, (left + right) / 2)
+                new_cy, self._snap_guide_y = _snap_axis(raw_cy, h / 2, top, bottom, (top + bottom) / 2)
         else:   # scale_*: o canto oposto fica parado e o que foi pego segue o mouse, preso ao quadro
             sx, sy = self._drag_sx, self._drag_sy
             ox, oy = self._drag_opp_x, self._drag_opp_y
