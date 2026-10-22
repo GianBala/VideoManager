@@ -269,8 +269,9 @@ bloco numa trilha de **Adicionais** (ou, no caso da transição, na trilha de
 vídeo, sobre o corte):
 
 - **Texto** — conteúdo, fonte, tamanho, negrito e itálico, cor e contorno.
-- **Filtros** — Preto e Branco, Sépia, Alto Contraste, Vinheta e Inversão. Um
-  filtro age sobre tudo que está **abaixo** da trilha dele.
+- **Filtros** — Preto e Branco, Sépia, Alto Contraste, Vinheta, Inversão e
+  **Desfoque**. Um filtro age sobre tudo que está **abaixo** da trilha dele; o
+  Desfoque age só num retângulo (ver [Desfoque de região](#desfoque-de-região)).
 - **Transições** — Fade, Fade para Preto, Fade para Branco, Dissolve, Wipe e
   Slide (esquerda/direita), com duração a partir de 0,2 s e até o que cabe nos
   dois blocos do corte, no campo e na alça (padrão 1 s), e a opção
@@ -280,6 +281,34 @@ vídeo, sobre o corte):
 - **Propriedades** — aparece ao escolher **Propriedades** no menu do botão
   direito sobre um bloco, e se fecha pelo ✕ do título. É a edição numérica
   precisa do bloco selecionado (ver a seguir).
+
+### Desfoque de região
+
+O **Desfoque** (aba **Filtros**) borra só um retângulo do quadro, durante o tempo do bloco: para
+esconder um rosto, uma placa ou uma tela. Escolha **Desfoque** e **Aplicar Filtro**: o bloco nasce na
+trilha de Adicionais, com a duração do campo, e na prévia aparece o retângulo (30% da tela, no centro).
+
+- **Mover e redimensionar** — arraste o retângulo na prévia. Os quatro cantos mudam a largura e a
+  altura **independentes**; o canto oposto fica parado. Ele não gira e **não sai do quadro**, e se
+  encaixa nas bordas e no centro. Enquanto você arrasta, a caixa acompanha o mouse na hora e o
+  conteúdo borrado chega logo depois, com o quadro novo do ffmpeg.
+- **Aba Propriedades** — posição X/Y, largura/altura e escala, em pixels da tela do projeto. Não há
+  rotação, opacidade nem trava de proporção: um recorte não tem nada disso.
+- **Acompanhar o que se move** — só a **posição** anima. Com o cursor onde quer, mexer no retângulo cria
+  um quadro-chave, e a região anda entre eles (o acompanhamento é manual, não automático). O
+  **tamanho é um só por bloco**: redimensionar vale para todos os quadros-chave.
+- **Força** — fixa e proporcional ao tamanho da região, forte o bastante para que nem um texto que
+  ocupe a região inteira seja legível. Não há controle de intensidade.
+- **Vários desfoques** — um bloco para cada; podem estar na mesma trilha (um depois do outro) ou em
+  trilhas diferentes. Como todo filtro, o Desfoque age sobre o que está **abaixo** da trilha dele:
+  um texto numa trilha acima fica nítido.
+- **Trocar de filtro** — com o bloco selecionado, escolher outro filtro na aba o troca: quem vira
+  Desfoque ganha o tamanho inicial, e quem deixa de ser volta à tela cheia.
+- **Corte rápido** — não vale para uma edição com Desfoque: copiar os dados entregaria o vídeo sem a
+  região borrada, então a exportação recodifica.
+- **Projeto aberto em versão antiga** — o arquivo não ganha campo novo, mas uma versão do aplicativo
+  anterior ao Desfoque não conhece o filtro e mostra o bloco como Preto e Branco. Com o ffmpeg 6 vale
+  a mesma limitação dos outros filtros: uma transição que atravessa o bloco o perde durante a passagem.
 
 ### Propriedades e animação
 
