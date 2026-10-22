@@ -195,6 +195,10 @@ class DesktopRuntime:
     def find_tools(self):
         return binaries.find_tools()
 
+    def ffmpeg_major_version(self, tools):
+        """O número maior da versão do ffmpeg em uso (``None`` se não der para ler); guardado por caminho."""
+        return binaries.major_version(tools.ffmpeg)
+
     def hardware_ready(self, tools):
         return hardware.probes_ready(tools)
 
