@@ -422,6 +422,11 @@ EXPORT_GIF_NOTE = (
     "every frame is a whole image, and at the project's canvas the file would be "
     "ten times larger. Choosing the canvas or frame rate by hand still applies."
 )
+EXPORT_BLUR_TRANSITION_WARN = (
+    "This machine's ffmpeg {version} drops the blur during a transition with \"Affect overlay items\": "
+    "during the transition, the area it would hide shows through. Turn that option off on the transition or use "
+    "ffmpeg 7 or newer."
+)
 EXPORT_VIDEO_CODEC = "Video codec"
 EXPORT_VIDEO_CODEC_TIP = "Video compression algorithm (H.264, HEVC, AV1, VP9)"
 EXPORT_QUALITY = "Video quality"
