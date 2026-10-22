@@ -1551,7 +1551,6 @@ def _compose_region_blur(
     current: str,
     piece: _Piece,
     project: Project,
-    fps: float,
     order: int | str,
     enable: str,
 ) -> str:
@@ -1577,12 +1576,15 @@ def _compose_region_blur(
       no alfa, então não cai na divisão pelo alfa do ffmpeg 9;
     * ``steps=3``. Com um passo só a aproximação gaussiana tem cauda pesada, e o texto
       de uma placa ainda se lê com σ de 0,35 do lado;
-    * a ramificação é aparada (``trim``) à janela do bloco. Sem isso ela borra todo
-      quadro do projeto para usar só a janela, e o custo cresce além do linear com o
-      número de blocos (+3,0 s com 8 blocos em 24 s de 1080p, contra +0,7 s aparada).
-      O ``trim`` descarta o quadro cujo **fim** passa de ``end``, então a janela que
-      termina entre dois quadros perdia o desfoque do último; por isso a folga de
-      dois quadros dos dois lados, e quem liga e desliga o efeito é só o ``enable``.
+    * a ramificação **não** é aparada (``trim``) à janela do bloco, e quem liga e desliga o efeito é só o
+      ``enable``. O ``trim`` parecia a economia óbvia (+0,7 s com 8 blocos em 24 s de 1080p, contra +3,0 s sem
+      ele), mas o ``overlay`` só decide o que fazer com o quadro 0 do ramo principal quando conhece o primeiro
+      quadro do ramo aparado, que só chega depois de o fluxo produzir todos os quadros até o início do bloco; até
+      lá ele guarda os do ramo principal, RGBA do tamanho da tela. Medido: o pico de memória do ffmpeg cresce
+      ~228 MB por segundo de antecedência a 1080p (um desfoque aos 60 s pede ~14 GB na exportação), e o primeiro
+      quadro da reprodução atrasa na mesma proporção, nos ffmpeg 6.1, 7.1 e 9.0. Sem o ``trim`` a memória é plana
+      e o custo (~1 ms por quadro por bloco a 1080p) é o do projeto inteiro, não o do bloco. Encher o início do
+      ramo com ``tpad`` não adianta: ele só emite o preenchimento depois de receber o primeiro quadro real.
     """
     clip = piece.clip
     width, height = project.width, project.height
@@ -1599,13 +1601,10 @@ def _compose_region_blur(
     side = min(REGION_BLUR_WORK_SIDE, w, h)
     work_w = max(2, round(w * side / min(w, h) / 2) * 2)
     work_h = max(2, round(h * side / min(w, h) / 2) * 2)
-    margin = 2.0 / fps
-    start, end = piece.offset, piece.offset + piece.duration
     keep, branch, blurred, label = f"[rb{order}a]", f"[rb{order}b]", f"[rb{order}c]", f"[f{order}]"
     filters.append(f"{current}split=2{keep}{branch}")
     filters.append(
-        f"{branch}trim=start={max(0.0, start - margin):.6f}:end={end + margin:.6f},"
-        f"crop=w={w}:h={h}:x='{x}':y='{y}',"
+        f"{branch}crop=w={w}:h={h}:x='{x}':y='{y}',"
         f"scale={work_w}:{work_h}:flags=bilinear,format=gbrp,"
         f"gblur=sigma={REGION_BLUR_SIGMA_RATIO * side:.4f}:steps={REGION_BLUR_STEPS},format=rgba,"
         f"scale={w}:{h}:flags=bilinear{blurred}"
@@ -1638,7 +1637,7 @@ def _compose_video_piece(
         )
     if piece.clip.overlay_type is OverlayType.FILTER:
         if piece.clip.has_region:
-            return _compose_region_blur(filters, current, piece, project, fps, order, enable)
+            return _compose_region_blur(filters, current, piece, project, order, enable)
         name = piece.clip.filter_name
         if name == "pb":
             expression = f"hue=s=0:enable='{enable}'"
