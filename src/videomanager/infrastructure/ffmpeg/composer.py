@@ -1565,7 +1565,7 @@ def _compose_region_blur(
     O desfoque é feito num recorte de lado menor fixo (``REGION_BLUR_WORK_SIDE``),
     com σ proporcional a esse lado, e só então ampliado de volta: assim a força é
     relativa à região e prévia e exportação saem do mesmo desenho, como no fundo
-    desfocado (``_BLUR_SHORT_SIDE``). Três coisas foram medidas e estão presas em teste:
+    desfocado (``_BLUR_SHORT_SIDE``). Quatro coisas foram medidas e estão presas em teste:
 
     * o ``gblur`` roda em ``gbrp``. Em ``yuv420p``, num recorte de 16 px, os planos de
       cor saem com verde nas bordas (excesso de 135 contra −127 do original);

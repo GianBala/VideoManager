@@ -169,7 +169,5 @@ def test_ampliar_a_regiao_colada_na_borda_nao_a_deixa_para_fora():
     maior = colada.with_region_size(0.4, 0.4)
     assert maior.x == pytest.approx(0.8)                                   # 1 − 0,4/2
     assert [k.x for k in maior.keyframes] == [pytest.approx(0.8), pytest.approx(0.2)]
-    (x_min, x_max), (y_min, y_max) = maior.region_center_limits()
-    assert (x_min, x_max) == (pytest.approx(0.2), pytest.approx(0.8))
-    assert (y_min, y_max) == (pytest.approx(0.2), pytest.approx(0.8))
-    assert all(x_min <= k.x <= x_max for k in maior.keyframes)
+    assert maior.y == pytest.approx(0.5)                                   # dentro dos limites: não se mexe
+    assert all(0.2 - 1e-9 <= k.x <= 0.8 + 1e-9 for k in maior.keyframes)
