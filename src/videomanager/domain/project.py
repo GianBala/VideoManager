@@ -446,10 +446,6 @@ class Clip:
         left, top = region_origin(pose.x, pose.y, w, h, canvas_w, canvas_h)
         return left, top, w, h
 
-    def region_center_limits(self) -> tuple[tuple[float, float], tuple[float, float]]:
-        """Onde o centro da região pode ficar para ela não sair da tela: ``((x_min, x_max), (y_min, y_max))``."""
-        return ((self.scale_x / 2, 1 - self.scale_x / 2), (self.scale_y / 2, 1 - self.scale_y / 2))
-
     def with_region_size(self, scale_x: float, scale_y: float) -> Clip:
         """Muda o tamanho da região no bloco **e em todos os quadros-chave**, e a mantém dentro da tela.
 
