@@ -443,7 +443,8 @@ def test_campo_novo_no_projeto_exige_subir_a_versao(tmp_path):
     bloco = trilha['clips'][0]
     gravado = {'projeto': set(data), 'trilha': set(trilha), 'bloco': set(bloco),
                'midia': set(bloco['media']), 'quadro_chave': set(bloco['keyframes'][0])}
-    assert PROJECT_VERSION == 6, 'versão nova: atualize _CHAVES_V6 para o conjunto dela'
+    assert PROJECT_VERSION == 6, ('versão nova: atualize _CHAVES_V6 para o conjunto dela. A 7 é do desfoque de região: '
+                                 'a próxima chave nova do arquivo é a 8 (PROJECT_VERSION = 8)')
     assert gravado == _CHAVES_V6
 
 
