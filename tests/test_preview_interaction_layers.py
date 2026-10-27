@@ -458,3 +458,56 @@ def test_camadas_do_gesto_so_valem_com_a_contagem_do_plano(pose_panel):
     assert panel._preview._interaction_layers is None, 'quatro imagens para um plano sem fundo foram instaladas'
     sem_fundo.signals.frame.emit(sem_fundo.args[3], (_png('lime'), _png('red'), _png('#00000000')))
     assert len(panel._preview._interaction_layers) == 3
+
+
+def _com_desfoque_acima(panel, deliver, calls):
+    """Põe um desfoque de região acima do item selecionado e devolve o worker das camadas que isso pede."""
+    from videomanager.domain.constants import REGION_BLUR
+    from videomanager.domain.project import OverlayType, pseudo_media
+    desfoque = Clip(pseudo_media(OverlayType.FILTER, REGION_BLUR, 10.0), 0, 10, overlay_type='filter',
+                    filter_name=REGION_BLUR, x=.4, y=.5, scale=.3, scale_x=.3, scale_y=.3)
+    panel._apply(replace(panel._project, tracks=(Track(TrackKind.ADDITIONAL, clips=(desfoque,)),
+                                                 *panel._project.tracks)))
+    while panel._frame_busy:
+        deliver(calls.frames[-1])
+    return desfoque, calls.interaction[-1]
+
+
+def test_desfoque_acima_do_item_pede_uma_imagem_a_mais_e_a_previa_a_recebe_com_a_regiao(pose_panel):
+    """Com um desfoque acima do item, o plano tem um trecho e a imagem dele chega à prévia junto da região."""
+    panel, calls, item, deliver = pose_panel
+    desfoque, worker = _com_desfoque_acima(panel, deliver, calls)
+    plano = worker.args[0]
+    assert [r.clip_id for r, _ in plano.stages] == [desfoque.clip_id]
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('red'), _png('#00000000'), _png('#00000000')))
+    worker.signals.done.emit()
+    assert len(panel._preview._interaction_layers) == 3
+    assert [r.clip_id for r, _ in panel._preview._interaction_stages] == [desfoque.clip_id]
+    assert not panel._preview._interaction_stages[0][1].isNull()
+
+
+def test_camadas_com_desfoque_acima_so_valem_com_a_contagem_do_plano(pose_panel):
+    """Sem a imagem do trecho depois do desfoque, o desfoque sairia sem o que o cobre: não se instala."""
+    panel, calls, item, deliver = pose_panel
+    _, worker = _com_desfoque_acima(panel, deliver, calls)
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('red'), _png('#00000000')))
+    assert panel._preview._interaction_layers is None, 'três imagens para um plano com desfoque foram instaladas'
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('red'), _png('#00000000'), _png('#00000000'),
+                                               _png('#00000000')))
+    assert panel._preview._interaction_layers is None, 'imagem a mais para um plano com um desfoque foi instalada'
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('red'), _png('#00000000'), _png('#00000000')))
+    assert panel._preview._interaction_layers is not None, 'a recusa anterior não pode travar a entrega certa'
+
+
+def test_pose_com_desfoque_acima_aparece_na_hora_sem_pedir_quadro_ao_ffmpeg(pose_panel):
+    """Era o caminho lento: um render inteiro por tecla ou movimento. Com as camadas prontas, a pose é desenhada na hora."""
+    from PySide6.QtCore import Qt
+    panel, calls, item, deliver = pose_panel
+    _, worker = _com_desfoque_acima(panel, deliver, calls)
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('red'), _png('#00000000'), _png('#00000000')))
+    worker.signals.done.emit()
+    antes = len(calls.frames)
+    _keys(panel, '_spin_x', Qt.Key.Key_PageUp, times=3)
+    assert panel._project.find(item.clip_id)[1] != item
+    assert panel._preview._interaction_visible, 'a pose nova não foi desenhada na hora'
+    assert len(calls.frames) == antes, 'cada tecla compôs um quadro inteiro'
