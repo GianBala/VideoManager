@@ -699,7 +699,12 @@ def test_desfoque_numa_transicao_que_afeta_adicionais_avisa_so_no_ffmpeg_anterio
     """No ffmpeg 6 o desfoque some durante a passagem; a exportação avisa antes, em vez de deixar o rosto à mostra."""
     avisos = _enfileirar(sample_media, dummy_tools, _projeto_com_desfoque_na_transicao(sample_media[0]),
                          monkeypatch, versao)
-    assert any("ffmpeg 6" in aviso and "Afetar itens adicionais" in aviso for aviso in avisos) is avisa
+    # Filtra pelo assunto do aviso, não pelo número: a mensagem imprime a versão **real**, e procurar "ffmpeg 6"
+    # não acusava um aviso indevido no 7 ("O ffmpeg 7 desta máquina perde o desfoque…").
+    do_desfoque = [aviso for aviso in avisos if "Afetar itens adicionais" in aviso]
+    assert bool(do_desfoque) is avisa, do_desfoque
+    if avisa:
+        assert "ffmpeg 6" in do_desfoque[0]
 
 
 def test_sem_transicao_que_afeta_adicionais_nem_pergunta_a_versao_do_ffmpeg(
