@@ -153,3 +153,18 @@ def test_abrir_um_projeto_com_desfoque_no_editor_nao_o_marca_como_alterado(tmp_p
     # E o que o painel guarda depois de ser aberto é o mesmo desfoque, no mesmo lugar.
     volta = next(c for t in painel._project.additional_tracks for c in t.clips)
     assert volta.region_rect(1280, 720, 1.5) == filtro.region_rect(1280, 720, 1.5)
+
+
+def test_a_7_e_do_desfoque_e_a_leitura_vai_ate_a_maior_das_duas_versoes() -> None:
+    """Uma chave nova do arquivo é a versão 8: tomar a 7 faria um programa só com o desfoque perder a chave ao salvar."""
+    assert PROJECT_VERSION != REGION_BLUR_VERSION, "a 7 é do desfoque: uma chave nova sobe PROJECT_VERSION para 8"
+    assert SUPPORTED_VERSION == max(PROJECT_VERSION, REGION_BLUR_VERSION)
+
+
+def test_com_uma_chave_nova_na_versao_8_todo_projeto_grava_8_inclusive_o_com_desfoque(tmp_path: Path, monkeypatch) -> None:
+    """O projeto com desfoque grava a maior das duas versões: gravar 7 deixaria a chave da 8 sem quem a entenda."""
+    monkeypatch.setattr(project_json, "PROJECT_VERSION", 8)
+    desfoque, _ = _projeto(tmp_path)
+    sepia, _ = _projeto(tmp_path, "sepia")
+    assert project_to_dict(desfoque, base_dir=tmp_path)["version"] == 8
+    assert project_to_dict(sepia, base_dir=tmp_path)["version"] == 8

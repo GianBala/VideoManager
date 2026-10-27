@@ -47,15 +47,19 @@ from videomanager.domain.project import reserve_project_ids
 # desconhecido) sem desfocar a região — o rosto ou a placa à mostra, sem erro. Por isso a 7 só é
 # gravada por quem precisa dela (``project_version``): sem desfoque o arquivo continua na 6, igual
 # ao de antes, e as versões anteriores seguem abrindo tudo o que não tem desfoque.
+#
+# **A 7 é do desfoque: a próxima chave nova do arquivo é a 8.** ``PROJECT_VERSION`` sobe para 8 (nunca para 7, que
+# um programa só com o desfoque leria sem conhecer a chave e a perderia ao salvar), e ``project_version`` e
+# ``SUPPORTED_VERSION`` já tiram o maior dos dois números.
 PROJECT_VERSION = 6
 REGION_BLUR_VERSION = 7
 # A maior versão que a leitura aceita.
-SUPPORTED_VERSION = REGION_BLUR_VERSION
+SUPPORTED_VERSION = max(PROJECT_VERSION, REGION_BLUR_VERSION)
 
 
 def project_version(project: Project) -> int:
     """A menor versão do formato em que este projeto pode ser gravado."""
-    return REGION_BLUR_VERSION if any(clip.has_region for clip in project.clips) else PROJECT_VERSION
+    return max(PROJECT_VERSION, REGION_BLUR_VERSION) if any(clip.has_region for clip in project.clips) else PROJECT_VERSION
 
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
