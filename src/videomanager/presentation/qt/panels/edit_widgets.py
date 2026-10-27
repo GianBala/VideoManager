@@ -19,6 +19,7 @@ from PySide6.QtGui import (
     QFontDatabase,
     QFontMetrics,
     QIcon,
+    QImage,
     QKeyEvent,
     QMouseEvent,
     QPaintEvent,
@@ -77,6 +78,7 @@ from videomanager.presentation.qt.panels.field_box import FieldBox, WrapCheck
 from videomanager.presentation.qt.panels.section import Section
 from videomanager.presentation.qt.panels.segmented import SegmentButton, segmented
 from videomanager.presentation.qt.panels.swatch import Swatch
+from videomanager.presentation.qt.panels.region_blur import blur_region
 from videomanager.presentation.qt.panels.timeline import MEDIA_MIME
 
 from videomanager.presentation.qt import fonts, icons, strings, theme
@@ -399,6 +401,8 @@ class _Preview(QLabel):
         self.setProperty("role", "screen-dim")
         self._pixmap: QPixmap | None = None
         self._interaction_layers: tuple[QPixmap, ...] | None = None
+        # Um desfoque de região acima do item arrastado, com a imagem do que vem depois dele (ver ``set_interaction_layers``).
+        self._interaction_stages: tuple[tuple[Clip, QPixmap], ...] = ()
         self._interaction_visible = False
 
         self._active_clip: Clip | None = None
@@ -484,8 +488,15 @@ class _Preview(QLabel):
         bind(self, "setText", lambda: strings.EDIT_EMPTY)
         self.update()
 
-    def set_interaction_layers(self, layers: tuple[QPixmap, ...] | None) -> None:
+    def set_interaction_layers(self, layers: tuple[QPixmap, ...] | None,
+                               stages: tuple[tuple[Clip, QPixmap], ...] = ()) -> None:
+        """``stages``: cada desfoque de região acima do item, com o que o cobre até o próximo desfoque.
+
+        O desfoque borra o que o item móvel desenha, então ele não vem pronto: a prévia monta a imagem do gesto
+        a cada movimento e borra a região nela (``_paint_interaction_with_regions``).
+        """
         self._interaction_layers = layers
+        self._interaction_stages = stages if layers is not None else ()
         if layers is None:
             self._interaction_visible = False
         elif self._drag_mode:
@@ -608,18 +619,21 @@ class _Preview(QLabel):
             item_h * scale_y,
         )
 
+    def _compose_size(self) -> tuple[int, int]:
+        """A tela reduzida em que o quadro parado é composto (a de ``composer._preview_project``)."""
+        if self._pixmap is not None and not self._pixmap.isNull():
+            output_w, output_h = self._pixmap.width(), self._pixmap.height()
+        else:
+            output_w, output_h = self._proj_w, self._proj_h
+        return fit_size(self._proj_w, self._proj_h, min(self._proj_w, output_w), min(self._proj_h, output_h))
+
     def _region_geometry(self, clip: Clip, t_offset: float, vrect: QRect) -> tuple[float, float, float, float]:
         """A região do desfoque na prévia, pela **mesma conta** do compositor (``Clip.region_rect``).
 
         Na tela reduzida em que o quadro parado é composto (a mesma de ``_image_overlay_geometry``), e só
         então levada à área do vídeo: a caixa cai em cima do retângulo que o ffmpeg borrou.
         """
-        if self._pixmap is not None and not self._pixmap.isNull():
-            output_w, output_h = self._pixmap.width(), self._pixmap.height()
-        else:
-            output_w, output_h = self._proj_w, self._proj_h
-        compose_w, compose_h = fit_size(self._proj_w, self._proj_h, min(self._proj_w, output_w),
-                                        min(self._proj_h, output_h))
+        compose_w, compose_h = self._compose_size()
         left, top, w, h = clip.region_rect(compose_w, compose_h, t_offset)
         rx, ry = vrect.width() / compose_w, vrect.height() / compose_h
         return (vrect.x() + (left + w / 2) * rx, vrect.y() + (top + h / 2) * ry, w * rx, h * ry)
@@ -1128,6 +1142,50 @@ class _Preview(QLabel):
         super().resizeEvent(event)
         self.update()
 
+    def _paint_interaction_with_regions(self, painter: QPainter, target: QRect, clip: Clip,
+                                        geom: tuple[float, float, float, float]) -> None:
+        """As camadas do gesto quando há desfoque de região acima do item arrastado.
+
+        As mesmas camadas de sempre, mas num quadro fora da tela, na resolução delas: a região é borrada nele
+        com os pixels que o item móvel acabou de pôr ali, e só então a imagem vai para a prévia. A pose do item é
+        a de agora, como no caminho sem desfoque. A região vem da conta do compositor (``Clip.region_rect``), na
+        mesma tela reduzida em que as camadas foram feitas.
+        """
+        background, texture, foreground, *fundo = self._interaction_layers
+        stages = self._interaction_stages
+        size = background.size()
+        kx, ky = size.width() / max(1, target.width()), size.height() / max(1, target.height())
+        frame = QImage(size, QImage.Format.Format_RGB32)
+        layers = QPainter(frame)
+        layers.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        layers.drawPixmap(0, 0, background)
+        transform = clip.transform_at(max(0., self._position - clip.start))
+        cx, cy, w, h = geom
+        if fundo and clip.shows_blur_background(self._proj_w, self._proj_h):
+            layers.setOpacity(transform.opacity)
+            layers.drawPixmap(0, 0, fundo[0])
+        layers.setOpacity(transform.opacity)
+        layers.translate((cx - target.x()) * kx, (cy - target.y()) * ky)
+        layers.rotate(transform.rotation)
+        layers.drawPixmap(QRectF(-w * kx / 2, -h * ky / 2, w * kx, h * ky), texture, QRectF(texture.rect()))
+        layers.resetTransform()
+        layers.setOpacity(1.0)
+        layers.drawPixmap(0, 0, foreground)
+        compose_w, compose_h = self._compose_size()
+        for region, after in stages:
+            left, top, rw, rh = region.region_rect(compose_w, compose_h, max(0., self._position - region.start))
+            sx, sy = size.width() / compose_w, size.height() / compose_h
+            layers.end()
+            blur_region(frame, round(left * sx), round(top * sy), round(rw * sx), round(rh * sy))
+            layers.begin(frame)
+            layers.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            layers.drawPixmap(0, 0, after)
+        layers.end()
+        painter.save()
+        painter.setClipRect(target, Qt.ClipOperation.IntersectClip)
+        painter.drawImage(target, frame)
+        painter.restore()
+
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         if (self._pixmap is None or self._pixmap.isNull()) and self.text():
             # Sem quadro, o QLabel desenha o texto; o cartão é o mesmo de quando há quadro. O QSS não o faria: o
@@ -1171,7 +1229,9 @@ class _Preview(QLabel):
         # A pose acompanha cada evento; só o fechamento espera o quadro canônico.
         if has_active and self._interaction_visible and self._interaction_layers:
             geom = self._clip_geometry(clip)
-            if geom:
+            if geom and self._interaction_stages:
+                self._paint_interaction_with_regions(painter, target, clip, geom)
+            elif geom:
                 background, texture, foreground, *fundo = self._interaction_layers
                 transform = clip.transform_at(max(0., self._position - clip.start))
                 cx, cy, w, h = geom

@@ -2895,7 +2895,9 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
     """Fundo e frente canônicos; textura isolada sem recortar pixels da cena.
 
     Com o fundo desfocado ligado no bloco, uma quarta imagem: o fundo de tela
-    cheia dele, pintado entre ``background`` e a textura.
+    cheia dele, pintado entre ``background`` e a textura. Depois delas, uma imagem
+    por desfoque de região acima do bloco (``plan.stages``): o que fica entre esse
+    desfoque e o seguinte, em base transparente.
     """
     background = frame_command(plan.background, plan.seconds, size, tools, text_assets=text_assets, png=True)
     foreground = frame_command(plan.foreground, plan.seconds, size, tools, text_assets=text_assets,
@@ -2913,8 +2915,10 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
                *_limited_inputs(_input_args(piece, source.fps, text_assets=text_assets)),
                '-filter_complex', graph, '-map', '[texture]',
                '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgba', 'pipe:1']
+    after = tuple(frame_command(project, plan.seconds, size, tools, text_assets=text_assets,
+                                transparent=True, png=True) for _, project in plan.stages)
     if not plan.blur:
-        return background, texture, foreground
+        return background, texture, foreground, *after
     # O fundo não depende da pose (cobre a tela inteira e a opacidade é aplicada
     # ao pintar), então uma imagem só serve o gesto todo. A frente vai para o
     # ``nullsink`` porque a cadeia do bloco só existe com as duas saídas ligadas.
@@ -2924,4 +2928,4 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
             *_limited_inputs(_input_args(piece, source.fps, text_assets=text_assets)),
             '-filter_complex', graph, '-map', '[blur]',
             '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgb24', 'pipe:1']
-    return background, texture, foreground, blur
+    return background, texture, foreground, blur, *after
