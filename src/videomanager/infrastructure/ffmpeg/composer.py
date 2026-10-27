@@ -42,9 +42,7 @@ from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
 from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.constants import GAIN_EPSILON
-from videomanager.domain.constants import REGION_BLUR_SIGMA_RATIO
 from videomanager.domain.constants import REGION_BLUR_STEPS
-from videomanager.domain.constants import REGION_BLUR_WORK_SIDE
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import BYTES_PER_PIXEL
@@ -67,6 +65,7 @@ from videomanager.infrastructure.ffmpeg.trimmer import tail_args
 from videomanager.domain.geometry import image_base_size
 from videomanager.domain.geometry import region_origin_expr
 from videomanager.domain.geometry import region_size
+from videomanager.domain.geometry import region_work_size
 from videomanager.domain.render_cost import interpolation_bytes
 from videomanager.domain.render_cost import reverse_cuts
 from videomanager.domain.reversal import MAX_REVERSE_BYTES, PREVIEW_WINDOW_SECONDS
@@ -1597,16 +1596,13 @@ def _compose_region_blur(
         cx, cy = f"{clip.x:.6f}", f"{clip.y:.6f}"
     x, y = region_origin_expr(cx, width, w), region_origin_expr(cy, height, h)
 
-    # Região menor que a tela de trabalho não é ampliada para ser borrada.
-    side = min(REGION_BLUR_WORK_SIDE, w, h)
-    work_w = max(2, round(w * side / min(w, h) / 2) * 2)
-    work_h = max(2, round(h * side / min(w, h) / 2) * 2)
+    work_w, work_h, sigma = region_work_size(w, h)
     keep, branch, blurred, label = f"[rb{order}a]", f"[rb{order}b]", f"[rb{order}c]", f"[f{order}]"
     filters.append(f"{current}split=2{keep}{branch}")
     filters.append(
         f"{branch}crop=w={w}:h={h}:x='{x}':y='{y}',"
         f"scale={work_w}:{work_h}:flags=bilinear,format=gbrp,"
-        f"gblur=sigma={REGION_BLUR_SIGMA_RATIO * side:.4f}:steps={REGION_BLUR_STEPS},format=rgba,"
+        f"gblur=sigma={sigma:.4f}:steps={REGION_BLUR_STEPS},format=rgba,"
         f"scale={w}:{h}:flags=bilinear{blurred}"
     )
     filters.append(f"{keep}{blurred}overlay=x='{x}':y='{y}':eof_action=pass:format=auto:enable='{enable}'{label}")
