@@ -74,7 +74,7 @@ def test_trocar_o_tipo_de_um_bloco_ajusta_a_pose_e_o_desfazer_a_devolve(painel_d
     painel._select_filter(REGION_BLUR)                       # com o bloco de sépia selecionado
     (bloco,) = _filtros(painel)
     assert bloco.clip_id == sepia.clip_id and bloco.has_region
-    assert bloco.scale_x == REGION_BLUR_DEFAULT_SCALE
+    assert (bloco.scale_x, bloco.scale_y) == (REGION_BLUR_DEFAULT_SCALE, REGION_BLUR_DEFAULT_SCALE)
 
     painel._select_filter("pb")                              # e de volta: a região some do bloco
     (volta,) = _filtros(painel)
@@ -91,4 +91,4 @@ def test_o_botao_de_atualizar_tambem_ajusta_a_pose(painel_de_edicao):
     painel._selected_filter_name = REGION_BLUR
     painel._handle_apply_or_update_filter()
     (bloco,) = _filtros(painel)
-    assert bloco.has_region and bloco.scale_x == REGION_BLUR_DEFAULT_SCALE
+    assert bloco.has_region and (bloco.scale_x, bloco.scale_y) == (REGION_BLUR_DEFAULT_SCALE, REGION_BLUR_DEFAULT_SCALE)

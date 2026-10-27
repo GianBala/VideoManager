@@ -146,6 +146,34 @@ def test_o_tamanho_da_regiao_tem_minimo_e_nao_passa_do_quadro():
     assert esq + largura <= LARGURA and topo + altura <= ALTURA
 
 
+@pytest.mark.parametrize("sx, sy", [(1, 1), (1, -1), (-1, 1), (-1, -1)], ids=["br", "tr", "bl", "tl"])
+@pytest.mark.parametrize("gesto", ["para_fora_do_quadro", "passando_do_canto_oposto"])
+def test_o_canto_oposto_fica_parado_ao_sair_do_quadro_e_ao_passar_dele(sx, sy, gesto):
+    """O canto pego é preso ao quadro e ao tamanho mínimo; só o oposto é que não pode andar.
+
+    Os testes de tamanho olham a região final, que ``with_region_size`` e ``region_origin`` já prendem por conta
+    própria: sem as travas do arrasto o tamanho saía igual, mas o canto parado se deslocava.
+    """
+    clip = _filtro()
+    previa = _previa(clip)
+    esq, topo, w, h = clip.region_rect(LARGURA, ALTURA, 1.0)
+    fixo = (esq if sx > 0 else esq + w, topo if sy > 0 else topo + h)
+    cx, cy, gw, gh = previa._clip_geometry(clip)
+    pego = (cx + sx * gw / 2, cy + sy * gh / 2)
+    destino = ((pego[0] + sx * 9000, pego[1] + sy * 9000) if gesto == "para_fora_do_quadro"
+               else (pego[0] - sx * (gw + 300), pego[1] - sy * (gh + 300)))
+    _arrastar(previa, pego, destino)
+    novo = previa._active_clip
+    nesq, ntopo, nw, nh = novo.region_rect(LARGURA, ALTURA, 1.0)
+    assert (nesq if sx > 0 else nesq + nw) == pytest.approx(fixo[0], abs=2)
+    assert (ntopo if sy > 0 else ntopo + nh) == pytest.approx(fixo[1], abs=2)
+    if gesto == "para_fora_do_quadro":
+        assert (nesq + nw == LARGURA) if sx > 0 else nesq == 0        # o canto pego pára na borda do quadro
+        assert (ntopo + nh == ALTURA) if sy > 0 else ntopo == 0
+    else:
+        assert (novo.scale_x, novo.scale_y) == pytest.approx((REGION_MIN_SCALE,) * 2)
+
+
 def test_com_quadros_chave_mover_edita_so_o_ponto_da_agulha_e_o_tamanho_vale_para_todos():
     clip = _filtro(keyframes=(Keyframe(0.0, x=0.3, y=0.5, scale_x=0.3, scale_y=0.3),
                               Keyframe(3.0, x=0.7, y=0.5, scale_x=0.3, scale_y=0.3)))
@@ -233,7 +261,12 @@ def _propriedades(clip: Clip, agulha: float = 1.0) -> tuple[_ClipPropertiesWidge
 def test_a_regiao_mostra_posicao_e_tamanho_mas_nao_rotacao_nem_opacidade():
     widget, _ = _propriedades(_filtro())
     assert not widget._transform_group.isHidden() and not widget._animation_group.isHidden()
-    assert all(w.isHidden() for w in widget._region_hidden)
+    # Os controles pelo nome, e não a lista ``_region_hidden``: lida pelo teste, uma lista esvaziada por um defeito
+    # passaria por "todos escondidos". ``isVisibleTo`` e não ``isVisible``: a janela não está na tela.
+    for nome in ("_slider_opacity", "_spin_opacity", "_slider_rot", "_spin_rot", "_rotation_presets_box"):
+        assert not getattr(widget, nome).isVisibleTo(widget), nome
+    for nome in ("_spin_x", "_spin_y", "_spin_w", "_spin_h"):
+        assert getattr(widget, nome).isVisibleTo(widget), nome
     assert widget._spin_x.value() == 960 and widget._spin_w.value() == round(1920 * 0.3)
     chaves = [widget._combo_presets.itemData(i) for i in range(widget._combo_presets.count())]
     assert chaves == ["", "clear"]                       # girar, surgir e deslizar não valem para um recorte
@@ -373,3 +406,73 @@ def test_editar_um_campo_da_regiao_no_painel_prende_dentro_do_quadro(painel_de_e
     painel._properties_widget._spin_x.setValue(painel._project.width)              # centro na borda direita
     editado = _regiao_do_painel(painel)
     assert editado.x == pytest.approx(1 - bloco.scale_x / 2)
+
+
+
+# -- encaixe: a imagem e a região usam o mesmo ``_snap_axis`` ---------------------------------
+
+def test_o_encaixe_cobre_as_duas_bordas_o_centro_e_o_limiar_de_14_px():
+    from videomanager.presentation.qt.panels.edit_widgets import _snap_axis
+    baixo, alto, meio, metade = 0.0, 640.0, 320.0, 50.0
+    assert _snap_axis(metade + 5, metade, baixo, alto, meio) == (metade, baixo)              # borda esquerda
+    assert _snap_axis(alto - metade - 5, metade, baixo, alto, meio) == (alto - metade, alto)  # borda direita
+    assert _snap_axis(meio + 7, metade, baixo, alto, meio) == (meio, meio)                   # centro
+    assert _snap_axis(metade + 12, metade, baixo, alto, meio)[1] == baixo                    # 12 px: ainda encaixa
+    assert _snap_axis(metade + 15, metade, baixo, alto, meio) == (metade + 15, None)         # 15 px: já não
+    assert _snap_axis(meio + 20, metade, baixo, alto, meio) == (meio + 20, None)
+    # O que está mais perto ganha: a 4 px da borda esquerda e a 12 px do centro, é a borda.
+    assert _snap_axis(metade + 4, metade, baixo, alto, meio)[1] == baixo
+
+
+def _arrastar_vendo_a_guia(previa: _Preview, de: tuple[float, float], para: tuple[float, float]):
+    """Arrasta e devolve as guias de encaixe **durante** o gesto: soltar o mouse as apaga."""
+    previa.mousePressEvent(_evento(QMouseEvent.Type.MouseButtonPress, QPointF(*de)))
+    previa.mouseMoveEvent(_evento(QMouseEvent.Type.MouseMove, QPointF(*para)))
+    guias = previa._snap_guide_x, previa._snap_guide_y
+    previa.mouseReleaseEvent(_evento(QMouseEvent.Type.MouseButtonRelease, QPointF(*para), Qt.MouseButton.NoButton))
+    return guias
+
+
+def _imagem_na_previa(x: float = 0.5, y: float = 0.5) -> tuple[_Preview, Clip]:
+    imagem = Clip(MediaRef(Path("a.png"), MediaKind.IMAGE, width=100, height=100), 0.0, 4.0, overlay_type="image",
+                  x=x, y=y, scale=0.3, scale_x=0.3, scale_y=0.3)
+    return _previa(imagem), imagem
+
+
+@pytest.mark.parametrize("quem", ["regiao", "imagem"])
+@pytest.mark.parametrize("onde, eixo, guia", [
+    ("borda_direita", "x", LARGURA), ("borda_inferior", "y", ALTURA), ("centro_x", "x", LARGURA / 2),
+    ("centro_y", "y", ALTURA / 2), ("borda_esquerda", "x", 0), ("borda_superior", "y", 0)])
+def test_arrastar_para_perto_encaixa_a_regiao_e_a_imagem_do_mesmo_jeito(quem, onde, eixo, guia):
+    """Cinco pixels antes da borda (ou do centro), os dois blocos encaixam e mostram a guia; a imagem já era assim."""
+    previa, clip = _previa(_filtro()), None
+    if quem == "imagem":
+        previa, clip = _imagem_na_previa()
+    clip = previa._active_clip
+    cx, cy, w, h = previa._clip_geometry(clip)
+    meio, extensao = (cx, w) if eixo == "x" else (cy, h)
+    total = LARGURA if eixo == "x" else ALTURA
+    # Posição do centro que deixa o bloco a 5 px do ponto de encaixe.
+    alvo = {"borda_direita": total - extensao / 2 - 5, "borda_inferior": total - extensao / 2 - 5,
+            "centro_x": total / 2 + 5, "centro_y": total / 2 + 5,
+            "borda_esquerda": extensao / 2 + 5, "borda_superior": extensao / 2 + 5}[onde]
+    d = alvo - meio
+    # O centro da imagem é o ``QRect.center()`` do quadro (inteiro: 319 e 179 em 640×360) e o da região o meio exato; as
+    # duas posições finais não podem mudar (``_snap_axis``), e é isto que este teste prende.
+    ajuste = -1 if quem == "imagem" and onde.startswith("centro") else 0
+    guias = _arrastar_vendo_a_guia(previa, (cx, cy), (cx + d, cy) if eixo == "x" else (cx, cy + d))
+    visto = guias[0] if eixo == "x" else guias[1]
+    assert visto == pytest.approx(guia + ajuste)
+    novo = previa._active_clip
+    centro = novo.x * LARGURA if eixo == "x" else novo.y * ALTURA
+    esperado = {"borda_direita": total - extensao / 2, "borda_inferior": total - extensao / 2,
+                "centro_x": total / 2, "centro_y": total / 2,
+                "borda_esquerda": extensao / 2, "borda_superior": extensao / 2}[onde]
+    assert centro == pytest.approx(esperado + ajuste, abs=0.01)
+
+
+@pytest.mark.parametrize("quem", ["regiao", "imagem"])
+def test_longe_dos_pontos_de_encaixe_nao_ha_guia(quem):
+    previa, _ = _imagem_na_previa() if quem == "imagem" else (_previa(_filtro()), None)
+    cx, cy, _w, _h = previa._clip_geometry(previa._active_clip)
+    assert _arrastar_vendo_a_guia(previa, (cx, cy), (cx + 40, cy + 30)) == (None, None)
