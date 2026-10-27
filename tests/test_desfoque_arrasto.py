@@ -197,7 +197,9 @@ def _cena_com_desfoque_acima(tmp_path: Path, tools):
     # O verde fica acima do desfoque e invade a região: tem de continuar nítido.
     sobre = _imagem(tmp_path / "verde.png", QColor(30, 200, 30), scale_x=.12, scale_y=.12, x=.5, y=.5)
     desfoque = _filtro(x=.4, y=.5)
-    return _pilha(tmp_path, sobre, desfoque, arrastado, base=chao), arrastado, desfoque, sobre
+    # O azul fica entre o item arrastado e o desfoque: faz parte do que é borrado, e é a imagem "da frente" pronta.
+    entre = _imagem(tmp_path / "azul.png", QColor(20, 20, 220), scale_x=.3, scale_y=.3, x=.4, y=.5)
+    return _pilha(tmp_path, sobre, desfoque, entre, arrastado, base=chao), arrastado, desfoque, sobre
 
 
 def _medir(tmp_path: Path, x: float) -> SimpleNamespace:
@@ -208,6 +210,7 @@ def _medir(tmp_path: Path, x: float) -> SimpleNamespace:
     projeto, arrastado, desfoque, sobre = _cena_com_desfoque_acima(tmp_path, tools)
     plano = interaction_plan(projeto, arrastado.clip_id, 1.0)
     assert plano is not None and len(plano.stages) == 1
+    assert [c.clip_id for t in plano.foreground.tracks for c in t.clips], "o azul, entre o item e o desfoque, é a frente"
     tamanho = (640, 360)
     camadas = tuple(QPixmap.fromImage(QImage.fromData(_run(c, 30, strict=True)))
                     for c in interaction_commands(plano, tamanho, tools))
