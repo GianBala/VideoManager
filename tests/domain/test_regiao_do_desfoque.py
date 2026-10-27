@@ -10,10 +10,12 @@ import pytest
 
 from videomanager.domain.constants import REGION_BLUR
 from videomanager.domain.constants import REGION_BLUR_DEFAULT_SCALE
+from videomanager.domain.constants import REGION_BLUR_SIGMA_RATIO
 from videomanager.domain.constants import REGION_MIN_SCALE
 from videomanager.domain.geometry import region_origin
 from videomanager.domain.geometry import region_origin_expr
 from videomanager.domain.geometry import region_size
+from videomanager.domain.geometry import region_work_size
 from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip
 from videomanager.domain.project import OverlayType
@@ -177,3 +179,13 @@ def test_ampliar_a_regiao_colada_na_borda_nao_a_deixa_para_fora():
     assert [k.x for k in maior.keyframes] == [pytest.approx(0.8), pytest.approx(0.2)]
     assert maior.y == pytest.approx(0.5)                                   # dentro dos limites: não se mexe
     assert all(0.2 - 1e-9 <= k.x <= 0.8 + 1e-9 for k in maior.keyframes)
+
+
+# -- tela de trabalho do desfoque --------------------------------------------
+
+def test_a_tela_de_trabalho_tem_lado_menor_fixo_e_sigma_proporcional():
+    assert region_work_size(288, 162) == (28, 16, pytest.approx(REGION_BLUR_SIGMA_RATIO * 16))
+    assert region_work_size(100, 400) == (16, 64, pytest.approx(REGION_BLUR_SIGMA_RATIO * 16))
+    # Região menor que o lado de trabalho: não é ampliada para ser borrada.
+    assert region_work_size(10, 40) == (10, 40, pytest.approx(REGION_BLUR_SIGMA_RATIO * 10))
+    assert region_work_size(2, 2)[:2] == (2, 2)

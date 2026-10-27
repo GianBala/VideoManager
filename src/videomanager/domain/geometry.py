@@ -2,6 +2,9 @@
 
 import math
 
+from videomanager.domain.constants import REGION_BLUR_SIGMA_RATIO
+from videomanager.domain.constants import REGION_BLUR_WORK_SIDE
+
 
 def _image_size(media_w: int | None, media_h: int | None, canvas_w: int, canvas_h: int,
                 *, enlarge: bool) -> tuple[int, int]:
@@ -94,3 +97,15 @@ def region_origin_expr(center_expr: str, total: int, size: int) -> str:
     """
     limit = _region_limit(total, size)
     return f"2*round(max(0,min({limit},({center_expr})*{total}-{size}/2))/2)"
+
+
+def region_work_size(w: int, h: int) -> tuple[int, int, float]:
+    """Largura e altura da tela de trabalho em que a região é borrada, e o σ do desfoque nela.
+
+    A região é reduzida a um lado menor fixo (``REGION_BLUR_WORK_SIDE``), borrada com σ proporcional a esse lado e
+    só então ampliada de volta: a força é relativa à região. Uma região menor que o lado de trabalho não é ampliada
+    para ser borrada. Compositor e prévia chamam esta função.
+    """
+    side = min(REGION_BLUR_WORK_SIDE, w, h)
+    return (max(2, round(w * side / min(w, h) / 2) * 2), max(2, round(h * side / min(w, h) / 2) * 2),
+            REGION_BLUR_SIGMA_RATIO * side)
