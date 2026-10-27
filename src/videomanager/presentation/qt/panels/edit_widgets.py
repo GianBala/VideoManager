@@ -89,6 +89,9 @@ _PREVIEW_MIN_HEIGHT = 160
 _PREVIEW_RADIUS = 18
 # Distância, em pixels da tela, a que o bloco arrastado se encaixa nas bordas e no centro do quadro.
 _SNAP_THRESHOLD = 14.0
+# A borda por onde um desfoque inativo se deixa pegar na prévia: quanto para dentro e quanto para fora do retângulo.
+_REGION_EDGE_IN = 8.0
+_REGION_EDGE_OUT = 4.0
 
 # Os botões quadrados da aba Propriedades (quadro-chave): 30 px de lado e o ícone de 16.
 _TILE = 30
@@ -735,6 +738,25 @@ class _Preview(QLabel):
 
         return None, geom
 
+    def _selects_on_click(self, clip: Clip, pos: QPoint) -> bool:
+        """Se um clique em ``pos`` seleciona ``clip``, que não é o bloco ativo.
+
+        O desfoque fica sempre numa trilha **acima** do que borra, e a escolha é do primeiro que acerta, de cima
+        para baixo: se o corpo do retângulo valesse como acerto, nenhuma imagem, vídeo ou texto sob ele poderia ser
+        clicado ou arrastado. Inativa, a região só se seleciona pela borda (e pela linha do tempo); o corpo deixa o
+        clique passar. Ativa, ela é o ``_active_clip`` e se arrasta por dentro, como qualquer bloco.
+        """
+        mode, geom = self._hit_test_clip(clip, pos)
+        if not clip.has_region:
+            return bool(mode and geom)
+        if geom is None:
+            return False
+        cx, cy, w, h = geom
+        dx, dy = abs(pos.x() - cx), abs(pos.y() - cy)
+        in_reach = dx <= w / 2 + _REGION_EDGE_OUT and dy <= h / 2 + _REGION_EDGE_OUT
+        in_body = dx < w / 2 - _REGION_EDGE_IN and dy < h / 2 - _REGION_EDGE_IN
+        return in_reach and not in_body
+
     def _hit_test(self, pos: QPoint) -> tuple[str | None, tuple[float, float, float, float] | None]:
         if not self._clip_visible or self._active_clip is None or self._is_playing:
             return None, None
@@ -756,8 +778,7 @@ class _Preview(QLabel):
                         for ov_clip in reversed(self._selectable_clips if self._selectable_clips is not None else self._overlay_clips):
                             if ov_clip.clip_id == self._active_clip.clip_id:
                                 break
-                            mode_ov, geom_ov = self._hit_test_clip(ov_clip, pos)
-                            if mode_ov and geom_ov:
+                            if self._selects_on_click(ov_clip, pos):
                                 self.clip_selected.emit(ov_clip.clip_id)
                                 event.accept()
                                 return
@@ -816,8 +837,7 @@ class _Preview(QLabel):
             for ov_clip in reversed(self._selectable_clips if self._selectable_clips is not None else self._overlay_clips):
                 if self._active_clip is not None and ov_clip.clip_id == self._active_clip.clip_id:
                     continue
-                mode_ov, geom_ov = self._hit_test_clip(ov_clip, pos)
-                if mode_ov and geom_ov:
+                if self._selects_on_click(ov_clip, pos):
                     self.clip_selected.emit(ov_clip.clip_id)
                     event.accept()
                     return
