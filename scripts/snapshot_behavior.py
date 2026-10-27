@@ -169,6 +169,8 @@ def secao_comandos(_midia_dir: Path) -> dict:
                 opacity=0.8, keyframes=anim, clip_id=4)
     texto = Clip(TXT, 2.0, 5.0, overlay_type="text", text_content="Olá", keyframes=anim, clip_id=5)
     filtro = Clip(FIL, 3.0, 4.0, overlay_type="filter", filter_name="sepia", clip_id=6)
+    desfoque = Clip(MediaRef(Path("Filtro_desfoque"), MediaKind.IMAGE, duration=5.0), 1.5, 3.0, overlay_type="filter",
+                    filter_name="desfoque", x=0.7, y=0.3, scale=0.3, scale_x=0.3, scale_y=0.3, clip_id=12)
     chroma = Clip(V2, 0.5, 3.0, chromakey_enabled=True, x=0.4, clip_id=7)
     rapido = Clip(V, 9.0, 2.0, in_point=6.0, speed=2.0, gain_db=-3.0, clip_id=8)
     musica = Clip(AUD, 0.0, 12.0, gain_db=2.0, clip_id=9)
@@ -198,6 +200,20 @@ def secao_comandos(_midia_dir: Path) -> dict:
                                width=1920, height=1080, fps=60.0),
         "menor_ampliado": Project(tracks=(video(replace(b, start=0.0, scale=2.0, scale_x=2.0, scale_y=2.0),
                                                 tid=14),), width=1920, height=1080, fps=60.0),
+        # O desfoque junto de outros itens: acima, entre e abaixo do que é arrastado. Uma cena só com o desfoque (ou
+        # sem ele) não vê o que ele muda no resto: a lista de selecionáveis e o plano rápido do arrasto.
+        "desfoque_acima_dos_itens": Project(tracks=(
+            Track(TrackKind.ADDITIONAL, clips=(desfoque,), track_id=17),
+            Track(TrackKind.ADDITIONAL, clips=(texto,), track_id=18), video(foto, tid=19), video(a, tid=20),
+        ), width=1920, height=1080, fps=30.0),
+        "desfoque_entre_itens": Project(tracks=(
+            Track(TrackKind.ADDITIONAL, clips=(texto,), track_id=21),
+            Track(TrackKind.ADDITIONAL, clips=(desfoque,), track_id=22), video(foto, tid=23), video(a, tid=24),
+        ), width=1920, height=1080, fps=30.0),
+        "desfoque_abaixo_dos_itens": Project(tracks=(
+            Track(TrackKind.ADDITIONAL, clips=(texto,), track_id=25), video(foto, tid=26),
+            Track(TrackKind.ADDITIONAL, clips=(desfoque,), track_id=27), video(a, tid=28),
+        ), width=1920, height=1080, fps=30.0),
         "musica_alem_do_video": Project(tracks=(video(replace(a, duration=3.0), tid=15),
                                                 Track(TrackKind.AUDIO, clips=(musica,), track_id=16)),
                                         width=1280, height=720, fps=30.0),
