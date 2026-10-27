@@ -292,6 +292,13 @@ trilha de Adicionais, com a duração do campo, e na prévia aparece o retângul
   altura **independentes**; o canto oposto fica parado. Ele não gira e **não sai do quadro**, e se
   encaixa nas bordas e no centro. Enquanto você arrasta, a caixa acompanha o mouse na hora e o
   conteúdo borrado chega logo depois, com o quadro novo do ffmpeg.
+- **Selecionar** — o Desfoque fica sempre acima do que borra, então o **corpo** do retângulo não o
+  seleciona: clicar ali pega a imagem, o vídeo ou o texto que está embaixo, como se o Desfoque não
+  existisse. Para pegar o Desfoque, clique na **borda** do retângulo ou no bloco dele na linha do
+  tempo; depois de selecionado, ele se arrasta por dentro como qualquer bloco.
+- **Arrastar o que está embaixo** — mover uma imagem, um vídeo ou um texto que passa por baixo do
+  Desfoque mostra o borrão acompanhando o movimento na hora. (Os outros filtros acima do item, como
+  Sépia ou Preto e Branco, não têm esse atalho: a prévia refaz o quadro inteiro a cada passo.)
 - **Aba Propriedades** — posição X/Y, largura/altura e escala, em pixels da tela do projeto. Não há
   rotação, opacidade nem trava de proporção: um recorte não tem nada disso.
 - **Acompanhar o que se move** — só a **posição** anima. Com o cursor onde quer, mexer no retângulo cria
