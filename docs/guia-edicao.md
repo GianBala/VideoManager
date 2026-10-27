@@ -290,8 +290,8 @@ trilha de Adicionais, com a duração do campo, e na prévia aparece o retângul
 
 - **Mover e redimensionar** — arraste o retângulo na prévia. Os quatro cantos mudam a largura e a
   altura **independentes**; o canto oposto fica parado. Ele não gira e **não sai do quadro**, e se
-  encaixa nas bordas e no centro. Enquanto você arrasta, a caixa acompanha o mouse na hora e o
-  conteúdo borrado chega logo depois, com o quadro novo do ffmpeg.
+  encaixa nas bordas e no centro. Enquanto você arrasta (ou redimensiona), a caixa e o borrão
+  acompanham o mouse na hora; o quadro definitivo do ffmpeg chega quando você solta.
 - **Selecionar** — o Desfoque fica sempre acima do que borra, então o **corpo** do retângulo não o
   seleciona: clicar ali pega a imagem, o vídeo ou o texto que está embaixo, como se o Desfoque não
   existisse. Para pegar o Desfoque, clique na **borda** do retângulo ou no bloco dele na linha do

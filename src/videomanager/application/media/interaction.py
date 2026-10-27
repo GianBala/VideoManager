@@ -8,7 +8,9 @@ from ...domain.project import Clip, OverlayType, Project, TrackKind
 class InteractionPlan:
     background: Project
     foreground: Project
-    source: Project
+    # O item arrastado, sozinho e sem pose. ``None`` quando o que se arrasta é a própria região de um desfoque: ela não
+    # tem textura, é só o retângulo que a prévia borra no que está abaixo.
+    source: Project | None
     clip_id: int
     seconds: float
     # Se o gesto precisa da imagem do fundo desfocado como quarta camada. É a
@@ -19,13 +21,19 @@ class InteractionPlan:
     # a cada movimento. ``foreground`` é só o que está entre o item e o primeiro desfoque.
     stages: tuple[tuple[Clip, Project], ...] = ()
 
+    @property
+    def base_layers(self) -> int:
+        """Quantas imagens vêm antes das dos desfoques acima: fundo e frente (região), ou mais a textura e o fundo desfocado."""
+        return 2 if self.source is None else 4 if self.blur else 3
+
 
 def interaction_plan(project: Project, clip_id: int, seconds: float) -> InteractionPlan | None:
     """Separa a pilha sem tentar decompor filtros que dependem do objeto móvel.
 
     Filtro de tela inteira ou transição acima do item mudam o resultado de tudo que está abaixo e não têm como ser
     refeitos a cada movimento: sem plano. O desfoque de região também depende do item, mas é só um recorte, e a
-    prévia sabe refazê-lo (``stages``).
+    prévia sabe refazê-lo (``stages``). Quando o item arrastado é o próprio desfoque, o que está abaixo dele vem
+    pronto e a prévia borra a região na pose da mão (``source`` é ``None``).
     """
     if any(c.start <= seconds < c.end for c in project.transition_contexts()):
         return None
@@ -36,7 +44,7 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     if selected is None:
         return None
     clip = ordered[selected]
-    if clip.overlay_type in (OverlayType.FILTER, OverlayType.TRANSITION):
+    if clip.overlay_type is OverlayType.TRANSITION or (clip.overlay_type is OverlayType.FILTER and not clip.has_region):
         return None
     above = ordered[selected + 1:]
     if any(c.overlay_type is OverlayType.TRANSITION or (c.overlay_type is OverlayType.FILTER and not c.has_region)
@@ -50,8 +58,8 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
 
     # Retirar somente a pose torna o plano estável ao longo do gesto. Tempo,
     # origem, chroma, texto e todas as demais camadas continuam fazendo parte dele.
-    source = subset([clip]).with_updated_clip(clip_id, x=.5, y=.5, scale=1.,
-                    scale_x=1., scale_y=1., rotation=0., opacity=1., keyframes=())
+    source = None if clip.has_region else subset([clip]).with_updated_clip(
+        clip_id, x=.5, y=.5, scale=1., scale_x=1., scale_y=1., rotation=0., opacity=1., keyframes=())
     head: list[Clip] = []
     regions: list[tuple[Clip, list[Clip]]] = []
     for c in above:
