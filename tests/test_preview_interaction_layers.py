@@ -511,3 +511,54 @@ def test_pose_com_desfoque_acima_aparece_na_hora_sem_pedir_quadro_ao_ffmpeg(pose
     assert panel._project.find(item.clip_id)[1] != item
     assert panel._preview._interaction_visible, 'a pose nova não foi desenhada na hora'
     assert len(calls.frames) == antes, 'cada tecla compôs um quadro inteiro'
+
+
+def _selecionando_o_desfoque(panel, deliver, calls):
+    """Põe um desfoque de região no projeto, seleciona **ele** e devolve o worker das camadas que isso pede."""
+    desfoque, anterior = _com_desfoque_acima(panel, deliver, calls)
+    anterior.signals.done.emit()           # o gesto do item terminou: a fila das camadas fica livre para o do desfoque
+    antes = len(calls.interaction)
+    panel._timeline.select(desfoque.clip_id)
+    while panel._frame_busy:
+        deliver(calls.frames[-1])
+    assert len(calls.interaction) > antes, 'selecionar o desfoque não pediu as camadas do gesto'
+    return desfoque, calls.interaction[-1]
+
+
+def test_selecionar_o_desfoque_pede_as_camadas_dele_e_a_previa_as_recebe(pose_panel):
+    """A região não tem textura: o plano pede só o que está abaixo e acima dela, duas imagens."""
+    panel, calls, item, deliver = pose_panel
+    desfoque, worker = _selecionando_o_desfoque(panel, deliver, calls)
+    plano = worker.args[0]
+    assert plano.clip_id == desfoque.clip_id and plano.source is None and plano.base_layers == 2
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('#00000000')))
+    worker.signals.done.emit()
+    assert len(panel._preview._interaction_layers) == 2 and panel._preview._interaction_stages == ()
+
+
+def test_camadas_do_desfoque_arrastado_so_valem_com_a_contagem_do_plano(pose_panel):
+    """Três imagens (as de um item) para o plano de uma região não se instalam: a textura que não existe viraria a frente."""
+    panel, calls, item, deliver = pose_panel
+    _, worker = _selecionando_o_desfoque(panel, deliver, calls)
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('red'), _png('#00000000')))
+    assert panel._preview._interaction_layers is None, 'três imagens para o plano de uma região foram instaladas'
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('#00000000')))
+    assert panel._preview._interaction_layers is not None, 'a recusa anterior não pode travar a entrega certa'
+
+
+def test_mover_o_desfoque_com_as_camadas_prontas_nao_pede_quadro_ao_ffmpeg(pose_panel):
+    """Era o caminho lento: um render inteiro por movimento, com o borrão ficando para trás da caixa."""
+    panel, calls, item, deliver = pose_panel
+    desfoque, worker = _selecionando_o_desfoque(panel, deliver, calls)
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('#00000000')))
+    worker.signals.done.emit()
+    antes = len(calls.frames)
+    for x in (.35, .4, .45, .5):
+        ativo = panel._preview._active_clip
+        panel._preview.set_active_clip(replace(ativo, x=x), panel._project.width, panel._project.height)
+        panel._on_overlay_transformed(desfoque.clip_id, x, ativo.y, ativo.scale, 0.0)
+        assert panel._preview._interaction_visible, 'a região nova não foi desenhada na hora'
+    assert len(calls.frames) == antes, 'cada movimento compôs um quadro inteiro'
+    assert panel._project.find(desfoque.clip_id)[1].x == .5
+    # As camadas continuam valendo para o gesto seguinte: a pose do desfoque não faz parte do plano.
+    assert panel._interaction_ready()

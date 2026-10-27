@@ -2897,11 +2897,16 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
     Com o fundo desfocado ligado no bloco, uma quarta imagem: o fundo de tela
     cheia dele, pintado entre ``background`` e a textura. Depois delas, uma imagem
     por desfoque de região acima do bloco (``plan.stages``): o que fica entre esse
-    desfoque e o seguinte, em base transparente.
+    desfoque e o seguinte, em base transparente. Quando o que se arrasta é a própria
+    região de um desfoque (``plan.source`` é ``None``), não há textura nem fundo
+    desfocado: só ``background``, ``foreground`` e as imagens dos desfoques acima.
     """
     background = frame_command(plan.background, plan.seconds, size, tools, text_assets=text_assets, png=True)
     foreground = frame_command(plan.foreground, plan.seconds, size, tools, text_assets=text_assets,
                                transparent=True, png=True)
+    if plan.source is None:
+        return background, foreground, *(frame_command(project, plan.seconds, size, tools, text_assets=text_assets,
+                                                       transparent=True, png=True) for _, project in plan.stages)
     source = _preview_project(plan.source, size)
     pieces = _pieces(source, plan.seconds, 1 / source.fps, want_audio=False)
     piece = next(p for p in pieces if p.clip.clip_id == plan.clip_id)

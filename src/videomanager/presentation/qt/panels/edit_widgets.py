@@ -1144,42 +1144,56 @@ class _Preview(QLabel):
 
     def _paint_interaction_with_regions(self, painter: QPainter, target: QRect, clip: Clip,
                                         geom: tuple[float, float, float, float]) -> None:
-        """As camadas do gesto quando há desfoque de região acima do item arrastado.
+        """As camadas do gesto quando há desfoque de região no caminho: acima do item arrastado, ou o próprio item.
 
         As mesmas camadas de sempre, mas num quadro fora da tela, na resolução delas: a região é borrada nele
         com os pixels que o item móvel acabou de pôr ali, e só então a imagem vai para a prévia. A pose do item é
         a de agora, como no caminho sem desfoque. A região vem da conta do compositor (``Clip.region_rect``), na
         mesma tela reduzida em que as camadas foram feitas.
+
+        Se o que se arrasta é a **própria região** (``clip.has_region``), não há textura: o quadro é o que está
+        abaixo dela, borrado no retângulo da pose de agora, e por cima vem o que a cobre.
         """
-        background, texture, foreground, *fundo = self._interaction_layers
+        if clip.has_region:
+            background, foreground = self._interaction_layers
+            texture, fundo = None, []
+        else:
+            background, texture, foreground, *fundo = self._interaction_layers
         stages = self._interaction_stages
         size = background.size()
         kx, ky = size.width() / max(1, target.width()), size.height() / max(1, target.height())
         frame = QImage(size, QImage.Format.Format_RGB32)
         whole = QRect(0, 0, size.width(), size.height())   # o fundo desfocado vem na tela do projeto, não na da prévia
+        compose_w, compose_h = self._compose_size()
+        sx, sy = size.width() / compose_w, size.height() / compose_h
         layers = QPainter(frame)
         layers.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        layers.drawPixmap(whole, background)
-        transform = clip.transform_at(max(0., self._position - clip.start))
-        cx, cy, w, h = geom
-        if fundo and clip.shows_blur_background(self._proj_w, self._proj_h):
-            layers.setOpacity(transform.opacity)
-            layers.drawPixmap(whole, fundo[0])
-        layers.setOpacity(transform.opacity)
-        layers.translate((cx - target.x()) * kx, (cy - target.y()) * ky)
-        layers.rotate(transform.rotation)
-        layers.drawPixmap(QRectF(-w * kx / 2, -h * ky / 2, w * kx, h * ky), texture, QRectF(texture.rect()))
-        layers.resetTransform()
-        layers.setOpacity(1.0)
-        layers.drawPixmap(whole, foreground)
-        compose_w, compose_h = self._compose_size()
-        for region, after in stages:
+
+        def blur(region: Clip) -> None:
             left, top, rw, rh = region.region_rect(compose_w, compose_h, max(0., self._position - region.start))
-            sx, sy = size.width() / compose_w, size.height() / compose_h
             layers.end()
             blur_region(frame, round(left * sx), round(top * sy), round(rw * sx), round(rh * sy))
             layers.begin(frame)
             layers.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        layers.drawPixmap(whole, background)
+        if texture is None:
+            blur(clip)
+        else:
+            transform = clip.transform_at(max(0., self._position - clip.start))
+            cx, cy, w, h = geom
+            if fundo and clip.shows_blur_background(self._proj_w, self._proj_h):
+                layers.setOpacity(transform.opacity)
+                layers.drawPixmap(whole, fundo[0])
+            layers.setOpacity(transform.opacity)
+            layers.translate((cx - target.x()) * kx, (cy - target.y()) * ky)
+            layers.rotate(transform.rotation)
+            layers.drawPixmap(QRectF(-w * kx / 2, -h * ky / 2, w * kx, h * ky), texture, QRectF(texture.rect()))
+            layers.resetTransform()
+            layers.setOpacity(1.0)
+        layers.drawPixmap(whole, foreground)
+        for region, after in stages:
+            blur(region)
             layers.drawPixmap(whole, after)
         layers.end()
         painter.save()
@@ -1230,7 +1244,7 @@ class _Preview(QLabel):
         # A pose acompanha cada evento; só o fechamento espera o quadro canônico.
         if has_active and self._interaction_visible and self._interaction_layers:
             geom = self._clip_geometry(clip)
-            if geom and self._interaction_stages:
+            if geom and (self._interaction_stages or clip.has_region):
                 self._paint_interaction_with_regions(painter, target, clip, geom)
             elif geom:
                 background, texture, foreground, *fundo = self._interaction_layers
