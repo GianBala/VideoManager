@@ -166,7 +166,7 @@ def test_o_projeto_troca_o_filtro_de_um_bloco_pelo_id():
     sepia = _filtro("sepia")
     projeto = Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(sepia,), name="Adicionais 1"),), width=1280, height=720, fps=30.0)
     novo = projeto.with_filter(sepia.clip_id, REGION_BLUR).find(sepia.clip_id)[1]
-    assert novo.has_region and novo.scale_x == REGION_BLUR_DEFAULT_SCALE
+    assert novo.has_region and (novo.scale_x, novo.scale_y) == (REGION_BLUR_DEFAULT_SCALE, REGION_BLUR_DEFAULT_SCALE)
     assert projeto.with_filter(9999, REGION_BLUR) is projeto           # id que não existe: nada muda
 
 
