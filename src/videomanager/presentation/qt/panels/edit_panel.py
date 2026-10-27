@@ -3801,9 +3801,10 @@ class EditPanel(QWidget):
         # A contagem é a do plano: com o fundo desfocado são quatro imagens, sem
         # ele três. Três para um plano com fundo deixariam a faixa descoberta
         # mostrando a trilha de baixo, sem erro; quatro para um sem, o inverso.
-        # Depois delas vem uma imagem por desfoque de região acima do item.
+        # Depois delas vem uma imagem por desfoque de região acima do item. Arrastar o próprio desfoque pede só duas
+        # (o que está abaixo e o que está acima dele): a região não tem textura.
         plan = self._interaction_context[2]
-        base = 4 if plan.blur else 3
+        base = plan.base_layers
         if len(layers) == base + len(plan.stages) and all(not p.isNull() for p in layers):
             self._preview.set_interaction_layers(
                 layers[:base], tuple(zip((region for region, _ in plan.stages), layers[base:])))

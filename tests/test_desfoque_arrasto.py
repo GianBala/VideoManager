@@ -20,6 +20,7 @@ from PySide6.QtGui import QPixmap
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.application.media.interaction import interaction_plan
 from videomanager.domain.constants import REGION_BLUR
+from videomanager.domain.keyframe import Keyframe
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
@@ -142,6 +143,160 @@ def test_sem_desfoque_acima_os_comandos_sao_os_de_antes(tmp_path):
     assert plano.stages == ()
     comandos = interaction_commands(plano, (320, 180), FALSO)
     assert len(comandos) == 3
+
+
+# -- arrastar o próprio desfoque ----------------------------------------------------------------
+
+def test_o_plano_do_desfoque_arrastado_tem_o_que_esta_abaixo_e_acima_e_nenhuma_textura(tmp_path):
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    sobre = _imagem(tmp_path / "sobre.png", QColor("blue"), scale_x=.2, scale_y=.2)
+    desfoque = _filtro()
+    plano = interaction_plan(_pilha(tmp_path, sobre, desfoque, abaixo), desfoque.clip_id, 1.0)
+    assert plano is not None and plano.source is None and plano.stages == () and not plano.blur
+    assert plano.base_layers == 2
+    ids = lambda projeto: {c.clip_id for t in projeto.tracks for c in t.clips}                 # noqa: E731
+    assert abaixo.clip_id in ids(plano.background) and desfoque.clip_id not in ids(plano.background)
+    assert ids(plano.foreground) == {sobre.clip_id}
+
+
+def test_o_plano_do_desfoque_arrastado_nao_depende_da_pose_dele(tmp_path):
+    """O que está abaixo e acima não muda enquanto a mão move a região: as camadas prontas valem o gesto todo."""
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    desfoque = _filtro()
+    projeto = _pilha(tmp_path, desfoque, abaixo)
+    plano = interaction_plan(projeto, desfoque.clip_id, 1.0)
+    movido = projeto.with_updated_clip(desfoque.clip_id, x=.8, y=.2, scale_x=.1, scale_y=.4)
+    assert plano == interaction_plan(movido, desfoque.clip_id, 1.0)
+    # Mexer no que está abaixo, sim, troca o plano.
+    assert plano != interaction_plan(projeto.with_updated_clip(abaixo.clip_id, x=.1), desfoque.clip_id, 1.0)
+
+
+def test_o_desfoque_arrastado_com_outro_desfoque_acima_deixa_o_de_cima_como_trecho(tmp_path):
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    entre = _imagem(tmp_path / "entre.png", QColor("blue"), scale_x=.2, scale_y=.2)
+    de_baixo, de_cima = _filtro(x=.3), _filtro(x=.6)
+    plano = interaction_plan(_pilha(tmp_path, de_cima, entre, de_baixo, abaixo), de_baixo.clip_id, 1.0)
+    assert [r.clip_id for r, _ in plano.stages] == [de_cima.clip_id]
+    assert [c.clip_id for t in plano.foreground.tracks for c in t.clips] == [entre.clip_id]
+    # O de cima, arrastado, tem o de baixo já borrado na imagem de baixo.
+    plano = interaction_plan(_pilha(tmp_path, de_cima, entre, de_baixo, abaixo), de_cima.clip_id, 1.0)
+    assert plano.stages == () and de_baixo.clip_id in {c.clip_id for t in plano.background.tracks for c in t.clips}
+
+
+@pytest.mark.parametrize("acima", ["sepia", "inverter"])
+def test_o_desfoque_arrastado_sem_plano_se_ha_filtro_de_tela_inteira_acima(tmp_path, acima):
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    desfoque = _filtro()
+    assert interaction_plan(_pilha(tmp_path, _filtro(acima), desfoque, abaixo), desfoque.clip_id, 1.0) is None
+
+
+def test_o_desfoque_arrastado_pede_so_duas_imagens_mais_uma_por_desfoque_acima(tmp_path):
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    desfoque = _filtro()
+    um = interaction_plan(_pilha(tmp_path, desfoque, abaixo), desfoque.clip_id, 1.0)
+    dois = interaction_plan(_pilha(tmp_path, _filtro(x=.7), desfoque, abaixo), desfoque.clip_id, 1.0)
+    assert [len(interaction_commands(p, (320, 180), FALSO)) for p in (um, dois)] == [2, 3]
+
+
+def _cena_arrastando_o_desfoque(tmp_path: Path, tools, *, com_outro_acima: bool = False, animado: bool = False):
+    fonte = tmp_path / "fonte.png"
+    subprocess.run([tools.ffmpeg_str, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=5",
+                    "-frames:v", "1", str(fonte)], check=True, timeout=30, **subprocess_kwargs())
+    chao = Clip(MediaRef(fonte, MediaKind.IMAGE, width=320, height=180), 0, 5, overlay_type="image",
+                scale_x=1.0, scale_y=1.0)
+    # O vermelho fica abaixo do desfoque: é borrado onde a região passa. O verde fica acima: nítido.
+    abaixo = _imagem(tmp_path / "vermelho.png", QColor("red"), scale_x=.4, scale_y=.4, x=.5, y=.5)
+    sobre = _imagem(tmp_path / "verde.png", QColor(30, 200, 30), scale_x=.12, scale_y=.12, x=.6, y=.3)
+    desfoque = _filtro(x=.3, y=.5)
+    # Um segundo desfoque, acima: borra também o que o primeiro deixou.
+    # Com ``animado``, ele anda entre dois quadros-chave: a posição que vale é a da agulha (1 s), não a do início do bloco.
+    chaves = (Keyframe(0.0, x=.2, y=.65, scale_x=.25, scale_y=.25), Keyframe(4.0, x=.8, y=.65, scale_x=.25, scale_y=.25))
+    outro = _filtro(x=.75, y=.65, scale_x=.25, scale_y=.25, scale=.25, **(dict(keyframes=chaves) if animado else {}))
+    acima = (outro,) if com_outro_acima else ()
+    return _pilha(tmp_path, *acima, sobre, desfoque, abaixo, base=chao), desfoque, sobre, outro
+
+
+def _medir_regiao(tmp_path: Path, movida: dict, *, com_outro_acima: bool = False, animado: bool = False) -> SimpleNamespace:
+    """Arrasta o desfoque (``movida``: campos novos do bloco) na prévia e mede contra o quadro que o ffmpeg comporia."""
+    tools = find_tools()
+    if tools is None:
+        pytest.skip("FFmpeg não disponível")
+    projeto, desfoque, sobre, outro = _cena_arrastando_o_desfoque(tmp_path, tools, com_outro_acima=com_outro_acima,
+                                                                   animado=animado)
+    plano = interaction_plan(projeto, desfoque.clip_id, 1.0)
+    assert plano is not None and plano.source is None and len(plano.stages) == int(com_outro_acima)
+    tamanho = (640, 360)
+    camadas = tuple(QPixmap.fromImage(QImage.fromData(_run(c, 30, strict=True)))
+                    for c in interaction_commands(plano, tamanho, tools))
+    assert len(camadas) == 2 + len(plano.stages) and all(not p.isNull() for p in camadas)
+    previa = _Preview()
+    previa.resize(*tamanho)
+    previa.set_frame_pixmap(QPixmap.fromImage(QImage.fromData(
+        _run(frame_command(projeto, 1, tamanho, tools, png=True), 30, strict=True))))
+    previa.set_active_clip(desfoque, projeto.width, projeto.height)
+    previa.set_position(1)
+    previa.set_interaction_layers(camadas[:2], tuple(zip((r for r, _ in plano.stages), camadas[2:])))
+    novo = replace(desfoque, **movida)
+    previa.set_active_clip(novo, projeto.width, projeto.height)
+    assert previa.begin_interaction()
+    atual = previa.grab().toImage()
+    esperado = QImage.fromData(_run(frame_command(projeto.with_updated_clip(desfoque.clip_id, **movida), 1, tamanho,
+                                                  tools, png=True), 30, strict=True))
+    esq, topo, w, h = novo.region_rect(*tamanho, 1.0)
+
+    def diferenca(px: int, py: int) -> int:
+        a, b = atual.pixelColor(px, py), esperado.pixelColor(px, py)
+        return max(abs(a.red() - b.red()), abs(a.green() - b.green()), abs(a.blue() - b.blue()))
+
+    # A caixa e as alças do bloco ativo ficam na borda da região: lê-se longe dela, dos dois lados.
+    dentro = [diferenca(px, py) for py in range(topo + 12, topo + h - 12, 5) for px in range(esq + 12, esq + w - 12, 5)]
+    fora = [diferenca(px, py) for py in range(14, 346, 12) for px in range(14, 626, 12)
+            if not (esq - 14 <= px < esq + w + 14 and topo - 14 <= py < topo + h + 14)]
+    return SimpleNamespace(dentro=dentro, fora=fora)
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("movida", [dict(x=.3), dict(x=.45), dict(x=.7, y=.3), dict(x=.5, y=.6, scale_x=.45, scale_y=.2)],
+                         ids=["parado", "para_a_direita", "para_cima_e_a_direita", "redimensionado"])
+def test_o_desfoque_arrastado_borra_na_pose_da_mao_e_o_resto_fica_como_estava(tmp_path, movida):
+    """A região na pose nova borra o que está embaixo; o lugar onde ela estava volta a ficar nítido; o que está acima
+    dela continua nítido. Medido contra o quadro do ffmpeg numa cena com barras de cor (o pior caso para um borrão)."""
+    medida = _medir_regiao(tmp_path, movida)
+    assert len(medida.dentro) > 40
+    assert sum(medida.dentro) / len(medida.dentro) <= 4, sum(medida.dentro) / len(medida.dentro)
+    assert max(medida.dentro) <= 60, max(medida.dentro)
+    assert sum(medida.fora) / len(medida.fora) <= 1.5, sum(medida.fora) / len(medida.fora)
+    # Fora da região só diferem as bordas do quadrado verde, que a imagem da frente (composta em base transparente na tela
+    # do projeto e ampliada) tem um pouco diferentes das do quadro inteiro: até ~50 em 255 em um pixel de borda.
+    assert max(medida.fora) <= 60, max(medida.fora)
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("movida", [dict(x=.3), dict(x=.6, y=.5)], ids=["parado", "movido"])
+def test_o_desfoque_arrastado_com_outro_desfoque_acima_junta_as_tres_imagens(tmp_path, movida):
+    medida = _medir_regiao(tmp_path, movida, com_outro_acima=True)
+    assert sum(medida.dentro) / len(medida.dentro) <= 4, sum(medida.dentro) / len(medida.dentro)
+    assert max(medida.dentro) <= 60, max(medida.dentro)
+    assert sum(medida.fora) / len(medida.fora) <= 3, sum(medida.fora) / len(medida.fora)
+
+
+@pytest.mark.ffmpeg
+def test_o_desfoque_arrastado_e_o_de_cima_usam_a_posicao_da_agulha_quando_ha_quadros_chave(tmp_path):
+    """Entre quadros-chave a região anda: a prévia a borra onde ela está na agulha, e não onde começa o bloco."""
+    chaves = (Keyframe(0.0, x=.2, y=.5, scale_x=.3, scale_y=.3), Keyframe(4.0, x=.8, y=.5, scale_x=.3, scale_y=.3))
+    medida = _medir_regiao(tmp_path, dict(keyframes=chaves), com_outro_acima=True, animado=True)
+    assert sum(medida.dentro) / len(medida.dentro) <= 4, sum(medida.dentro) / len(medida.dentro)
+    assert max(medida.dentro) <= 60, max(medida.dentro)
+    assert sum(medida.fora) / len(medida.fora) <= 3, sum(medida.fora) / len(medida.fora)
+
+
+@pytest.mark.ffmpeg
+def test_o_teste_acima_enxerga_o_desfoque_arrastado_que_nao_e_borrado(tmp_path, monkeypatch):
+    """Guarda: sem borrar a região na pose da mão, o mesmo quadro estoura os limites do teste acima."""
+    from videomanager.presentation.qt.panels import edit_widgets
+    monkeypatch.setattr(edit_widgets, "blur_region", lambda *args: None)
+    medida = _medir_regiao(tmp_path, dict(x=.45))
+    assert sum(medida.dentro) / len(medida.dentro) > 4 or max(medida.dentro) > 60
 
 
 # -- o desfoque no Qt --------------------------------------------------------------------------
