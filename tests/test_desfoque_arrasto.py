@@ -187,13 +187,14 @@ def test_blur_region_repetida_com_os_mesmos_pixels_da_o_mesmo_resultado():
 
 # -- a prévia contra o quadro do ffmpeg ------------------------------------------------------
 
-def _cena_com_desfoque_acima(tmp_path: Path, tools):
+def _cena_com_desfoque_acima(tmp_path: Path, tools, *, fundo_desfocado: bool = False):
     fonte = tmp_path / "fonte.png"
     subprocess.run([tools.ffmpeg_str, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=5",
                     "-frames:v", "1", str(fonte)], check=True, timeout=30, **subprocess_kwargs())
     chao = Clip(MediaRef(fonte, MediaKind.IMAGE, width=320, height=180), 0, 5, overlay_type="image",
                 scale_x=1.0, scale_y=1.0)
-    arrastado = _imagem(tmp_path / "vermelho.png", QColor("red"), scale_x=.5, scale_y=.5, x=.3, y=.5)
+    arrastado = _imagem(tmp_path / "vermelho.png", QColor("red"), scale_x=.5, scale_y=.5, x=.3, y=.5,
+                        blur_background=fundo_desfocado)
     # O verde fica acima do desfoque e invade a região: tem de continuar nítido.
     sobre = _imagem(tmp_path / "verde.png", QColor(30, 200, 30), scale_x=.12, scale_y=.12, x=.5, y=.5)
     desfoque = _filtro(x=.4, y=.5)
@@ -202,26 +203,27 @@ def _cena_com_desfoque_acima(tmp_path: Path, tools):
     return _pilha(tmp_path, sobre, desfoque, entre, arrastado, base=chao), arrastado, desfoque, sobre
 
 
-def _medir(tmp_path: Path, x: float) -> SimpleNamespace:
+def _medir(tmp_path: Path, x: float, *, fundo_desfocado: bool = False) -> SimpleNamespace:
     """Arrasta o item até ``x`` na prévia e mede a diferença para o quadro que o ffmpeg comporia ali."""
     tools = find_tools()
     if tools is None:
         pytest.skip("FFmpeg não disponível")
-    projeto, arrastado, desfoque, sobre = _cena_com_desfoque_acima(tmp_path, tools)
+    projeto, arrastado, desfoque, sobre = _cena_com_desfoque_acima(tmp_path, tools, fundo_desfocado=fundo_desfocado)
     plano = interaction_plan(projeto, arrastado.clip_id, 1.0)
-    assert plano is not None and len(plano.stages) == 1
+    assert plano is not None and len(plano.stages) == 1 and plano.blur is fundo_desfocado
+    base = 4 if fundo_desfocado else 3
     assert [c.clip_id for t in plano.foreground.tracks for c in t.clips], "o azul, entre o item e o desfoque, é a frente"
     tamanho = (640, 360)
     camadas = tuple(QPixmap.fromImage(QImage.fromData(_run(c, 30, strict=True)))
                     for c in interaction_commands(plano, tamanho, tools))
-    assert len(camadas) == 4 and all(not p.isNull() for p in camadas)
+    assert len(camadas) == base + 1 and all(not p.isNull() for p in camadas)
     previa = _Preview()
     previa.resize(*tamanho)
     previa.set_frame_pixmap(QPixmap.fromImage(QImage.fromData(
         _run(frame_command(projeto, 1, tamanho, tools, png=True), 30, strict=True))))
     previa.set_active_clip(arrastado, projeto.width, projeto.height)
     previa.set_position(1)
-    previa.set_interaction_layers(camadas[:3], tuple(zip((r for r, _ in plano.stages), camadas[3:])))
+    previa.set_interaction_layers(camadas[:base], tuple(zip((r for r, _ in plano.stages), camadas[base:])))
     previa.set_active_clip(replace(arrastado, x=x), projeto.width, projeto.height)
     assert previa.begin_interaction()
     atual = previa.grab().toImage()
@@ -264,6 +266,16 @@ def test_o_quadro_do_arrasto_com_desfoque_acima_acompanha_o_quadro_final(tmp_pat
     assert medida.verde <= 6 and medida.verde_g > 150
     # Fora da região e do contorno do item, a imagem é a mesma de sempre.
     assert sum(medida.fora) / len(medida.fora) <= 2, sum(medida.fora) / len(medida.fora)
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("x", [.3, .45], ids=lambda x: f"x={x}")
+def test_o_arrasto_com_fundo_desfocado_e_desfoque_acima_junta_as_cinco_camadas(tmp_path, x):
+    """O item com "fundo desfocado" tem uma quarta camada, e a do desfoque de região vem depois dela: as cinco se compõem."""
+    medida = _medir(tmp_path, x, fundo_desfocado=True)
+    assert sum(medida.dentro) / len(medida.dentro) <= 4, sum(medida.dentro) / len(medida.dentro)
+    assert max(medida.dentro) <= 60, max(medida.dentro)
+    assert sum(medida.fora) / len(medida.fora) <= 3, sum(medida.fora) / len(medida.fora)
 
 
 @pytest.mark.ffmpeg
