@@ -738,3 +738,79 @@ def test_o_aviso_do_desfoque_na_transicao_segue_a_troca_de_idioma(qapp, sample_m
     assert "Afetar itens adicionais" in str(aviso)
     idioma.apply_language(i18n.ENGLISH)
     assert "Affect overlay items" in str(aviso) and "Afetar" not in str(aviso)
+
+
+
+def _janela_com_desfoque(sample_media, dummy_tools, monkeypatch, versao, *, projeto=None, tem_ffmpeg=True):
+    """A janela de exportação, com a versão do ffmpeg e o ffmpeg achado trocados **antes** de ela se montar."""
+    ref, local = sample_media
+    runtime = build_desktop_runtime()
+    monkeypatch.setattr(runtime, "ffmpeg_major_version", lambda tools: versao)
+    monkeypatch.setattr(runtime, "find_tools", lambda: dummy_tools if tem_ffmpeg else None)
+    dialog = ExportDialog(project=projeto or _projeto_com_desfoque_na_transicao(ref), settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=runtime)
+    dialog._fast.setChecked(False)
+    return dialog
+
+
+@pytest.mark.parametrize("versao, avisa", [(6, True), (7, False), (9, False), (None, False)])
+def test_o_aviso_do_desfoque_na_transicao_aparece_na_janela_antes_de_enfileirar(
+    qapp, sample_media, dummy_tools, monkeypatch, versao, avisa
+) -> None:
+    """Quem decide exportar precisa ler que o rosto aparece na passagem; na dica da fila é tarde demais."""
+    dialog = _janela_com_desfoque(sample_media, dummy_tools, monkeypatch, versao)
+    assert dialog._warning_box.isHidden() is not avisa
+    texto = dialog._warning.text()
+    assert bool(texto) is avisa
+    if avisa:
+        assert "ffmpeg 6" in texto and "Afetar itens adicionais" in texto
+
+
+def test_o_aviso_da_janela_convive_com_os_outros_avisos_da_exportacao(qapp, sample_media, dummy_tools, monkeypatch) -> None:
+    from videomanager.presentation.qt import strings
+    dialog = _janela_com_desfoque(sample_media, dummy_tools, monkeypatch, 6)
+    _escolhe(dialog._container_box, "gif")
+    texto = dialog._warning.text()
+    assert strings.EXPORT_GIF_NOTE in texto and "Afetar itens adicionais" in texto
+    assert texto.index(strings.EXPORT_GIF_NOTE) < texto.index("Afetar itens adicionais")
+
+
+def test_so_exportar_o_audio_nao_avisa_do_desfoque(qapp, sample_media, dummy_tools, monkeypatch) -> None:
+    dialog = _janela_com_desfoque(sample_media, dummy_tools, monkeypatch, 6)
+    assert not dialog._warning_box.isHidden()
+    dialog._audio_only_check.setChecked(True)
+    assert dialog._warning_box.isHidden() and not dialog._warning.text()
+
+
+def test_sem_ffmpeg_a_janela_nao_avisa_nem_pergunta_a_versao(qapp, sample_media, dummy_tools, monkeypatch) -> None:
+    """O "Baixar o ffmpeg?" só se abre ao enfileirar; enquanto isso a janela fica sem o aviso, sem quebrar."""
+    ref, local = sample_media
+    runtime = build_desktop_runtime()
+    monkeypatch.setattr(runtime, "find_tools", lambda: None)
+
+    def nao_deveria(tools):
+        raise AssertionError("sem ffmpeg não há versão a perguntar")
+    monkeypatch.setattr(runtime, "ffmpeg_major_version", nao_deveria)
+    dialog = ExportDialog(project=_projeto_com_desfoque_na_transicao(ref), settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: None,
+                          processing=build_processing_service(), runtime=runtime)
+    dialog._fast.setChecked(False)
+    assert dialog._warning_box.isHidden()
+
+
+def test_sem_desfoque_na_transicao_a_janela_nem_procura_o_ffmpeg_para_o_aviso(
+    qapp, sample_media, dummy_tools, monkeypatch
+) -> None:
+    ref, local = sample_media
+    runtime = build_desktop_runtime()
+
+    def nao_deveria(*args):
+        raise AssertionError("a janela só procura o ffmpeg e a versão quando há desfoque numa transição que afeta adicionais")
+    monkeypatch.setattr(runtime, "find_tools", nao_deveria)
+    monkeypatch.setattr(runtime, "ffmpeg_major_version", nao_deveria)
+    dialog = ExportDialog(project=_projeto_com_desfoque_na_transicao(ref, afeta=False), settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=runtime)
+    dialog._fast.setChecked(False)
+    assert dialog._warning_box.isHidden()

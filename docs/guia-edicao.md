@@ -314,8 +314,8 @@ trilha de Adicionais, com a duração do campo, e na prévia aparece o retângul
   gravar o formato antigo.
 - **ffmpeg 6 e transições** — com o ffmpeg 6 (o do Ubuntu 24.04; o aplicativo empacotado traz o 7), uma
   transição com **Afetar itens adicionais** que atravessa o bloco o perde durante a passagem, como
-  acontece com os demais filtros: a área que ele esconderia aparece. A exportação avisa na fila quando
-  encontra essa combinação; desligar a opção na transição, ou usar o ffmpeg 7 ou mais novo, resolve.
+  acontece com os demais filtros: a área que ele esconderia aparece. A janela de exportação avisa antes
+  de enfileirar (e a fila repete o aviso) quando encontra essa combinação; desligar a opção na transição, ou usar o ffmpeg 7 ou mais novo, resolve.
 
 ### Propriedades e animação
 

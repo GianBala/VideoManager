@@ -930,7 +930,10 @@ class ExportDialog(QDialog):
                 family=codec_family,
                 quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
             )
-            warning = _export_warning(container, proj, interpolating)
+            # O ffmpeg que a janela encontraria agora, sem a caixa "Baixar o ffmpeg?" (que só se abre ao enfileirar): a
+            # pessoa precisa ler que o desfoque some na passagem **antes** de decidir exportar, e não só na dica da fila.
+            blur = self._blur_transition_warning(proj, self._runtime.find_tools)
+            warning = "\n".join(filter(None, (_export_warning(container, proj, interpolating), *map(str, blur))))
 
         if hasattr(self, "_ext_label"):
             self._ext_label.setText(f".{container}")
@@ -1043,14 +1046,18 @@ class ExportDialog(QDialog):
     # Enfileirar
     # ------------------------------------------------------------------
 
-    def _blur_transition_warning(self, project: Project, tools: FFmpegTools) -> tuple[Text, ...]:
+    def _blur_transition_warning(
+        self, project: Project, find_tools: Callable[[], FFmpegTools | None]
+    ) -> tuple[Text, ...]:
         """Avisa quando o ffmpeg em uso perde o desfoque numa transição que afeta os adicionais.
 
-        A versão só se consulta (um processo, guardado por caminho) quando o projeto tem essa combinação.
+        O ffmpeg e a versão dele só se consultam (um processo, guardado por caminho) quando o projeto tem essa
+        combinação.
         """
         if not region_blur_in_affecting_transition(project):
             return ()
-        version = self._runtime.ffmpeg_major_version(tools)
+        tools = find_tools()
+        version = self._runtime.ffmpeg_major_version(tools) if tools is not None else None
         if version is None or version >= MIN_FFMPEG_FOR_FILTER_IN_TRANSITION:
             return ()
         return (Text.of(_blur_transition_note, version),)
@@ -1113,7 +1120,7 @@ class ExportDialog(QDialog):
                                   interpolating, family=target.family,
                                   quality=self._quality_choice or hwaccel.QUALITY_BALANCED)
             warning = Text.of(_export_warning, target.container, proj, interpolating)
-            extra = self._blur_transition_warning(proj, tools)
+            extra = self._blur_transition_warning(proj, lambda: tools)
 
         self.created_job.description = description
         self.created_job.warnings = (*((warning,) if warning is not None and str(warning) else ()), *extra)
