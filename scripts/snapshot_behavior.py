@@ -214,6 +214,18 @@ def secao_comandos(_midia_dir: Path) -> dict:
             Track(TrackKind.ADDITIONAL, clips=(texto,), track_id=25), video(foto, tid=26),
             Track(TrackKind.ADDITIONAL, clips=(desfoque,), track_id=27), video(a, tid=28),
         ), width=1920, height=1080, fps=30.0),
+        # Dois filtros: o segundo, aplicado depois, entra numa trilha acima do primeiro (o desfoque, aqui) e muda o plano
+        # rápido do arrasto de tudo que está abaixo dele.
+        "desfoque_e_sepia": Project(tracks=(
+            Track(TrackKind.ADDITIONAL, clips=(replace(filtro, start=1.0, duration=6.0),), track_id=29),
+            Track(TrackKind.ADDITIONAL, clips=(desfoque,), track_id=30), video(foto, tid=31), video(a, tid=32),
+        ), width=1920, height=1080, fps=30.0),
+        "desfoque_e_vinheta": Project(tracks=(
+            Track(TrackKind.ADDITIONAL, clips=(replace(filtro, filter_name="vinheta", start=1.0, duration=6.0),),
+                  track_id=33),
+            Track(TrackKind.ADDITIONAL, clips=(texto,), track_id=34),
+            Track(TrackKind.ADDITIONAL, clips=(desfoque,), track_id=35), video(foto, tid=36), video(a, tid=37),
+        ), width=1920, height=1080, fps=30.0),
         "musica_alem_do_video": Project(tracks=(video(replace(a, duration=3.0), tid=15),
                                                 Track(TrackKind.AUDIO, clips=(musica,), track_id=16)),
                                         width=1280, height=720, fps=30.0),
