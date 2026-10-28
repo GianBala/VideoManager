@@ -36,6 +36,7 @@ from videomanager.infrastructure.system.binaries import find_tools
 from videomanager.infrastructure.system.binaries import subprocess_kwargs
 from videomanager.presentation.qt.panels.edit_widgets import _Preview
 from videomanager.presentation.qt.panels.region_blur import blur_region
+from videomanager.presentation.qt.panels.region_filter import filter_region
 
 pytestmark = pytest.mark.usefixtures("desktop_app")
 
@@ -795,6 +796,52 @@ def test_blur_region_repetida_com_os_mesmos_pixels_da_o_mesmo_resultado():
     blur_region(a, 10, 10, 60, 30)
     blur_region(b, 10, 10, 60, 30)
     assert a == b
+
+
+def test_filter_region_filtra_so_o_retangulo_e_com_a_conta_do_dominio():
+    from videomanager.domain.color_filters import apply_color_filter
+    imagem = _xadrez(160, 90)
+    antes = imagem.copy()
+    filter_region(imagem, 40, 20, 80, 50, "inverter")
+    for y in range(90):
+        for x in range(160):
+            dentro = 40 <= x < 120 and 20 <= y < 70
+            esperado = antes.pixelColor(x, y)
+            if dentro:
+                esperado = QColor(255 - esperado.red(), 255 - esperado.green(), 255 - esperado.blue())
+            assert imagem.pixelColor(x, y) == esperado, (x, y)
+    # E a mesma conta que o domínio dá para um filtro com mistura de canais.
+    colorida = QImage(8, 8, QImage.Format.Format_RGB32)
+    colorida.fill(QColor(200, 120, 40))
+    filter_region(colorida, 0, 0, 8, 8, "sepia")
+    esperado = apply_color_filter("sepia", bytes((200, 120, 40, 255)))
+    assert colorida.pixelColor(3, 3) == QColor(esperado[0], esperado[1], esperado[2])
+
+
+def test_filter_region_ignora_o_que_cai_fora_da_imagem_e_o_que_nao_tem_area():
+    imagem = _xadrez(64, 36)
+    antes = imagem.copy()
+    filter_region(imagem, -20, -20, 10, 10, "pb")                    # inteiramente fora
+    filter_region(imagem, 10, 10, 0, 5, "pb")                        # sem largura
+    assert imagem == antes
+    filter_region(imagem, 60, 30, 40, 40, "inverter")                # quase tudo fora: só o canto de 4×6 muda
+    assert imagem.pixel(0, 0) == antes.pixel(0, 0) and imagem.pixel(30, 20) == antes.pixel(30, 20)
+    assert imagem.pixelColor(63, 35).red() == 255 - antes.pixelColor(63, 35).red()
+
+
+def test_o_painel_leva_o_tamanho_da_previa_ao_plano_e_o_filtro_de_cor_movel_grande_demais_fica_sem_plano(painel_de_edicao, tmp_path):
+    """O orçamento de pixels depende do tamanho da prévia, que só o painel sabe: sem ele chegar ao ``interaction_plan``,
+    o retângulo na tela inteira passaria e travaria a interface a cada movimento."""
+    painel = painel_de_edicao
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    for lado, tem_plano in ((.2, True), (1.0, False)):
+        movel = replace(_movel("sepia"), scale=lado, scale_x=lado, scale_y=lado)
+        painel._apply(_pilha(tmp_path, movel, item))
+        painel._seek_to(1.0)
+        painel._preview.set_active_clip(item, painel._project.width, painel._project.height)
+        painel._timeline.select(item.clip_id)
+        chave = painel._interaction_key()
+        assert (chave is not None) is tem_plano, lado
 
 
 # -- a prévia contra o quadro do ffmpeg ------------------------------------------------------
