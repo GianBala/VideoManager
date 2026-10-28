@@ -205,14 +205,19 @@ def pseudo_media(overlay: OverlayType | str, label: str, duration: float) -> Med
     return MediaRef(path=Path(f"{PSEUDO_PREFIXES[overlay]}{label}"), kind=MediaKind.IMAGE, duration=duration)
 
 
+def region_pose() -> dict[str, float]:
+    """O tamanho com que uma região nasce: um recorte pequeno, que é o que se vai mexer (tela cheia não diz que há um)."""
+    return {"scale": REGION_BLUR_DEFAULT_SCALE, "scale_x": REGION_BLUR_DEFAULT_SCALE, "scale_y": REGION_BLUR_DEFAULT_SCALE}
+
+
 def filter_pose(name: str) -> dict[str, float]:
     """A escala com que um filtro nasce: tela cheia, salvo o desfoque de região.
 
     O desfoque nasce pequeno porque a região é o que se vai mexer; os demais filtros
-    agem no quadro todo, que é a pose padrão (centro 0,5 e escala 1).
+    agem no quadro todo, que é a pose padrão (centro 0,5 e escala 1). Um filtro vira
+    região quando se liga o "móvel" (:meth:`Clip.with_movable`), e então nasce como o desfoque.
     """
-    scale = REGION_BLUR_DEFAULT_SCALE if name == REGION_BLUR else 1.0
-    return {"scale": scale, "scale_x": scale, "scale_y": scale}
+    return region_pose() if name == REGION_BLUR else {"scale": 1.0, "scale_x": 1.0, "scale_y": 1.0}
 
 
 def is_pseudo_path(path: Path | str) -> bool:
@@ -341,6 +346,10 @@ class Clip:
     # desfazíveis. Fica **antes** de ``clip_id`` para nenhuma construção
     # posicional mudar de sentido.
     reversed: bool = False
+    # Só para filtro: age num retângulo da tela (que se move, se redimensiona e anima como o do desfoque) em vez de nela
+    # inteira. O desfoque de região não usa o campo: ele é sempre um retângulo. Fica **antes** de ``clip_id`` para
+    # nenhuma construção posicional mudar de sentido.
+    movable: bool = False
     # Identidade estável, preservada por ``dataclasses.replace``: é por ela que
     # a seleção, o cache de miniaturas e o desfazer reconhecem o mesmo bloco
     # depois de qualquer alteração.
@@ -429,11 +438,27 @@ class Clip:
         """Se este bloco age só num retângulo da tela, e não nela inteira.
 
         É o **único** teste de "este filtro tem região": alças da prévia, aba
-        Propriedades e compositor perguntam por aqui, e nenhum outro código olha o
-        nome do filtro. Hoje só o desfoque de região responde sim; estender a
-        região aos demais filtros é mudar o corpo desta propriedade.
+        Propriedades e compositor perguntam por aqui. O desfoque de região é sempre
+        um retângulo; os demais filtros só quando o bloco é ``movable``.
         """
+        return self.overlay_type is OverlayType.FILTER and (self.filter_name == REGION_BLUR or self.movable)
+
+    @property
+    def is_region_blur(self) -> bool:
+        """Se é o desfoque de região (e não outro filtro tornado móvel): ele borra, e os demais aplicam a cor deles."""
         return self.overlay_type is OverlayType.FILTER and self.filter_name == REGION_BLUR
+
+    def with_movable(self, movable: bool) -> Clip:
+        """Liga ou desliga o "móvel" de um filtro, ajustando a pose ao que ele passa a ser.
+
+        Ligado, o filtro vira um retângulo e nasce com o tamanho inicial das regiões, no centro; desligado, volta à
+        tela inteira e sem quadros-chave, senão o bloco guardaria um retângulo que nada mais mostra nem deixa mexer.
+        O desfoque e o que não é filtro não têm o que ligar: o bloco volta como estava.
+        """
+        if self.overlay_type is not OverlayType.FILTER or self.is_region_blur or movable == self.movable:
+            return self
+        pose = region_pose() if movable else filter_pose(self.filter_name)
+        return replace(self, movable=movable, x=0.5, y=0.5, keyframes=(), **pose)
 
     def region_rect(self, canvas_w: int, canvas_h: int, time_offset: float = 0.0) -> tuple[int, int, int, int]:
         """``(esquerda, topo, largura, altura)`` da região, em pixels da tela dada.
@@ -467,13 +492,14 @@ class Clip:
     def with_filter(self, name: str) -> Clip:
         """Troca o filtro do bloco, ajustando a pose ao que o filtro novo faz dela.
 
-        Quem vira desfoque nasce com o tamanho inicial; quem deixa de ser desfoque
-        volta à pose padrão, senão o bloco guardaria uma região que nenhum filtro
-        mais mostra nem deixa mexer.
+        Quem vira desfoque nasce com o tamanho inicial (e quem já era uma região a
+        conserva); quem deixa de ser desfoque volta à pose padrão, senão o bloco
+        guardaria uma região que nenhum filtro mais mostra nem deixa mexer. Um filtro
+        móvel que troca por outro filtro continua móvel, com o mesmo retângulo.
         """
-        if name == REGION_BLUR and not self.has_region:
-            return replace(self, filter_name=name, **filter_pose(name))
-        if self.has_region and name != REGION_BLUR:
+        if name == REGION_BLUR:
+            return replace(self, filter_name=name, movable=False, **({} if self.has_region else filter_pose(name)))
+        if self.is_region_blur:
             return replace(self, filter_name=name, x=0.5, y=0.5, keyframes=(), **filter_pose(name))
         return replace(self, filter_name=name)
 
@@ -1334,7 +1360,7 @@ class Project:
         changed = found[1].with_filter(name)
         return self.with_updated_clip(clip_id, **{
             field: getattr(changed, field)
-            for field in ("filter_name", "x", "y", "scale", "scale_x", "scale_y", "keyframes")})
+            for field in ("filter_name", "movable", "x", "y", "scale", "scale_x", "scale_y", "keyframes")})
 
     def _sync_transition_markers(self, clip_id: int) -> Project:
         """Mantém marcadores ligados ao corte ou remove os que ficaram órfãos."""
