@@ -106,13 +106,75 @@ def test_o_desfoque_abaixo_do_item_continua_na_imagem_de_baixo_e_nao_cria_trecho
     assert desfoque.clip_id in {c.clip_id for t in plano.background.tracks for c in t.clips}
 
 
-@pytest.mark.parametrize("nome", ["sepia", "pb", "inverter", "vinheta", "contraste"])
-def test_outro_filtro_acima_do_item_continua_sem_plano_rapido(tmp_path, nome):
-    """Só o desfoque de região é refeito na prévia: os de tela inteira mudam tudo que está abaixo."""
+def _ids(projeto):
+    return {c.clip_id for t in projeto.tracks for c in t.clips}
+
+
+@pytest.mark.parametrize("nome", ["sepia", "pb", "inverter", "contraste"])
+def test_filtro_de_cor_acima_do_item_tem_plano_e_ja_vai_nas_imagens_prontas(tmp_path, nome):
+    """Sépia, P&B, Inverter e Contraste são afins: filtrar a soma é filtrar cada camada. O filtro entra no fundo e na
+    textura, e a prévia não precisa refazer nada a cada movimento."""
     item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
-    assert interaction_plan(_pilha(tmp_path, _filtro(nome), item), item.clip_id, 1.0) is None
-    assert interaction_plan(_pilha(tmp_path, _filtro(nome), _filtro(), item), item.clip_id, 1.0) is None
-    assert interaction_plan(_pilha(tmp_path, _filtro(), _filtro(nome), item), item.clip_id, 1.0) is None
+    filtro = _filtro(nome)
+    plano = interaction_plan(_pilha(tmp_path, filtro, item), item.clip_id, 1.0)
+    assert plano is not None and plano.stages == () and plano.filters == (filtro,) and not plano.needs_mask
+    assert filtro.clip_id in _ids(plano.background)                  # o fundo sai filtrado
+    assert plano.base_layers == 3
+
+
+def test_o_filtro_de_cor_so_age_nos_trechos_que_estao_abaixo_dele(tmp_path):
+    """No meio da pilha, o filtro entra nos trechos que o têm acima e **não** nos que vêm depois dele."""
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    a = _imagem(tmp_path / "a.png", QColor("blue"), scale_x=.2, scale_y=.2)
+    b = _imagem(tmp_path / "b.png", QColor("white"), scale_x=.2, scale_y=.2)
+    desfoque, sepia = _filtro(), _filtro("sepia")
+    # De cima para baixo: b, sepia, desfoque, a, item. O Sépia fica entre o desfoque e b.
+    plano = interaction_plan(_pilha(tmp_path, b, sepia, desfoque, a, item), item.clip_id, 1.0)
+    assert _ids(plano.foreground) == {a.clip_id, sepia.clip_id}       # a está abaixo do Sépia
+    assert [(r.clip_id, _ids(p)) for r, p in plano.stages] == [(desfoque.clip_id, {b.clip_id})]   # b está acima: sem Sépia
+    assert plano.filters == (sepia,) and sepia.clip_id in _ids(plano.background)
+
+
+def test_a_vinheta_acima_do_item_e_um_trecho_com_mascara_e_nao_vai_nas_imagens_prontas(tmp_path):
+    """A vinheta escurece por posição na tela e o item muda de posição: refeita a cada movimento, com uma máscara."""
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    sobre = _imagem(tmp_path / "sobre.png", QColor("blue"), scale_x=.2, scale_y=.2)
+    vinheta = _filtro("vinheta")
+    plano = interaction_plan(_pilha(tmp_path, sobre, vinheta, item), item.clip_id, 1.0)
+    assert plano.needs_mask and plano.filters == ()
+    assert [(r.clip_id, _ids(p)) for r, p in plano.stages] == [(vinheta.clip_id, {sobre.clip_id})]
+    assert vinheta.clip_id not in _ids(plano.background) and vinheta.clip_id not in _ids(plano.foreground)
+    comandos = interaction_commands(plano, (320, 180), FALSO)
+    assert len(comandos) == 3 + 1 + 1                                   # base, o trecho depois da vinheta e a máscara
+    assert "vignette=PI/4" in " ".join(comandos[-1]) and "color=c=white" in " ".join(comandos[-1])
+
+
+@pytest.mark.parametrize("acima, tem_plano", [("inverter", False), ("contraste", False), ("sepia", True), ("pb", True)])
+def test_vinheta_abaixo_de_um_filtro_com_termo_constante_fica_sem_plano(tmp_path, acima, tem_plano):
+    """Inverter e Contraste não comutam com a multiplicação da vinheta; Sépia e P&B (lineares) comutam."""
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    plano = interaction_plan(_pilha(tmp_path, _filtro(acima), _filtro("vinheta"), item), item.clip_id, 1.0)
+    assert (plano is not None) is tem_plano
+    # Com a vinheta **acima** do Inverter a ordem se refaz sozinha (a vinheta multiplica por último): tem plano.
+    assert interaction_plan(_pilha(tmp_path, _filtro("vinheta"), _filtro(acima), item), item.clip_id, 1.0) is not None
+
+
+def test_filtro_que_o_plano_nao_conhece_ou_transicao_acima_do_item_fica_sem_plano(tmp_path):
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    assert interaction_plan(_pilha(tmp_path, _filtro("filtro-novo"), item), item.clip_id, 1.0) is None
+
+
+def test_a_textura_e_o_fundo_desfocado_saem_com_a_cadeia_dos_filtros_de_cor(tmp_path):
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4, blur_background=True)
+    sem = " ".join(interaction_commands(interaction_plan(_pilha(tmp_path, item), item.clip_id, 1.0), (320, 180), FALSO)[1])
+    plano = interaction_plan(_pilha(tmp_path, _filtro("sepia"), _filtro("inverter"), item), item.clip_id, 1.0)
+    comandos = interaction_commands(plano, (320, 180), FALSO)
+    assert len(comandos) == 4                                          # fundo, textura, frente e fundo desfocado
+    textura, fundo_desfocado = " ".join(comandos[1]), " ".join(comandos[3])
+    assert "colorchannelmixer" not in sem
+    for comando in (textura, fundo_desfocado):
+        # Na ordem da pilha, de baixo para cima: o Inverter (mais baixo) age antes do Sépia (que está no topo).
+        assert 0 <= comando.index("negate") < comando.index("colorchannelmixer")
 
 
 def test_o_plano_nao_depende_da_pose_do_item_mas_muda_com_o_desfoque(tmp_path):
@@ -183,11 +245,19 @@ def test_o_desfoque_arrastado_com_outro_desfoque_acima_deixa_o_de_cima_como_trec
     assert plano.stages == () and de_baixo.clip_id in {c.clip_id for t in plano.background.tracks for c in t.clips}
 
 
-@pytest.mark.parametrize("acima", ["sepia", "inverter"])
-def test_o_desfoque_arrastado_sem_plano_se_ha_filtro_de_tela_inteira_acima(tmp_path, acima):
+@pytest.mark.parametrize("acima", ["sepia", "pb", "inverter", "contraste"])
+def test_o_desfoque_arrastado_com_filtro_de_cor_acima_tem_plano_com_o_filtro_no_fundo(tmp_path, acima):
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    desfoque, filtro = _filtro(), _filtro(acima)
+    plano = interaction_plan(_pilha(tmp_path, filtro, desfoque, abaixo), desfoque.clip_id, 1.0)
+    assert plano is not None and plano.source is None and plano.filters == (filtro,)
+    assert filtro.clip_id in _ids(plano.background) and desfoque.clip_id not in _ids(plano.background)
+
+
+def test_o_desfoque_arrastado_com_filtro_desconhecido_acima_fica_sem_plano(tmp_path):
     abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
     desfoque = _filtro()
-    assert interaction_plan(_pilha(tmp_path, _filtro(acima), desfoque, abaixo), desfoque.clip_id, 1.0) is None
+    assert interaction_plan(_pilha(tmp_path, _filtro("filtro-novo"), desfoque, abaixo), desfoque.clip_id, 1.0) is None
 
 
 def test_o_desfoque_arrastado_pede_so_duas_imagens_mais_uma_por_desfoque_acima(tmp_path):
@@ -297,6 +367,109 @@ def test_o_teste_acima_enxerga_o_desfoque_arrastado_que_nao_e_borrado(tmp_path, 
     monkeypatch.setattr(edit_widgets, "blur_region", lambda *args: None)
     medida = _medir_regiao(tmp_path, dict(x=.45))
     assert sum(medida.dentro) / len(medida.dentro) > 4 or max(medida.dentro) > 60
+
+
+# -- filtros de tela inteira acima do que se arrasta -------------------------------------------
+
+def _medir_com_filtros(tmp_path: Path, arrasta: str, filtros: tuple[str, ...], com_desfoque: bool,
+                       *, sem_o_filtro_na_textura: bool = False) -> SimpleNamespace:
+    """Arrasta o item (ou o desfoque) com ``filtros`` no topo da pilha e mede o quadro todo contra o do ffmpeg.
+
+    ``filtros`` vai do topo para baixo. Os pontos junto da caixa do bloco ativo (contorno e alças, que o ffmpeg não
+    desenha) ficam de fora.
+    """
+    tools = find_tools()
+    if tools is None:
+        pytest.skip("FFmpeg não disponível")
+    fonte = tmp_path / "fonte.png"
+    subprocess.run([tools.ffmpeg_str, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=5",
+                    "-frames:v", "1", str(fonte)], check=True, timeout=30, **subprocess_kwargs())
+    chao = Clip(MediaRef(fonte, MediaKind.IMAGE, width=320, height=180), 0, 5, overlay_type="image",
+                scale_x=1.0, scale_y=1.0)
+    item = _imagem(tmp_path / "vermelho.png", QColor(200, 40, 40), scale_x=.5, scale_y=.5, x=.3, y=.5, opacity=.8)
+    sobre = _imagem(tmp_path / "verde.png", QColor(30, 200, 30), scale_x=.12, scale_y=.12, x=.6, y=.3)
+    desfoque = _filtro(x=.4, y=.5)
+    pilha = [*(_filtro(f) for f in filtros), sobre, *([desfoque] if com_desfoque or arrasta == "regiao" else []), item]
+    projeto = _pilha(tmp_path, *pilha, base=chao)
+    alvo = item if arrasta == "item" else desfoque
+    plano = interaction_plan(projeto, alvo.clip_id, 1.0)
+    assert plano is not None
+    if sem_o_filtro_na_textura:
+        plano = replace(plano, filters=())
+    tamanho = (640, 360)
+    camadas = tuple(QPixmap.fromImage(QImage.fromData(_run(c, 30, strict=True)))
+                    for c in interaction_commands(plano, tamanho, tools))
+    base, fim = plano.base_layers, plano.base_layers + len(plano.stages)
+    assert len(camadas) == fim + int(plano.needs_mask) and all(not c.isNull() for c in camadas)
+    previa = _Preview()
+    previa.resize(*tamanho)
+    previa.set_frame_pixmap(QPixmap.fromImage(QImage.fromData(
+        _run(frame_command(projeto, 1, tamanho, tools, png=True), 30, strict=True))))
+    previa.set_active_clip(alvo, projeto.width, projeto.height)
+    previa.set_position(1)
+    previa.set_interaction_layers(camadas[:base], tuple(zip((r for r, _ in plano.stages), camadas[base:fim])),
+                                  camadas[fim] if plano.needs_mask else None)
+    movida = replace(alvo, x=.55) if arrasta == "item" else replace(alvo, x=.6, y=.55)
+    previa.set_active_clip(movida, projeto.width, projeto.height)
+    assert previa.begin_interaction()
+    atual = previa.grab().toImage()
+    esperado = QImage.fromData(_run(frame_command(projeto.with_updated_clip(alvo.clip_id, x=movida.x, y=movida.y), 1,
+                                                  tamanho, tools, png=True), 30, strict=True))
+    cx, cy, bw, bh = previa._clip_geometry(movida)
+    x0, x1, y0, y1 = cx - bw / 2, cx + bw / 2, cy - bh / 2, cy + bh / 2
+    erros = []
+    for py in range(14, 346, 6):
+        for px in range(14, 626, 6):
+            if ((min(abs(px - x0), abs(px - x1)) < 10 and y0 - 10 < py < y1 + 10)
+                    or (min(abs(py - y0), abs(py - y1)) < 10 and x0 - 10 < px < x1 + 10)):
+                continue
+            a, b = atual.pixelColor(px, py), esperado.pixelColor(px, py)
+            erros.append(max(abs(a.red() - b.red()), abs(a.green() - b.green()), abs(a.blue() - b.blue())))
+    erros.sort()
+    return SimpleNamespace(media=sum(erros) / len(erros), p95=erros[int(len(erros) * .95)], n=len(erros))
+
+
+CASOS_DE_FILTROS = [
+    pytest.param("item", ("pb",), False, id="item+pb"),
+    pytest.param("item", ("sepia",), False, id="item+sepia"),
+    pytest.param("item", ("inverter",), False, id="item+inverter"),
+    pytest.param("item", ("contraste",), False, id="item+contraste"),
+    pytest.param("item", ("vinheta",), False, id="item+vinheta"),
+    pytest.param("item", ("sepia",), True, id="item+desfoque+sepia"),
+    pytest.param("item", ("vinheta",), True, id="item+desfoque+vinheta"),
+    pytest.param("item", ("sepia", "pb"), True, id="item+desfoque+sepia+pb"),
+    # Vinheta abaixo do Sépia: o ffmpeg escurece e depois aplica a matriz (que passa de 255 nos claros e é cortada);
+    # a prévia aplica a matriz às camadas e escurece por último, então os claros saem um pouco mais escuros (~1 em 255).
+    pytest.param("item", ("sepia", "vinheta"), False, id="item+vinheta+sepia"),
+    pytest.param("item", ("vinheta", "inverter"), False, id="item+inverter+vinheta"),
+    pytest.param("regiao", ("sepia",), False, id="regiao+sepia"),
+    pytest.param("regiao", ("pb",), False, id="regiao+pb"),
+    pytest.param("regiao", ("vinheta",), False, id="regiao+vinheta"),
+    pytest.param("regiao", ("vinheta", "inverter"), False, id="regiao+inverter+vinheta"),
+]
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("arrasta, filtros, com_desfoque", CASOS_DE_FILTROS)
+def test_o_quadro_do_arrasto_com_filtros_acima_acompanha_o_quadro_final(tmp_path, arrasta, filtros, com_desfoque):
+    """Com filtros de tela inteira acima, o item (ou o desfoque) arrastado sai com a cor do quadro final e a prévia não
+    refaz nada a cada movimento. Medido na cena de barras de cor (o pior caso): média até ~2 e p95 até ~14 em 255; os
+    pontos que passam disso estão nas arestas do item, onde a prévia desenha à parte do ffmpeg."""
+    medida = _medir_com_filtros(tmp_path, arrasta, filtros, com_desfoque)
+    vinheta_sob_sepia = filtros == ("sepia", "vinheta")
+    assert medida.n > 1000
+    assert medida.media <= (5 if vinheta_sob_sepia else 3), medida
+    assert medida.p95 <= (34 if vinheta_sob_sepia else 24), medida
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("filtro", ["sepia", "inverter", "pb"])
+def test_sem_o_filtro_na_textura_o_item_arrastado_destoa_do_quadro_final(tmp_path, filtro):
+    """Guarda do teste acima: com a textura sem a cadeia dos filtros, o item sai com a cor errada e o limite estoura."""
+    certo = _medir_com_filtros(tmp_path / "a", "item", (filtro,), False) if (tmp_path / "a").mkdir() is None else None
+    errado = _medir_com_filtros(tmp_path / "b", "item", (filtro,), False, sem_o_filtro_na_textura=True) \
+        if (tmp_path / "b").mkdir() is None else None
+    assert errado.media > certo.media * 2 and errado.media > 1.5, (certo, errado)
 
 
 # -- o desfoque no Qt --------------------------------------------------------------------------

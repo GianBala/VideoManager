@@ -29,6 +29,12 @@ REGION_MIN_SCALE = 0.05
 REGION_BLUR_WORK_SIDE = 16
 REGION_BLUR_SIGMA_RATIO = 0.35
 REGION_BLUR_STEPS = 3
+# Filtros de tela inteira (ids gravados no .vmp). Os de cor agem pixel a pixel e são afins (``a·x + b``): somar um item
+# translúcido e depois filtrar dá o mesmo que filtrar cada camada e somar, então a prévia do arrasto os aplica às camadas
+# prontas. Os que têm termo constante (``b``) não comutam com a multiplicação da vinheta, que depende da posição na tela.
+COLOR_FILTERS = ("pb", "sepia", "inverter", "contraste")
+OFFSET_COLOR_FILTERS = ("inverter", "contraste")
+VIGNETTE_FILTER = "vinheta"
 # Ganho abaixo disto é zero: o controle anda de 0,1 dB, e um resto de float
 # não pode virar um filtro "volume" no grafo nem tirar a edição do corte rápido.
 GAIN_EPSILON = 0.05

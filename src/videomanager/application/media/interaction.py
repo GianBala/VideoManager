@@ -1,6 +1,7 @@
 """Planos imutáveis para manipulação imediata de um objeto em um instante."""
 from dataclasses import dataclass, replace
 
+from ...domain.constants import COLOR_FILTERS, OFFSET_COLOR_FILTERS, VIGNETTE_FILTER
 from ...domain.project import Clip, OverlayType, Project, TrackKind
 
 
@@ -16,24 +17,39 @@ class InteractionPlan:
     # Se o gesto precisa da imagem do fundo desfocado como quarta camada. É a
     # opção ligada, e não "aparece agora": a pose muda durante o arrasto.
     blur: bool = False
-    # Os desfoques de região **acima** do item, de baixo para cima, cada um com o que vem depois dele até o
-    # próximo. O desfoque borra o que o item móvel desenha, então não cabe numa imagem pronta: a prévia o refaz
-    # a cada movimento. ``foreground`` é só o que está entre o item e o primeiro desfoque.
+    # O que a prévia refaz a cada movimento, acima do item, de baixo para cima, cada um com o que vem depois dele até o
+    # próximo: o desfoque de região (borra o que o item móvel desenha) e a vinheta (escurece por posição na tela, e o
+    # item muda de posição). Não cabem numa imagem pronta. ``foreground`` é só o que está entre o item e o primeiro.
     stages: tuple[tuple[Clip, Project], ...] = ()
+    # Os filtros de cor acima do item (Sépia, P&B, Inverter, Contraste): já estão aplicados em ``background`` e em
+    # cada trecho, e aqui ficam para a textura do item (e o fundo desfocado dele) sair filtrada também.
+    filters: tuple[Clip, ...] = ()
 
     @property
     def base_layers(self) -> int:
-        """Quantas imagens vêm antes das dos desfoques acima: fundo e frente (região), ou mais a textura e o fundo desfocado."""
+        """Quantas imagens vêm antes das dos trechos: fundo e frente (região), ou mais a textura e o fundo desfocado."""
         return 2 if self.source is None else 4 if self.blur else 3
+
+    @property
+    def needs_mask(self) -> bool:
+        """Se há vinheta no caminho: a última imagem é então a máscara dela (quanto cada pixel escurece)."""
+        return any(stage.filter_name == VIGNETTE_FILTER for stage, _ in self.stages)
 
 
 def interaction_plan(project: Project, clip_id: int, seconds: float) -> InteractionPlan | None:
     """Separa a pilha sem tentar decompor filtros que dependem do objeto móvel.
 
-    Filtro de tela inteira ou transição acima do item mudam o resultado de tudo que está abaixo e não têm como ser
-    refeitos a cada movimento: sem plano. O desfoque de região também depende do item, mas é só um recorte, e a
-    prévia sabe refazê-lo (``stages``). Quando o item arrastado é o próprio desfoque, o que está abaixo dele vem
-    pronto e a prévia borra a região na pose da mão (``source`` é ``None``).
+    Transição acima do item muda tudo que está abaixo e não tem como ser refeita a cada movimento: sem plano. Os
+    filtros de tela inteira acima do item têm três destinos:
+
+    * os de cor (Sépia, P&B, Inverter, Contraste) são afins, e filtrar a soma é filtrar cada camada e somar: entram já
+      aplicados nas imagens prontas (``background`` e os trechos) e na textura (``filters``);
+    * o desfoque de região e a vinheta são refeitos pela prévia a cada movimento (``stages``);
+    * uma combinação em que a ordem muda o resultado e a prévia não sabe reproduzir (vinheta abaixo de Inverter ou de
+      Contraste, que têm termo constante) fica sem plano, e o quadro vem do ffmpeg como sempre veio.
+
+    Quando o item arrastado é o próprio desfoque, o que está abaixo dele vem pronto e a prévia borra a região na pose
+    da mão (``source`` é ``None``).
     """
     if any(c.start <= seconds < c.end for c in project.transition_contexts()):
         return None
@@ -47,8 +63,21 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     if clip.overlay_type is OverlayType.TRANSITION or (clip.overlay_type is OverlayType.FILTER and not clip.has_region):
         return None
     above = ordered[selected + 1:]
-    if any(c.overlay_type is OverlayType.TRANSITION or (c.overlay_type is OverlayType.FILTER and not c.has_region)
-           for c in above):
+
+    def is_color(c: Clip) -> bool:
+        return c.overlay_type is OverlayType.FILTER and not c.has_region and c.filter_name in COLOR_FILTERS
+
+    def is_vignette(c: Clip) -> bool:
+        return c.overlay_type is OverlayType.FILTER and not c.has_region and c.filter_name == VIGNETTE_FILTER
+
+    for c in above:
+        if c.overlay_type is OverlayType.TRANSITION:
+            return None
+        if c.overlay_type is OverlayType.FILTER and not (c.has_region or is_color(c) or is_vignette(c)):
+            return None          # filtro que o compositor trata de outro jeito (ou que esta lista não conhece)
+    first_vignette = next((i for i, c in enumerate(above) if is_vignette(c)), None)
+    if first_vignette is not None and any(c.filter_name in OFFSET_COLOR_FILTERS for c in above[first_vignette + 1:]
+                                          if is_color(c)):
         return None
 
     def subset(clips: list[Clip]) -> Project:
@@ -56,17 +85,27 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
         return replace(project, tracks=tuple(replace(t, clips=tuple(c for c in t.clips if c.clip_id in ids))
                                               for t in project.tracks))
 
+    colors = [c for c in above if is_color(c)]
+
+    def with_filters(items: list[Clip]) -> list[Clip]:
+        """Os itens de um trecho e os filtros de cor que agem sobre eles: os que estão acima do primeiro item."""
+        if not items:
+            return items
+        first = above.index(items[0])
+        return [*items, *(c for c in colors if above.index(c) > first)]
+
     # Retirar somente a pose torna o plano estável ao longo do gesto. Tempo,
     # origem, chroma, texto e todas as demais camadas continuam fazendo parte dele.
     source = None if clip.has_region else subset([clip]).with_updated_clip(
         clip_id, x=.5, y=.5, scale=1., scale_x=1., scale_y=1., rotation=0., opacity=1., keyframes=())
     head: list[Clip] = []
-    regions: list[tuple[Clip, list[Clip]]] = []
+    stages: list[tuple[Clip, list[Clip]]] = []
     for c in above:
-        if c.has_region:
-            regions.append((c, []))
-        else:
-            (regions[-1][1] if regions else head).append(c)
-    return InteractionPlan(subset(ordered[:selected]), subset(head), source, clip_id, seconds,
-                           blur=clip.has_blur_background,
-                           stages=tuple((region, subset(items)) for region, items in regions))
+        if c.has_region or is_vignette(c):
+            stages.append((c, []))
+        elif not is_color(c):
+            (stages[-1][1] if stages else head).append(c)
+    return InteractionPlan(subset([*ordered[:selected], *colors]), subset(with_filters(head)), source, clip_id, seconds,
+                           blur=False if clip.has_region else clip.has_blur_background,
+                           stages=tuple((stage, subset(with_filters(items))) for stage, items in stages),
+                           filters=tuple(colors))
