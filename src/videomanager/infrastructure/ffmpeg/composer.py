@@ -1546,7 +1546,7 @@ def _xfade_name(name: str) -> str:
     }.get(name, "fade")
 
 
-def _compose_region_blur(
+def _compose_region(
     filters: list[str],
     current: str,
     piece: _Piece,
@@ -1554,7 +1554,12 @@ def _compose_region_blur(
     order: int | str,
     enable: str,
 ) -> str:
-    """O desfoque de região: recorta o retângulo, borra numa tela de trabalho e cola de volta.
+    """O filtro de região: recorta o retângulo, aplica o filtro nele e cola de volta.
+
+    O desfoque borra numa tela de trabalho (``_region_blur_chain``, e o resto desta explicação é dele); os demais
+    filtros, quando o bloco é ``movable``, passam a própria expressão (``_filter_expression``) pelo recorte e o
+    devolvem ao mesmo lugar: fora do retângulo o quadro não muda um pixel, e dentro dele é o filtro que a tela
+    inteira receberia. A vinheta, sendo calculada sobre o recorte, escurece as bordas **do retângulo**.
 
     A região é a do bloco (``domain.geometry.region_*``, a mesma conta da prévia). O
     tamanho é um só por bloco e a posição pode animar: ``crop`` lê ``w`` e ``h`` uma
@@ -1597,16 +1602,19 @@ def _compose_region_blur(
         cx, cy = f"{clip.x:.6f}", f"{clip.y:.6f}"
     x, y = region_origin_expr(cx, width, w), region_origin_expr(cy, height, h)
 
-    work_w, work_h, sigma = region_work_size(w, h)
-    keep, branch, blurred, label = f"[rb{order}a]", f"[rb{order}b]", f"[rb{order}c]", f"[f{order}]"
+    if clip.is_region_blur:
+        work_w, work_h, sigma = region_work_size(w, h)
+        inner = (f"scale={work_w}:{work_h}:flags=bilinear,format=gbrp,"
+                 f"gblur=sigma={sigma:.4f}:steps={REGION_BLUR_STEPS},format=rgba,"
+                 f"scale={w}:{h}:flags=bilinear")
+    else:
+        # Sem ``format=rgba`` ao fim (o desfoque precisa dele, por causa do ``gbrp``): o ``format=auto`` do ``overlay`` já
+        # converte a região para o formato do quadro principal e não toca no que está fora dela (medido).
+        inner = _filter_expression(clip.filter_name)
+    keep, branch, filtered, label = f"[rb{order}a]", f"[rb{order}b]", f"[rb{order}c]", f"[f{order}]"
     filters.append(f"{current}split=2{keep}{branch}")
-    filters.append(
-        f"{branch}crop=w={w}:h={h}:x='{x}':y='{y}',"
-        f"scale={work_w}:{work_h}:flags=bilinear,format=gbrp,"
-        f"gblur=sigma={sigma:.4f}:steps={REGION_BLUR_STEPS},format=rgba,"
-        f"scale={w}:{h}:flags=bilinear{blurred}"
-    )
-    filters.append(f"{keep}{blurred}overlay=x='{x}':y='{y}':eof_action=pass:format=auto:enable='{enable}'{label}")
+    filters.append(f"{branch}crop=w={w}:h={h}:x='{x}':y='{y}',{inner}{filtered}")
+    filters.append(f"{keep}{filtered}overlay=x='{x}':y='{y}':eof_action=pass:format=auto:enable='{enable}'{label}")
     return label
 
 
@@ -1655,7 +1663,7 @@ def _compose_video_piece(
         )
     if piece.clip.overlay_type is OverlayType.FILTER:
         if piece.clip.has_region:
-            return _compose_region_blur(filters, current, piece, project, order, enable)
+            return _compose_region(filters, current, piece, project, order, enable)
         expression = _filter_expression(piece.clip.filter_name, enable)
         label = f"[f{order}]"
         filters.append(f"{current}{expression}{label}")

@@ -1,7 +1,7 @@
 """O desfoque da região na prévia do arrasto: a sequência do compositor, feita no Qt a cada movimento.
 
 O compositor recorta o retângulo, reduz a uma tela de trabalho de lado fixo, borra e amplia de volta
-(``composer._compose_region_blur``). Aqui é a mesma sequência sobre a imagem que a prévia monta enquanto um
+(``composer._compose_region``). Aqui é a mesma sequência sobre a imagem que a prévia monta enquanto um
 item é arrastado por baixo do desfoque: abrir o ffmpeg a cada movimento é justamente o que o plano rápido evita.
 A redução e a ampliação são as do Qt; a gaussiana é a do ``gblur`` (``domain.gaussian``).
 """

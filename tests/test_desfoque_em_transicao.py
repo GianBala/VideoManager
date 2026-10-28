@@ -69,7 +69,7 @@ def test_a_conta_do_dominio_concorda_com_o_roteamento_do_compositor(nome):
     projeto = _projeto(**parametros)
     renderizado = projeto.for_render()
     roteado = any(
-        piece.clip.has_region
+        piece.clip.is_region_blur
         for contexto in renderizado.transition_contexts() if contexto.marker.transition_affects_additionals
         for lado in ("left", "right")
         for piece in composer._transition_additional_pieces(renderizado, contexto, lado, 0)[0])
