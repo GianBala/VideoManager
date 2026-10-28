@@ -1609,6 +1609,27 @@ def _compose_region_blur(
     return label
 
 
+_COLOR_FILTER_EXPRESSIONS = {
+    "pb": "hue=s=0",
+    "sepia": "colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131",
+    "vinheta": "vignette=PI/4",
+    "inverter": "negate",
+    "contraste": "eq=contrast=1.5",
+}
+
+
+def _filter_expression(name: str, enable: str | None = None) -> str:
+    """O filtro de tela inteira do bloco, no ffmpeg; ``enable`` o liga só na janela dele (sem ele, sempre).
+
+    Um nome que não conhece vira Preto e Branco, como sempre foi. A exportação e as camadas da prévia do arrasto saem
+    daqui, e é isso que as deixa com o mesmo filtro.
+    """
+    expression = _COLOR_FILTER_EXPRESSIONS.get(name, _COLOR_FILTER_EXPRESSIONS["pb"])
+    if enable is None:
+        return expression
+    return f"{expression}{':' if '=' in expression else '='}enable='{enable}'"
+
+
 def _compose_video_piece(
     filters: list[str],
     current: str,
@@ -1634,22 +1655,7 @@ def _compose_video_piece(
     if piece.clip.overlay_type is OverlayType.FILTER:
         if piece.clip.has_region:
             return _compose_region_blur(filters, current, piece, project, order, enable)
-        name = piece.clip.filter_name
-        if name == "pb":
-            expression = f"hue=s=0:enable='{enable}'"
-        elif name == "sepia":
-            expression = (
-                f"colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"
-                f":enable='{enable}'"
-            )
-        elif name == "vinheta":
-            expression = f"vignette=PI/4:enable='{enable}'"
-        elif name == "inverter":
-            expression = f"negate=enable='{enable}'"
-        elif name == "contraste":
-            expression = f"eq=contrast=1.5:enable='{enable}'"
-        else:
-            expression = f"hue=s=0:enable='{enable}'"
+        expression = _filter_expression(piece.clip.filter_name, enable)
         label = f"[f{order}]"
         filters.append(f"{current}{expression}{label}")
         return label
