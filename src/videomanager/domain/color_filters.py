@@ -11,8 +11,6 @@ Sem NumPy e sem laço por pixel: a conta usa o que o Python faz em C — fatiar 
 não vaza para a vizinha. O corte em 0 e 255 sai dos bytes de excesso da pista. Em 200 mil pixels, ~10 ms.
 """
 
-from functools import lru_cache
-
 from videomanager.domain.constants import COLOR_FILTERS
 
 # Os números do compositor (``composer._COLOR_FILTER_EXPRESSIONS``; um teste confere que são os mesmos).
@@ -32,10 +30,15 @@ def _fixed(weights: tuple[float, ...]) -> tuple[int, ...]:
     return tuple(round(w * 256) for w in weights)
 
 
-@lru_cache(maxsize=None)
+_PRODUCT_TABLES: dict[int, tuple[bytes, bytes]] = {}
+
+
 def _product_tables(weight: int) -> tuple[bytes, bytes]:
-    """O byte baixo e o byte alto de ``valor * peso`` para cada valor de 0 a 255."""
-    return bytes((c * weight) & 255 for c in range(256)), bytes((c * weight) >> 8 for c in range(256))
+    """O byte baixo e o byte alto de ``valor * peso`` para cada valor de 0 a 255 (guardados: são poucos pesos)."""
+    if weight not in _PRODUCT_TABLES:
+        _PRODUCT_TABLES[weight] = (bytes((c * weight) & 255 for c in range(256)),
+                                   bytes((c * weight) >> 8 for c in range(256)))
+    return _PRODUCT_TABLES[weight]
 
 
 def _lanes(size: int, *placed: tuple[int, bytes]) -> int:
@@ -62,8 +65,7 @@ def _saturate(low: bytes, excess: bytes) -> bytes:
     return (int.from_bytes(low, "little") | int.from_bytes(excess.translate(_EXCESS), "little")).to_bytes(n, "little")
 
 
-@lru_cache(maxsize=None)
-def _contrast_tables() -> tuple[bytes, bytes]:
+def _build_contrast_tables() -> tuple[bytes, bytes]:
     """O deslocamento que o ``eq`` soma a cada canal, por luma Y (0 a 255), mais 256 para ficar positivo: byte baixo e alto.
 
     O ``eq`` age só no Y do YCbCr (faixa limitada, 16 a 235), e a conversão de volta soma essa diferença aos três
@@ -77,10 +79,13 @@ def _contrast_tables() -> tuple[bytes, bytes]:
     return bytes(v & 255 for v in values), bytes(v >> 8 for v in values)
 
 
+_CONTRAST_LOW, _CONTRAST_HIGH = _build_contrast_tables()
+
+
 def _contrast(r: bytes, g: bytes, b: bytes) -> tuple[bytes, bytes, bytes]:
     n = len(r)
     luma, _ = _weighted_sum((r, g, b), _fixed(LUMA))
-    low, high = _contrast_tables()
+    low, high = _CONTRAST_LOW, _CONTRAST_HIGH
     shift = _lanes(2, (0, luma.translate(low)), (1, luma.translate(high)))
     out = []
     for plane in (r, g, b):
