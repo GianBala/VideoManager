@@ -966,6 +966,12 @@ PROP_CHROMA_PRESETS = {"#00FF00": "Standard green", "#00B140": "Studio green", "
 PROP_CHROMA_PRESET_TIP = "{name} ({color})"
 PROP_CHROMA_TOLERANCE = "Tolerance"
 PROP_CHROMA_SMOOTHING = "Smoothing"
+PROP_FILTER = "Filter"
+PROP_FILTER_MOVABLE = "Movable filter (limit to an area)"
+PROP_FILTER_MOVABLE_NOTE = (
+    "Off, the filter applies to the whole screen. On, it applies only to a rectangle that you move and resize in the "
+    "preview, and that can also be animated with keyframes."
+)
 PROP_BLUR = "Blurred Background"
 PROP_BLUR_ENABLE = "Fill the edges with the blurred clip"
 PROP_BLUR_NOTE = "Covers the whole canvas under the clip, including the tracks below it."

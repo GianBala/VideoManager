@@ -1520,8 +1520,8 @@ class _ClipPropertiesWidget(QWidget):
         theme.on_theme_change(self._retheme)
         self._retheme()
 
-        # Bloco sem nenhuma seção (o filtro só tem duração e posição, que se ajustam na linha do tempo): diz isso,
-        # em vez de mostrar uma aba vazia.
+        # Bloco sem nenhuma seção (a transição, por exemplo, só tem duração e posição, que se ajustam na linha do
+        # tempo): diz isso, em vez de mostrar uma aba vazia.
         self._lbl_no_settings = bind(QLabel(), "setText", lambda: strings.PROP_NO_SETTINGS)
         self._lbl_no_settings.setProperty("role", "dim")
         self._lbl_no_settings.setWordWrap(True)
@@ -1529,6 +1529,22 @@ class _ClipPropertiesWidget(QWidget):
         self._lbl_no_settings.setContentsMargins(0, 14, 0, 0)
         self._lbl_no_settings.setVisible(False)
         self._layout.addWidget(self._lbl_no_settings)
+
+        # Grupo Filtro: o "móvel" de um filtro que não é o desfoque. Vem antes da Transformação porque é ele que a
+        # libera: ligado, o filtro vira um retângulo e as seções de posição, tamanho e animação aparecem logo abaixo.
+        self._filter_group = Section(lambda: strings.PROP_FILTER)
+        filter_layout = QVBoxLayout(self._filter_group.body)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+        filter_layout.setSpacing(9)
+        self._chk_movable = bind(WrapCheck(), "setText", lambda: strings.PROP_FILTER_MOVABLE)
+        self._chk_movable.toggled.connect(self._on_movable_toggled)
+        filter_layout.addWidget(self._chk_movable)
+        # Em linha própria: o texto quebra, e a altura dele não atravessa um layout horizontal.
+        filter_note = bind(QLabel(), "setText", lambda: strings.PROP_FILTER_MOVABLE_NOTE)
+        filter_note.setWordWrap(True)
+        filter_note.setProperty("role", "hint")
+        filter_layout.addWidget(filter_note)
+        self._layout.addWidget(self._filter_group)
 
         # Grupo Transformação (Posição, Tamanho, Travar proporção, Escala, Opacidade, Rotação)
         self._transform_group = Section(lambda: strings.PROP_TRANSFORM)
@@ -1909,6 +1925,7 @@ class _ClipPropertiesWidget(QWidget):
         self._clip_id = -1
         self._clip = None
         self._refresh_header()
+        self._filter_group.setVisible(False)
         self._transform_group.setVisible(False)
         self._speed_group.setVisible(False)
         self._volume_group.setVisible(False)
@@ -1928,7 +1945,7 @@ class _ClipPropertiesWidget(QWidget):
             first = first and not visible
 
     def _groups(self) -> tuple[Section, ...]:
-        return (self._transform_group, self._speed_group, self._volume_group, self._animation_group,
+        return (self._filter_group, self._transform_group, self._speed_group, self._volume_group, self._animation_group,
                 self._chromakey_group, self._blur_group, self._transition_group)
 
     def load_clip(self, clip: Clip, proj_w: int, proj_h: int, fps: float = 30.0, text_ratio: float = 1.0) -> None:
@@ -1993,6 +2010,10 @@ class _ClipPropertiesWidget(QWidget):
                         and (clip.has_image or clip.is_additional))
             # Um bloco de áudio não tem pose, mas tem volume: a animação é a mesma e anima o que ele tem.
             can_animate = can_pose or clip.can_adjust_sound
+            # O "móvel" é de todo filtro menos o desfoque, que é sempre um retângulo.
+            can_move = clip.overlay_type is OverlayType.FILTER and not clip.is_region_blur
+            self._filter_group.setVisible(can_move)
+            self._chk_movable.setChecked(clip.movable and can_move)
             self._transform_group.setVisible(can_pose)
             self._animation_group.setVisible(can_animate)
             # A região só se move e se redimensiona: girar, surgir e a opacidade não se aplicam a um ``crop``.
@@ -2107,6 +2128,15 @@ class _ClipPropertiesWidget(QWidget):
         if self._updating or self._clip_id < 0:
             return
         self.property_changed.emit(self._clip_id, {"chromakey_enabled": checked})
+
+    def _on_movable_toggled(self, checked: bool) -> None:
+        """Liga ou desliga o "móvel" do filtro: o retângulo nasce (ou some) e a pose acompanha, de uma vez só."""
+        if self._updating or self._clip_id < 0 or self._clip is None:
+            return
+        updated = self._clip.with_movable(checked)
+        self._clip = updated
+        self.property_changed.emit(self._clip_id, {
+            name: getattr(updated, name) for name in ("movable", "x", "y", "scale", "scale_x", "scale_y", "keyframes")})
 
     def _on_blur_toggled(self, checked: bool) -> None:
         if self._updating or self._clip_id < 0:
