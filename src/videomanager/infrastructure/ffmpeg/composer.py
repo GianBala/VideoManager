@@ -1555,7 +1555,7 @@ def _compose_region(
 ) -> str:
     """O filtro de região: recorta o retângulo, aplica o filtro nele e cola de volta.
 
-    O desfoque borra numa tela de trabalho (``_region_blur_chain``, e o resto desta explicação é dele); os demais
+    O desfoque borra numa tela de trabalho (o ramo ``is_region_blur`` abaixo, e o resto desta explicação é dele); os demais
     filtros, quando o bloco é ``movable``, passam a própria expressão (``_filter_expression``) pelo recorte e o
     devolvem ao mesmo lugar: fora do retângulo o quadro não muda um pixel, e dentro dele é o filtro que a tela
     inteira receberia. A vinheta, sendo calculada sobre o recorte, escurece as bordas **do retângulo**.
