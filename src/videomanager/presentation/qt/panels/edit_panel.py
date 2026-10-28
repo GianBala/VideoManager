@@ -3801,13 +3801,16 @@ class EditPanel(QWidget):
         # A contagem é a do plano: com o fundo desfocado são quatro imagens, sem
         # ele três. Três para um plano com fundo deixariam a faixa descoberta
         # mostrando a trilha de baixo, sem erro; quatro para um sem, o inverso.
-        # Depois delas vem uma imagem por desfoque de região acima do item. Arrastar o próprio desfoque pede só duas
-        # (o que está abaixo e o que está acima dele): a região não tem textura.
+        # Depois delas vem uma imagem por desfoque de região ou vinheta acima do item e, se houver vinheta, a máscara dela
+        # por último. Arrastar o próprio desfoque pede só duas de base (o que está abaixo e o que está acima dele): a região
+        # não tem textura.
         plan = self._interaction_context[2]
         base = plan.base_layers
-        if len(layers) == base + len(plan.stages) and all(not p.isNull() for p in layers):
+        end = base + len(plan.stages)
+        if len(layers) == end + int(plan.needs_mask) and all(not p.isNull() for p in layers):
             self._preview.set_interaction_layers(
-                layers[:base], tuple(zip((region for region, _ in plan.stages), layers[base:])))
+                layers[:base], tuple(zip((stage for stage, _ in plan.stages), layers[base:end])),
+                layers[end] if plan.needs_mask else None)
 
     def _begin_loading_hint(self) -> None:
         """Arma o aviso de atualização; ver ``_LOADING_HINT_MS``."""
