@@ -403,6 +403,7 @@ class _Preview(QLabel):
         self._interaction_layers: tuple[QPixmap, ...] | None = None
         # Um desfoque de região acima do item arrastado, com a imagem do que vem depois dele (ver ``set_interaction_layers``).
         self._interaction_stages: tuple[tuple[Clip, QPixmap], ...] = ()
+        self._interaction_mask: QPixmap | None = None
         self._interaction_visible = False
 
         self._active_clip: Clip | None = None
@@ -489,14 +490,17 @@ class _Preview(QLabel):
         self.update()
 
     def set_interaction_layers(self, layers: tuple[QPixmap, ...] | None,
-                               stages: tuple[tuple[Clip, QPixmap], ...] = ()) -> None:
-        """``stages``: cada desfoque de região acima do item, com o que o cobre até o próximo desfoque.
+                               stages: tuple[tuple[Clip, QPixmap], ...] = (),
+                               mask: QPixmap | None = None) -> None:
+        """``stages``: cada desfoque de região ou vinheta acima do item, com o que o cobre até o próximo.
 
-        O desfoque borra o que o item móvel desenha, então ele não vem pronto: a prévia monta a imagem do gesto
-        a cada movimento e borra a região nela (``_paint_interaction_with_regions``).
+        O desfoque borra o que o item móvel desenha e a vinheta escurece por posição na tela, então nenhum dos dois
+        vem pronto: a prévia monta a imagem do gesto a cada movimento e aplica cada um nela
+        (``_paint_interaction_with_regions``). ``mask`` é o quanto a vinheta escurece cada pixel.
         """
         self._interaction_layers = layers
         self._interaction_stages = stages if layers is not None else ()
+        self._interaction_mask = mask if layers is not None else None
         if layers is None:
             self._interaction_visible = False
         elif self._drag_mode:
@@ -1146,7 +1150,8 @@ class _Preview(QLabel):
                                         geom: tuple[float, float, float, float]) -> None:
         """As camadas do gesto quando há desfoque de região no caminho: acima do item arrastado, ou o próprio item.
 
-        As mesmas camadas de sempre, mas num quadro fora da tela, na resolução delas: a região é borrada nele
+        As mesmas camadas de sempre, mas num quadro fora da tela, na resolução delas: a região é borrada (ou a vinheta
+        multiplicada) nele
         com os pixels que o item móvel acabou de pôr ali, e só então a imagem vai para a prévia. A pose do item é
         a de agora, como no caminho sem desfoque. A região vem da conta do compositor (``Clip.region_rect``), na
         mesma tela reduzida em que as camadas foram feitas.
@@ -1192,8 +1197,13 @@ class _Preview(QLabel):
             layers.resetTransform()
             layers.setOpacity(1.0)
         layers.drawPixmap(whole, foreground)
-        for region, after in stages:
-            blur(region)
+        for stage, after in stages:
+            if stage.has_region:
+                blur(stage)
+            else:        # vinheta: multiplica o quadro pela máscara, no lugar onde o item está agora
+                layers.setCompositionMode(QPainter.CompositionMode.CompositionMode_Multiply)
+                layers.drawPixmap(whole, self._interaction_mask)
+                layers.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
             layers.drawPixmap(whole, after)
         layers.end()
         painter.save()

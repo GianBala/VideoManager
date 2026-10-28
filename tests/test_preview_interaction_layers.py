@@ -44,7 +44,11 @@ def test_plano_estavel_durante_pose_mas_invalidado_por_contexto(tmp_path):
     other = project.tracks[0].clips[0]
     assert plan != interaction_plan(project.with_updated_clip(other.clip_id, x=.1), clip.clip_id, 1)
     effect = Clip(None, 0, 5, overlay_type='filter', filter_name='inverter')
-    assert interaction_plan(replace(project, tracks=(Track(TrackKind.ADDITIONAL, clips=(effect,)), *project.tracks)), clip.clip_id, 1) is None
+    # Filtro de cor acima do item: o plano existe e leva o filtro (já aplicado nas imagens prontas e na textura).
+    with_effect = interaction_plan(replace(project, tracks=(Track(TrackKind.ADDITIONAL, clips=(effect,)), *project.tracks)), clip.clip_id, 1)
+    assert with_effect is not None and with_effect.filters == (effect,)
+    unknown = Clip(None, 0, 5, overlay_type='filter', filter_name='filtro-que-o-plano-nao-conhece')
+    assert interaction_plan(replace(project, tracks=(Track(TrackKind.ADDITIONAL, clips=(unknown,)), *project.tracks)), clip.clip_id, 1) is None
     below = replace(project, tracks=(*project.tracks, Track(TrackKind.ADDITIONAL, clips=(effect,))))
     assert interaction_plan(below, clip.clip_id, 1) is not None
 
@@ -562,3 +566,79 @@ def test_mover_o_desfoque_com_as_camadas_prontas_nao_pede_quadro_ao_ffmpeg(pose_
     assert panel._project.find(desfoque.clip_id)[1].x == .5
     # As camadas continuam valendo para o gesto seguinte: a pose do desfoque não faz parte do plano.
     assert panel._interaction_ready()
+
+
+def _aplicar_filtros_pela_aba(panel, deliver, calls, *nomes):
+    """O caminho do usuário: ``Aplicar Filtro`` na aba, um filtro depois do outro (o novo entra numa trilha acima)."""
+    for nome in nomes:
+        panel._insert_filter_clip(nome)
+        while panel._frame_busy:
+            deliver(calls.frames[-1])
+    achados = {c.filter_name: c for t in panel._project.tracks for c in t.clips if c.filter_name}
+    return [achados[nome] for nome in dict.fromkeys(nomes)]
+
+
+def _liberar_camadas(calls):
+    for worker in calls.interaction:
+        worker.signals.done.emit()
+
+
+def test_desfoque_e_sepia_pela_aba_arrastar_o_desfoque_continua_sem_pedir_quadro(pose_panel):
+    """Era o caso de quem aplica dois filtros: o Sépia entra acima do desfoque e o plano rápido sumia."""
+    panel, calls, item, deliver = pose_panel
+    desfoque, sepia = _aplicar_filtros_pela_aba(panel, deliver, calls, "desfoque", "sepia")
+    ordem = [c.filter_name for t in panel._project.tracks for c in t.clips if c.filter_name]
+    assert ordem == ["sepia", "desfoque"], "o Sépia aplicado depois fica acima do desfoque"
+    _liberar_camadas(calls)
+    antes = len(calls.interaction)
+    panel._timeline.select(desfoque.clip_id)
+    while panel._frame_busy:
+        deliver(calls.frames[-1])
+    assert len(calls.interaction) > antes, 'selecionar o desfoque com o Sépia acima não pediu as camadas do gesto'
+    worker = calls.interaction[-1]
+    plano = worker.args[0]
+    assert plano.source is None and [c.filter_name for c in plano.filters] == ["sepia"] and plano.stages == ()
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('#00000000')))
+    worker.signals.done.emit()
+    assert panel._preview._interaction_layers is not None
+    antes = len(calls.frames)
+    for x in (.35, .4, .45):
+        ativo = panel._preview._active_clip
+        panel._preview.set_active_clip(replace(ativo, x=x), panel._project.width, panel._project.height)
+        panel._on_overlay_transformed(desfoque.clip_id, x, ativo.y, ativo.scale, 0.0)
+    assert len(calls.frames) == antes, 'cada movimento compôs um quadro inteiro'
+    assert panel._preview._interaction_visible
+
+
+def test_item_com_desfoque_e_sepia_acima_recebe_as_camadas_e_o_trecho_do_desfoque(pose_panel):
+    panel, calls, item, deliver = pose_panel
+    desfoque, sepia = _aplicar_filtros_pela_aba(panel, deliver, calls, "desfoque", "sepia")
+    _liberar_camadas(calls)
+    panel._timeline.select(item.clip_id)
+    while panel._frame_busy:
+        deliver(calls.frames[-1])
+    worker = calls.interaction[-1]
+    plano = worker.args[0]
+    assert plano.clip_id == item.clip_id and [r.clip_id for r, _ in plano.stages] == [desfoque.clip_id]
+    # Fundo, textura, frente e o trecho depois do desfoque: o Sépia não é imagem, já está nelas.
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('red'), _png('#00000000'), _png('#00000000')))
+    worker.signals.done.emit()
+    assert len(panel._preview._interaction_layers) == 3 and len(panel._preview._interaction_stages) == 1
+    assert panel._preview._interaction_mask is None
+
+
+def test_vinheta_acima_do_item_pede_a_mascara_como_ultima_imagem_e_so_vale_com_ela(pose_panel):
+    panel, calls, item, deliver = pose_panel
+    (vinheta,) = _aplicar_filtros_pela_aba(panel, deliver, calls, "vinheta")
+    _liberar_camadas(calls)
+    panel._timeline.select(item.clip_id)
+    while panel._frame_busy:
+        deliver(calls.frames[-1])
+    worker = calls.interaction[-1]
+    plano = worker.args[0]
+    assert plano.needs_mask and [r.clip_id for r, _ in plano.stages] == [vinheta.clip_id]
+    sem_mascara = (_png('lime'), _png('red'), _png('#00000000'), _png('#00000000'))
+    worker.signals.frame.emit(worker.args[3], sem_mascara)
+    assert panel._preview._interaction_layers is None, 'sem a máscara a vinheta não pode ser refeita: não se instala'
+    worker.signals.frame.emit(worker.args[3], (*sem_mascara, _png('#808080')))
+    assert panel._preview._interaction_layers is not None and panel._preview._interaction_mask is not None
