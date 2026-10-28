@@ -3754,8 +3754,9 @@ class EditPanel(QWidget):
         clip = self._preview._active_clip
         if self._closed or self._playing or self._on_fullscreen or clip is None:
             return None
-        plan = interaction_plan(self._project, clip.clip_id, self._position)
-        return (self._generation, self._preview_size(), plan) if plan else None
+        size = self._preview_size()
+        plan = interaction_plan(self._project, clip.clip_id, self._position, size)
+        return (self._generation, size, plan) if plan else None
 
     def _interaction_ready(self) -> bool:
         """Se as camadas na prévia valem para o objeto, o instante e a composição atuais."""

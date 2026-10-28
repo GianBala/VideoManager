@@ -29,6 +29,12 @@ REGION_MIN_SCALE = 0.05
 REGION_BLUR_WORK_SIDE = 16
 REGION_BLUR_SIGMA_RATIO = 0.35
 REGION_BLUR_STEPS = 3
+# Quantos pixels a prévia do arrasto aceita passar, a cada movimento, por um filtro de cor móvel (``color_filters``, em
+# Python): ~10 ms para o Sépia (o mais caro) e ~6 para o Contraste. Acima disso o retângulo de um filtro de cor móvel
+# acima do que se arrasta devolve o quadro ao ffmpeg, como antes: uma interface travada é pior que uma prévia que atrasa.
+# Medido: 23 ms em 640×360 e 98 ms em 1280×720 com o retângulo na tela inteira; o do filtro recém-ligado (30% de lado)
+# custa 2 e 8 ms.
+REGION_COLOR_STAGE_MAX_PIXELS = 100_000
 # Filtros de tela inteira (ids gravados no .vmp). Os de cor agem pixel a pixel e são afins (``a·x + b``): somar um item
 # translúcido e depois filtrar dá o mesmo que filtrar cada camada e somar, então a prévia do arrasto os aplica às camadas
 # prontas. Os que têm termo constante (``b``) não comutam com a multiplicação da vinheta, que depende da posição na tela.
