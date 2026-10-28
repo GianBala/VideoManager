@@ -1412,3 +1412,89 @@ class TestFundoDesfocado:
         # Os dois blocos da trilha e os dois lados da transição: quatro fundos.
         assert texto.count("gblur") == 4 and texto.count("split=2") == 4
         self.rotulos_fecham(grafo)
+
+
+class TestDesfoqueDeRegiao:
+    """O grafo do filtro de desfoque de região. A imagem que sai é medida em ``test_regiao_do_desfoque_export.py``."""
+
+    @staticmethod
+    def desfoque(inicio: float = 2.0, duracao: float = 3.0, **kw) -> Clip:
+        from videomanager.domain.project import OverlayType, filter_pose, pseudo_media
+        pose = {} if "scale_x" in kw else filter_pose("desfoque")
+        return Clip(pseudo_media(OverlayType.FILTER, "Desfoque", duracao), inicio, duracao,
+                    overlay_type="filter", filter_name="desfoque", **pose, **kw)
+
+    def com(self, *filtros: Clip, **kw) -> Project:
+        adicionais = Track(kind=TrackKind.ADDITIONAL, name="Adicionais 1", clips=filtros)
+        return projeto(adicionais, video_track(clip(VIDEO, duration=10.0)), **kw)
+
+    @staticmethod
+    def ramo(graph) -> str:
+        return next(f for f in ";".join(graph.filters).split(";") if "gblur" in f)
+
+    def test_recorta_borra_na_tela_de_trabalho_e_cola_no_mesmo_lugar(self) -> None:
+        texto = ";".join(build_graph(self.com(self.desfoque())).filters)
+        ramo = self.ramo(build_graph(self.com(self.desfoque())))
+        # 30% da tela de 1920×1080: 576×324, e o lado menor vai a 16 px na tela de trabalho.
+        assert "crop=w=576:h=324:" in ramo and "scale=28:16:flags=bilinear" in ramo
+        # gbrp para o gblur (em yuv420p saem faixas verdes), steps=3 (com um passo o texto ainda se lê).
+        assert "format=gbrp,gblur=sigma=5.6000:steps=3,format=rgba" in ramo
+        # O overlay segue o formato do quadro principal e só liga na janela do bloco.
+        assert "format=auto" in texto and "eof_action=pass" in texto
+        assert "enable='gte(t,2.000000)*lt(t,5.000000)'" in texto
+
+    def test_a_ramificacao_nao_e_aparada_para_o_overlay_nao_reter_quadros(self) -> None:
+        # O trim fazia o overlay guardar, na fila, todo quadro do ramo principal anterior ao bloco (o ramo aparado só
+        # entrega o primeiro depois dele): o pico de memória do ffmpeg crescia ~228 MB por segundo de antecedência a
+        # 1080p. A medida está em test_regiao_do_desfoque_export.py; aqui, que o ramo não descarta quadro nenhum.
+        ramo = self.ramo(build_graph(self.com(self.desfoque())))
+        assert "trim=" not in ramo and "select=" not in ramo
+
+    def test_crop_e_overlay_recebem_a_mesma_posicao(self) -> None:
+        from videomanager.domain.keyframe import Keyframe
+        animado = self.desfoque(x=0.25, scale=0.25, scale_x=0.25, scale_y=0.25, keyframes=(
+            Keyframe(0.0, x=0.25, y=0.5, scale_x=0.25, scale_y=0.25),
+            Keyframe(3.0, x=0.75, y=0.5, scale_x=0.25, scale_y=0.25)))
+        grafo = build_graph(self.com(animado))
+        ramo = self.ramo(grafo)
+        overlay = next(f for f in grafo.filters if f.startswith("[rb") and "overlay" in f)
+        x_crop = re.search(r"crop=w=\d+:h=\d+:x='([^']+)':y='([^']+)'", ramo).groups()
+        x_over = re.search(r"overlay=x='([^']+)':y='([^']+)'", overlay).groups()
+        assert x_crop == x_over
+        assert "t" in re.sub(r"\bround\b|\bmax\b|\bmin\b", "", x_crop[0]) and x_crop[0].startswith("2*round(max(0,min(")
+
+    def test_a_regiao_e_fracao_da_tela_do_projeto(self) -> None:
+        assert "crop=w=384:h=216:" in self.ramo(build_graph(self.com(self.desfoque(), width=1280, height=720)))
+
+    def test_dois_desfoques_nao_repetem_rotulo(self) -> None:
+        sequencia = self.com(self.desfoque(0.0, 2.0, x=0.2), self.desfoque(3.0, 2.0, x=0.8))
+        grafo = build_graph(sequencia)
+        TestFundoDesfocado.rotulos_fecham(grafo)
+        assert ";".join(grafo.filters).count("gblur") == 2
+
+    def test_os_outros_filtros_continuam_com_o_mesmo_grafo(self) -> None:
+        # A região é só do desfoque: nenhum outro filtro ganha recorte, nem ramificação do quadro.
+        sepia = clip(VIDEO, overlay_type="filter", filter_name="sepia")
+        grafo = build_graph(projeto(Track(kind=TrackKind.ADDITIONAL, name="Adicionais 1", clips=(sepia,)),
+                                    video_track(clip(VIDEO))))
+        texto = ";".join(grafo.filters)
+        assert "colorchannelmixer=.393" in texto and "gblur" not in texto and "crop=w=" not in texto
+
+    def test_corte_rapido_nao_ignora_o_desfoque_em_silencio(self) -> None:
+        # Copiar os dados entregaria o vídeo sem a região borrada.
+        sem = projeto(video_track(clip(VIDEO)))
+        assert simple_trim(sem) is not None
+        assert simple_trim(self.com(self.desfoque(), width=1920, height=1080)) is None
+
+    def test_o_desfoque_nao_entra_no_grafo_de_so_audio(self) -> None:
+        grafo = build_graph(self.com(self.desfoque()), want_video=False)
+        assert grafo.video_label is None and "gblur" not in ";".join(grafo.filters)
+
+
+def test_filtro_de_tela_inteira_com_nome_desconhecido_vira_preto_e_branco_como_sempre_foi():
+    """Arquivo de outra versão, ou nome que o plano não conhece: o quadro sai em P&B, e a exportação e as camadas do arrasto
+    (que saem desta mesma função) têm de concordar."""
+    from videomanager.infrastructure.ffmpeg.composer import _filter_expression
+    assert _filter_expression("filtro-novo") == _filter_expression("pb") == "hue=s=0"
+    assert _filter_expression("filtro-novo", "between(t,1,2)") == "hue=s=0:enable='between(t,1,2)'"
+    assert _filter_expression("inverter", "between(t,1,2)") == "negate=enable='between(t,1,2)'"

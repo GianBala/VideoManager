@@ -214,10 +214,20 @@ def _recursos(pasta: Path) -> dict:
                  overlay_type="text", text_content="Olá")
     filtro = Clip(MediaRef(Path("Filtro_x"), MediaKind.IMAGE, duration=3.0), 4.5, 3.0, clip_id=905,
                   overlay_type="filter", filter_name="sepia")
+    # O desfoque de região tem texto próprio (a opção e a dica da aba Filtros) e uma aba Propriedades sem rotação nem
+    # opacidade: fica numa trilha à parte para não mexer na janela do texto e do filtro das outras cenas.
+    desfoque = Clip(MediaRef(Path("Filtro_Desfoque"), MediaKind.IMAGE, duration=3.0), 0.5, 3.0, clip_id=908,
+                    overlay_type="filter", filter_name="desfoque", scale=0.3, scale_x=0.3, scale_y=0.3)
+    # O filtro móvel mostra a seção "Filtro" e as de posição e animação na aba Propriedades: outra trilha, para não
+    # sobrepor o desfoque no tempo.
+    movel = Clip(MediaRef(Path("Filtro_Movel"), MediaKind.IMAGE, duration=3.0), 0.5, 3.0, clip_id=909,
+                 overlay_type="filter", filter_name="vinheta", movable=True, scale=0.3, scale_x=0.3, scale_y=0.3)
     foto = Clip(refs["foto.png"], 1.0, 3.0, clip_id=906, scale=0.5, scale_x=0.5, scale_y=0.5)
     musica = Clip(refs["musica.m4a"], 0.0, 6.0, clip_id=907, gain_db=-3.5)
     projeto = Project(tracks=(
         Track(TrackKind.ADDITIONAL, clips=(texto, filtro), name="Adicionais 1"),
+        Track(TrackKind.ADDITIONAL, clips=(desfoque,), name="Adicionais 2"),
+        Track(TrackKind.ADDITIONAL, clips=(movel,), name="Adicionais 3"),
         Track(TrackKind.VIDEO, clips=(foto,), name="Vídeo 2"),
         Track(TrackKind.VIDEO, clips=(a, transicao, b), name="Vídeo 1"),
         Track(TrackKind.AUDIO, clips=(musica,), name="Trilha da câmera"),
@@ -308,6 +318,9 @@ CENAS = {
     "editor_texto": lambda app, j, r: _editor(app, j, r, 904),
     "editor_filtro": lambda app, j, r: _editor(app, j, r, 905),
     "editor_transicao": lambda app, j, r: _editor(app, j, r, 903),
+    "editor_desfoque": lambda app, j, r: _editor(app, j, r, 908),
+    "editor_desfoque_propriedades": lambda app, j, r: (_editor(app, j, r, 908), j._edit._open_properties_tab(908)),
+    "editor_filtro_movel_propriedades": lambda app, j, r: (_editor(app, j, r, 909), j._edit._open_properties_tab(909)),
     "editor_propriedades": lambda app, j, r: (_editor(app, j, r, 906), j._edit._open_properties_tab(906)),
     "tela_cheia": lambda app, j, r: (_editor(app, j, r, 901), j._edit._toggle_fullscreen()),
 }

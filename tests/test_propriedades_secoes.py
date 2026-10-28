@@ -105,14 +105,18 @@ def test_o_cabecalho_traz_a_especie_o_id_e_fecha(painel_de_edicao, blocos_de_edi
     assert pedidos == [1] and not widget._btn_close.icon().isNull()
 
 
-def test_o_filtro_nao_tem_secao_e_diz_o_que_ha(painel_de_edicao, blocos_de_edicao):
+def test_o_filtro_so_tem_a_secao_filtro_e_todo_tipo_de_bloco_tem_alguma_secao(painel_de_edicao, blocos_de_edicao):
+    """Antes da caixa "Filtro móvel" o filtro não tinha seção nenhuma e a aba dizia "sem ajustes". Agora tem uma, e é
+    só ela: a pose, a animação e o resto só aparecem quando o filtro é móvel. Nenhum tipo de bloco fica com a aba vazia
+    (por isso o aviso "sem ajustes" deixou de existir): um tipo novo sem seção pede o aviso de volta."""
     painel = painel_de_edicao
     widget = painel._properties_widget
     _abrir(painel, blocos_de_edicao["filtro"])
+    assert widget._filter_group.isVisibleTo(widget) and widget._chk_movable.isVisibleTo(widget)
     assert not any(getattr(widget, nome).isVisibleTo(widget) for nome in _ORDEM)
-    assert widget._lbl_no_settings.isVisibleTo(widget) and widget._lbl_no_settings.text() == strings.PROP_NO_SETTINGS
     for tipo in ("video com som", "imagem", "audio", "texto", "transicao"):
         _abrir(painel, blocos_de_edicao[tipo])
-        assert not widget._lbl_no_settings.isVisibleTo(widget), tipo
+        assert any(grupo.isVisibleTo(widget) for grupo in widget._groups()), tipo
+        assert not widget._filter_group.isVisibleTo(widget), tipo     # a caixa é só do filtro
     widget.clear()
-    assert not widget._lbl_no_settings.isVisibleTo(widget)
+    assert not any(grupo.isVisibleTo(widget) for grupo in widget._groups())

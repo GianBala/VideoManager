@@ -269,8 +269,11 @@ bloco numa trilha de **Adicionais** (ou, no caso da transição, na trilha de
 vídeo, sobre o corte):
 
 - **Texto** — conteúdo, fonte, tamanho, negrito e itálico, cor e contorno.
-- **Filtros** — Preto e Branco, Sépia, Alto Contraste, Vinheta e Inversão. Um
-  filtro age sobre tudo que está **abaixo** da trilha dele.
+- **Filtros** — Preto e Branco, Sépia, Alto Contraste, Vinheta, Inversão e
+  **Desfoque**. Um filtro age sobre tudo que está **abaixo** da trilha dele; o
+  Desfoque age só num retângulo (ver [Desfoque de região](#desfoque-de-região)), e
+  qualquer outro filtro também pode agir só num retângulo, ligando **Filtro móvel**
+  na aba Propriedades (ver [Filtro móvel](#filtro-móvel)).
 - **Transições** — Fade, Fade para Preto, Fade para Branco, Dissolve, Wipe e
   Slide (esquerda/direita), com duração a partir de 0,2 s e até o que cabe nos
   dois blocos do corte, no campo e na alça (padrão 1 s), e a opção
@@ -280,6 +283,81 @@ vídeo, sobre o corte):
 - **Propriedades** — aparece ao escolher **Propriedades** no menu do botão
   direito sobre um bloco, e se fecha pelo ✕ do título. É a edição numérica
   precisa do bloco selecionado (ver a seguir).
+
+### Desfoque de região
+
+O **Desfoque** (aba **Filtros**) borra só um retângulo do quadro, durante o tempo do bloco: para
+esconder um rosto, uma placa ou uma tela. Escolha **Desfoque** e **Aplicar Filtro**: o bloco nasce na
+trilha de Adicionais, com a duração do campo, e na prévia aparece o retângulo (30% da tela, no centro).
+
+- **Mover e redimensionar** — arraste o retângulo na prévia. Os quatro cantos mudam a largura e a
+  altura **independentes**; o canto oposto fica parado. Ele não gira e **não sai do quadro**, e se
+  encaixa nas bordas e no centro. Enquanto você arrasta (ou redimensiona), a caixa e o borrão
+  acompanham o mouse na hora; o quadro definitivo do ffmpeg chega quando você solta.
+- **Selecionar** — o Desfoque fica sempre acima do que borra, então o **corpo** do retângulo não o
+  seleciona: clicar ali pega a imagem, o vídeo ou o texto que está embaixo, como se o Desfoque não
+  existisse. Para pegar o Desfoque, clique na **borda** do retângulo ou no bloco dele na linha do
+  tempo; depois de selecionado, ele se arrasta por dentro como qualquer bloco.
+- **Arrastar o que está embaixo** — mover uma imagem, um vídeo ou um texto que passa por baixo do
+  Desfoque mostra o borrão acompanhando o movimento na hora. O mesmo vale com outros filtros por cima
+  (Sépia, Preto e Branco, Inverter, Contraste, Vinheta), de tela inteira ou **móveis**: a prévia aplica o
+  filtro às imagens prontas do gesto (ou, no filtro móvel, ao retângulo do quadro que ela monta a cada
+  movimento), e o quadro definitivo do ffmpeg chega quando você solta. Só ficam no caminho lento — o
+  quadro inteiro refeito a cada passo — estas combinações: uma transição acima do item; um filtro que a
+  prévia não conhece; a Vinheta (de tela inteira ou móvel) abaixo de um Inverter ou de um Contraste; um
+  filtro de cor de tela inteira acima de um filtro de cor móvel; e um filtro de cor móvel com o retângulo
+  maior que 100 mil pixels da prévia (algo como dois terços da largura numa prévia de 640 × 360, ou um
+  terço numa de 1280 × 720).
+- **Aba Propriedades** — posição X/Y, largura/altura e escala, em pixels da tela do projeto. Não há
+  rotação, opacidade nem trava de proporção: um recorte não tem nada disso.
+- **Acompanhar o que se move** — só a **posição** anima. Com o cursor onde quer, mexer no retângulo cria
+  um quadro-chave, e a região anda entre eles (o acompanhamento é manual, não automático). O
+  **tamanho é um só por bloco**: redimensionar vale para todos os quadros-chave.
+- **Força** — fixa e proporcional ao tamanho da região, forte o bastante para que nem um texto que
+  ocupe a região inteira seja legível. Não há controle de intensidade.
+- **Vários desfoques** — um bloco para cada; podem estar na mesma trilha (um depois do outro) ou em
+  trilhas diferentes. Como todo filtro, o Desfoque age sobre o que está **abaixo** da trilha dele:
+  um texto numa trilha acima fica nítido.
+- **Trocar de filtro** — com o bloco selecionado, escolher outro filtro na aba o troca: quem vira
+  Desfoque ganha o tamanho inicial, e quem deixa de ser volta à tela cheia.
+- **Corte rápido** — não vale para uma edição com Desfoque: copiar os dados entregaria o vídeo sem a
+  região borrada, então a exportação recodifica.
+- **Projeto aberto em versão antiga** — o projeto que tem Desfoque é gravado na versão 7 do arquivo.
+  Uma versão do aplicativo anterior ao Desfoque recusa esse arquivo, com a mensagem de versão não
+  suportada, em vez de mostrar o quadro inteiro em Preto e Branco sem desfocar nada; os projetos que
+  não têm Desfoque continuam abrindo nela. Ao gravar a versão 7 sobre um arquivo mais antigo, o
+  aplicativo guarda o original numa cópia `.v6.bak` ao lado; tirar o último Desfoque e salvar volta a
+  gravar o formato antigo.
+- **ffmpeg 6 e transições** — com o ffmpeg 6 (o do Ubuntu 24.04; o aplicativo empacotado traz o 7), uma
+  transição com **Afetar itens adicionais** que atravessa o bloco o perde durante a passagem, como
+  acontece com os demais filtros: a área que ele esconderia aparece. A janela de exportação avisa antes
+  de enfileirar (e a fila repete o aviso) quando encontra essa combinação; desligar a opção na transição, ou usar o ffmpeg 7 ou mais novo, resolve.
+
+### Filtro móvel
+
+Todo filtro, menos o Desfoque (que já é sempre um retângulo), nasce agindo na **tela inteira**, como sempre foi. Na
+aba **Propriedades** do bloco, a caixa **Filtro móvel (limitar a uma área)** o transforma num retângulo:
+
+- **Ligada** — o filtro passa a agir só dentro de um retângulo, que nasce com 30% da tela, no centro, e libera o que o
+  Desfoque tem: posição, largura, altura e escala (na aba e arrastando o retângulo e os cantos na prévia, como no
+  [Desfoque de região](#desfoque-de-região)) e os quadros-chave, que animam a **posição** (o tamanho é um só por bloco).
+  Não há rotação, opacidade nem trava de proporção: um recorte não tem nada disso.
+- **Desligada** — volta à tela inteira, sem retângulo e sem quadros-chave.
+- **Fora do retângulo** o quadro não muda um pixel; **dentro**, o filtro é o mesmo que a tela inteira receberia. A
+  **Vinheta** é calculada no retângulo, então escurece as bordas **dele** e deixa o centro.
+- **Selecionar** — como no Desfoque, o corpo de um filtro móvel que não está selecionado deixa o clique passar para o
+  item que está embaixo; para pegá-lo, clique na **borda** do retângulo ou no bloco dele na linha do tempo.
+- **Trocar de filtro** — com o bloco selecionado, escolher outro filtro na aba o troca e **mantém o retângulo**; quem
+  vira Desfoque conserva o retângulo, e o Desfoque que vira outro filtro volta à tela inteira.
+- **Fluidez** — mover ou redimensionar o retângulo mostra o resultado na hora, na prévia, para qualquer filtro, e o
+  mesmo vale para arrastar um item, o Desfoque ou outro filtro que esteja **abaixo** de um filtro móvel. Os casos que
+  seguem no caminho lento (o quadro inteiro refeito a cada passo) são os listados em "Arrastar o que está embaixo",
+  em [Desfoque de região](#desfoque-de-região): os que mais aparecem são um filtro de cor móvel muito grande e um
+  filtro de tela inteira por cima de um filtro de cor móvel.
+- **Projeto aberto em versão antiga** — o projeto com um filtro móvel é gravado na versão 8 do arquivo, e uma versão
+  anterior a recusa com a mensagem de versão não suportada (ela aplicaria o filtro à tela inteira). Os projetos sem
+  filtro móvel continuam na versão de antes. Ao gravar a versão 8 sobre um arquivo mais antigo, o aplicativo guarda o
+  original numa cópia `.vN.bak` ao lado.
 
 ### Propriedades e animação
 

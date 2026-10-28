@@ -271,16 +271,6 @@ def test_a_lista_de_transicoes_traz_so_o_nome_e_o_icone_vem_do_desenho(tema_do_a
     assert _origem(caixa, widget).x() + caixa.width() == _origem(combo, widget).x() + combo.width()
 
 
-def test_o_bloco_sem_ajustes_diz_isso_com_ar_embaixo_do_cabecalho(tema_do_app, painel_de_edicao, blocos_de_edicao):
-    widget = _abrir(painel_de_edicao, blocos_de_edicao["filtro"])
-    aviso = widget._lbl_no_settings
-    assert aviso.isVisibleTo(widget) and aviso.text() == strings.PROP_NO_SETTINGS
-    cabecalho = widget._lbl_clip_type
-    vao = _origem(aviso, widget).y() - (_origem(cabecalho, widget).y() + cabecalho.height())
-    # O ar é a margem de cima do próprio rótulo, e o texto começa depois dela.
-    assert vao + aviso.contentsMargins().top() >= 14
-
-
 @pytest.mark.parametrize("bloco", ["video com som", "transicao"])
 def test_o_conteudo_da_aba_cabe_na_coluna_de_304_px_sem_rolar_para_o_lado(tema_do_app, painel_de_edicao, blocos_de_edicao, bloco):
     widget = _abrir(painel_de_edicao, blocos_de_edicao[bloco])

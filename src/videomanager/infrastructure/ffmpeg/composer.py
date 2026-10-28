@@ -42,6 +42,7 @@ from videomanager.infrastructure.system.binaries import decode_thread_args
 from videomanager.application.errors import ConversionError
 from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.constants import GAIN_EPSILON
+from videomanager.domain.constants import REGION_BLUR_STEPS
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import BYTES_PER_PIXEL
@@ -62,6 +63,9 @@ from videomanager.domain.timing import frame_time
 from videomanager.domain.timing import last_frame_time
 from videomanager.infrastructure.ffmpeg.trimmer import tail_args
 from videomanager.domain.geometry import image_base_size
+from videomanager.domain.geometry import region_origin_expr
+from videomanager.domain.geometry import region_size
+from videomanager.domain.geometry import region_work_size
 from videomanager.domain.render_cost import interpolation_bytes
 from videomanager.domain.render_cost import reverse_cuts
 from videomanager.domain.reversal import MAX_REVERSE_BYTES, PREVIEW_WINDOW_SECONDS
@@ -1541,6 +1545,99 @@ def _xfade_name(name: str) -> str:
     }.get(name, "fade")
 
 
+def _compose_region(
+    filters: list[str],
+    current: str,
+    piece: _Piece,
+    project: Project,
+    order: int | str,
+    enable: str,
+) -> str:
+    """O filtro de região: recorta o retângulo, aplica o filtro nele e cola de volta.
+
+    O desfoque borra numa tela de trabalho (o ramo ``is_region_blur`` abaixo, e o resto desta explicação é dele); os demais
+    filtros, quando o bloco é ``movable``, passam a própria expressão (``_filter_expression``) pelo recorte e o
+    devolvem ao mesmo lugar: fora do retângulo o quadro não muda um pixel, e dentro dele é o filtro que a tela
+    inteira receberia. A vinheta, sendo calculada sobre o recorte, escurece as bordas **do retângulo**.
+
+    A região é a do bloco (``domain.geometry.region_*``, a mesma conta da prévia). O
+    tamanho é um só por bloco e a posição pode animar: ``crop`` lê ``w`` e ``h`` uma
+    vez, mas reavalia ``x`` e ``y`` a cada quadro. O ``crop`` e o ``overlay`` recebem
+    **o mesmo texto** de posição, já par e presa por dentro da tela.
+
+    O desfoque é feito num recorte de lado menor fixo (``REGION_BLUR_WORK_SIDE``),
+    com σ proporcional a esse lado, e só então ampliado de volta: assim a força é
+    relativa à região e prévia e exportação saem do mesmo desenho, como no fundo
+    desfocado (``_BLUR_SHORT_SIDE``). Quatro coisas foram medidas e estão presas em teste:
+
+    * o ``gblur`` roda em ``gbrp``. Em ``yuv420p``, num recorte de 16 px, os planos de
+      cor saem com verde nas bordas (excesso de 135 contra −127 do original);
+    * o quadro principal é ``rgba`` (todo bloco termina em ``format=rgba``), e o ``overlay``
+      daqui precisa de ``format=auto`` como os demais: o padrão dele é ``yuv420``, que
+      convertia o quadro **inteiro** de ``rgba`` para ``yuva420p`` (croma subamostrado,
+      faixa de vídeo) e mudava pixels de fora do retângulo, sem erro nenhum. A cadeia
+      devolve ``rgba`` pelo mesmo motivo; passar por ``gbrp`` e voltar a ``rgba`` não toca
+      no alfa, então não cai na divisão pelo alfa do ffmpeg 9;
+    * ``steps=3``. Com um passo só a aproximação gaussiana tem cauda pesada, e o texto
+      de uma placa ainda se lê com σ de 0,35 do lado;
+    * a ramificação **não** é aparada (``trim``) à janela do bloco, e quem liga e desliga o efeito é só o
+      ``enable``. O ``trim`` parecia a economia óbvia (+0,7 s com 8 blocos em 24 s de 1080p, contra +3,0 s sem
+      ele), mas o ``overlay`` só decide o que fazer com o quadro 0 do ramo principal quando conhece o primeiro
+      quadro do ramo aparado, que só chega depois de o fluxo produzir todos os quadros até o início do bloco; até
+      lá ele guarda os do ramo principal, RGBA do tamanho da tela. Medido: o pico de memória do ffmpeg cresce
+      ~228 MB por segundo de antecedência a 1080p (um desfoque aos 60 s pede ~14 GB na exportação), e o primeiro
+      quadro da reprodução atrasa na mesma proporção, nos ffmpeg 6.1, 7.1 e 9.0. Sem o ``trim`` a memória é plana
+      e o custo (~1 ms por quadro por bloco a 1080p) é o do projeto inteiro, não o do bloco. Encher o início do
+      ramo com ``tpad`` não adianta: ele só emite o preenchimento depois de receber o primeiro quadro real.
+    """
+    clip = piece.clip
+    width, height = project.width, project.height
+    w, h = region_size(clip.scale_x, clip.scale_y, width, height)
+    if clip.has_pose_keyframes:
+        origin = _clip_stream_origin(piece)
+        cx = _keyframe_expr(clip.keyframes, "x", origin, clip.x)
+        cy = _keyframe_expr(clip.keyframes, "y", origin, clip.y)
+    else:
+        cx, cy = f"{clip.x:.6f}", f"{clip.y:.6f}"
+    x, y = region_origin_expr(cx, width, w), region_origin_expr(cy, height, h)
+
+    if clip.is_region_blur:
+        work_w, work_h, sigma = region_work_size(w, h)
+        inner = (f"scale={work_w}:{work_h}:flags=bilinear,format=gbrp,"
+                 f"gblur=sigma={sigma:.4f}:steps={REGION_BLUR_STEPS},format=rgba,"
+                 f"scale={w}:{h}:flags=bilinear")
+    else:
+        # Sem ``format=rgba`` ao fim (o desfoque precisa dele, por causa do ``gbrp``): o ``format=auto`` do ``overlay`` já
+        # converte a região para o formato do quadro principal e não toca no que está fora dela (medido).
+        inner = _filter_expression(clip.filter_name)
+    keep, branch, filtered, label = f"[rb{order}a]", f"[rb{order}b]", f"[rb{order}c]", f"[f{order}]"
+    filters.append(f"{current}split=2{keep}{branch}")
+    filters.append(f"{branch}crop=w={w}:h={h}:x='{x}':y='{y}',{inner}{filtered}")
+    filters.append(f"{keep}{filtered}overlay=x='{x}':y='{y}':eof_action=pass:format=auto:enable='{enable}'{label}")
+    return label
+
+
+_COLOR_FILTER_EXPRESSIONS = {
+    "pb": "hue=s=0",
+    "sepia": "colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131",
+    "vinheta": "vignette=PI/4",
+    "inverter": "negate",
+    "contraste": "eq=contrast=1.5",
+}
+
+
+def _filter_expression(name: str, enable: str | None = None) -> str:
+    """O filtro de tela inteira do bloco, no ffmpeg; ``enable`` o liga só na janela dele (sem ele, sempre).
+
+    Um nome que não conhece vira Preto e Branco, como sempre foi. A exportação e as camadas da prévia do arrasto saem
+    daqui, e é isso que as deixa com o mesmo filtro.
+    """
+    expression = _COLOR_FILTER_EXPRESSIONS.get(name, _COLOR_FILTER_EXPRESSIONS["pb"])
+    if enable is None:
+        return expression
+    return f"{expression}{':' if '=' in expression else '='}enable='{enable}'"
+
+
 def _compose_video_piece(
     filters: list[str],
     current: str,
@@ -1564,22 +1661,9 @@ def _compose_video_piece(
             f"*not(gte(t,{excluded_start:.6f})*lt(t,{excluded_end:.6f}))"
         )
     if piece.clip.overlay_type is OverlayType.FILTER:
-        name = piece.clip.filter_name
-        if name == "pb":
-            expression = f"hue=s=0:enable='{enable}'"
-        elif name == "sepia":
-            expression = (
-                f"colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"
-                f":enable='{enable}'"
-            )
-        elif name == "vinheta":
-            expression = f"vignette=PI/4:enable='{enable}'"
-        elif name == "inverter":
-            expression = f"negate=enable='{enable}'"
-        elif name == "contraste":
-            expression = f"eq=contrast=1.5:enable='{enable}'"
-        else:
-            expression = f"hue=s=0:enable='{enable}'"
+        if piece.clip.has_region:
+            return _compose_region(filters, current, piece, project, order, enable)
+        expression = _filter_expression(piece.clip.filter_name, enable)
         label = f"[f{order}]"
         filters.append(f"{current}{expression}{label}")
         return label
@@ -2825,33 +2909,53 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
     """Fundo e frente canônicos; textura isolada sem recortar pixels da cena.
 
     Com o fundo desfocado ligado no bloco, uma quarta imagem: o fundo de tela
-    cheia dele, pintado entre ``background`` e a textura.
+    cheia dele, pintado entre ``background`` e a textura. Depois delas, uma imagem
+    por desfoque de região ou vinheta acima do bloco (``plan.stages``): o que fica
+    entre esse e o seguinte, em base transparente. Quando o que se arrasta é a própria
+    região de um filtro (``plan.source`` é ``None``), não há textura nem fundo desfocado:
+    só ``background`` e ``foreground``, a imagem do fundo com o filtro na tela inteira
+    (``plan.filtered``, só para os filtros de cor) e as imagens dos trechos acima.
+
+    Os filtros de cor acima do bloco (``plan.filters``) já estão em ``background`` e
+    nos trechos, que o compositor monta com eles; a textura e o fundo desfocado
+    recebem a mesma cadeia aqui, e é isso que faz o item sair com a cor do quadro final.
     """
     background = frame_command(plan.background, plan.seconds, size, tools, text_assets=text_assets, png=True)
     foreground = frame_command(plan.foreground, plan.seconds, size, tools, text_assets=text_assets,
                                transparent=True, png=True)
+    after = tuple(frame_command(project, plan.seconds, size, tools, text_assets=text_assets,
+                                transparent=True, png=True) for _, project in plan.stages)
+    if plan.source is None:
+        filtered = ((frame_command(plan.filtered, plan.seconds, size, tools, text_assets=text_assets, png=True),)
+                    if plan.filtered is not None else ())
+        return background, foreground, *filtered, *after
     source = _preview_project(plan.source, size)
     pieces = _pieces(source, plan.seconds, 1 / source.fps, want_audio=False)
     piece = next(p for p in pieces if p.clip.clip_id == plan.clip_id)
     graph = _video_chain(piece, source, source.fps, canonical_size=(plan.source.width, plan.source.height),
                          standalone=True)
+    colors = ",".join(_filter_expression(c.filter_name) for c in plan.filters)
     # Texto pode exceder o canvas. Conservar a textura inteira, com memória
     # limitada, permite revelar conteúdo ao arrastar sem recorte na borda.
     graph += (f";[v{piece.index}]scale=w='min(iw,{size[0] * 2})':"
-              f"h='min(ih,{size[1] * 2})':force_original_aspect_ratio=decrease[texture]")
+              f"h='min(ih,{size[1] * 2})':force_original_aspect_ratio=decrease[texture{'0' if colors else ''}]")
+    if colors:
+        graph += f";[texture0]format=rgba,{colors}[texture]"
     texture = [tools.ffmpeg_str, '-nostdin', '-hide_banner', '-v', 'error',
                *_limited_inputs(_input_args(piece, source.fps, text_assets=text_assets)),
                '-filter_complex', graph, '-map', '[texture]',
                '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgba', 'pipe:1']
     if not plan.blur:
-        return background, texture, foreground
+        return background, texture, foreground, *after
     # O fundo não depende da pose (cobre a tela inteira e a opacidade é aplicada
     # ao pintar), então uma imagem só serve o gesto todo. A frente vai para o
     # ``nullsink`` porque a cadeia do bloco só existe com as duas saídas ligadas.
     graph = _video_chain(piece, source, source.fps, canonical_size=(plan.source.width, plan.source.height),
-                         standalone=True, blur="[blur]") + f";[v{piece.index}]nullsink"
+                         standalone=True, blur=f"[blur{'0' if colors else ''}]") + f";[v{piece.index}]nullsink"
+    if colors:
+        graph += f";[blur0]{colors}[blur]"
     blur = [tools.ffmpeg_str, '-nostdin', '-hide_banner', '-v', 'error',
             *_limited_inputs(_input_args(piece, source.fps, text_assets=text_assets)),
             '-filter_complex', graph, '-map', '[blur]',
             '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgb24', 'pipe:1']
-    return background, texture, foreground, blur
+    return background, texture, foreground, blur, *after

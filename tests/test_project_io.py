@@ -443,7 +443,8 @@ def test_campo_novo_no_projeto_exige_subir_a_versao(tmp_path):
     bloco = trilha['clips'][0]
     gravado = {'projeto': set(data), 'trilha': set(trilha), 'bloco': set(bloco),
                'midia': set(bloco['media']), 'quadro_chave': set(bloco['keyframes'][0])}
-    assert PROJECT_VERSION == 6, 'versão nova: atualize _CHAVES_V6 para o conjunto dela'
+    assert PROJECT_VERSION == 6, ('versão nova: atualize _CHAVES_V6 para o conjunto dela. A 7 é do desfoque de região e a 8 '
+                                 'do filtro móvel: a próxima chave que todo arquivo grava é a 9 (PROJECT_VERSION = 9)')
     assert gravado == _CHAVES_V6
 
 
@@ -518,9 +519,9 @@ class TestBlocoInvertidoNoArquivo:
             project_from_dict(dados, base_dir=tmp_path)
 
     def test_a_versao_anterior_recusa_o_arquivo_novo(self, tmp_path):
-        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+        from videomanager.infrastructure.storage.project_json import SUPPORTED_VERSION
         dados = project_to_dict(self._projeto(tmp_path, reversed=True), base_dir=tmp_path)
-        dados['version'] = PROJECT_VERSION + 1
+        dados['version'] = SUPPORTED_VERSION + 1
         with pytest.raises(ProjectError):
             project_from_dict(dados, base_dir=tmp_path)
 
@@ -567,9 +568,9 @@ class TestVolumeAnimadoNoArquivo:
             project_from_dict(dados, base_dir=tmp_path)
 
     def test_a_versao_anterior_recusa_o_arquivo_novo(self, tmp_path):
-        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+        from videomanager.infrastructure.storage.project_json import PROJECT_VERSION, SUPPORTED_VERSION
         dados = project_to_dict(self._projeto(tmp_path, self.CURVA), base_dir=tmp_path)
         assert dados['version'] == PROJECT_VERSION == 6
-        dados['version'] = PROJECT_VERSION + 1
+        dados['version'] = SUPPORTED_VERSION + 1
         with pytest.raises(ProjectError):
             project_from_dict(dados, base_dir=tmp_path)
