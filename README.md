@@ -62,7 +62,7 @@ Edição multipista completa, sem sair do aplicativo.
 
 - **Trilhas livres**: vídeos, fotos, áudios, textos e filtros em qualquer ordem
 - **Cortes precisos**: montagem magnética com ímã, alças de corte, divisão no cursor e separação de áudio
-- **Efeitos e transições**: Dissolve, Wipe, Slide, Fade, filtros de cor, chroma key, fundo desfocado, desfoque de região (para esconder um rosto, uma placa ou uma tela) e quadros-chave
+- **Efeitos e transições**: Dissolve, Wipe, Slide, Fade, filtros de cor, chroma key, fundo desfocado, desfoque de região (para esconder um rosto, uma placa ou uma tela), filtros que agem só num retângulo ("filtro móvel") e quadros-chave
 - **Prévia fiel**: reprodução com o som da mixagem em tempo real, loop sem corte e tela cheia (`F`)
 - **Exportação versátil**: MP4, MKV, WebM, MOV ou GIF animado, e corte sem recodificar em keyframes
 
@@ -115,7 +115,7 @@ Multipista, com os gestos que o CapCut e o Filmora tornaram padrão.
 - **Blocos** — arraste no tempo e entre trilhas, ajuste o corte pelas alças, divida no cursor, copie e cole, separe o áudio de um vídeo.
 - **Som** — volume por bloco em decibéis, mudo por trilha ou por bloco e **velocidade** de 0,1× a 10×.
 - **Transições** entre dois cortes — Fade, Dissolve, Wipe, Slide.
-- **Texto, filtros e chroma key.** O filtro **Desfoque** borra só um retângulo que você move e redimensiona na prévia; a posição pode andar entre quadros-chave.
+- **Texto, filtros e chroma key.** O filtro **Desfoque** borra só um retângulo que você move e redimensiona na prévia; a posição pode andar entre quadros-chave. Qualquer outro filtro pode agir só num retângulo, ligando **Filtro móvel** nas Propriedades.
 - **Animação por quadros-chave** — posição, escala, rotação, opacidade e volume (fade de som), com curvas de aceleração e efeitos rápidos de entrada; editável direto na prévia ou na aba **Propriedades**.
 - **Prévia** — retrátil, em tela cheia (`F`), com o som da mixagem, loop sem corte e navegação quadro a quadro. Arrastar a agulha responde na hora.
 - **Tela** — proporção 16:9, 4:3, 9:16, 1:1 ou 21:9, e *Slideshow* para montagens só de fotos.
