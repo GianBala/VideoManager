@@ -35,6 +35,7 @@ from videomanager.domain.project import reserve_project_ids
 # 5: o bloco ganha ``reversed`` (toca de trás para frente).
 # 6: o quadro-chave ganha ``gain_offset_db`` (a curva de volume, relativa ao do bloco).
 # 7: o desfoque de região (``filter_name = "desfoque"``). Não traz chave nova: a região é a pose do bloco.
+# 8: o filtro móvel (``movable``): um filtro que age num retângulo, e não na tela inteira.
 #
 # Todo campo novo no arquivo sobe esta versão. A leitura ignora chaves que não
 # conhece, então uma versão anterior que abrisse um arquivo com campo novo o
@@ -42,24 +43,34 @@ from videomanager.domain.project import reserve_project_ids
 # versão nova, a anterior recusa o arquivo com mensagem. O teste
 # ``test_campo_novo_no_projeto_exige_subir_a_versao`` trava as chaves da 6.
 #
-# A 7 é diferente: só entra um **valor** novo, e uma versão anterior que o abrisse não perderia
-# nada ao salvar, mas exportaria o quadro **inteiro** em Preto e Branco (nome de filtro
-# desconhecido) sem desfocar a região — o rosto ou a placa à mostra, sem erro. Por isso a 7 só é
-# gravada por quem precisa dela (``project_version``): sem desfoque o arquivo continua na 6, igual
-# ao de antes, e as versões anteriores seguem abrindo tudo o que não tem desfoque.
+# A 7 e a 8 são gravadas só por quem precisa delas (``project_version``), e o arquivo de quem não usa
+# o recurso continua na 6, igual ao de antes: as versões anteriores seguem abrindo tudo o que não tem
+# desfoque nem filtro móvel.
 #
-# **A 7 é do desfoque: a próxima chave nova do arquivo é a 8.** ``PROJECT_VERSION`` sobe para 8 (nunca para 7, que
-# um programa só com o desfoque leria sem conhecer a chave e a perderia ao salvar), e ``project_version`` e
-# ``SUPPORTED_VERSION`` já tiram o maior dos dois números.
+# * A 7 só traz um **valor** novo, e uma versão anterior que o abrisse não perderia nada ao salvar,
+#   mas exportaria o quadro **inteiro** em Preto e Branco (nome de filtro desconhecido) sem desfocar a
+#   região — o rosto ou a placa à mostra, sem erro.
+# * A 8 traz uma chave, ``movable``, **só gravada quando ligada**: uma versão anterior a ignoraria e
+#   aplicaria o filtro à tela inteira, e a perderia ao salvar.
+#
+# **A próxima chave nova que todo arquivo grava é a 9.** ``PROJECT_VERSION`` sobe para 9 (nunca para 7 ou 8,
+# que as versões só com o desfoque ou só com o filtro móvel leriam sem conhecer a chave e a perderiam ao
+# salvar), e ``project_version`` e ``SUPPORTED_VERSION`` já tiram o maior dos números.
 PROJECT_VERSION = 6
 REGION_BLUR_VERSION = 7
+MOVABLE_FILTER_VERSION = 8
 # A maior versão que a leitura aceita.
-SUPPORTED_VERSION = max(PROJECT_VERSION, REGION_BLUR_VERSION)
+SUPPORTED_VERSION = max(PROJECT_VERSION, REGION_BLUR_VERSION, MOVABLE_FILTER_VERSION)
 
 
 def project_version(project: Project) -> int:
     """A menor versão do formato em que este projeto pode ser gravado."""
-    return max(PROJECT_VERSION, REGION_BLUR_VERSION) if any(clip.has_region for clip in project.clips) else PROJECT_VERSION
+    version = PROJECT_VERSION
+    if any(clip.is_region_blur for clip in project.clips):
+        version = max(version, REGION_BLUR_VERSION)
+    if any(clip.movable for clip in project.clips):
+        version = max(version, MOVABLE_FILTER_VERSION)
+    return version
 
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
@@ -145,7 +156,7 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
     for track in project.tracks:
         clips_data: list[dict[str, object]] = []
         for clip in track.clips:
-            clips_data.append(
+            clip_data = (
                 {
                     "clip_id": clip.clip_id,
                     "start": clip.start,
@@ -200,6 +211,9 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                     "media": _media_to_dict(clip.media, base_dir),
                 }
             )
+            if clip.movable:
+                clip_data["movable"] = True      # só quando ligada: o arquivo sem filtro móvel sai idêntico ao de antes
+            clips_data.append(clip_data)
         tracks_data.append(
             {
                 "track_id": track.track_id,
@@ -335,6 +349,7 @@ def _validate_project(data: dict[str, object]) -> None:
                     "transition_affects_additionals",
                     "blur_background",
                     "reversed",
+                    "movable",
                 ),
             )
             strings(clip, ("overlay_type", "text_content", "font_family", "text_color", "stroke_color", "filter_name", "transition_name", "chromakey_color"))
@@ -476,6 +491,7 @@ def _project_from_dict(
                 chromakey_blend=float(c_data.get("chromakey_blend", 0.10)),
                 blur_background=bool(c_data.get("blur_background", False)),
                 reversed=bool(c_data.get("reversed", False)),
+                movable=bool(c_data.get("movable", False)),
                 clip_id=c_data["clip_id"] if "clip_id" in c_data else next_clip_id(),
             )
             clips.append(clip)

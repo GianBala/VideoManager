@@ -9,6 +9,7 @@ versão 7 (a anterior recusa o arquivo com mensagem) e o que não tem continua n
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ from videomanager.domain.project import filter_pose
 from videomanager.domain.project import pseudo_media
 from videomanager.infrastructure.storage import project_json
 from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+from videomanager.infrastructure.storage.project_json import MOVABLE_FILTER_VERSION
 from videomanager.infrastructure.storage.project_json import REGION_BLUR_VERSION
 from videomanager.infrastructure.storage.project_json import SUPPORTED_VERSION
 from videomanager.infrastructure.storage.project_json import load_project
@@ -100,7 +102,7 @@ def test_a_versao_anterior_recusa_o_projeto_com_desfoque_e_abre_os_outros(tmp_pa
     desfoque, _ = _projeto(tmp_path)
     sepia, _ = _projeto(tmp_path, "sepia")
     com, sem = (project_to_dict(p, base_dir=tmp_path) for p in (desfoque, sepia))
-    assert SUPPORTED_VERSION == 7
+    assert SUPPORTED_VERSION == MOVABLE_FILTER_VERSION == 8
     monkeypatch.setattr(project_json, "SUPPORTED_VERSION", PROJECT_VERSION)
     with pytest.raises(ProjectError):
         project_from_dict(com, base_dir=tmp_path)
@@ -155,16 +157,99 @@ def test_abrir_um_projeto_com_desfoque_no_editor_nao_o_marca_como_alterado(tmp_p
     assert volta.region_rect(1280, 720, 1.5) == filtro.region_rect(1280, 720, 1.5)
 
 
-def test_a_7_e_do_desfoque_e_a_leitura_vai_ate_a_maior_das_duas_versoes() -> None:
-    """Uma chave nova do arquivo é a versão 8: tomar a 7 faria um programa só com o desfoque perder a chave ao salvar."""
-    assert PROJECT_VERSION != REGION_BLUR_VERSION, "a 7 é do desfoque: uma chave nova sobe PROJECT_VERSION para 8"
-    assert SUPPORTED_VERSION == max(PROJECT_VERSION, REGION_BLUR_VERSION)
+def test_a_7_e_a_8_tem_dono_e_a_leitura_vai_ate_a_maior_das_versoes() -> None:
+    """A 7 é do desfoque e a 8 do filtro móvel: uma chave nova que todo arquivo grava é a 9. Tomar a 7 ou a 8 faria um
+    programa que só conhece uma delas perder a chave ao salvar."""
+    assert PROJECT_VERSION not in (REGION_BLUR_VERSION, MOVABLE_FILTER_VERSION), \
+        "a 7 é do desfoque e a 8 do filtro móvel: uma chave nova sobe PROJECT_VERSION para 9"
+    assert SUPPORTED_VERSION == max(PROJECT_VERSION, REGION_BLUR_VERSION, MOVABLE_FILTER_VERSION)
 
 
-def test_com_uma_chave_nova_na_versao_8_todo_projeto_grava_8_inclusive_o_com_desfoque(tmp_path: Path, monkeypatch) -> None:
-    """O projeto com desfoque grava a maior das duas versões: gravar 7 deixaria a chave da 8 sem quem a entenda."""
-    monkeypatch.setattr(project_json, "PROJECT_VERSION", 8)
+def test_com_uma_chave_nova_na_versao_9_todo_projeto_grava_9_inclusive_o_com_desfoque_e_o_movel(
+        tmp_path: Path, monkeypatch) -> None:
+    """Os projetos com desfoque e com filtro móvel gravam a maior das versões: gravar 7 ou 8 deixaria a chave da 9 sem
+    quem a entenda."""
+    monkeypatch.setattr(project_json, "PROJECT_VERSION", 9)
     desfoque, _ = _projeto(tmp_path)
     sepia, _ = _projeto(tmp_path, "sepia")
-    assert project_to_dict(desfoque, base_dir=tmp_path)["version"] == 8
-    assert project_to_dict(sepia, base_dir=tmp_path)["version"] == 8
+    movel, _ = _projeto(tmp_path, "sepia", movable=True)
+    for projeto in (desfoque, sepia, movel):
+        assert project_to_dict(projeto, base_dir=tmp_path)["version"] == 9
+
+
+# -- o filtro móvel no arquivo -------------------------------------------------------------------
+
+def _movel(tmp_path: Path, nome: str = "sepia", **extra) -> tuple[Project, Clip]:
+    return _projeto(tmp_path, nome, movable=True, x=0.3, y=0.6, scale_x=0.25, scale_y=0.4, scale=0.325, **extra)
+
+
+def test_o_filtro_movel_grava_a_chave_e_a_versao_8_e_o_comum_nao_grava_nenhuma_das_duas(tmp_path: Path) -> None:
+    movel, _ = _movel(tmp_path)
+    comum, _ = _projeto(tmp_path, "sepia")
+    com = project_to_dict(movel, base_dir=tmp_path)
+    sem = project_to_dict(comum, base_dir=tmp_path)
+    assert com["version"] == MOVABLE_FILTER_VERSION == 8 and com["tracks"][0]["clips"][0]["movable"] is True
+    assert sem["version"] == PROJECT_VERSION == 6 and "movable" not in sem["tracks"][0]["clips"][0]
+
+
+def test_o_desfoque_continua_na_7_e_sem_a_chave(tmp_path: Path) -> None:
+    desfoque, _ = _projeto(tmp_path)
+    dados = project_to_dict(desfoque, base_dir=tmp_path)
+    assert dados["version"] == REGION_BLUR_VERSION and "movable" not in dados["tracks"][0]["clips"][0]
+
+
+def test_desfoque_e_filtro_movel_no_mesmo_projeto_gravam_a_8(tmp_path: Path) -> None:
+    movel, filtro = _movel(tmp_path)
+    desfoque, bloco = _projeto(tmp_path)
+    junto = replace(movel, tracks=(*movel.tracks, Track(TrackKind.ADDITIONAL, clips=(bloco,), name="Adicionais 2")))
+    assert project_to_dict(junto, base_dir=tmp_path)["version"] == 8
+
+
+@pytest.mark.parametrize("nome", ["pb", "sepia", "inverter", "contraste", "vinheta"])
+def test_o_filtro_movel_relê_igual_com_a_posicao_o_tamanho_e_os_quadros_chave(tmp_path: Path, nome: str) -> None:
+    chaves = (Keyframe(0.0, x=0.3, y=0.6, scale_x=0.25, scale_y=0.4), Keyframe(3.0, x=0.7, y=0.4, scale_x=0.25, scale_y=0.4))
+    projeto, filtro = _movel(tmp_path, nome, keyframes=chaves)
+    caminho = tmp_path / "movel.vmp"
+    save_project(projeto, caminho)
+    assert json.loads(caminho.read_text(encoding="utf-8"))["version"] == 8
+    carregado, _ = load_project(caminho)
+    volta = carregado.additional_tracks[0].clips[0]
+    assert volta.movable and volta.has_region and not volta.is_region_blur and volta.filter_name == nome
+    assert volta.region_rect(1280, 720, 1.5) == filtro.region_rect(1280, 720, 1.5)
+    assert carregado == projeto
+    segundo = tmp_path / "dois.vmp"
+    save_project(carregado, segundo)
+    assert segundo.read_bytes() == caminho.read_bytes()          # abrir e salvar sem editar grava o mesmo arquivo
+
+
+def test_a_versao_anterior_recusa_o_projeto_com_filtro_movel_e_abre_os_outros(tmp_path: Path, monkeypatch) -> None:
+    """Uma versão que só lê até a 7 recusa o arquivo com filtro móvel (ela o aplicaria à tela inteira e o perderia ao
+    salvar); o projeto sem filtro móvel, com ou sem desfoque, abre."""
+    movel, _ = _movel(tmp_path)
+    desfoque, _ = _projeto(tmp_path)
+    com, comum = (project_to_dict(p, base_dir=tmp_path) for p in (movel, desfoque))
+    monkeypatch.setattr(project_json, "SUPPORTED_VERSION", REGION_BLUR_VERSION)
+    with pytest.raises(ProjectError):
+        project_from_dict(com, base_dir=tmp_path)
+    lido, _ = project_from_dict(comum, base_dir=tmp_path)
+    assert lido.additional_tracks[0].clips[0].is_region_blur
+
+
+def test_o_arquivo_sem_a_chave_abre_como_filtro_de_tela_inteira(tmp_path: Path) -> None:
+    comum, _ = _projeto(tmp_path, "sepia")
+    lido, _ = project_from_dict(project_to_dict(comum, base_dir=tmp_path), base_dir=tmp_path)
+    bloco = lido.additional_tracks[0].clips[0]
+    assert not bloco.movable and not bloco.has_region
+
+
+def test_gravar_a_8_sobre_a_6_guarda_a_copia_e_sem_filtro_movel_volta_a_6(tmp_path: Path) -> None:
+    comum, _ = _projeto(tmp_path, "sepia")
+    movel, _ = _movel(tmp_path)
+    caminho = tmp_path / "p.vmp"
+    save_project(comum, caminho)
+    original = caminho.read_bytes()
+    save_project(movel, caminho)
+    assert json.loads(caminho.read_text(encoding="utf-8"))["version"] == 8
+    assert (tmp_path / "p.vmp.v6.bak").read_bytes() == original
+    save_project(comum, caminho)                                      # tirou o filtro móvel: volta ao formato antigo
+    assert json.loads(caminho.read_text(encoding="utf-8"))["version"] == 6
