@@ -422,6 +422,11 @@ EXPORT_GIF_NOTE = (
     "every frame is a whole image, and at the project's canvas the file would be "
     "ten times larger. Choosing the canvas or frame rate by hand still applies."
 )
+EXPORT_BLUR_TRANSITION_WARN = (
+    "This machine's ffmpeg {version} drops the blur during a transition with \"Affect overlay items\": "
+    "during the transition, the area it would hide shows through. Turn that option off on the transition or use "
+    "ffmpeg 7 or newer."
+)
 EXPORT_VIDEO_CODEC = "Video codec"
 EXPORT_VIDEO_CODEC_TIP = "Video compression algorithm (H.264, HEVC, AV1, VP9)"
 EXPORT_QUALITY = "Video quality"
@@ -606,12 +611,14 @@ EDIT_FILTER_SEPIA = "Sepia"
 EDIT_FILTER_VIGNETTE = "Vignette"
 EDIT_FILTER_INVERT = "Invert"
 EDIT_FILTER_CONTRAST = "High Contrast"
+EDIT_FILTER_BLUR = "Blur"
 EDIT_FILTERS = {
     "pb": ("🎬", EDIT_FILTER_BW),
     "sepia": ("☕", EDIT_FILTER_SEPIA),
     "contraste": ("⚡", EDIT_FILTER_CONTRAST),
     "vinheta": ("🎯", EDIT_FILTER_VIGNETTE),
     "inverter": ("🔄", EDIT_FILTER_INVERT),
+    "desfoque": ("🔲", EDIT_FILTER_BLUR),
 }
 EDIT_TRANSITIONS = {
     "fade": ("🌑", "Fade"),
@@ -623,6 +630,7 @@ EDIT_TRANSITIONS = {
     "slideleft": ("◀", "Slide Left"),
     "slideright": ("▶", "Slide Right"),
 }
+EDIT_BLUR_HINT = "Drag the rectangle on the preview over what you want to blur. The corners resize it."
 EDIT_CHOOSE_FILTER = "Choose a visual effect"
 EDIT_CHOOSE_TRANSITION = "Choose a video transition"
 EDIT_EXTRA_DURATION = "Duration"
@@ -928,7 +936,6 @@ EDIT_EASINGS = {
 # aba Propriedades
 PROP_TITLE = "Properties"
 PROP_CLOSE_TIP = "Close the Properties tab"
-PROP_NO_SETTINGS = "This block has no settings besides its duration and its position on the timeline."
 PROP_CLIP_ID = "ID #{id} · {kind}"
 PROP_KINDS = {"none": "Media", "image": "Image", "text": "Text", "filter": "Filter", "transition": "Transition"}
 PROP_TRANSFORM = "Transform"
@@ -958,6 +965,12 @@ PROP_CHROMA_PRESETS = {"#00FF00": "Standard green", "#00B140": "Studio green", "
 PROP_CHROMA_PRESET_TIP = "{name} ({color})"
 PROP_CHROMA_TOLERANCE = "Tolerance"
 PROP_CHROMA_SMOOTHING = "Smoothing"
+PROP_FILTER = "Filter"
+PROP_FILTER_MOVABLE = "Movable filter (limit to an area)"
+PROP_FILTER_MOVABLE_NOTE = (
+    "Off, the filter applies to the whole screen. On, it applies only to a rectangle that you move and resize in the "
+    "preview, and that can also be animated with keyframes."
+)
 PROP_BLUR = "Blurred Background"
 PROP_BLUR_ENABLE = "Fill the edges with the blurred clip"
 PROP_BLUR_NOTE = "Covers the whole canvas under the clip, including the tracks below it."

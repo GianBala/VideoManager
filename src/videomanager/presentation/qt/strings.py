@@ -417,6 +417,10 @@ EXPORT_GIF_NOTE = (
     "quadro é uma imagem inteira, e na tela do projeto o arquivo fica dez "
     "vezes maior. Escolher tela ou taxa na mão continua valendo."
 )
+EXPORT_BLUR_TRANSITION_WARN = (
+    "O ffmpeg {version} desta máquina perde o desfoque durante uma transição com \"Afetar itens adicionais\": "
+    "na passagem, a área que ele esconderia aparece. Desligue essa opção na transição ou use o ffmpeg 7 ou mais novo."
+)
 EXPORT_VIDEO_CODEC = "Codec de vídeo"
 EXPORT_VIDEO_CODEC_TIP = "Algoritmo de compressão de vídeo (H.264, HEVC, AV1, VP9)"
 EXPORT_QUALITY = "Qualidade do vídeo"
@@ -606,6 +610,7 @@ EDIT_FILTER_SEPIA = "Sépia"
 EDIT_FILTER_VIGNETTE = "Vinheta"
 EDIT_FILTER_INVERT = "Inversão"
 EDIT_FILTER_CONTRAST = "Alto Contraste"
+EDIT_FILTER_BLUR = "Desfoque"
 # Filtros e transições por identificador gravado no projeto, com o ícone que os
 # acompanha nos botões. Uma tabela só para a aba de Adicionais, a linha do tempo
 # e a aba Propriedades: eram quatro cópias, e acrescentar uma transição exigia
@@ -616,6 +621,7 @@ EDIT_FILTERS = {
     "contraste": ("⚡", EDIT_FILTER_CONTRAST),
     "vinheta": ("🎯", EDIT_FILTER_VIGNETTE),
     "inverter": ("🔄", EDIT_FILTER_INVERT),
+    "desfoque": ("🔲", EDIT_FILTER_BLUR),
 }
 EDIT_TRANSITIONS = {
     "fade": ("🌑", "Fade"),
@@ -627,6 +633,7 @@ EDIT_TRANSITIONS = {
     "slideleft": ("◀", "Slide para Esquerda"),
     "slideright": ("▶", "Slide para Direita"),
 }
+EDIT_BLUR_HINT = "Arraste o retângulo na prévia sobre o que quer borrar. Os cantos mudam o tamanho."
 EDIT_CHOOSE_FILTER = "Escolha um efeito visual"
 EDIT_CHOOSE_TRANSITION = "Escolha uma transição de vídeo"
 EDIT_EXTRA_DURATION = "Duração"
@@ -942,7 +949,6 @@ EDIT_EASINGS = {
 # aba Propriedades
 PROP_TITLE = "Propriedades"
 PROP_CLOSE_TIP = "Fechar aba de propriedades"
-PROP_NO_SETTINGS = "Este bloco não tem ajustes além da duração e da posição na linha do tempo."
 PROP_CLIP_ID = "ID #{id} · {kind}"
 # Espécie do bloco, pelo tipo de sobreposição gravado no projeto.
 PROP_KINDS = {"none": "Mídia", "image": "Imagem", "text": "Texto", "filter": "Filtro", "transition": "Transição"}
@@ -973,6 +979,12 @@ PROP_CHROMA_PRESETS = {"#00FF00": "Verde Padrão", "#00B140": "Verde Studio", "#
 PROP_CHROMA_PRESET_TIP = "{name} ({color})"
 PROP_CHROMA_TOLERANCE = "Tolerância"
 PROP_CHROMA_SMOOTHING = "Suavização"
+PROP_FILTER = "Filtro"
+PROP_FILTER_MOVABLE = "Filtro móvel (limitar a uma área)"
+PROP_FILTER_MOVABLE_NOTE = (
+    "Desligado, o filtro age na tela inteira. Ligado, age só num retângulo que você move e redimensiona na prévia, "
+    "e que também pode ser animado com quadros-chave."
+)
 PROP_BLUR = "Fundo Desfocado"
 PROP_BLUR_ENABLE = "Preencher as bordas com o bloco desfocado"
 PROP_BLUR_NOTE = "Cobre a tela inteira por baixo do bloco, inclusive as trilhas abaixo dele."

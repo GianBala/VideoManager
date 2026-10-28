@@ -91,6 +91,7 @@ from videomanager.application.media.preview import FrameContext, PreviewFrameInb
 from videomanager.application.media.interaction import interaction_plan
 from videomanager.application.media.scrub import ScrubFrameCache
 from videomanager.domain.export_policy import reference_clip
+from videomanager.domain.project import filter_pose
 from videomanager.domain.project import pseudo_media
 from videomanager.domain.project import OverlayType
 from videomanager.domain.scrub import render_signature, signature_at, signature_segments
@@ -112,6 +113,7 @@ from videomanager.domain.project import auto_canvas
 from videomanager.domain.project import next_clip_id
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.domain.constants import MIN_SEGMENT
+from videomanager.domain.constants import REGION_BLUR
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.i18n import decimal
 from videomanager.domain.timing import format_span
@@ -1424,6 +1426,15 @@ class EditPanel(QWidget):
         self._filter_dur.valueChanged.connect(self._on_filter_dur_changed)
         layout.addLayout(self._duration_row(self._filter_dur))
 
+        # Só quando o desfoque é a opção marcada: é o único filtro com retângulo para mexer na prévia. Fica depois da
+        # duração para o que está acima não se mexer quando ela aparece.
+        self._blur_hint = bind(QLabel(), "setText", lambda: strings.EDIT_BLUR_HINT)
+        self._blur_hint.setWordWrap(True)
+        self._blur_hint.setProperty("role", "hint")
+        self._blur_hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._blur_hint.setVisible(self._selected_filter_name == REGION_BLUR)
+        layout.addWidget(self._blur_hint)
+
         layout.addStretch(1)
 
         self._apply_filter_btn = bind(QPushButton(), "setText", lambda: strings.EDIT_APPLY_FILTER)
@@ -1447,10 +1458,11 @@ class EditPanel(QWidget):
             if i < len(self._filter_buttons):
                 self._filter_buttons[i].setChecked(fid == filter_name)
         _restyle(self._filter_buttons)
+        self._blur_hint.setVisible(filter_name == REGION_BLUR)
         clip = self._timeline.selected_clip
         if not self._syncing and clip is not None and clip.overlay_type is OverlayType.FILTER:
             self._remember()
-            self._apply(self._project.with_updated_clip(clip.clip_id, filter_name=filter_name))
+            self._apply(self._project.with_filter(clip.clip_id, filter_name))
 
     def _on_filter_dur_changed(self, dur: float) -> None:
         clip = self._timeline.selected_clip
@@ -1478,7 +1490,7 @@ class EditPanel(QWidget):
         if clip is not None and clip.overlay_type is OverlayType.FILTER:
             self._remember()
             project = self._filter_resized(clip, self._filter_dur.value())
-            self._apply(project.with_updated_clip(clip.clip_id, filter_name=self._selected_filter_name))
+            self._apply(project.with_filter(clip.clip_id, self._selected_filter_name))
         else:
             self._insert_filter_clip(self._selected_filter_name)
 
@@ -1598,6 +1610,7 @@ class EditPanel(QWidget):
             duration=duration,
             overlay_type=OverlayType.FILTER,
             filter_name=fname,
+            **filter_pose(fname),
         )
         self._place_clip(clip)
 
@@ -1837,6 +1850,7 @@ class EditPanel(QWidget):
                     self._filter_buttons[i].setChecked(fid == fname)
             _restyle(self._filter_buttons)
             self._filter_dur.setValue(clip.duration)
+            self._blur_hint.setVisible(fname == REGION_BLUR)
             self._insert_new_filter_btn.setVisible(True)
             self._insert_new_text_btn.setVisible(False)
             if hasattr(self, "_apply_trans_btn"):
@@ -2988,8 +3002,9 @@ class EditPanel(QWidget):
         # A duração de uma transição pode ser limitada pelas duas pontas do
         # corte. Recarregar devolve ao campo o valor realmente aceito pelo
         # domínio, em vez de deixar na tela um número que não será renderizado.
+        # O "móvel" de um filtro muda quais seções a aba mostra (posição, tamanho e animação) e os valores delas.
         if (
-            updated_clip.is_transition
+            (updated_clip.is_transition or "movable" in changes)
             and self._properties_widget._clip_id == clip_id
         ):
             self._properties_widget.load_clip(
@@ -3543,7 +3558,7 @@ class EditPanel(QWidget):
             c for t in reversed(self._project.tracks) if t.visible
             for c in sorted(t.clips, key=lambda c: (c.start, c.clip_id))
             if t.kind is not TrackKind.AUDIO and c.has_image and not c.audio_only
-            and c.overlay_type not in (OverlayType.FILTER, OverlayType.TRANSITION)
+            and (c.overlay_type is not OverlayType.FILTER or c.has_region) and not c.is_transition
             and c.contains(self._preview._position)
             and c.transform_at(self._preview._position - c.start).opacity > 0
         )
@@ -3739,8 +3754,9 @@ class EditPanel(QWidget):
         clip = self._preview._active_clip
         if self._closed or self._playing or self._on_fullscreen or clip is None:
             return None
-        plan = interaction_plan(self._project, clip.clip_id, self._position)
-        return (self._generation, self._preview_size(), plan) if plan else None
+        size = self._preview_size()
+        plan = interaction_plan(self._project, clip.clip_id, self._position, size)
+        return (self._generation, size, plan) if plan else None
 
     def _interaction_ready(self) -> bool:
         """Se as camadas na prévia valem para o objeto, o instante e a composição atuais."""
@@ -3787,9 +3803,15 @@ class EditPanel(QWidget):
         # A contagem é a do plano: com o fundo desfocado são quatro imagens, sem
         # ele três. Três para um plano com fundo deixariam a faixa descoberta
         # mostrando a trilha de baixo, sem erro; quatro para um sem, o inverso.
-        expected = 4 if self._interaction_context[2].blur else 3
-        if len(layers) == expected and all(not p.isNull() for p in layers):
-            self._preview.set_interaction_layers(layers)
+        # Depois delas vem uma imagem por desfoque de região ou vinheta acima do item. Arrastar o próprio filtro móvel
+        # pede só as de base: o que está abaixo e o que está acima dele (e, no filtro de cor, o fundo já filtrado); a
+        # região não tem textura.
+        plan = self._interaction_context[2]
+        base = plan.base_layers
+        end = base + len(plan.stages)
+        if len(layers) == end and all(not p.isNull() for p in layers):
+            self._preview.set_interaction_layers(
+                layers[:base], tuple(zip((stage for stage, _ in plan.stages), layers[base:end])))
 
     def _begin_loading_hint(self) -> None:
         """Arma o aviso de atualização; ver ``_LOADING_HINT_MS``."""
