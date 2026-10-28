@@ -188,6 +188,15 @@ def test_a_vinheta_movel_arrastada_sob_um_filtro_com_termo_constante_fica_sem_pl
     assert interaction_plan(_pilha(tmp_path, vinheta, _filtro(acima), abaixo), vinheta.clip_id, 1.0) is not None
 
 
+@pytest.mark.parametrize("largura, altura, passo", [(20, 20, 1), (31, 200, 1), (32, 32, 4), (64, 40, 4), (320, 180, 4)])
+def test_a_mascara_da_vinheta_so_e_amostrada_em_grade_de_4_px_a_partir_de_32_px_de_lado(largura, altura, passo):
+    """Num recorte pequeno a grade de 4 px seria de poucos pontos e a vinheta sairia em degraus."""
+    from videomanager.domain.vignette import mask_size
+    from videomanager.presentation.qt.panels.edit_widgets import _vignette_mask
+    mascara = _vignette_mask(largura, altura)
+    assert (mascara.width(), mascara.height()) == mask_size(largura, altura, passo)
+
+
 def test_o_plano_do_filtro_movel_selecionado_nao_depende_da_pose_dele(tmp_path):
     abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
     movel = _movel("sepia")
