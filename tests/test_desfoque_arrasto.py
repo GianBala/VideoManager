@@ -117,7 +117,7 @@ def test_filtro_de_cor_acima_do_item_tem_plano_e_ja_vai_nas_imagens_prontas(tmp_
     item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
     filtro = _filtro(nome)
     plano = interaction_plan(_pilha(tmp_path, filtro, item), item.clip_id, 1.0)
-    assert plano is not None and plano.stages == () and plano.filters == (filtro,) and not plano.needs_mask
+    assert plano is not None and plano.stages == () and plano.filters == (filtro,)
     assert filtro.clip_id in _ids(plano.background)                  # o fundo sai filtrado
     assert plano.base_layers == 3
 
@@ -136,13 +136,58 @@ def test_o_filtro_de_cor_so_age_nos_trechos_que_estao_abaixo_dele(tmp_path):
 
 
 @pytest.mark.parametrize("nome", ["sepia", "pb", "inverter", "contraste", "vinheta"])
-def test_filtro_movel_acima_do_item_ou_selecionado_ainda_fica_sem_plano_rapido(tmp_path, nome):
-    """O filtro móvel aplica a cor dele num retângulo: refazê-lo a cada movimento pede o filtro na imagem do gesto.
+def test_filtro_movel_acima_do_item_fica_sem_plano_rapido(tmp_path, nome):
+    """O filtro móvel aplica a cor dele num retângulo: refazê-lo a cada movimento pede o filtro em cada imagem do gesto.
     Enquanto a prévia não sabe, o quadro vem do ffmpeg (e não do desfoque, que ela borra)."""
     item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
     movel = replace(_filtro(nome), movable=True, scale=.3, scale_x=.3, scale_y=.3)
     assert interaction_plan(_pilha(tmp_path, movel, item), item.clip_id, 1.0) is None
-    assert interaction_plan(_pilha(tmp_path, movel, item), movel.clip_id, 1.0) is None
+    desfoque = _filtro()
+    assert interaction_plan(_pilha(tmp_path, movel, desfoque, item), desfoque.clip_id, 1.0) is None
+
+
+def _movel(nome: str, **extra) -> Clip:
+    return replace(_filtro(nome), movable=True, scale=.3, scale_x=.3, scale_y=.3, **extra)
+
+
+@pytest.mark.parametrize("nome", ["sepia", "pb", "inverter", "contraste"])
+def test_o_filtro_de_cor_movel_selecionado_tem_plano_com_o_fundo_ja_filtrado(tmp_path, nome):
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    sobre = _imagem(tmp_path / "sobre.png", QColor("blue"), scale_x=.2, scale_y=.2)
+    movel = _movel(nome)
+    plano = interaction_plan(_pilha(tmp_path, sobre, movel, abaixo), movel.clip_id, 1.0)
+    assert plano is not None and plano.source is None and plano.stages == () and plano.base_layers == 3
+    assert movel.clip_id not in _ids(plano.background) and abaixo.clip_id in _ids(plano.background)
+    assert _ids(plano.foreground) == {sobre.clip_id}
+    # A imagem filtrada é o fundo com o MESMO filtro na tela inteira (o bloco clonado sem retângulo, no mesmo lugar).
+    assert movel.clip_id in _ids(plano.filtered) and abaixo.clip_id in _ids(plano.filtered)
+    clone = next(c for t in plano.filtered.tracks for c in t.clips if c.clip_id == movel.clip_id)
+    assert not clone.movable and not clone.has_region and (clone.scale_x, clone.scale_y) == (1.0, 1.0)
+    assert len(interaction_commands(plano, (320, 180), FALSO)) == 3     # fundo, frente e o fundo filtrado
+
+
+def test_a_vinheta_movel_selecionada_tem_plano_sem_imagem_filtrada(tmp_path):
+    """A vinheta é calculada no retângulo ao pintar: o plano só pede o que está abaixo e o que está acima."""
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    movel = _movel("vinheta")
+    plano = interaction_plan(_pilha(tmp_path, movel, abaixo), movel.clip_id, 1.0)
+    assert plano is not None and plano.source is None and plano.filtered is None and plano.base_layers == 2
+    assert len(interaction_commands(plano, (320, 180), FALSO)) == 2
+
+
+def test_o_plano_do_filtro_movel_selecionado_nao_depende_da_pose_dele(tmp_path):
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    movel = _movel("sepia")
+    projeto = _pilha(tmp_path, movel, abaixo)
+    plano = interaction_plan(projeto, movel.clip_id, 1.0)
+    movido = projeto.with_updated_clip(movel.clip_id, x=.8, y=.2, scale_x=.1, scale_y=.4)
+    assert plano == interaction_plan(movido, movel.clip_id, 1.0)
+
+
+def test_filtro_movel_desconhecido_selecionado_fica_sem_plano(tmp_path):
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    movel = _movel("filtro-novo")
+    assert interaction_plan(_pilha(tmp_path, movel, abaixo), movel.clip_id, 1.0) is None
 
 
 def test_o_mesmo_filtro_aplicado_duas_vezes_age_em_cada_trecho_pela_posicao_dele(tmp_path):
@@ -156,18 +201,19 @@ def test_o_mesmo_filtro_aplicado_duas_vezes_age_em_cada_trecho_pela_posicao_dele
     assert _ids(plano.foreground) == {a.clip_id, de_cima.clip_id}
 
 
-def test_a_vinheta_acima_do_item_e_um_trecho_com_mascara_e_nao_vai_nas_imagens_prontas(tmp_path):
-    """A vinheta escurece por posição na tela e o item muda de posição: refeita a cada movimento, com uma máscara."""
+def test_a_vinheta_acima_do_item_e_um_trecho_refeito_ao_pintar_e_nao_vai_nas_imagens_prontas(tmp_path):
+    """A vinheta escurece por posição na tela e o item muda de posição: a prévia a refaz a cada movimento, com a conta
+    do domínio (``vignette_factors``), sem imagem de máscara nem processo a mais."""
     item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
     sobre = _imagem(tmp_path / "sobre.png", QColor("blue"), scale_x=.2, scale_y=.2)
     vinheta = _filtro("vinheta")
     plano = interaction_plan(_pilha(tmp_path, sobre, vinheta, item), item.clip_id, 1.0)
-    assert plano.needs_mask and plano.filters == ()
+    assert plano.filters == ()
     assert [(r.clip_id, _ids(p)) for r, p in plano.stages] == [(vinheta.clip_id, {sobre.clip_id})]
     assert vinheta.clip_id not in _ids(plano.background) and vinheta.clip_id not in _ids(plano.foreground)
     comandos = interaction_commands(plano, (320, 180), FALSO)
-    assert len(comandos) == 3 + 1 + 1                                   # base, o trecho depois da vinheta e a máscara
-    assert "vignette=PI/4" in " ".join(comandos[-1]) and "color=c=white" in " ".join(comandos[-1])
+    assert len(comandos) == 3 + 1                                       # base e o trecho depois da vinheta
+    assert not any("vignette" in " ".join(c) for c in comandos)
 
 
 @pytest.mark.parametrize("acima, tem_plano", [("inverter", False), ("contraste", False), ("sepia", True), ("pb", True)])
@@ -421,15 +467,14 @@ def _medir_com_filtros(tmp_path: Path, arrasta: str, filtros: tuple[str, ...], c
     camadas = tuple(QPixmap.fromImage(QImage.fromData(_run(c, 30, strict=True)))
                     for c in interaction_commands(plano, tamanho, tools))
     base, fim = plano.base_layers, plano.base_layers + len(plano.stages)
-    assert len(camadas) == fim + int(plano.needs_mask) and all(not c.isNull() for c in camadas)
+    assert len(camadas) == fim and all(not c.isNull() for c in camadas)
     previa = _Preview()
     previa.resize(*tamanho)
     previa.set_frame_pixmap(QPixmap.fromImage(QImage.fromData(
         _run(frame_command(projeto, 1, tamanho, tools, png=True), 30, strict=True))))
     previa.set_active_clip(alvo, projeto.width, projeto.height)
     previa.set_position(1)
-    previa.set_interaction_layers(camadas[:base], tuple(zip((r for r, _ in plano.stages), camadas[base:fim])),
-                                  camadas[fim] if plano.needs_mask else None)
+    previa.set_interaction_layers(camadas[:base], tuple(zip((r for r, _ in plano.stages), camadas[base:fim])))
     movida = replace(alvo, x=.55) if arrasta == "item" else replace(alvo, x=.6, y=.55)
     previa.set_active_clip(movida, projeto.width, projeto.height)
     assert previa.begin_interaction()
@@ -491,6 +536,103 @@ def test_sem_o_filtro_na_textura_o_item_arrastado_destoa_do_quadro_final(tmp_pat
     errado = _medir_com_filtros(tmp_path / "b", "item", (filtro,), False, sem_o_filtro_na_textura=True) \
         if (tmp_path / "b").mkdir() is None else None
     assert errado.media > certo.media * 2 and errado.media > 1.5, (certo, errado)
+
+
+# -- arrastar o próprio filtro móvel -------------------------------------------------------------
+
+def _medir_movel(tmp_path: Path, nome: str, movida: dict, *, desfoque_acima: bool = False,
+                 de_cor_acima: str | None = None, desfoque_abaixo: bool = False,
+                 sem_o_fundo_filtrado: bool = False) -> SimpleNamespace:
+    """Arrasta um filtro móvel (``movida``: campos novos do bloco) e mede contra o quadro que o ffmpeg comporia ali."""
+    tools = find_tools()
+    if tools is None:
+        pytest.skip("FFmpeg não disponível")
+    fonte = tmp_path / "fonte.png"
+    subprocess.run([tools.ffmpeg_str, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=5",
+                    "-frames:v", "1", str(fonte)], check=True, timeout=30, **subprocess_kwargs())
+    chao = Clip(MediaRef(fonte, MediaKind.IMAGE, width=320, height=180), 0, 5, overlay_type="image",
+                scale_x=1.0, scale_y=1.0)
+    abaixo = _imagem(tmp_path / "vermelho.png", QColor(200, 40, 40), scale_x=.4, scale_y=.4, x=.45, y=.5)
+    sobre = _imagem(tmp_path / "verde.png", QColor(30, 200, 30), scale_x=.12, scale_y=.12, x=.6, y=.3)
+    movel = replace(_filtro(nome), movable=True, x=.4, y=.5, scale=.3, scale_x=.3, scale_y=.3)
+    acima = [*([_filtro(de_cor_acima)] if de_cor_acima else []),
+             *([_filtro(x=.75, y=.65, scale_x=.25, scale_y=.25, scale=.25)] if desfoque_acima else [])]
+    pilha = [*acima, sobre, movel, *([_filtro(x=.3, y=.4, scale_x=.25, scale_y=.25, scale=.25)] if desfoque_abaixo else []),
+             abaixo]
+    projeto = _pilha(tmp_path, *pilha, base=chao)
+    plano = interaction_plan(projeto, movel.clip_id, 1.0)
+    assert plano is not None and plano.source is None
+    tamanho = (640, 360)
+    comandos = list(interaction_commands(plano, tamanho, tools))
+    if sem_o_fundo_filtrado and plano.filtered is not None:       # guarda: a imagem filtrada vira o próprio fundo
+        comandos[2] = comandos[0]
+    camadas = tuple(QPixmap.fromImage(QImage.fromData(_run(c, 30, strict=True))) for c in comandos)
+    base, fim = plano.base_layers, plano.base_layers + len(plano.stages)
+    assert len(camadas) == fim and all(not c.isNull() for c in camadas)
+    previa = _Preview()
+    previa.resize(*tamanho)
+    previa.set_frame_pixmap(QPixmap.fromImage(QImage.fromData(
+        _run(frame_command(projeto, 1, tamanho, tools, png=True), 30, strict=True))))
+    previa.set_active_clip(movel, projeto.width, projeto.height)
+    previa.set_position(1)
+    previa.set_interaction_layers(camadas[:base], tuple(zip((r for r, _ in plano.stages), camadas[base:fim])))
+    novo = replace(movel, **movida)
+    previa.set_active_clip(novo, projeto.width, projeto.height)
+    assert previa.begin_interaction()
+    atual = previa.grab().toImage()
+    esperado = QImage.fromData(_run(frame_command(projeto.with_updated_clip(movel.clip_id, **movida), 1, tamanho, tools,
+                                                  png=True), 30, strict=True))
+    esq, topo, w, h = novo.region_rect(*tamanho, 1.0)
+
+    def diferenca(px: int, py: int) -> int:
+        a, b = atual.pixelColor(px, py), esperado.pixelColor(px, py)
+        return max(abs(a.red() - b.red()), abs(a.green() - b.green()), abs(a.blue() - b.blue()))
+
+    dentro = [diferenca(px, py) for py in range(topo + 12, topo + h - 12, 5) for px in range(esq + 12, esq + w - 12, 5)]
+    fora = [diferenca(px, py) for py in range(14, 346, 12) for px in range(14, 626, 12)
+            if not (esq - 14 <= px < esq + w + 14 and topo - 14 <= py < topo + h + 14)]
+    return SimpleNamespace(dentro=dentro, fora=fora)
+
+
+MOVIDAS = [pytest.param(dict(x=.4), id="parado"), pytest.param(dict(x=.6, y=.55), id="movido"),
+           pytest.param(dict(x=.5, y=.6, scale_x=.45, scale_y=.25, scale=.35), id="redimensionado")]
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("nome", ["pb", "sepia", "inverter", "contraste", "vinheta"])
+@pytest.mark.parametrize("movida", MOVIDAS)
+def test_o_filtro_movel_arrastado_aplica_o_filtro_na_pose_da_mao_e_o_resto_fica_como_estava(tmp_path, nome, movida):
+    """O retângulo na pose nova tem o filtro; o lugar onde ele estava volta ao que era; o que está acima dele (o quadrado
+    verde) continua sem o filtro. Medido contra o quadro do ffmpeg numa cena com barras de cor, o pior caso."""
+    medida = _medir_movel(tmp_path, nome, movida)
+    assert len(medida.dentro) > 40
+    assert sum(medida.dentro) / len(medida.dentro) <= 3, sum(medida.dentro) / len(medida.dentro)
+    assert max(medida.dentro) <= 40, max(medida.dentro)
+    assert sum(medida.fora) / len(medida.fora) <= 1.5, sum(medida.fora) / len(medida.fora)
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("nome, variacao", [
+    ("sepia", dict(desfoque_acima=True)), ("sepia", dict(de_cor_acima="inverter")),
+    ("sepia", dict(desfoque_abaixo=True)), ("vinheta", dict(desfoque_acima=True)),
+    ("pb", dict(desfoque_acima=True, de_cor_acima="sepia"))],
+    ids=["sepia+desfoque_acima", "sepia+inverter_acima", "sepia+desfoque_abaixo", "vinheta+desfoque_acima",
+         "pb+desfoque_e_sepia_acima"])
+def test_o_filtro_movel_arrastado_com_desfoque_ou_filtro_de_tela_inteira_em_volta(tmp_path, nome, variacao):
+    medida = _medir_movel(tmp_path, nome, dict(x=.6, y=.55), **variacao)
+    assert sum(medida.dentro) / len(medida.dentro) <= 4, sum(medida.dentro) / len(medida.dentro)
+    assert max(medida.dentro) <= 60, max(medida.dentro)
+    assert sum(medida.fora) / len(medida.fora) <= 3, sum(medida.fora) / len(medida.fora)
+
+
+@pytest.mark.ffmpeg
+def test_sem_o_fundo_ja_filtrado_o_filtro_movel_arrastado_destoa_do_quadro_final(tmp_path):
+    """Guarda: se a imagem "filtrada" for o próprio fundo, o retângulo sai sem o filtro e o limite estoura."""
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    certo = _medir_movel(tmp_path / "a", "sepia", dict(x=.6, y=.55))
+    errado = _medir_movel(tmp_path / "b", "sepia", dict(x=.6, y=.55), sem_o_fundo_filtrado=True)
+    assert sum(errado.dentro) / len(errado.dentro) > 3 * max(1.0, sum(certo.dentro) / len(certo.dentro))
 
 
 # -- o desfoque no Qt --------------------------------------------------------------------------

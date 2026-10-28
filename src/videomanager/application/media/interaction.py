@@ -24,16 +24,18 @@ class InteractionPlan:
     # Os filtros de cor acima do item (Sépia, P&B, Inverter, Contraste): já estão aplicados em ``background`` e em
     # cada trecho, e aqui ficam para a textura do item (e o fundo desfocado dele) sair filtrada também.
     filters: tuple[Clip, ...] = ()
+    # Quando o que se arrasta é um filtro de cor móvel: o que está abaixo dele **com o filtro na tela inteira**. A região
+    # é a parte desta imagem que a prévia mostra no retângulo da mão (o filtro é afim: o recorte do filtro aplicado ao
+    # quadro todo é o filtro aplicado ao recorte).
+    filtered: Project | None = None
 
     @property
     def base_layers(self) -> int:
-        """Quantas imagens vêm antes das dos trechos: fundo e frente (região), ou mais a textura e o fundo desfocado."""
-        return 2 if self.source is None else 4 if self.blur else 3
-
-    @property
-    def needs_mask(self) -> bool:
-        """Se há vinheta no caminho: a última imagem é então a máscara dela (quanto cada pixel escurece)."""
-        return any(stage.filter_name == VIGNETTE_FILTER for stage, _ in self.stages)
+        """Quantas imagens vêm antes das dos trechos: fundo e frente (região, mais a filtrada se o filtro é de cor), ou
+        a textura e o fundo desfocado (item)."""
+        if self.source is None:
+            return 3 if self.filtered is not None else 2
+        return 4 if self.blur else 3
 
 
 def interaction_plan(project: Project, clip_id: int, seconds: float) -> InteractionPlan | None:
@@ -49,7 +51,10 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
       Contraste, que têm termo constante) fica sem plano, e o quadro vem do ffmpeg como sempre veio.
 
     Quando o item arrastado é o próprio desfoque, o que está abaixo dele vem pronto e a prévia borra a região na pose
-    da mão (``source`` é ``None``).
+    da mão (``source`` é ``None``). O mesmo vale para um filtro móvel: o de cor traz também o fundo já filtrado
+    (``filtered``), de onde a prévia recorta o retângulo da mão, e a vinheta é calculada no retângulo ao pintar. Um
+    filtro móvel **acima** do que se arrasta fica sem plano: refazê-lo a cada movimento pede o filtro em cada imagem
+    do gesto.
     """
     if any(c.start <= seconds < c.end for c in project.transition_contexts()):
         return None
@@ -62,8 +67,8 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     clip = ordered[selected]
     if clip.overlay_type is OverlayType.TRANSITION or (clip.overlay_type is OverlayType.FILTER and not clip.has_region):
         return None
-    if clip.has_region and not clip.is_region_blur:
-        return None            # filtro móvel que não borra: a prévia ainda não sabe refazê-lo a cada movimento
+    if clip.has_region and not clip.is_region_blur and clip.filter_name not in (*COLOR_FILTERS, VIGNETTE_FILTER):
+        return None            # filtro móvel que o plano não conhece: o quadro vem do ffmpeg
     above = ordered[selected + 1:]
 
     def is_color(c: Clip) -> bool:
@@ -84,10 +89,10 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
                                           if is_color(c)):
         return None
 
-    def subset(clips: list[Clip]) -> Project:
+    def subset(clips: list[Clip], of: Project = project) -> Project:
         ids = {c.clip_id for c in clips}
-        return replace(project, tracks=tuple(replace(t, clips=tuple(c for c in t.clips if c.clip_id in ids))
-                                              for t in project.tracks))
+        return replace(of, tracks=tuple(replace(t, clips=tuple(c for c in t.clips if c.clip_id in ids))
+                                        for t in of.tracks))
 
     colors = [c for c in above if is_color(c)]
     # A posição na pilha é por ``clip_id``: dois blocos iguais em tudo menos na identidade (o mesmo filtro aplicado duas
@@ -112,7 +117,13 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
             stages.append((c, []))
         elif not is_color(c):
             (stages[-1][1] if stages else head).append(c)
+    filtered = None
+    if clip.has_region and clip.filter_name in COLOR_FILTERS:
+        # O mesmo bloco na tela inteira, no mesmo lugar da pilha: o compositor aplica o filtro a tudo que está abaixo.
+        everywhere = project.with_updated_clip(clip_id, movable=False, x=.5, y=.5, scale=1., scale_x=1., scale_y=1.,
+                                               keyframes=())
+        filtered = subset([*ordered[:selected], clip, *colors], everywhere)
     return InteractionPlan(subset([*ordered[:selected], *colors]), subset(with_filters(head)), source, clip_id, seconds,
                            blur=False if clip.has_region else clip.has_blur_background,
                            stages=tuple((stage, subset(with_filters(items))) for stage, items in stages),
-                           filters=tuple(colors))
+                           filters=tuple(colors), filtered=filtered)
