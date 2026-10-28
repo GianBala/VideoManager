@@ -251,6 +251,11 @@ def secao_comandos(_midia_dir: Path) -> dict:
                 Track(TrackKind.ADDITIONAL, clips=(texto,), track_id=42),
                 Track(TrackKind.ADDITIONAL, clips=(desfoque,), track_id=43), video(foto, tid=44), video(a, tid=45),
             ), width=1920, height=1080, fps=30.0),
+            # Dois filtros móveis, o de cima sobre o de baixo: as etapas do plano rápido se aplicam em ordem.
+            "filtros_moveis_empilhados": Project(tracks=(
+                Track(TrackKind.ADDITIONAL, clips=(replace(movel, filter_name="pb", clip_id=13),), track_id=49),
+                Track(TrackKind.ADDITIONAL, clips=(movel,), track_id=50), video(foto, tid=51), video(a, tid=52),
+            ), width=1920, height=1080, fps=30.0),
             "filtro_comum_nao_movel": Project(tracks=(
                 Track(TrackKind.ADDITIONAL, clips=(replace(filtro, start=1.0, duration=6.0),), track_id=46),
                 video(foto, tid=47), video(a, tid=48),
