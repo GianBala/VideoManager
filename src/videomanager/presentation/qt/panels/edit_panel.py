@@ -3002,8 +3002,9 @@ class EditPanel(QWidget):
         # A duração de uma transição pode ser limitada pelas duas pontas do
         # corte. Recarregar devolve ao campo o valor realmente aceito pelo
         # domínio, em vez de deixar na tela um número que não será renderizado.
+        # O "móvel" de um filtro muda quais seções a aba mostra (posição, tamanho e animação) e os valores delas.
         if (
-            updated_clip.is_transition
+            (updated_clip.is_transition or "movable" in changes)
             and self._properties_widget._clip_id == clip_id
         ):
             self._properties_widget.load_clip(

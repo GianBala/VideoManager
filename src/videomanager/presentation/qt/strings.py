@@ -980,6 +980,12 @@ PROP_CHROMA_PRESETS = {"#00FF00": "Verde Padrão", "#00B140": "Verde Studio", "#
 PROP_CHROMA_PRESET_TIP = "{name} ({color})"
 PROP_CHROMA_TOLERANCE = "Tolerância"
 PROP_CHROMA_SMOOTHING = "Suavização"
+PROP_FILTER = "Filtro"
+PROP_FILTER_MOVABLE = "Filtro móvel (limitar a uma área)"
+PROP_FILTER_MOVABLE_NOTE = (
+    "Desligado, o filtro age na tela inteira. Ligado, age só num retângulo que você move e redimensiona na prévia, "
+    "e que também pode ser animado com quadros-chave."
+)
 PROP_BLUR = "Fundo Desfocado"
 PROP_BLUR_ENABLE = "Preencher as bordas com o bloco desfocado"
 PROP_BLUR_NOTE = "Cobre a tela inteira por baixo do bloco, inclusive as trilhas abaixo dele."
