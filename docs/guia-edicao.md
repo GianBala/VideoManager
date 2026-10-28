@@ -300,10 +300,14 @@ trilha de Adicionais, com a duração do campo, e na prévia aparece o retângul
   tempo; depois de selecionado, ele se arrasta por dentro como qualquer bloco.
 - **Arrastar o que está embaixo** — mover uma imagem, um vídeo ou um texto que passa por baixo do
   Desfoque mostra o borrão acompanhando o movimento na hora. O mesmo vale com outros filtros por cima
-  (Sépia, Preto e Branco, Inverter, Contraste, Vinheta): a prévia aplica o filtro às imagens prontas do
-  gesto, e o quadro definitivo do ffmpeg chega quando você solta. Só fica no caminho lento — o quadro
-  inteiro refeito a cada passo — a Vinheta que está abaixo de um Inverter ou de um Contraste, e uma
-  transição acima do item.
+  (Sépia, Preto e Branco, Inverter, Contraste, Vinheta), de tela inteira ou **móveis**: a prévia aplica o
+  filtro às imagens prontas do gesto (ou, no filtro móvel, ao retângulo do quadro que ela monta a cada
+  movimento), e o quadro definitivo do ffmpeg chega quando você solta. Só ficam no caminho lento — o
+  quadro inteiro refeito a cada passo — estas combinações: uma transição acima do item; um filtro que a
+  prévia não conhece; a Vinheta (de tela inteira ou móvel) abaixo de um Inverter ou de um Contraste; um
+  filtro de cor de tela inteira acima de um filtro de cor móvel; e um filtro de cor móvel com o retângulo
+  maior que 100 mil pixels da prévia (algo como dois terços da largura numa prévia de 640 × 360, ou um
+  terço numa de 1280 × 720).
 - **Aba Propriedades** — posição X/Y, largura/altura e escala, em pixels da tela do projeto. Não há
   rotação, opacidade nem trava de proporção: um recorte não tem nada disso.
 - **Acompanhar o que se move** — só a **posição** anima. Com o cursor onde quer, mexer no retângulo cria
@@ -345,9 +349,11 @@ aba **Propriedades** do bloco, a caixa **Filtro móvel (limitar a uma área)** o
   item que está embaixo; para pegá-lo, clique na **borda** do retângulo ou no bloco dele na linha do tempo.
 - **Trocar de filtro** — com o bloco selecionado, escolher outro filtro na aba o troca e **mantém o retângulo**; quem
   vira Desfoque conserva o retângulo, e o Desfoque que vira outro filtro volta à tela inteira.
-- **Fluidez** — mover ou redimensionar o retângulo mostra o resultado na hora, na prévia, para qualquer filtro. Só um
-  filtro móvel **acima** do que você está arrastando (um item, ou outro filtro) faz a prévia pedir o quadro inteiro ao
-  ffmpeg a cada passo.
+- **Fluidez** — mover ou redimensionar o retângulo mostra o resultado na hora, na prévia, para qualquer filtro, e o
+  mesmo vale para arrastar um item, o Desfoque ou outro filtro que esteja **abaixo** de um filtro móvel. Os casos que
+  seguem no caminho lento (o quadro inteiro refeito a cada passo) são os listados em "Arrastar o que está embaixo",
+  em [Desfoque de região](#desfoque-de-região): os que mais aparecem são um filtro de cor móvel muito grande e um
+  filtro de tela inteira por cima de um filtro de cor móvel.
 - **Projeto aberto em versão antiga** — o projeto com um filtro móvel é gravado na versão 8 do arquivo, e uma versão
   anterior a recusa com a mensagem de versão não suportada (ela aplicaria o filtro à tela inteira). Os projetos sem
   filtro móvel continuam na versão de antes. Ao gravar a versão 8 sobre um arquivo mais antigo, o aplicativo guarda o
