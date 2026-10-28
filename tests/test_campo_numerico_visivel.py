@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QDoubleSpinBox, QSpinBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QDoubleSpinBox, QSpinBox, QStyle, QStyleOptionSpinBox,
+                               QVBoxLayout, QWidget)
 
+from videomanager.infrastructure.storage.settings import Settings
 from videomanager.presentation.qt.panels.field_box import FieldBox
 
 
@@ -100,3 +102,54 @@ def test_os_numeros_do_editor_aparecem_no_texto_e_na_aba_propriedades(tema_do_ap
     vazios = [type(spin).__name__ + ":" + spin.text() for spin in visiveis if not _preenche(spin)]
     assert not vazios, f"campos de número com o texto de dentro espremido: {vazios}"
 
+
+def test_o_recuo_do_numero_nos_campos_com_setas_bate_com_o_qss(tema_do_app):
+    """``SPIN_EDIT_INSET`` é a borda mais o preenchimento horizontal da regra genérica de campos do tema."""
+    import re
+
+    from videomanager.presentation.qt import theme
+
+    regra = re.search(r"QLineEdit, QComboBox, QSpinBox[^{]*\{([^}]*)\}", tema_do_app.styleSheet()).group(1)
+    borda = int(re.search(r"border:\s*(\d+)px", regra).group(1))
+    lateral = int(re.search(r"padding:\s*\d+px\s+(\d+)px", regra).group(1))
+    assert theme.SPIN_EDIT_INSET == borda + lateral
+
+
+@pytest.mark.parametrize("largura", [110, 246, 400])
+def test_o_numero_do_campo_com_setas_nasce_afastado_da_borda_e_antes_dos_botoes(tema_do_app, largura):
+    """No Qt 6.12 o campo de dentro começava em x = 0: o número colava na borda arredondada (Configurações, bitrate livre)."""
+    from videomanager.presentation.qt import theme
+    from videomanager.presentation.qt.arrow_spin import ArrowSpinBox
+
+    janela = QWidget()
+    coluna = QVBoxLayout(janela)
+    spin = ArrowSpinBox()
+    spin.setRange(0, 9999)
+    spin.setFixedWidth(largura)
+    coluna.addWidget(spin)
+    janela.resize(largura + 40, 120)
+    janela.show()
+    _assentar()
+    try:
+        edit = spin.lineEdit()
+        assert edit.x() == theme.SPIN_EDIT_INSET, f"campo de dentro em x = {edit.x()}"
+        assert edit.x() + edit.width() <= spin.width() - theme.SPIN_EDIT_INSET
+        # O texto termina antes dos botões, sem invadi-los.
+        opcao = QStyleOptionSpinBox()
+        spin.initStyleOption(opcao)
+        botoes = spin.style().subControlRect(QStyle.ComplexControl.CC_SpinBox, opcao, QStyle.SubControl.SC_SpinBoxUp, spin)
+        assert edit.x() + edit.width() <= botoes.left()
+    finally:
+        janela.close()
+
+
+def test_o_bitrate_livre_da_aba_download_tem_as_setas_desenhadas(tema_do_app, desktop_app):
+    """Era um ``QSpinBox`` puro: sob o QSS os botões saíam como dois retângulos vazios."""
+    from videomanager.presentation.qt.arrow_spin import ArrowSpinBox
+    from videomanager.presentation.qt.panels.quality_panel import QualityPanel
+
+    painel = QualityPanel(Settings())
+    try:
+        assert isinstance(painel._bitrate_custom, ArrowSpinBox)
+    finally:
+        painel.close()
