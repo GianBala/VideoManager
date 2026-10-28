@@ -56,12 +56,29 @@ class FieldBox(QFrame):
         self._target.installEventFilter(self)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
-        # O anel de foco é da caixa inteira, e o QSS não tem "foco em algum filho".
-        if obj is self._target and event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
-            self.setProperty("focused", "true" if event.type() == QEvent.Type.FocusIn else "false")
-            self.style().unpolish(self)
-            self.style().polish(self)
+        if obj is self._target:
+            kind = event.type()
+            # O anel de foco é da caixa inteira, e o QSS não tem "foco em algum filho".
+            if kind in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
+                self.setProperty("focused", "true" if kind == QEvent.Type.FocusIn else "false")
+                self.style().unpolish(self)
+                self.style().polish(self)
+            elif kind in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show):
+                self._fill_control()
         return super().eventFilter(obj, event)
+
+    def _fill_control(self) -> None:
+        """Devolve ao campo de texto de dentro o retângulo inteiro do controle.
+
+        No Qt 6.12 o ``QStyleSheetStyle`` entrega 1 px de largura ao campo de dentro de um ``QSpinBox`` sem botões
+        quando a regra do QSS tem borda ou preenchimento (medido: 1×15 num controle de 256×15, no Linux e no
+        Windows; no 6.11 e sem QSS saía 256×15). O texto do número sumia — tamanho da fonte, contorno e todos os campos
+        da aba Propriedades apareciam vazios, e nenhum erro dizia isso. Sem botões e sem moldura, o campo ocupa o
+        controle todo, que é o que o 6.11 sempre calculou; refazer a conta aqui não depende de como o estilo a faz.
+        """
+        area = self.control.rect()
+        if not area.isEmpty() and self._target.geometry() != area:
+            self._target.setGeometry(area)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         # Clicar no rótulo ou na unidade vai para o campo, como clicar numa caixa de texto qualquer.
