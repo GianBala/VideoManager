@@ -29,7 +29,9 @@ from PySide6.QtWidgets import (
 )
 
 from videomanager.application.capabilities import FFmpegTools
+from videomanager.domain.export_policy import MIN_FFMPEG_FOR_FILTER_IN_TRANSITION
 from videomanager.domain.export_policy import can_interpolate
+from videomanager.domain.export_policy import region_blur_in_affecting_transition
 from videomanager.application.media.export_description import describe_export
 from videomanager.domain.render_cost import interpolation_bytes
 from videomanager.domain.export_policy import reference_clip
@@ -147,6 +149,10 @@ def _export_warning(container: str, project: Project, interpolating: bool) -> st
     if interpolating:
         return strings.EDIT_INTERPOLATE_WARN.format(memory=format_size(interpolation_bytes(project)))
     return strings.EXPORT_GIF_NOTE if container == "gif" else ""
+
+
+def _blur_transition_note(version: int) -> str:
+    return strings.EXPORT_BLUR_TRANSITION_WARN.format(version=version)
 
 
 def _gif_canvas(width: int, height: int) -> tuple[int, int]:
@@ -924,7 +930,10 @@ class ExportDialog(QDialog):
                 family=codec_family,
                 quality=self._quality_choice or hwaccel.QUALITY_BALANCED,
             )
-            warning = _export_warning(container, proj, interpolating)
+            # O ffmpeg que a janela encontraria agora, sem a caixa "Baixar o ffmpeg?" (que só se abre ao enfileirar): a
+            # pessoa precisa ler que o desfoque some na passagem **antes** de decidir exportar, e não só na dica da fila.
+            blur = self._blur_transition_warning(proj, self._runtime.find_tools)
+            warning = "\n".join(filter(None, (_export_warning(container, proj, interpolating), *map(str, blur))))
 
         if hasattr(self, "_ext_label"):
             self._ext_label.setText(f".{container}")
@@ -1037,6 +1046,22 @@ class ExportDialog(QDialog):
     # Enfileirar
     # ------------------------------------------------------------------
 
+    def _blur_transition_warning(
+        self, project: Project, find_tools: Callable[[], FFmpegTools | None]
+    ) -> tuple[Text, ...]:
+        """Avisa quando o ffmpeg em uso perde o desfoque numa transição que afeta os adicionais.
+
+        O ffmpeg e a versão dele só se consultam (um processo, guardado por caminho) quando o projeto tem essa
+        combinação.
+        """
+        if not region_blur_in_affecting_transition(project):
+            return ()
+        tools = find_tools()
+        version = self._runtime.ffmpeg_major_version(tools) if tools is not None else None
+        if version is None or version >= MIN_FFMPEG_FOR_FILTER_IN_TRANSITION:
+            return ()
+        return (Text.of(_blur_transition_note, version),)
+
     def _on_enqueue(self) -> None:
         tools = self._ensure_tools() if self._ensure_tools else None
         if tools is None:
@@ -1082,6 +1107,7 @@ class ExportDialog(QDialog):
         # Descrição e aviso ficam na fila depois de a janela fechar: guardados
         # como texto refeito na exibição, acompanham a troca de idioma — com os
         # mesmos cálculos que a janela acabou de mostrar.
+        extra: tuple[Text, ...] = ()
         if is_fast and isinstance(target, TrimTarget):
             description = Text.of(_fast_plan, target)
             warning = Text.of(_drift_text, target, proj.fps)
@@ -1094,8 +1120,9 @@ class ExportDialog(QDialog):
                                   interpolating, family=target.family,
                                   quality=self._quality_choice or hwaccel.QUALITY_BALANCED)
             warning = Text.of(_export_warning, target.container, proj, interpolating)
+            extra = self._blur_transition_warning(proj, lambda: tools)
 
         self.created_job.description = description
-        self.created_job.warnings = (warning,) if warning is not None and str(warning) else ()
+        self.created_job.warnings = (*((warning,) if warning is not None and str(warning) else ()), *extra)
 
         self.accept()

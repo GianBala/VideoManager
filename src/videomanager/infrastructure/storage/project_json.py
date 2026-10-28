@@ -34,13 +34,43 @@ from videomanager.domain.project import reserve_project_ids
 # 4: o bloco ganha ``blur_background`` (fundo desfocado).
 # 5: o bloco ganha ``reversed`` (toca de trás para frente).
 # 6: o quadro-chave ganha ``gain_offset_db`` (a curva de volume, relativa ao do bloco).
+# 7: o desfoque de região (``filter_name = "desfoque"``). Não traz chave nova: a região é a pose do bloco.
+# 8: o filtro móvel (``movable``): um filtro que age num retângulo, e não na tela inteira.
 #
 # Todo campo novo no arquivo sobe esta versão. A leitura ignora chaves que não
 # conhece, então uma versão anterior que abrisse um arquivo com campo novo o
 # perderia em silêncio ao salvar — keyframes e opacity entraram assim. Com a
 # versão nova, a anterior recusa o arquivo com mensagem. O teste
 # ``test_campo_novo_no_projeto_exige_subir_a_versao`` trava as chaves da 6.
+#
+# A 7 e a 8 são gravadas só por quem precisa delas (``project_version``), e o arquivo de quem não usa
+# o recurso continua na 6, igual ao de antes: as versões anteriores seguem abrindo tudo o que não tem
+# desfoque nem filtro móvel.
+#
+# * A 7 só traz um **valor** novo, e uma versão anterior que o abrisse não perderia nada ao salvar,
+#   mas exportaria o quadro **inteiro** em Preto e Branco (nome de filtro desconhecido) sem desfocar a
+#   região — o rosto ou a placa à mostra, sem erro.
+# * A 8 traz uma chave, ``movable``, **só gravada quando ligada**: uma versão anterior a ignoraria e
+#   aplicaria o filtro à tela inteira, e a perderia ao salvar.
+#
+# **A próxima chave nova que todo arquivo grava é a 9.** ``PROJECT_VERSION`` sobe para 9 (nunca para 7 ou 8,
+# que as versões só com o desfoque ou só com o filtro móvel leriam sem conhecer a chave e a perderiam ao
+# salvar), e ``project_version`` e ``SUPPORTED_VERSION`` já tiram o maior dos números.
 PROJECT_VERSION = 6
+REGION_BLUR_VERSION = 7
+MOVABLE_FILTER_VERSION = 8
+# A maior versão que a leitura aceita.
+SUPPORTED_VERSION = max(PROJECT_VERSION, REGION_BLUR_VERSION, MOVABLE_FILTER_VERSION)
+
+
+def project_version(project: Project) -> int:
+    """A menor versão do formato em que este projeto pode ser gravado."""
+    version = PROJECT_VERSION
+    if any(clip.is_region_blur for clip in project.clips):
+        version = max(version, REGION_BLUR_VERSION)
+    if any(clip.movable for clip in project.clips):
+        version = max(version, MOVABLE_FILTER_VERSION)
+    return version
 
 
 def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
@@ -126,7 +156,7 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
     for track in project.tracks:
         clips_data: list[dict[str, object]] = []
         for clip in track.clips:
-            clips_data.append(
+            clip_data = (
                 {
                     "clip_id": clip.clip_id,
                     "start": clip.start,
@@ -181,6 +211,9 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
                     "media": _media_to_dict(clip.media, base_dir),
                 }
             )
+            if clip.movable:
+                clip_data["movable"] = True      # só quando ligada: o arquivo sem filtro móvel sai idêntico ao de antes
+            clips_data.append(clip_data)
         tracks_data.append(
             {
                 "track_id": track.track_id,
@@ -193,7 +226,7 @@ def project_to_dict(project: Project, base_dir: Path | None = None) -> dict[str,
         )
 
     return {
-        "version": PROJECT_VERSION,
+        "version": project_version(project),
         "width": project.width,
         "height": project.height,
         "fps": project.fps,
@@ -236,7 +269,7 @@ def _validate_project(data: dict[str, object]) -> None:
     if not isinstance(data, dict):
         fail(Text("PROJECT_FIELD_DOCUMENT"))
     version = data.get("version", 1)
-    if type(version) is not int or not 1 <= version <= PROJECT_VERSION:
+    if type(version) is not int or not 1 <= version <= SUPPORTED_VERSION:
         raise ProjectError(Text("PROJECT_VERSION_UNSUPPORTED", version=version))
     for name in ("width", "height", "fps", "text_reference_width", "text_reference_height"):
         number(data, name, positive=True, integer=name != "fps")
@@ -316,6 +349,7 @@ def _validate_project(data: dict[str, object]) -> None:
                     "transition_affects_additionals",
                     "blur_background",
                     "reversed",
+                    "movable",
                 ),
             )
             strings(clip, ("overlay_type", "text_content", "font_family", "text_color", "stroke_color", "filter_name", "transition_name", "chromakey_color"))
@@ -359,7 +393,7 @@ def _project_from_dict(
     """Reconstrói um projeto a partir do dicionário serializado."""
     missing_files: list[Path] = []
     version = data.get("version", 1)
-    if not isinstance(version, int) or version > PROJECT_VERSION:
+    if not isinstance(version, int) or version > SUPPORTED_VERSION:
         raise ProjectError(Text("PROJECT_VERSION_UNSUPPORTED", version=version))
 
     width = int(data.get("width", 1920))
@@ -457,6 +491,7 @@ def _project_from_dict(
                 chromakey_blend=float(c_data.get("chromakey_blend", 0.10)),
                 blur_background=bool(c_data.get("blur_background", False)),
                 reversed=bool(c_data.get("reversed", False)),
+                movable=bool(c_data.get("movable", False)),
                 clip_id=c_data["clip_id"] if "clip_id" in c_data else next_clip_id(),
             )
             clips.append(clip)
@@ -495,7 +530,7 @@ def save_project(project: Project, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = project_to_dict(project, base_dir=path.parent)
         text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
-        _backup_previous_version(path)
+        _backup_previous_version(path, int(data["version"]))
         # Temporário criado com 0666 (a máscara do usuário corta o resto), e
         # não pelo NamedTemporaryFile, que nasce 0600: a troca levava essa
         # permissão junto, e um projeto numa pasta compartilhada deixava de
@@ -523,8 +558,8 @@ def save_project(project: Project, path: Path) -> None:
                 pass
 
 
-def _backup_previous_version(path: Path) -> None:
-    """Preserva o original antes de gravá-lo num formato mais novo.
+def _backup_previous_version(path: Path, new_version: int) -> None:
+    """Preserva o original antes de gravá-lo num formato mais novo (``new_version``, o que vai ser gravado).
 
     Binários antigos não abrem o formato novo; a cópia ``.vN.bak`` é o caminho
     de volta. Nunca sobrescreve uma cópia existente.
@@ -539,7 +574,7 @@ def _backup_previous_version(path: Path) -> None:
     if not isinstance(old, dict):
         return
     version = old.get('version', 1)
-    if type(version) is not int or version >= PROJECT_VERSION:
+    if type(version) is not int or version >= new_version:
         return
     number = 0
     while True:

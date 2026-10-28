@@ -842,6 +842,20 @@ def dashed_circle(color: str, size: int = _NAV) -> QIcon:
 
 
 @_desenhado
+def region_blur(color: str, size: int = _NAV) -> QIcon:
+    """Desfoque de região: o retângulo tracejado da região, com o que ela esconde dentro."""
+    def desenho(p: QPainter, u: float) -> None:
+        caneta = p.pen()
+        caneta.setStyle(Qt.PenStyle.DotLine)
+        p.setPen(caneta)
+        p.drawRoundedRect(QRectF(4.5 * u, 5.5 * u, 15 * u, 13 * u), 2 * u, 2 * u)
+        p.setPen(_pen(color, 1.7))
+        p.setBrush(QColor(color))
+        p.drawEllipse(QPointF(12 * u, 12 * u), 2.4 * u, 2.4 * u)
+    return _nav(color, size, desenho)
+
+
+@_desenhado
 def square_filled(color: str, size: int = _NAV) -> QIcon:
     """Fade para preto: quadrado cheio."""
     def desenho(p: QPainter, u: float) -> None:
@@ -986,7 +1000,8 @@ def diamond(color: str, size: int = _NAV, filled: bool = False) -> QIcon:
 
 
 # Qual desenho acompanha cada opção, por identificador gravado no projeto.
-FILTER_ICONS = {"pb": half_circle, "sepia": cup, "contraste": bolt, "vinheta": target, "inverter": nav_convert}
+FILTER_ICONS = {"pb": half_circle, "sepia": cup, "contraste": bolt, "vinheta": target, "inverter": nav_convert,
+                "desfoque": region_blur}
 TRANSITION_ICONS = {
     "fade": dashed_circle, "fadeblack": square_filled, "fadewhite": square_outline, "dissolve": type_filter,
     "wipeleft": wipe_left, "wiperight": wipe_right, "slideleft": slide_left, "slideright": slide_right,

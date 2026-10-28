@@ -4,7 +4,12 @@ from collections.abc import Callable
 from videomanager.domain.project import Project
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
+from videomanager.domain.project import TrackKind
 from videomanager.domain.timing import Segment
+
+# A primeira versão do ffmpeg em que uma transição que atravessa um filtro adicional não o perde durante a passagem
+# (o agendamento interno mudou na 7; medido no 6.1, o do Ubuntu 24.04).
+MIN_FFMPEG_FOR_FILTER_IN_TRANSITION = 7
 
 
 
@@ -132,3 +137,24 @@ def _interpolated_clips(project: Project) -> list[Clip]:
 def can_interpolate(project: Project) -> bool:
     """Se há bloco abaixo da taxa da tela — o único caso com o que interpolar."""
     return bool(_interpolated_clips(project))
+
+
+def region_blur_in_affecting_transition(project: Project) -> bool:
+    """Se algum desfoque de região cai na janela de uma transição que afeta os adicionais.
+
+    É onde o ffmpeg anterior ao 7 perde o filtro durante a passagem (ver
+    ``MIN_FFMPEG_FOR_FILTER_IN_TRANSITION``). Repete o roteamento do compositor
+    (``_transition_additional_pieces``): trilha de adicionais visível **acima** da
+    trilha da transição e bloco que atravessa a janela; ``tests/test_desfoque_em_transicao.py``
+    confere que as duas contas concordam.
+    """
+    for context in project.transition_contexts():
+        if not context.marker.transition_affects_additionals:
+            continue
+        for index, track in enumerate(project.tracks):
+            if not track.visible or track.kind is not TrackKind.ADDITIONAL or index >= context.track_index:
+                continue
+            if any(clip.is_region_blur and min(context.end, clip.end) - max(context.start, clip.start) > 1e-6
+                   for clip in track.clips):
+                return True
+    return False

@@ -15,10 +15,13 @@ from videomanager.application.jobs.models import JobKind
 from videomanager.domain.project import Clip
 from videomanager.domain.project import MediaKind
 from videomanager.domain.project import MediaRef
+from videomanager.domain.project import OverlayType
 from videomanager.domain.project import Project
 from videomanager.domain.project import Track
 from videomanager.domain.project import TrackKind
+from videomanager.domain.project import filter_pose
 from videomanager.domain.project import new_project
+from videomanager.domain.project import pseudo_media
 from videomanager.infrastructure.storage.settings import Settings
 from videomanager.presentation.qt.export_dialog import ExportDialog
 from videomanager.presentation.qt.panels.edit_panel import EditPanel
@@ -664,3 +667,150 @@ def test_automatica_do_gif_anuncia_os_limites_do_gif_mesmo_com_taxa_escolhida(qa
     _escolhe(dialog._rate_box, 25.0)
     _escolhe(dialog._canvas_box, (1920, 1080))
     assert esperado_tela in dialog._canvas_box.itemText(0) and esperada_taxa in dialog._rate_box.itemText(0)
+
+
+def _projeto_com_desfoque_na_transicao(ref: MediaRef, *, afeta: bool = True) -> Project:
+    esquerda, direita = Clip(ref, 0.0, 30.0), Clip(ref, 30.0, 30.0, in_point=30.0)
+    marca = Clip(pseudo_media(OverlayType.TRANSITION, "T", 1.0), 29.5, 1.0, overlay_type="transition",
+                 transition_name="dissolve", transition_left_id=esquerda.clip_id, transition_right_id=direita.clip_id,
+                 transition_affects_additionals=afeta)
+    desfoque = Clip(pseudo_media(OverlayType.FILTER, "D", 4.0), 28.0, 4.0, overlay_type="filter",
+                    filter_name="desfoque", **filter_pose("desfoque"))
+    return Project(tracks=(Track(TrackKind.ADDITIONAL, clips=(desfoque,), name="A"),
+                           Track(TrackKind.VIDEO, clips=(esquerda, marca, direita), name="V")),
+                   width=1920, height=1080, fps=30.0)
+
+
+def _enfileirar(sample_media, dummy_tools, projeto, monkeypatch, versao):
+    ref, local = sample_media
+    dialog = ExportDialog(project=projeto, settings=Settings(), pool=[ref], probed={ref.path: local},
+                          ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=build_desktop_runtime())
+    monkeypatch.setattr(dialog._runtime, "ffmpeg_major_version", lambda tools: versao)
+    dialog._on_enqueue()
+    assert dialog.created_job is not None
+    return [str(aviso) for aviso in dialog.created_job.warnings]
+
+
+@pytest.mark.parametrize("versao, avisa", [(6, True), (7, False), (9, False), (None, False)])
+def test_desfoque_numa_transicao_que_afeta_adicionais_avisa_so_no_ffmpeg_anterior_ao_7(
+    qapp, sample_media, dummy_tools, monkeypatch, versao, avisa
+) -> None:
+    """No ffmpeg 6 o desfoque some durante a passagem; a exportação avisa antes, em vez de deixar o rosto à mostra."""
+    avisos = _enfileirar(sample_media, dummy_tools, _projeto_com_desfoque_na_transicao(sample_media[0]),
+                         monkeypatch, versao)
+    # Filtra pelo assunto do aviso, não pelo número: a mensagem imprime a versão **real**, e procurar "ffmpeg 6"
+    # não acusava um aviso indevido no 7 ("O ffmpeg 7 desta máquina perde o desfoque…").
+    do_desfoque = [aviso for aviso in avisos if "Afetar itens adicionais" in aviso]
+    assert bool(do_desfoque) is avisa, do_desfoque
+    if avisa:
+        assert "ffmpeg 6" in do_desfoque[0]
+
+
+def test_sem_transicao_que_afeta_adicionais_nem_pergunta_a_versao_do_ffmpeg(
+    qapp, sample_media, dummy_tools, monkeypatch
+) -> None:
+    ref, local = sample_media
+    projeto = _projeto_com_desfoque_na_transicao(ref, afeta=False)
+    dialog = ExportDialog(project=projeto, settings=Settings(), pool=[ref], probed={ref.path: local},
+                          ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=build_desktop_runtime())
+
+    def nao_deveria(tools):
+        raise AssertionError("a versão do ffmpeg só se consulta quando há desfoque numa transição que afeta adicionais")
+    monkeypatch.setattr(dialog._runtime, "ffmpeg_major_version", nao_deveria)
+    dialog._on_enqueue()
+    assert dialog.created_job is not None and not any("ffmpeg" in str(a) for a in dialog.created_job.warnings)
+
+
+def test_o_aviso_do_desfoque_na_transicao_segue_a_troca_de_idioma(qapp, sample_media, dummy_tools, monkeypatch) -> None:
+    """O aviso fica na fila depois de a janela fechar: guardado como texto refeito na exibição, e não já em português."""
+    from videomanager.domain import i18n
+    from videomanager.presentation.qt import i18n as idioma
+
+    ref, local = sample_media
+    dialog = ExportDialog(project=_projeto_com_desfoque_na_transicao(ref), settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=build_desktop_runtime())
+    monkeypatch.setattr(dialog._runtime, "ffmpeg_major_version", lambda tools: 6)
+    dialog._on_enqueue()
+    (aviso,) = [a for a in dialog.created_job.warnings if "ffmpeg 6" in str(a)]
+    assert "Afetar itens adicionais" in str(aviso)
+    idioma.apply_language(i18n.ENGLISH)
+    assert "Affect overlay items" in str(aviso) and "Afetar" not in str(aviso)
+
+
+
+def _janela_com_desfoque(sample_media, dummy_tools, monkeypatch, versao, *, projeto=None, tem_ffmpeg=True):
+    """A janela de exportação, com a versão do ffmpeg e o ffmpeg achado trocados **antes** de ela se montar."""
+    ref, local = sample_media
+    runtime = build_desktop_runtime()
+    monkeypatch.setattr(runtime, "ffmpeg_major_version", lambda tools: versao)
+    monkeypatch.setattr(runtime, "find_tools", lambda: dummy_tools if tem_ffmpeg else None)
+    dialog = ExportDialog(project=projeto or _projeto_com_desfoque_na_transicao(ref), settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=runtime)
+    dialog._fast.setChecked(False)
+    return dialog
+
+
+@pytest.mark.parametrize("versao, avisa", [(6, True), (7, False), (9, False), (None, False)])
+def test_o_aviso_do_desfoque_na_transicao_aparece_na_janela_antes_de_enfileirar(
+    qapp, sample_media, dummy_tools, monkeypatch, versao, avisa
+) -> None:
+    """Quem decide exportar precisa ler que o rosto aparece na passagem; na dica da fila é tarde demais."""
+    dialog = _janela_com_desfoque(sample_media, dummy_tools, monkeypatch, versao)
+    assert dialog._warning_box.isHidden() is not avisa
+    texto = dialog._warning.text()
+    assert bool(texto) is avisa
+    if avisa:
+        assert "ffmpeg 6" in texto and "Afetar itens adicionais" in texto
+
+
+def test_o_aviso_da_janela_convive_com_os_outros_avisos_da_exportacao(qapp, sample_media, dummy_tools, monkeypatch) -> None:
+    from videomanager.presentation.qt import strings
+    dialog = _janela_com_desfoque(sample_media, dummy_tools, monkeypatch, 6)
+    _escolhe(dialog._container_box, "gif")
+    texto = dialog._warning.text()
+    assert strings.EXPORT_GIF_NOTE in texto and "Afetar itens adicionais" in texto
+    assert texto.index(strings.EXPORT_GIF_NOTE) < texto.index("Afetar itens adicionais")
+
+
+def test_so_exportar_o_audio_nao_avisa_do_desfoque(qapp, sample_media, dummy_tools, monkeypatch) -> None:
+    dialog = _janela_com_desfoque(sample_media, dummy_tools, monkeypatch, 6)
+    assert not dialog._warning_box.isHidden()
+    dialog._audio_only_check.setChecked(True)
+    assert dialog._warning_box.isHidden() and not dialog._warning.text()
+
+
+def test_sem_ffmpeg_a_janela_nao_avisa_nem_pergunta_a_versao(qapp, sample_media, dummy_tools, monkeypatch) -> None:
+    """O "Baixar o ffmpeg?" só se abre ao enfileirar; enquanto isso a janela fica sem o aviso, sem quebrar."""
+    ref, local = sample_media
+    runtime = build_desktop_runtime()
+    monkeypatch.setattr(runtime, "find_tools", lambda: None)
+
+    def nao_deveria(tools):
+        raise AssertionError("sem ffmpeg não há versão a perguntar")
+    monkeypatch.setattr(runtime, "ffmpeg_major_version", nao_deveria)
+    dialog = ExportDialog(project=_projeto_com_desfoque_na_transicao(ref), settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: None,
+                          processing=build_processing_service(), runtime=runtime)
+    dialog._fast.setChecked(False)
+    assert dialog._warning_box.isHidden()
+
+
+def test_sem_desfoque_na_transicao_a_janela_nem_procura_o_ffmpeg_para_o_aviso(
+    qapp, sample_media, dummy_tools, monkeypatch
+) -> None:
+    ref, local = sample_media
+    runtime = build_desktop_runtime()
+
+    def nao_deveria(*args):
+        raise AssertionError("a janela só procura o ffmpeg e a versão quando há desfoque numa transição que afeta adicionais")
+    monkeypatch.setattr(runtime, "find_tools", nao_deveria)
+    monkeypatch.setattr(runtime, "ffmpeg_major_version", nao_deveria)
+    dialog = ExportDialog(project=_projeto_com_desfoque_na_transicao(ref, afeta=False), settings=Settings(), pool=[ref],
+                          probed={ref.path: local}, ensure_tools=lambda: dummy_tools,
+                          processing=build_processing_service(), runtime=runtime)
+    dialog._fast.setChecked(False)
+    assert dialog._warning_box.isHidden()
