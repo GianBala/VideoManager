@@ -175,6 +175,19 @@ def test_a_vinheta_movel_selecionada_tem_plano_sem_imagem_filtrada(tmp_path):
     assert len(interaction_commands(plano, (320, 180), FALSO)) == 2
 
 
+@pytest.mark.parametrize("acima, tem_plano", [("inverter", False), ("contraste", False), ("sepia", True), ("pb", True)])
+def test_a_vinheta_movel_arrastada_sob_um_filtro_com_termo_constante_fica_sem_plano(tmp_path, acima, tem_plano):
+    """A mesma regra da vinheta de tela cheia, e agora para a que se arrasta: ela não está em ``above``, então a conta
+    de "a vinheta tem Inverter ou Contraste acima" nunca a via, e a prévia multiplicava a máscara sobre a imagem já
+    invertida (bordas escuras no gesto, claras no quadro do ffmpeg: erro médio de 65 em 255)."""
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    vinheta = _movel("vinheta")
+    plano = interaction_plan(_pilha(tmp_path, _filtro(acima), vinheta, abaixo), vinheta.clip_id, 1.0)
+    assert (plano is not None) is tem_plano
+    # Com a vinheta **acima** do filtro, a ordem se refaz sozinha (o filtro fica abaixo e já vem pintado no fundo).
+    assert interaction_plan(_pilha(tmp_path, vinheta, _filtro(acima), abaixo), vinheta.clip_id, 1.0) is not None
+
+
 def test_o_plano_do_filtro_movel_selecionado_nao_depende_da_pose_dele(tmp_path):
     abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
     movel = _movel("sepia")

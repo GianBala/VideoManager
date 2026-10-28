@@ -84,7 +84,9 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
             # Um filtro móvel que não borra aplica a cor dele só num retângulo: refazê-lo a cada movimento pede o
             # filtro na própria imagem do gesto, e a prévia não o faz. Nome que esta lista não conhece, idem.
             return None
-    first_vignette = next((i for i, c in enumerate(above) if is_vignette(c)), None)
+    # A vinheta que se arrasta (móvel) não está em ``above``, mas é a primeira da pilha: tudo que há acima dela vem depois.
+    first_vignette = -1 if clip.has_region and clip.filter_name == VIGNETTE_FILTER else next(
+        (i for i, c in enumerate(above) if is_vignette(c)), None)
     if first_vignette is not None and any(c.filter_name in OFFSET_COLOR_FILTERS for c in above[first_vignette + 1:]
                                           if is_color(c)):
         return None
