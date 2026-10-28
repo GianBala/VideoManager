@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QLabel,
-    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -51,6 +50,7 @@ from videomanager.application.media.download_policy import audio_quality_warning
 from videomanager.application.media.download_policy import plan_container
 from videomanager.application.preferences import Preferences as Settings
 from videomanager.presentation.qt import icons, strings
+from videomanager.presentation.qt.arrow_spin import ArrowSpinBox
 from videomanager.presentation.qt.i18n import bind, on_language_change, retext_items
 from videomanager.presentation.qt.panels.fields import captioned, make_grid
 from videomanager.presentation.qt.panels.segmented import SegmentButton, segmented
@@ -207,7 +207,7 @@ class QualityPanel(QWidget):
         grid.addWidget(self._audio_track_box, 1, 2)
 
         # O valor livre só aparece quando "Personalizado…" está escolhido, numa fileira sua, sob o bitrate.
-        self._bitrate_custom = QSpinBox()
+        self._bitrate_custom = ArrowSpinBox()
         self._bitrate_custom.setRange(VIDEO_BITRATE_MIN, VIDEO_BITRATE_MAX)
         self._bitrate_custom.setSingleStep(100)
         self._bitrate_custom.setSuffix(" kbps")

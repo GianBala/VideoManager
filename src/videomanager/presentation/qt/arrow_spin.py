@@ -8,7 +8,7 @@ retângulos que o próprio estilo diz serem os botões, na cor do tema.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QEvent, QObject, QPointF
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSpinBox, QStyle, QStyleOptionSpinBox
 
@@ -19,9 +19,27 @@ class ArrowSpinBox(QSpinBox):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         theme.on_theme_change(self._retheme)
+        self.lineEdit().installEventFilter(self)
 
     def _retheme(self) -> None:
         self.update()
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        if obj is self.lineEdit() and event.type() in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show):
+            self._restore_inset()
+        return super().eventFilter(obj, event)
+
+    def _restore_inset(self) -> None:
+        """Devolve ao número o afastamento da borda que o QSS manda e o Qt 6.12 deixou de aplicar.
+
+        No 6.11 o campo de dentro nascia a ``SPIN_EDIT_INSET`` px de cada lado (borda e preenchimento da regra de campos);
+        no 6.12 ele começa em x = 0 e sobra o mesmo dos dois lados: o número colava na borda arredondada e o Windows da
+        CI, que instala o PySide6 mais novo, o entregava assim. Só age se o estilo não afastou, então nada dobra nas
+        versões em que ele afasta.
+        """
+        edit, inset = self.lineEdit(), theme.SPIN_EDIT_INSET
+        if edit.x() < inset and edit.width() > 2 * inset:
+            edit.setGeometry(edit.x() + inset, edit.y(), edit.width() - 2 * inset, edit.height())
 
     def paintEvent(self, event) -> None:  # noqa: N802
         super().paintEvent(event)
