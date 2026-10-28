@@ -86,13 +86,16 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
                                               for t in project.tracks))
 
     colors = [c for c in above if is_color(c)]
+    # A posição na pilha é por ``clip_id``: dois blocos iguais em tudo menos na identidade (o mesmo filtro aplicado duas
+    # vezes) são iguais para o ``==`` do bloco, e ``list.index`` devolveria sempre o primeiro.
+    position = {c.clip_id: i for i, c in enumerate(above)}
 
     def with_filters(items: list[Clip]) -> list[Clip]:
         """Os itens de um trecho e os filtros de cor que agem sobre eles: os que estão acima do primeiro item."""
         if not items:
             return items
-        first = above.index(items[0])
-        return [*items, *(c for c in colors if above.index(c) > first)]
+        first = position[items[0].clip_id]
+        return [*items, *(c for c in colors if position[c.clip_id] > first)]
 
     # Retirar somente a pose torna o plano estável ao longo do gesto. Tempo,
     # origem, chroma, texto e todas as demais camadas continuam fazendo parte dele.

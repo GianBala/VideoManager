@@ -135,6 +135,17 @@ def test_o_filtro_de_cor_so_age_nos_trechos_que_estao_abaixo_dele(tmp_path):
     assert plano.filters == (sepia,) and sepia.clip_id in _ids(plano.background)
 
 
+def test_o_mesmo_filtro_aplicado_duas_vezes_age_em_cada_trecho_pela_posicao_dele(tmp_path):
+    """Dois Sépias iguais em tudo menos na identidade são iguais para o ``==`` do bloco: o de cima tem de contar."""
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    a = _imagem(tmp_path / "a.png", QColor("blue"), scale_x=.2, scale_y=.2)
+    de_baixo, de_cima = _filtro("sepia"), _filtro("sepia")
+    assert de_baixo == de_cima and de_baixo.clip_id != de_cima.clip_id
+    # De cima para baixo: Sépia, a, Sépia, item. O trecho de `a` tem os dois Sépias acima dele.
+    plano = interaction_plan(_pilha(tmp_path, de_cima, a, de_baixo, item), item.clip_id, 1.0)
+    assert _ids(plano.foreground) == {a.clip_id, de_cima.clip_id}
+
+
 def test_a_vinheta_acima_do_item_e_um_trecho_com_mascara_e_nao_vai_nas_imagens_prontas(tmp_path):
     """A vinheta escurece por posição na tela e o item muda de posição: refeita a cada movimento, com uma máscara."""
     item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
