@@ -198,6 +198,31 @@ def test_varios_filtros_moveis_e_um_desfoque_no_mesmo_projeto_nao_repetem_rotulo
     assert caixa is not None and caixa[0] < 100 and caixa[2] > 220          # do filtro mais à esquerda ao mais à direita
 
 
+def _projeto_com_transicao(tools, fonte: Path, *filtros: Clip, afeta: bool) -> Project:
+    esquerda = Clip(media_ref(probe_file(fonte, tools)), 0.0, 2.0)
+    direita = Clip(media_ref(probe_file(fonte, tools)), 2.0, 2.0)
+    marca = Clip(pseudo_media(OverlayType.TRANSITION, "Dissolve", 1.0), 1.5, 1.0, overlay_type="transition",
+                 transition_name="dissolve", transition_left_id=esquerda.clip_id, transition_right_id=direita.clip_id,
+                 transition_affects_additionals=afeta)
+    return Project(tracks=(Track(TrackKind.ADDITIONAL, clips=filtros, name="Adicionais 1"),
+                           Track(TrackKind.VIDEO, clips=(esquerda, marca, direita), name="Vídeo 1")),
+                   width=TELA[0], height=TELA[1], fps=FPS)
+
+
+@pytest.mark.parametrize("afeta", [False, True], ids=["transicao_sem_adicionais", "transicao_que_afeta_adicionais"])
+@pytest.mark.parametrize("nome", ["sepia", "vinheta"])
+def test_o_filtro_movel_atravessa_uma_transicao_sem_quebrar_a_montagem(tools, ruido, nome, afeta) -> None:
+    """Dentro da janela da transição (1,5 s a 2,5 s) o filtro continua só no retângulo; fora dele, o quadro é o do
+    projeto sem o filtro. Com "Afetar itens adicionais" o compositor leva o filtro para dentro da transição (rótulos)."""
+    filtro = _filtro(nome, 1.0, 2.0)
+    com = _projeto_com_transicao(tools, ruido, filtro, afeta=afeta)
+    sem = _projeto_com_transicao(tools, ruido, afeta=afeta)
+    a, b = _quadro(tools, com, 60), _quadro(tools, sem, 60)                 # meio da passagem
+    esq, topo, w, h = _retangulo(filtro, 60)
+    caixa = _caixa_que_mudou(a, b)
+    assert caixa is not None and caixa[0] >= esq and caixa[1] >= topo and caixa[2] <= esq + w and caixa[3] <= topo + h
+
+
 # -- exportação de verdade ------------------------------------------------------------------
 
 def _exportar(tools, projeto: Project, fonte: Path, destino: Path) -> Path:
