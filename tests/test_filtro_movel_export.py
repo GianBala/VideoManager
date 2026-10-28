@@ -83,7 +83,9 @@ def _quadro(tools, projeto: Project, indice: int, tela: tuple[int, int] = TELA) 
     return dados
 
 
-def _caixa_que_mudou(a: bytes, b: bytes, tela: tuple[int, int] = TELA) -> tuple[int, int, int, int] | None:
+def _caixa_que_mudou(a: bytes, b: bytes, tela: tuple[int, int] = TELA,
+                     limiar: int = 0) -> tuple[int, int, int, int] | None:
+    """A menor caixa que contém os pixels que mudaram por mais de ``limiar`` (em 255) em algum canal."""
     largura, altura = tela
     esq, topo, dir_, base = largura, altura, -1, -1
     for y in range(altura):
@@ -91,7 +93,7 @@ def _caixa_que_mudou(a: bytes, b: bytes, tela: tuple[int, int] = TELA) -> tuple[
         ra, rb = a[linha], b[linha]
         if ra == rb:
             continue
-        diferentes = [x for x in range(largura) if any(ra[x * 3 + c] != rb[x * 3 + c] for c in range(3))]
+        diferentes = [x for x in range(largura) if any(abs(ra[x * 3 + c] - rb[x * 3 + c]) > limiar for c in range(3))]
         if not diferentes:
             continue
         topo, base = min(topo, y), max(base, y)
@@ -219,7 +221,10 @@ def test_o_filtro_movel_atravessa_uma_transicao_sem_quebrar_a_montagem(tools, ru
     sem = _projeto_com_transicao(tools, ruido, afeta=afeta)
     a, b = _quadro(tools, com, 60), _quadro(tools, sem, 60)                 # meio da passagem
     esq, topo, w, h = _retangulo(filtro, 60)
-    caixa = _caixa_que_mudou(a, b)
+    # No ffmpeg 9, o adicional que atravessa uma transição que o afeta sai do ``overlay`` convertido: 1 em 255 em quase
+    # todo o quadro (medido, e igual com o desfoque da versão anterior). Com "Afetar adicionais" a tolerância é essa;
+    # sem ele, e em qualquer outro teste, o que está fora do retângulo continua tendo de ser byte a byte igual.
+    caixa = _caixa_que_mudou(a, b, limiar=1 if afeta else 0)
     assert caixa is not None and caixa[0] >= esq and caixa[1] >= topo and caixa[2] <= esq + w and caixa[3] <= topo + h
 
 
