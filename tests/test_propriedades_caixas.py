@@ -272,9 +272,13 @@ def test_a_lista_de_transicoes_traz_so_o_nome_e_o_icone_vem_do_desenho(tema_do_a
 
 
 def test_o_bloco_sem_ajustes_diz_isso_com_ar_embaixo_do_cabecalho(tema_do_app, painel_de_edicao, blocos_de_edicao):
+    """Hoje todo tipo de bloco tem alguma seção (o filtro ganhou a caixa "Filtro móvel"), então o aviso fica de reserva
+    para um tipo sem nenhuma: o teste o mostra à força para conferir o ar embaixo do cabeçalho, que é dele."""
     widget = _abrir(painel_de_edicao, blocos_de_edicao["filtro"])
     aviso = widget._lbl_no_settings
-    assert aviso.isVisibleTo(widget) and aviso.text() == strings.PROP_NO_SETTINGS
+    assert not aviso.isVisibleTo(widget)
+    aviso.setVisible(True)
+    assert aviso.text() == strings.PROP_NO_SETTINGS
     cabecalho = widget._lbl_clip_type
     vao = _origem(aviso, widget).y() - (_origem(cabecalho, widget).y() + cabecalho.height())
     # O ar é a margem de cima do próprio rótulo, e o texto começa depois dela.
