@@ -154,7 +154,7 @@ def region_blur_in_affecting_transition(project: Project) -> bool:
         for index, track in enumerate(project.tracks):
             if not track.visible or track.kind is not TrackKind.ADDITIONAL or index >= context.track_index:
                 continue
-            if any(clip.has_region and min(context.end, clip.end) - max(context.start, clip.start) > 1e-6
+            if any(clip.is_region_blur and min(context.end, clip.end) - max(context.start, clip.start) > 1e-6
                    for clip in track.clips):
                 return True
     return False

@@ -62,6 +62,8 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     clip = ordered[selected]
     if clip.overlay_type is OverlayType.TRANSITION or (clip.overlay_type is OverlayType.FILTER and not clip.has_region):
         return None
+    if clip.has_region and not clip.is_region_blur:
+        return None            # filtro móvel que não borra: a prévia ainda não sabe refazê-lo a cada movimento
     above = ordered[selected + 1:]
 
     def is_color(c: Clip) -> bool:
@@ -73,8 +75,10 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     for c in above:
         if c.overlay_type is OverlayType.TRANSITION:
             return None
-        if c.overlay_type is OverlayType.FILTER and not (c.has_region or is_color(c) or is_vignette(c)):
-            return None          # filtro que o compositor trata de outro jeito (ou que esta lista não conhece)
+        if c.overlay_type is OverlayType.FILTER and not (c.is_region_blur or is_color(c) or is_vignette(c)):
+            # Um filtro móvel que não borra aplica a cor dele só num retângulo: refazê-lo a cada movimento pede o
+            # filtro na própria imagem do gesto, e a prévia não o faz. Nome que esta lista não conhece, idem.
+            return None
     first_vignette = next((i for i, c in enumerate(above) if is_vignette(c)), None)
     if first_vignette is not None and any(c.filter_name in OFFSET_COLOR_FILTERS for c in above[first_vignette + 1:]
                                           if is_color(c)):
@@ -104,7 +108,7 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     head: list[Clip] = []
     stages: list[tuple[Clip, list[Clip]]] = []
     for c in above:
-        if c.has_region or is_vignette(c):
+        if c.is_region_blur or is_vignette(c):
             stages.append((c, []))
         elif not is_color(c):
             (stages[-1][1] if stages else head).append(c)
