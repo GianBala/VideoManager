@@ -949,7 +949,6 @@ EDIT_EASINGS = {
 # aba Propriedades
 PROP_TITLE = "Propriedades"
 PROP_CLOSE_TIP = "Fechar aba de propriedades"
-PROP_NO_SETTINGS = "Este bloco não tem ajustes além da duração e da posição na linha do tempo."
 PROP_CLIP_ID = "ID #{id} · {kind}"
 # Espécie do bloco, pelo tipo de sobreposição gravado no projeto.
 PROP_KINDS = {"none": "Mídia", "image": "Imagem", "text": "Texto", "filter": "Filtro", "transition": "Transição"}

@@ -1551,16 +1551,6 @@ class _ClipPropertiesWidget(QWidget):
         theme.on_theme_change(self._retheme)
         self._retheme()
 
-        # Bloco sem nenhuma seção (a transição, por exemplo, só tem duração e posição, que se ajustam na linha do
-        # tempo): diz isso, em vez de mostrar uma aba vazia.
-        self._lbl_no_settings = bind(QLabel(), "setText", lambda: strings.PROP_NO_SETTINGS)
-        self._lbl_no_settings.setProperty("role", "dim")
-        self._lbl_no_settings.setWordWrap(True)
-        # O ar entre o cabeçalho e o texto, que nas seções vem do fio e do cabeçalho delas.
-        self._lbl_no_settings.setContentsMargins(0, 14, 0, 0)
-        self._lbl_no_settings.setVisible(False)
-        self._layout.addWidget(self._lbl_no_settings)
-
         # Grupo Filtro: o "móvel" de um filtro que não é o desfoque. Vem antes da Transformação porque é ele que a
         # libera: ligado, o filtro vira um retângulo e as seções de posição, tamanho e animação aparecem logo abaixo.
         self._filter_group = Section(lambda: strings.PROP_FILTER)
@@ -1964,7 +1954,6 @@ class _ClipPropertiesWidget(QWidget):
         self._chromakey_group.setVisible(False)
         self._blur_group.setVisible(False)
         self._transition_group.setVisible(False)
-        self._lbl_no_settings.setVisible(False)
         self._mark_first_section()
 
     def _mark_first_section(self) -> None:
@@ -2075,7 +2064,6 @@ class _ClipPropertiesWidget(QWidget):
             has_sound = clip.can_adjust_sound or clip.detached
             self._speed_group.setVisible(has_speed)
             self._volume_group.setVisible(has_sound)
-            self._lbl_no_settings.setVisible(not any(not group.isHidden() for group in self._groups()))
             self._mark_first_section()
             if has_speed:
                 self._spin_speed.setValue(clip.speed)
