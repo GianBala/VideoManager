@@ -8,6 +8,7 @@ do tempo); ativa, ela se arrasta por dentro como qualquer bloco.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -188,3 +189,37 @@ def test_clicar_no_desfoque_inativo_sob_um_item_ainda_seleciona_o_item_de_cima()
     cena = _Cena(None, _pilha(acima))
     cena.clicar(cena.centro(_desfoque()))
     assert cena.selecionados == [ACIMA_ID]
+
+
+# -- o filtro móvel inativo também deixa o clique passar -------------------------------------
+
+def _movel() -> Clip:
+    """Um Sépia móvel, no mesmo retângulo do desfoque dos testes acima."""
+    return replace(_desfoque(), filter_name="sepia", movable=True, clip_id=DESFOQUE_ID)
+
+
+def test_clicar_na_imagem_sob_um_filtro_movel_seleciona_a_imagem_e_a_borda_seleciona_o_filtro():
+    movel = _movel()
+    cena = _Cena(None, (_video(), _imagem(), movel))
+    cena.clicar(cena.centro(_imagem()))
+    assert cena.selecionados == [IMAGEM_ID]                       # o corpo do filtro deixa o clique passar
+    cx, cy, w, h = cena.previa._clip_geometry(movel)
+    cena.selecionados.clear()
+    cena.clicar((cx + w / 2 - 2, cy))
+    assert cena.selecionados == [DESFOQUE_ID]                     # a borda o seleciona
+
+
+def test_o_filtro_movel_ativo_se_arrasta_por_dentro():
+    movel = _movel()
+    cena = _Cena(movel, (_video(), _imagem(), movel))
+    cena.arrastar(cena.centro(movel))
+    assert cena.selecionados == [] and cena.movidos and set(cena.movidos) == {DESFOQUE_ID}
+    assert cena.previa._active_clip.x > movel.x
+
+
+def test_o_filtro_de_tela_inteira_nao_tem_corpo_para_pegar_o_clique():
+    """Sem ser móvel o filtro não tem retângulo: o clique vai direto ao item."""
+    comum = replace(_movel(), movable=False)
+    cena = _Cena(None, (_video(), _imagem(), comum))
+    cena.clicar(cena.centro(_imagem()))
+    assert cena.selecionados == [IMAGEM_ID]

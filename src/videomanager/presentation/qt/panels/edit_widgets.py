@@ -6,6 +6,7 @@ import json
 import math
 from collections.abc import Sequence
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
@@ -85,6 +86,7 @@ from videomanager.presentation.qt import fonts, icons, strings, theme
 from videomanager.presentation.qt.theme import TIPOS_DE_BLOCO
 from videomanager.presentation.qt.i18n import bind, on_language_change, retext_items
 from videomanager.domain.i18n import decimal
+from videomanager.domain.vignette import mask_size, vignette_factors
 
 _PREVIEW_MIN_HEIGHT = 160
 # O raio do cartão da prévia, o do protótipo.
@@ -120,6 +122,19 @@ def _snap_axis(raw: float, half: float, low: float, high: float, center: float) 
                (abs(high - (raw + half)), high - half, high),
                (abs(center - raw), center, center), key=lambda candidate: candidate[0])
     return (near[1], near[2]) if near[0] <= _SNAP_THRESHOLD else (raw, None)
+
+
+@lru_cache(maxsize=8)
+def _vignette_mask(width: int, height: int) -> QPixmap:
+    """A máscara da vinheta de um quadro ``width``×``height``, a ser multiplicada (``_paint_interaction_with_regions``).
+
+    Calculada numa grade de um quarto do tamanho e ampliada pelo Qt ao pintar (ver ``vignette_factors``). É guardada
+    por tamanho: arrastar a vinheta não muda o tamanho, e só redimensioná-la pede uma nova.
+    """
+    step = 4 if min(width, height) >= 32 else 1
+    grid_w, grid_h = mask_size(width, height, step)
+    gray = QImage(vignette_factors(width, height, step), grid_w, grid_h, grid_w, QImage.Format.Format_Grayscale8).copy()
+    return QPixmap.fromImage(gray.convertToFormat(QImage.Format.Format_RGB32))
 
 
 def _has_handles(clip: Clip | None) -> bool:
@@ -403,7 +418,6 @@ class _Preview(QLabel):
         self._interaction_layers: tuple[QPixmap, ...] | None = None
         # Um desfoque de região acima do item arrastado, com a imagem do que vem depois dele (ver ``set_interaction_layers``).
         self._interaction_stages: tuple[tuple[Clip, QPixmap], ...] = ()
-        self._interaction_mask: QPixmap | None = None
         self._interaction_visible = False
 
         self._active_clip: Clip | None = None
@@ -490,17 +504,15 @@ class _Preview(QLabel):
         self.update()
 
     def set_interaction_layers(self, layers: tuple[QPixmap, ...] | None,
-                               stages: tuple[tuple[Clip, QPixmap], ...] = (),
-                               mask: QPixmap | None = None) -> None:
+                               stages: tuple[tuple[Clip, QPixmap], ...] = ()) -> None:
         """``stages``: cada desfoque de região ou vinheta acima do item, com o que o cobre até o próximo.
 
         O desfoque borra o que o item móvel desenha e a vinheta escurece por posição na tela, então nenhum dos dois
         vem pronto: a prévia monta a imagem do gesto a cada movimento e aplica cada um nela
-        (``_paint_interaction_with_regions``). ``mask`` é o quanto a vinheta escurece cada pixel.
+        (``_paint_interaction_with_regions``).
         """
         self._interaction_layers = layers
         self._interaction_stages = stages if layers is not None else ()
-        self._interaction_mask = mask if layers is not None else None
         if layers is None:
             self._interaction_visible = False
         elif self._drag_mode:
@@ -1148,20 +1160,22 @@ class _Preview(QLabel):
 
     def _paint_interaction_with_regions(self, painter: QPainter, target: QRect, clip: Clip,
                                         geom: tuple[float, float, float, float]) -> None:
-        """As camadas do gesto quando há desfoque de região no caminho: acima do item arrastado, ou o próprio item.
+        """As camadas do gesto quando há filtro de região no caminho: acima do item arrastado, ou o próprio item.
 
-        As mesmas camadas de sempre, mas num quadro fora da tela, na resolução delas: a região é borrada (ou a vinheta
-        multiplicada) nele
-        com os pixels que o item móvel acabou de pôr ali, e só então a imagem vai para a prévia. A pose do item é
-        a de agora, como no caminho sem desfoque. A região vem da conta do compositor (``Clip.region_rect``), na
-        mesma tela reduzida em que as camadas foram feitas.
+        As mesmas camadas de sempre, mas num quadro fora da tela, na resolução delas: o desfoque borra nele, e a
+        vinheta o multiplica, com os pixels que o item móvel acabou de pôr ali, e só então a imagem vai para a prévia. A
+        pose do item é a de agora, como no caminho sem desfoque. A região vem da conta do compositor
+        (``Clip.region_rect``), na mesma tela reduzida em que as camadas foram feitas.
 
-        Se o que se arrasta é a **própria região** (``clip.has_region``), não há textura: o quadro é o que está
-        abaixo dela, borrado no retângulo da pose de agora, e por cima vem o que a cobre.
+        Se o que se arrasta é a **própria região** (``clip.has_region``), não há textura: o quadro é o que está abaixo
+        dela, com o filtro dela no retângulo da pose de agora (borrado, escurecido pela vinheta, ou recortado da imagem
+        do fundo já filtrado), e por cima vem o que a cobre.
         """
+        filtered = None
         if clip.has_region:
-            background, foreground = self._interaction_layers
+            background, foreground, *extra = self._interaction_layers
             texture, fundo = None, []
+            filtered = extra[0] if extra else None
         else:
             background, texture, foreground, *fundo = self._interaction_layers
         stages = self._interaction_stages
@@ -1174,16 +1188,35 @@ class _Preview(QLabel):
         layers = QPainter(frame)
         layers.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        def blur(region: Clip) -> None:
+        def rect_of(region: Clip) -> QRect:
             left, top, rw, rh = region.region_rect(compose_w, compose_h, max(0., self._position - region.start))
+            return QRect(round(left * sx), round(top * sy), round(rw * sx), round(rh * sy))
+
+        def blur(region: Clip) -> None:
+            area = rect_of(region)
             layers.end()
-            blur_region(frame, round(left * sx), round(top * sy), round(rw * sx), round(rh * sy))
+            blur_region(frame, area.x(), area.y(), area.width(), area.height())
             layers.begin(frame)
             layers.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
+        def darken(area: QRect, mask_w: int, mask_h: int) -> None:
+            """Multiplica ``area`` pela vinheta de um quadro ``mask_w``×``mask_h`` (o do ffmpeg: a tela do compositor)."""
+            layers.setCompositionMode(QPainter.CompositionMode.CompositionMode_Multiply)
+            layers.drawPixmap(area, _vignette_mask(mask_w, mask_h))
+            layers.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+
         layers.drawPixmap(whole, background)
         if texture is None:
-            blur(clip)
+            if clip.is_region_blur:
+                blur(clip)
+            elif filtered is not None:
+                layers.save()
+                layers.setClipRect(rect_of(clip))
+                layers.drawPixmap(whole, filtered)
+                layers.restore()
+            else:        # vinheta móvel: a do recorte, que escurece as bordas do retângulo
+                left, top, rw, rh = clip.region_rect(compose_w, compose_h, max(0., self._position - clip.start))
+                darken(rect_of(clip), rw, rh)
         else:
             transform = clip.transform_at(max(0., self._position - clip.start))
             cx, cy, w, h = geom
@@ -1198,12 +1231,10 @@ class _Preview(QLabel):
             layers.setOpacity(1.0)
         layers.drawPixmap(whole, foreground)
         for stage, after in stages:
-            if stage.has_region:
+            if stage.is_region_blur:
                 blur(stage)
-            else:        # vinheta: multiplica o quadro pela máscara, no lugar onde o item está agora
-                layers.setCompositionMode(QPainter.CompositionMode.CompositionMode_Multiply)
-                layers.drawPixmap(whole, self._interaction_mask)
-                layers.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            else:        # vinheta de tela inteira: multiplica o quadro, no lugar onde o item está agora
+                darken(whole, compose_w, compose_h)
             layers.drawPixmap(whole, after)
         layers.end()
         painter.save()

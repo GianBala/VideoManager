@@ -624,10 +624,11 @@ def test_item_com_desfoque_e_sepia_acima_recebe_as_camadas_e_o_trecho_do_desfoqu
     worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('red'), _png('#00000000'), _png('#00000000')))
     worker.signals.done.emit()
     assert len(panel._preview._interaction_layers) == 3 and len(panel._preview._interaction_stages) == 1
-    assert panel._preview._interaction_mask is None
 
 
-def test_vinheta_acima_do_item_pede_a_mascara_como_ultima_imagem_e_so_vale_com_ela(pose_panel):
+def test_vinheta_acima_do_item_e_um_trecho_e_so_vale_com_a_contagem_do_plano(pose_panel):
+    """A vinheta é refeita ao pintar, com a conta do domínio: o plano pede uma imagem a mais (o que vem depois dela) e
+    nenhuma máscara."""
     panel, calls, item, deliver = pose_panel
     (vinheta,) = _aplicar_filtros_pela_aba(panel, deliver, calls, "vinheta")
     _liberar_camadas(calls)
@@ -636,9 +637,57 @@ def test_vinheta_acima_do_item_pede_a_mascara_como_ultima_imagem_e_so_vale_com_e
         deliver(calls.frames[-1])
     worker = calls.interaction[-1]
     plano = worker.args[0]
-    assert plano.needs_mask and [r.clip_id for r, _ in plano.stages] == [vinheta.clip_id]
-    sem_mascara = (_png('lime'), _png('red'), _png('#00000000'), _png('#00000000'))
-    worker.signals.frame.emit(worker.args[3], sem_mascara)
-    assert panel._preview._interaction_layers is None, 'sem a máscara a vinheta não pode ser refeita: não se instala'
-    worker.signals.frame.emit(worker.args[3], (*sem_mascara, _png('#808080')))
-    assert panel._preview._interaction_layers is not None and panel._preview._interaction_mask is not None
+    assert [r.clip_id for r, _ in plano.stages] == [vinheta.clip_id] and plano.base_layers == 3
+    base = (_png('lime'), _png('red'), _png('#00000000'))
+    worker.signals.frame.emit(worker.args[3], base)
+    assert panel._preview._interaction_layers is None, 'sem o trecho depois da vinheta não se instala'
+    worker.signals.frame.emit(worker.args[3], (*base, _png('#00000000'), _png('#808080')))
+    assert panel._preview._interaction_layers is None, 'uma imagem a mais (a máscara de antes) não é do plano'
+    worker.signals.frame.emit(worker.args[3], (*base, _png('#00000000')))
+    assert panel._preview._interaction_layers is not None and len(panel._preview._interaction_stages) == 1
+
+
+def _filtro_movel_pela_aba(panel, deliver, calls, nome: str):
+    """O caminho do usuário: ``Aplicar Filtro``, "Filtro móvel" ligado na aba Propriedades e o bloco selecionado."""
+    (filtro,) = _aplicar_filtros_pela_aba(panel, deliver, calls, nome)
+    _liberar_camadas(calls)
+    antes = len(calls.interaction)
+    panel._open_properties_tab(filtro.clip_id)
+    panel._properties_widget._chk_movable.setChecked(True)
+    while panel._frame_busy:
+        deliver(calls.frames[-1])
+    return panel._project.find(filtro.clip_id)[1], antes
+
+
+@pytest.mark.parametrize("nome, imagens", [("sepia", 3), ("inverter", 3), ("vinheta", 2)])
+def test_filtro_movel_ligado_pela_aba_e_arrastado_nao_pede_quadro_ao_ffmpeg(pose_panel, nome, imagens):
+    """O que o usuário faz: aplica o filtro, liga "Filtro móvel" e arrasta o retângulo. Cor: fundo, frente e o fundo já
+    filtrado; vinheta: fundo e frente (a máscara é a conta do domínio)."""
+    panel, calls, item, deliver = pose_panel
+    movel, antes = _filtro_movel_pela_aba(panel, deliver, calls, nome)
+    assert movel.movable and movel.has_region
+    assert len(calls.interaction) > antes, 'selecionar o filtro móvel não pediu as camadas do gesto'
+    worker = calls.interaction[-1]
+    plano = worker.args[0]
+    assert plano.clip_id == movel.clip_id and plano.source is None and plano.base_layers == imagens
+    worker.signals.frame.emit(worker.args[3], tuple(_png('lime') for _ in range(imagens)))
+    worker.signals.done.emit()
+    assert panel._preview._interaction_layers is not None and len(panel._preview._interaction_layers) == imagens
+    antes_de_arrastar = len(calls.frames)
+    for x in (.35, .4, .45):
+        ativo = panel._preview._active_clip
+        panel._preview.set_active_clip(replace(ativo, x=x), panel._project.width, panel._project.height)
+        panel._on_overlay_transformed(movel.clip_id, x, ativo.y, ativo.scale, 0.0)
+    assert len(calls.frames) == antes_de_arrastar, 'cada movimento compôs um quadro inteiro'
+    assert panel._preview._interaction_visible
+
+
+def test_camadas_do_filtro_de_cor_movel_so_valem_com_a_imagem_filtrada(pose_panel):
+    """Sem o fundo já filtrado, o retângulo da mão sairia sem o filtro: duas imagens para um plano de três não se instalam."""
+    panel, calls, item, deliver = pose_panel
+    _, _ = _filtro_movel_pela_aba(panel, deliver, calls, "sepia")
+    worker = calls.interaction[-1]
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('#00000000')))
+    assert panel._preview._interaction_layers is None
+    worker.signals.frame.emit(worker.args[3], (_png('lime'), _png('#00000000'), _png('#aa7744')))
+    assert panel._preview._interaction_layers is not None

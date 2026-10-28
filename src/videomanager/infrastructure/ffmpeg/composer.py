@@ -43,7 +43,6 @@ from videomanager.application.errors import ConversionError
 from videomanager.domain.constants import CHROMA_COLOR
 from videomanager.domain.constants import GAIN_EPSILON
 from videomanager.domain.constants import REGION_BLUR_STEPS
-from videomanager.domain.constants import VIGNETTE_FILTER
 from videomanager.domain.i18n import Text
 from videomanager.domain.keyframe import Keyframe, resolve_segment_easing
 from videomanager.domain.preview import BYTES_PER_PIXEL
@@ -2912,10 +2911,10 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
     Com o fundo desfocado ligado no bloco, uma quarta imagem: o fundo de tela
     cheia dele, pintado entre ``background`` e a textura. Depois delas, uma imagem
     por desfoque de região ou vinheta acima do bloco (``plan.stages``): o que fica
-    entre esse e o seguinte, em base transparente. Com vinheta, a última é a máscara
-    dela (``_vignette_mask_command``). Quando o que se arrasta é a própria região de
-    um desfoque (``plan.source`` é ``None``), não há textura nem fundo desfocado: só
-    ``background``, ``foreground`` e as imagens dos trechos acima.
+    entre esse e o seguinte, em base transparente. Quando o que se arrasta é a própria
+    região de um filtro (``plan.source`` é ``None``), não há textura nem fundo desfocado:
+    só ``background`` e ``foreground``, a imagem do fundo com o filtro na tela inteira
+    (``plan.filtered``, só para os filtros de cor) e as imagens dos trechos acima.
 
     Os filtros de cor acima do bloco (``plan.filters``) já estão em ``background`` e
     nos trechos, que o compositor monta com eles; a textura e o fundo desfocado
@@ -2926,9 +2925,10 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
                                transparent=True, png=True)
     after = tuple(frame_command(project, plan.seconds, size, tools, text_assets=text_assets,
                                 transparent=True, png=True) for _, project in plan.stages)
-    mask = (_vignette_mask_command(plan, size, tools),) if plan.needs_mask else ()
     if plan.source is None:
-        return background, foreground, *after, *mask
+        filtered = ((frame_command(plan.filtered, plan.seconds, size, tools, text_assets=text_assets, png=True),)
+                    if plan.filtered is not None else ())
+        return background, foreground, *filtered, *after
     source = _preview_project(plan.source, size)
     pieces = _pieces(source, plan.seconds, 1 / source.fps, want_audio=False)
     piece = next(p for p in pieces if p.clip.clip_id == plan.clip_id)
@@ -2946,7 +2946,7 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
                '-filter_complex', graph, '-map', '[texture]',
                '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgba', 'pipe:1']
     if not plan.blur:
-        return background, texture, foreground, *after, *mask
+        return background, texture, foreground, *after
     # O fundo não depende da pose (cobre a tela inteira e a opacidade é aplicada
     # ao pintar), então uma imagem só serve o gesto todo. A frente vai para o
     # ``nullsink`` porque a cadeia do bloco só existe com as duas saídas ligadas.
@@ -2958,19 +2958,4 @@ def interaction_commands(plan, size, tools, *, text_assets=None) -> tuple[list[s
             *_limited_inputs(_input_args(piece, source.fps, text_assets=text_assets)),
             '-filter_complex', graph, '-map', '[blur]',
             '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgb24', 'pipe:1']
-    return background, texture, foreground, blur, *after, *mask
-
-
-def _vignette_mask_command(plan, size, tools) -> list[str]:
-    """A máscara da vinheta: um quadro branco, na tela do compositor, passado pelo mesmo filtro.
-
-    A vinheta multiplica cada pixel por um fator que só depende da posição (medido: a razão é a mesma em branco, cinza,
-    vermelho e azul), então escurecer o quadro do gesto é multiplicá-lo por esta imagem. Ela não pode vir pronta nas
-    camadas porque o item arrastado muda de posição: o escurecimento tem de cair no lugar onde ele está agora. A
-    ampliação até o tamanho do quadro fica com o Qt, ao pintar: o fator é uma curva suave.
-    """
-    canvas = _preview_project(plan.background, size)
-    return [tools.ffmpeg_str, '-nostdin', '-hide_banner', '-v', 'error',
-            '-f', 'lavfi', '-i', f"color=c=white:s={canvas.width}x{canvas.height}:d=0.1,format=rgba",
-            '-vf', _filter_expression(VIGNETTE_FILTER),
-            '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-pix_fmt', 'rgba', 'pipe:1']
+    return background, texture, foreground, blur, *after
