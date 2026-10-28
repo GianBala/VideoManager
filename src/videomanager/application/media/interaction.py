@@ -1,7 +1,9 @@
 """Planos imutáveis para manipulação imediata de um objeto em um instante."""
+import math
 from dataclasses import dataclass, replace
 
-from ...domain.constants import COLOR_FILTERS, OFFSET_COLOR_FILTERS, VIGNETTE_FILTER
+from ...domain.constants import COLOR_FILTERS, OFFSET_COLOR_FILTERS, REGION_COLOR_STAGE_MAX_PIXELS, VIGNETTE_FILTER
+from ...domain.geometry import region_size
 from ...domain.project import Clip, OverlayType, Project, TrackKind
 
 
@@ -38,23 +40,28 @@ class InteractionPlan:
         return 4 if self.blur else 3
 
 
-def interaction_plan(project: Project, clip_id: int, seconds: float) -> InteractionPlan | None:
+def interaction_plan(project: Project, clip_id: int, seconds: float,
+                     size: tuple[int, int] | None = None) -> InteractionPlan | None:
     """Separa a pilha sem tentar decompor filtros que dependem do objeto móvel.
 
     Transição acima do item muda tudo que está abaixo e não tem como ser refeita a cada movimento: sem plano. Os
-    filtros de tela inteira acima do item têm três destinos:
+    filtros acima do item têm três destinos:
 
-    * os de cor (Sépia, P&B, Inverter, Contraste) são afins, e filtrar a soma é filtrar cada camada e somar: entram já
-      aplicados nas imagens prontas (``background`` e os trechos) e na textura (``filters``);
-    * o desfoque de região e a vinheta são refeitos pela prévia a cada movimento (``stages``);
-    * uma combinação em que a ordem muda o resultado e a prévia não sabe reproduzir (vinheta abaixo de Inverter ou de
-      Contraste, que têm termo constante) fica sem plano, e o quadro vem do ffmpeg como sempre veio.
+    * os de cor de tela inteira (Sépia, P&B, Inverter, Contraste) são afins, e filtrar a soma é filtrar cada camada e
+      somar: entram já aplicados nas imagens prontas (``background`` e os trechos) e na textura (``filters``);
+    * o desfoque de região, a vinheta (de tela inteira ou móvel) e o filtro de cor **móvel** agem sobre o que o item
+      móvel acabou de pôr no quadro, e são refeitos pela prévia a cada movimento, em ordem (``stages``);
+    * uma combinação em que a ordem muda o resultado e a prévia não sabe reproduzir fica sem plano, e o quadro vem do
+      ffmpeg como sempre veio: vinheta abaixo de Inverter ou de Contraste (termo constante, não comuta com a
+      multiplicação), filtro de cor de tela inteira acima de um filtro de cor móvel (já estaria aplicado antes da etapa),
+      filtro que a prévia não conhece e transição;
+    * um filtro de cor móvel com o retângulo grande demais para a conta em Python a cada movimento
+      (``REGION_COLOR_STAGE_MAX_PIXELS`` pixels da imagem de ``size``, a da prévia) também fica sem plano: sem ``size``
+      não há o que medir e o limite não vale.
 
     Quando o item arrastado é o próprio desfoque, o que está abaixo dele vem pronto e a prévia borra a região na pose
     da mão (``source`` é ``None``). O mesmo vale para um filtro móvel: o de cor traz também o fundo já filtrado
-    (``filtered``), de onde a prévia recorta o retângulo da mão, e a vinheta é calculada no retângulo ao pintar. Um
-    filtro móvel **acima** do que se arrasta fica sem plano: refazê-lo a cada movimento pede o filtro em cada imagem
-    do gesto.
+    (``filtered``), de onde a prévia recorta o retângulo da mão, e a vinheta é calculada no retângulo ao pintar.
     """
     if any(c.start <= seconds < c.end for c in project.transition_contexts()):
         return None
@@ -77,18 +84,30 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     def is_vignette(c: Clip) -> bool:
         return c.overlay_type is OverlayType.FILTER and not c.has_region and c.filter_name == VIGNETTE_FILTER
 
+    def is_movable(c: Clip) -> bool:
+        """Filtro móvel que a prévia sabe aplicar ao quadro do gesto: a vinheta ou o filtro de cor, no retângulo."""
+        return (c.overlay_type is OverlayType.FILTER and c.has_region and not c.is_region_blur
+                and c.filter_name in (*COLOR_FILTERS, VIGNETTE_FILTER))
+
     for c in above:
         if c.overlay_type is OverlayType.TRANSITION:
             return None
-        if c.overlay_type is OverlayType.FILTER and not (c.is_region_blur or is_color(c) or is_vignette(c)):
-            # Um filtro móvel que não borra aplica a cor dele só num retângulo: refazê-lo a cada movimento pede o
-            # filtro na própria imagem do gesto, e a prévia não o faz. Nome que esta lista não conhece, idem.
-            return None
+        if c.overlay_type is OverlayType.FILTER and not (c.is_region_blur or is_color(c) or is_vignette(c) or is_movable(c)):
+            return None            # um nome que a prévia não conhece (nem como filtro móvel): o quadro vem do ffmpeg
     # A vinheta que se arrasta (móvel) não está em ``above``, mas é a primeira da pilha: tudo que há acima dela vem depois.
     first_vignette = -1 if clip.has_region and clip.filter_name == VIGNETTE_FILTER else next(
-        (i for i, c in enumerate(above) if is_vignette(c)), None)
+        (i for i, c in enumerate(above) if is_vignette(c) or (is_movable(c) and c.filter_name == VIGNETTE_FILTER)), None)
     if first_vignette is not None and any(c.filter_name in OFFSET_COLOR_FILTERS for c in above[first_vignette + 1:]
                                           if is_color(c)):
+        return None
+    if size is not None and any(
+            is_movable(c) and c.filter_name != VIGNETTE_FILTER and math.prod(region_size(c.scale_x, c.scale_y, *size))
+            > REGION_COLOR_STAGE_MAX_PIXELS for c in above):
+        return None
+    # Um filtro de cor de tela inteira acima de um filtro de cor móvel já estaria aplicado nas imagens prontas, antes da
+    # etapa do móvel: ``sépia(inverter(x))`` não é ``inverter(sépia(x))``. Abaixo dele a ordem está certa.
+    first_movable_color = next((i for i, c in enumerate(above) if is_movable(c) and c.filter_name != VIGNETTE_FILTER), None)
+    if first_movable_color is not None and any(is_color(c) for c in above[first_movable_color + 1:]):
         return None
 
     def subset(clips: list[Clip], of: Project = project) -> Project:
@@ -115,7 +134,7 @@ def interaction_plan(project: Project, clip_id: int, seconds: float) -> Interact
     head: list[Clip] = []
     stages: list[tuple[Clip, list[Clip]]] = []
     for c in above:
-        if c.is_region_blur or is_vignette(c):
+        if c.is_region_blur or is_vignette(c) or is_movable(c):
             stages.append((c, []))
         elif not is_color(c):
             (stages[-1][1] if stages else head).append(c)
