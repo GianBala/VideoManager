@@ -1489,3 +1489,12 @@ class TestDesfoqueDeRegiao:
     def test_o_desfoque_nao_entra_no_grafo_de_so_audio(self) -> None:
         grafo = build_graph(self.com(self.desfoque()), want_video=False)
         assert grafo.video_label is None and "gblur" not in ";".join(grafo.filters)
+
+
+def test_filtro_de_tela_inteira_com_nome_desconhecido_vira_preto_e_branco_como_sempre_foi():
+    """Arquivo de outra versão, ou nome que o plano não conhece: o quadro sai em P&B, e a exportação e as camadas do arrasto
+    (que saem desta mesma função) têm de concordar."""
+    from videomanager.infrastructure.ffmpeg.composer import _filter_expression
+    assert _filter_expression("filtro-novo") == _filter_expression("pb") == "hue=s=0"
+    assert _filter_expression("filtro-novo", "between(t,1,2)") == "hue=s=0:enable='between(t,1,2)'"
+    assert _filter_expression("inverter", "between(t,1,2)") == "negate=enable='between(t,1,2)'"

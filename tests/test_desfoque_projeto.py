@@ -192,6 +192,15 @@ def test_o_filtro_movel_grava_a_chave_e_a_versao_8_e_o_comum_nao_grava_nenhuma_d
     assert sem["version"] == PROJECT_VERSION == 6 and "movable" not in sem["tracks"][0]["clips"][0]
 
 
+def test_movable_que_nao_e_booleano_no_arquivo_e_recusado(tmp_path: Path) -> None:
+    """Sem a validação, ``bool("sim")`` ligaria o filtro móvel de um arquivo corrompido ou escrito à mão."""
+    movel, _ = _movel(tmp_path)
+    dados = project_to_dict(movel, base_dir=tmp_path)
+    dados["tracks"][0]["clips"][0]["movable"] = "sim"
+    with pytest.raises(ProjectError):
+        project_from_dict(dados, base_dir=tmp_path)
+
+
 def test_o_desfoque_continua_na_7_e_sem_a_chave(tmp_path: Path) -> None:
     desfoque, _ = _projeto(tmp_path)
     dados = project_to_dict(desfoque, base_dir=tmp_path)
