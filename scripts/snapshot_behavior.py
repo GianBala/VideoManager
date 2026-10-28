@@ -231,6 +231,33 @@ def secao_comandos(_midia_dir: Path) -> dict:
                                         width=1280, height=720, fps=30.0),
     }
 
+    def cenas_do_filtro_movel() -> dict:
+        """O filtro móvel (um filtro que age num retângulo): sozinho, com o desfoque e comparado ao de tela inteira.
+
+        Sem cena com ele, o retrato não vê o recorte do compositor nem o plano rápido do arrasto. Numa árvore anterior
+        ao campo ``movable`` o bloco não aceita o argumento: as cenas somem em vez de derrubar a seção inteira.
+        """
+        try:
+            movel = replace(filtro, movable=True, x=0.35, y=0.5, scale=0.3, scale_x=0.3, scale_y=0.3, start=1.0, duration=6.0)
+        except TypeError:
+            return {}
+        vinheta = replace(movel, filter_name="vinheta", x=0.6, y=0.4, scale=0.4, scale_x=0.4, scale_y=0.4)
+        return {
+            "filtro_movel_sepia": Project(tracks=(
+                Track(TrackKind.ADDITIONAL, clips=(movel,), track_id=38), video(foto, tid=39), video(a, tid=40),
+            ), width=1920, height=1080, fps=30.0),
+            "filtro_movel_vinheta_e_desfoque": Project(tracks=(
+                Track(TrackKind.ADDITIONAL, clips=(vinheta,), track_id=41),
+                Track(TrackKind.ADDITIONAL, clips=(texto,), track_id=42),
+                Track(TrackKind.ADDITIONAL, clips=(desfoque,), track_id=43), video(foto, tid=44), video(a, tid=45),
+            ), width=1920, height=1080, fps=30.0),
+            "filtro_comum_nao_movel": Project(tracks=(
+                Track(TrackKind.ADDITIONAL, clips=(replace(filtro, start=1.0, duration=6.0),), track_id=46),
+                video(foto, tid=47), video(a, tid=48),
+            ), width=1920, height=1080, fps=30.0),
+        }
+    projetos.update(cenas_do_filtro_movel())
+
     def seguro(funcao, *args, **kwargs):
         try:
             return funcao(*args, **kwargs)
