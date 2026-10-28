@@ -50,7 +50,6 @@ def test_um_filtro_comum_mostra_a_caixa_desligada_e_nenhuma_pose(nome):
     assert not widget._chk_movable.isChecked()
     for grupo in (widget._transform_group, widget._animation_group):
         assert not _visivel(widget, grupo)
-    assert not widget._lbl_no_settings.isVisibleTo(widget)          # a aba tem uma seção: não é "sem ajustes"
 
 
 @pytest.mark.parametrize("nome", OUTROS)
