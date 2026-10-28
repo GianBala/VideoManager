@@ -135,6 +135,16 @@ def test_o_filtro_de_cor_so_age_nos_trechos_que_estao_abaixo_dele(tmp_path):
     assert plano.filters == (sepia,) and sepia.clip_id in _ids(plano.background)
 
 
+@pytest.mark.parametrize("nome", ["sepia", "pb", "inverter", "contraste", "vinheta"])
+def test_filtro_movel_acima_do_item_ou_selecionado_ainda_fica_sem_plano_rapido(tmp_path, nome):
+    """O filtro móvel aplica a cor dele num retângulo: refazê-lo a cada movimento pede o filtro na imagem do gesto.
+    Enquanto a prévia não sabe, o quadro vem do ffmpeg (e não do desfoque, que ela borra)."""
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    movel = replace(_filtro(nome), movable=True, scale=.3, scale_x=.3, scale_y=.3)
+    assert interaction_plan(_pilha(tmp_path, movel, item), item.clip_id, 1.0) is None
+    assert interaction_plan(_pilha(tmp_path, movel, item), movel.clip_id, 1.0) is None
+
+
 def test_o_mesmo_filtro_aplicado_duas_vezes_age_em_cada_trecho_pela_posicao_dele(tmp_path):
     """Dois Sépias iguais em tudo menos na identidade são iguais para o ``==`` do bloco: o de cima tem de contar."""
     item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
