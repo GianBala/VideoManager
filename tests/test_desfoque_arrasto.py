@@ -518,6 +518,15 @@ def test_o_teste_acima_enxerga_o_desfoque_arrastado_que_nao_e_borrado(tmp_path, 
 
 # -- filtros de tela inteira acima do que se arrasta -------------------------------------------
 
+def _filtro_da_lista(especificacao: str) -> Clip:
+    """``"sepia"`` é o filtro de tela inteira; ``"movel:sepia"``, o móvel; ``"animado:sepia"``, o móvel com a posição
+    andando de 10% a 70% da largura em 2 s (no instante 1 s, o retângulo está em 40%, e não nos 50% de quem não anima)."""
+    if especificacao.startswith("animado:"):
+        quadros = (Keyframe(0.0, x=.1, y=.5, scale_x=.3, scale_y=.3), Keyframe(2.0, x=.7, y=.5, scale_x=.3, scale_y=.3))
+        return replace(_movel(especificacao[8:]), keyframes=quadros)
+    return _movel(especificacao[6:]) if especificacao.startswith("movel:") else _filtro(especificacao)
+
+
 def _medir_com_filtros(tmp_path: Path, arrasta: str, filtros: tuple[str, ...], com_desfoque: bool,
                        *, sem_o_filtro_na_textura: bool = False) -> SimpleNamespace:
     """Arrasta o item (ou o desfoque) com ``filtros`` no topo da pilha e mede o quadro todo contra o do ffmpeg.
@@ -536,7 +545,7 @@ def _medir_com_filtros(tmp_path: Path, arrasta: str, filtros: tuple[str, ...], c
     item = _imagem(tmp_path / "vermelho.png", QColor(200, 40, 40), scale_x=.5, scale_y=.5, x=.3, y=.5, opacity=.8)
     sobre = _imagem(tmp_path / "verde.png", QColor(30, 200, 30), scale_x=.12, scale_y=.12, x=.6, y=.3)
     desfoque = _filtro(x=.4, y=.5)
-    pilha = [*(_movel(f[6:]) if f.startswith("movel:") else _filtro(f) for f in filtros), sobre, *([desfoque] if com_desfoque or arrasta == "regiao" else []), item]
+    pilha = [*(_filtro_da_lista(f) for f in filtros), sobre, *([desfoque] if com_desfoque or arrasta == "regiao" else []), item]
     projeto = _pilha(tmp_path, *pilha, base=chao)
     alvo = item if arrasta == "item" else desfoque
     plano = interaction_plan(projeto, alvo.clip_id, 1.0)
@@ -634,6 +643,8 @@ CASOS_DE_FILTROS_MOVEIS = [
     pytest.param("item", ("movel:vinheta", "sepia"), False, id="item+sepia+movel_vinheta"),
     # Vinheta de tela inteira ACIMA do móvel de cor: as duas etapas se aplicam em ordem.
     pytest.param("item", ("vinheta", "movel:sepia"), False, id="item+movel_sepia+vinheta"),
+    # A posição do retângulo acima vem da agulha (quadros-chave), a mesma conta do compositor.
+    pytest.param("item", ("animado:sepia",), False, id="item+movel_sepia_animado"),
     pytest.param("regiao", ("movel:sepia",), False, id="regiao+movel_sepia"),
     pytest.param("regiao", ("movel:vinheta",), False, id="regiao+movel_vinheta"),
 ]
