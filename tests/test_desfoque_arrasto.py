@@ -136,14 +136,71 @@ def test_o_filtro_de_cor_so_age_nos_trechos_que_estao_abaixo_dele(tmp_path):
 
 
 @pytest.mark.parametrize("nome", ["sepia", "pb", "inverter", "contraste", "vinheta"])
-def test_filtro_movel_acima_do_item_fica_sem_plano_rapido(tmp_path, nome):
-    """O filtro móvel aplica a cor dele num retângulo: refazê-lo a cada movimento pede o filtro em cada imagem do gesto.
-    Enquanto a prévia não sabe, o quadro vem do ffmpeg (e não do desfoque, que ela borra)."""
+def test_filtro_movel_acima_do_item_e_uma_etapa_do_plano_como_o_desfoque(tmp_path, nome):
+    """O filtro móvel age sobre o que está abaixo dele, inclusive o item que a mão move: não cabe numa imagem pronta, e a
+    prévia o aplica ao quadro do gesto, em ordem, como faz com o desfoque (antes, o plano devolvia ``None``)."""
     item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
-    movel = replace(_filtro(nome), movable=True, scale=.3, scale_x=.3, scale_y=.3)
-    assert interaction_plan(_pilha(tmp_path, movel, item), item.clip_id, 1.0) is None
-    desfoque = _filtro()
-    assert interaction_plan(_pilha(tmp_path, movel, desfoque, item), desfoque.clip_id, 1.0) is None
+    sobre = _imagem(tmp_path / "sobre.png", QColor("blue"), scale_x=.2, scale_y=.2)
+    movel = _movel(nome)
+    plano = interaction_plan(_pilha(tmp_path, sobre, movel, item), item.clip_id, 1.0)
+    assert plano is not None and plano.filters == ()
+    assert [(r.clip_id, _ids(p)) for r, p in plano.stages] == [(movel.clip_id, {sobre.clip_id})]
+    assert movel.clip_id not in _ids(plano.background) and movel.clip_id not in _ids(plano.foreground)
+    assert len(interaction_commands(plano, (320, 180), FALSO)) == 3 + 1       # base e o trecho depois do filtro
+
+
+def test_o_desfoque_arrastado_com_filtro_movel_acima_tem_plano(tmp_path):
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    desfoque, movel = _filtro(), _movel("sepia")
+    plano = interaction_plan(_pilha(tmp_path, movel, desfoque, abaixo), desfoque.clip_id, 1.0)
+    assert plano is not None and plano.source is None and [r.clip_id for r, _ in plano.stages] == [movel.clip_id]
+
+
+def test_o_filtro_movel_arrastado_com_outro_filtro_movel_acima_tem_plano(tmp_path):
+    abaixo = _imagem(tmp_path / "abaixo.png", QColor("red"), scale_x=.4, scale_y=.4)
+    de_baixo, de_cima = _movel("sepia"), _movel("inverter")
+    plano = interaction_plan(_pilha(tmp_path, de_cima, de_baixo, abaixo), de_baixo.clip_id, 1.0)
+    assert plano is not None and plano.filtered is not None and [r.clip_id for r, _ in plano.stages] == [de_cima.clip_id]
+
+
+@pytest.mark.parametrize("de_cor", ["sepia", "pb", "inverter", "contraste"])
+def test_filtro_de_cor_de_tela_inteira_acima_de_um_filtro_movel_de_cor_fica_sem_plano(tmp_path, de_cor):
+    """O de tela inteira entra já aplicado nas imagens prontas, antes da etapa do filtro móvel, e a ordem dos dois
+    importa (``sépia(inverter(x))`` não é ``inverter(sépia(x))``); abaixo do móvel, ele está certo no fundo."""
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    movel, tela_cheia = _movel("pb"), _filtro(de_cor)
+    assert interaction_plan(_pilha(tmp_path, tela_cheia, movel, item), item.clip_id, 1.0) is None
+    plano = interaction_plan(_pilha(tmp_path, movel, tela_cheia, item), item.clip_id, 1.0)
+    assert plano is not None and plano.filters == (tela_cheia,) and [r.clip_id for r, _ in plano.stages] == [movel.clip_id]
+
+
+@pytest.mark.parametrize("acima, tem_plano", [("inverter", False), ("contraste", False), ("sepia", True), ("pb", True)])
+def test_vinheta_movel_acima_do_item_com_filtro_de_termo_constante_acima_dela_fica_sem_plano(tmp_path, acima, tem_plano):
+    """A mesma regra da vinheta de tela cheia: a etapa multiplica depois do Inverter/Contraste que já está no fundo."""
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    vinheta = _movel("vinheta")
+    plano = interaction_plan(_pilha(tmp_path, _filtro(acima), vinheta, item), item.clip_id, 1.0)
+    assert (plano is not None) is tem_plano
+    assert interaction_plan(_pilha(tmp_path, vinheta, _filtro(acima), item), item.clip_id, 1.0) is not None
+
+
+@pytest.mark.parametrize("nome, lado, tamanho, tem_plano", [
+    ("sepia", .3, (1280, 720), True), ("sepia", .5, (640, 360), True), ("sepia", .5, (1280, 720), False),
+    ("sepia", 1.0, (640, 360), False), ("contraste", 1.0, (640, 360), False), ("sepia", 1.0, None, True),
+    # A vinheta é uma conta de 1 a 5 ms em tela cheia: o limite é só dos filtros de cor.
+    ("vinheta", 1.0, (1280, 720), True)])
+def test_filtro_de_cor_movel_acima_do_item_com_retangulo_grande_demais_fica_sem_plano(tmp_path, nome, lado, tamanho, tem_plano):
+    """A conta em Python a cada movimento custa ~100 ns por pixel (23 ms em 640×360, 98 ms em 1280×720 com o retângulo na
+    tela inteira): acima de ``REGION_COLOR_STAGE_MAX_PIXELS`` o quadro volta ao ffmpeg, em vez de travar a interface."""
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    movel = replace(_movel(nome), scale=lado, scale_x=lado, scale_y=lado)
+    plano = interaction_plan(_pilha(tmp_path, movel, item), item.clip_id, 1.0, tamanho)
+    assert (plano is not None) is tem_plano
+
+
+def test_filtro_movel_que_o_plano_nao_conhece_acima_do_item_fica_sem_plano(tmp_path):
+    item = _imagem(tmp_path / "item.png", QColor("red"), scale_x=.4, scale_y=.4)
+    assert interaction_plan(_pilha(tmp_path, _movel("filtro-novo"), item), item.clip_id, 1.0) is None
 
 
 def _movel(nome: str, **extra) -> Clip:
@@ -464,8 +521,8 @@ def _medir_com_filtros(tmp_path: Path, arrasta: str, filtros: tuple[str, ...], c
                        *, sem_o_filtro_na_textura: bool = False) -> SimpleNamespace:
     """Arrasta o item (ou o desfoque) com ``filtros`` no topo da pilha e mede o quadro todo contra o do ffmpeg.
 
-    ``filtros`` vai do topo para baixo. Os pontos junto da caixa do bloco ativo (contorno e alças, que o ffmpeg não
-    desenha) ficam de fora.
+    ``filtros`` vai do topo para baixo; ``"movel:sepia"`` é o filtro móvel (retângulo de 30% no centro). Os pontos
+    junto da caixa do bloco ativo (contorno e alças, que o ffmpeg não desenha) ficam de fora.
     """
     tools = find_tools()
     if tools is None:
@@ -478,7 +535,7 @@ def _medir_com_filtros(tmp_path: Path, arrasta: str, filtros: tuple[str, ...], c
     item = _imagem(tmp_path / "vermelho.png", QColor(200, 40, 40), scale_x=.5, scale_y=.5, x=.3, y=.5, opacity=.8)
     sobre = _imagem(tmp_path / "verde.png", QColor(30, 200, 30), scale_x=.12, scale_y=.12, x=.6, y=.3)
     desfoque = _filtro(x=.4, y=.5)
-    pilha = [*(_filtro(f) for f in filtros), sobre, *([desfoque] if com_desfoque or arrasta == "regiao" else []), item]
+    pilha = [*(_movel(f[6:]) if f.startswith("movel:") else _filtro(f) for f in filtros), sobre, *([desfoque] if com_desfoque or arrasta == "regiao" else []), item]
     projeto = _pilha(tmp_path, *pilha, base=chao)
     alvo = item if arrasta == "item" else desfoque
     plano = interaction_plan(projeto, alvo.clip_id, 1.0)
@@ -561,6 +618,48 @@ def test_sem_o_filtro_na_textura_o_item_arrastado_destoa_do_quadro_final(tmp_pat
 
 
 # -- arrastar o próprio filtro móvel -------------------------------------------------------------
+
+CASOS_DE_FILTROS_MOVEIS = [
+    pytest.param("item", ("movel:pb",), False, id="item+movel_pb"),
+    pytest.param("item", ("movel:sepia",), False, id="item+movel_sepia"),
+    pytest.param("item", ("movel:inverter",), False, id="item+movel_inverter"),
+    pytest.param("item", ("movel:contraste",), False, id="item+movel_contraste"),
+    pytest.param("item", ("movel:vinheta",), False, id="item+movel_vinheta"),
+    pytest.param("item", ("movel:sepia",), True, id="item+desfoque+movel_sepia"),
+    # Dois filtros móveis, no mesmo retângulo: as etapas se aplicam em ordem (P&B sobre o Sépia, não o contrário).
+    pytest.param("item", ("movel:pb", "movel:sepia"), False, id="item+movel_sepia+movel_pb"),
+    # Filtro de tela inteira ABAIXO do móvel: já está no fundo e na textura, e a etapa do móvel vem depois.
+    pytest.param("item", ("movel:inverter", "sepia"), False, id="item+sepia+movel_inverter"),
+    pytest.param("item", ("movel:vinheta", "sepia"), False, id="item+sepia+movel_vinheta"),
+    # Vinheta de tela inteira ACIMA do móvel de cor: as duas etapas se aplicam em ordem.
+    pytest.param("item", ("vinheta", "movel:sepia"), False, id="item+movel_sepia+vinheta"),
+    pytest.param("regiao", ("movel:sepia",), False, id="regiao+movel_sepia"),
+    pytest.param("regiao", ("movel:vinheta",), False, id="regiao+movel_vinheta"),
+]
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("arrasta, filtros, com_desfoque", CASOS_DE_FILTROS_MOVEIS)
+def test_o_quadro_do_arrasto_com_filtro_movel_acima_acompanha_o_quadro_final(tmp_path, arrasta, filtros, com_desfoque):
+    """O filtro móvel acima do item (ou do desfoque) é uma etapa que a prévia aplica ao quadro do gesto: o retângulo
+    sai com a cor do quadro final, no lugar em que o item está agora, e o resto do quadro não muda. Medido na cena de
+    barras de cor: média até 2 e p95 até 7 em 255 (os pontos acima disso estão nas arestas do item, onde a prévia
+    desenha à parte do ffmpeg); a conta de cor está a no máximo 4 em 255 do ffmpeg (``test_cores_contra_o_ffmpeg``)."""
+    medida = _medir_com_filtros(tmp_path, arrasta, filtros, com_desfoque)
+    assert medida.n > 1000
+    assert medida.media <= 2.5, medida
+    assert medida.p95 <= 10, medida
+
+
+@pytest.mark.ffmpeg
+@pytest.mark.parametrize("nome", ["sepia", "pb", "inverter", "contraste"])
+def test_sem_a_etapa_do_filtro_movel_o_quadro_do_arrasto_destoa_do_quadro_final(tmp_path, nome, monkeypatch):
+    """O teste acima enxerga a etapa: sem ela, o retângulo do filtro móvel fica sem a cor."""
+    from videomanager.presentation.qt.panels import edit_widgets
+    monkeypatch.setattr(edit_widgets, "filter_region", lambda *args: None)
+    medida = _medir_com_filtros(tmp_path, "item", (f"movel:{nome}",), False)
+    assert medida.media > 2.5 or medida.p95 > 10, medida
+
 
 def _medir_movel(tmp_path: Path, nome: str, movida: dict, *, desfoque_acima: bool = False,
                  de_cor_acima: str | None = None, desfoque_abaixo: bool = False,

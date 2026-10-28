@@ -61,6 +61,7 @@ from videomanager.domain.geometry import image_base_size
 from videomanager.domain.timing import last_frame_time
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.constants import REGION_MIN_SCALE
+from videomanager.domain.constants import VIGNETTE_FILTER
 
 from videomanager.domain.preview import fit_size
 from videomanager.domain.preview import reduced_fit
@@ -80,6 +81,7 @@ from videomanager.presentation.qt.panels.section import Section
 from videomanager.presentation.qt.panels.segmented import SegmentButton, segmented
 from videomanager.presentation.qt.panels.swatch import Swatch
 from videomanager.presentation.qt.panels.region_blur import blur_region
+from videomanager.presentation.qt.panels.region_filter import filter_region
 from videomanager.presentation.qt.panels.timeline import MEDIA_MIME
 
 from videomanager.presentation.qt import fonts, icons, strings, theme
@@ -1205,6 +1207,19 @@ class _Preview(QLabel):
             layers.drawPixmap(area, _vignette_mask(mask_w, mask_h))
             layers.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
 
+        def darken_region(region: Clip) -> None:
+            """A vinheta móvel: calculada no recorte, escurece as bordas **do retângulo** e deixa o centro."""
+            _, _, rw, rh = region.region_rect(compose_w, compose_h, max(0., self._position - region.start))
+            darken(rect_of(region), rw, rh)
+
+        def color_region(region: Clip) -> None:
+            """O filtro de cor móvel: o retângulo do quadro, até aqui, passa pela conta do ffmpeg."""
+            area = rect_of(region)
+            layers.end()
+            filter_region(frame, area.x(), area.y(), area.width(), area.height(), region.filter_name)
+            layers.begin(frame)
+            layers.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
         layers.drawPixmap(whole, background)
         if texture is None:
             if clip.is_region_blur:
@@ -1215,8 +1230,7 @@ class _Preview(QLabel):
                 layers.drawPixmap(whole, filtered)
                 layers.restore()
             else:        # vinheta móvel: a do recorte, que escurece as bordas do retângulo
-                left, top, rw, rh = clip.region_rect(compose_w, compose_h, max(0., self._position - clip.start))
-                darken(rect_of(clip), rw, rh)
+                darken_region(clip)
         else:
             transform = clip.transform_at(max(0., self._position - clip.start))
             cx, cy, w, h = geom
@@ -1233,8 +1247,12 @@ class _Preview(QLabel):
         for stage, after in stages:
             if stage.is_region_blur:
                 blur(stage)
-            else:        # vinheta de tela inteira: multiplica o quadro, no lugar onde o item está agora
+            elif not stage.has_region:        # vinheta de tela inteira: multiplica o quadro, no lugar onde o item está agora
                 darken(whole, compose_w, compose_h)
+            elif stage.filter_name == VIGNETTE_FILTER:
+                darken_region(stage)
+            else:
+                color_region(stage)
             layers.drawPixmap(whole, after)
         layers.end()
         painter.save()
