@@ -71,7 +71,7 @@ def test_bloco_animado_acompanha_o_arrasto_sem_grudar_nos_proprios_quadros_chave
 
     Eles andam junto com o bloco: um quadro-chave no começo virava alvo a
     cada movimento, e o bloco só saía do lugar quando a mão passava da
-    tolerância do ímã — aos saltos de 8 px.
+    tolerância do ímã — aos saltos de 8 px (3 quadros).
     """
     texto = Clip(MediaRef(Path("Texto_x"), MediaKind.IMAGE, duration=5.0), 2.0, 3.0, overlay_type="text",
                  text_content="x", keyframes=(Keyframe(0.0, opacity=0.0), Keyframe(0.5, opacity=1.0)))
@@ -84,7 +84,12 @@ def test_bloco_animado_acompanha_o_arrasto_sem_grudar_nos_proprios_quadros_chave
     timeline.clip_moved.connect(lambda *_: posicoes.append(panel._project.clips[0].start))
     _drag(timeline, inicio, 40)
 
-    assert len(set(posicoes)) >= 30, f"o bloco andou só {len(set(posicoes))} vezes em 36 movimentos"
+    # O bloco anda de quadro em quadro (a grade): preso nos próprios quadros-chave, o primeiro passo só
+    # vinha depois dos 8 px da tolerância do ímã (3 quadros), e os dois primeiros ficavam pulados.
+    quadro = 1 / 30
+    passos = sorted(set(posicoes))
+    assert passos[0] == pytest.approx(2.0 + quadro), "o primeiro quadro do arrasto foi pulado"
+    assert all(b - a == pytest.approx(quadro) for a, b in zip(passos, passos[1:])), "o bloco pulou quadros"
     assert panel._project.clips[0].start > 2.0 + 30 * timeline._seconds_per_pixel()
 
 

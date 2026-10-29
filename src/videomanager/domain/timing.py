@@ -75,6 +75,20 @@ def frame_time(index: int, fps: float | None) -> float:
     return max(0, index) / fps
 
 
+def on_grid(seconds: float, fps: float | None, *, nearest: bool = True) -> float:
+    """Leva ``seconds`` ao limite de quadro: o mais próximo, ou o do quadro que o contém.
+
+    Quem arrasta uma ponta quer a linha mais perto do ponteiro (``nearest``); quem corta no cursor
+    quer o quadro que está na tela, que é o que ``frame_index`` e ``seek_time`` já chamam de quadro
+    daquele instante. Escolher o mais próximo ali cortaria depois do quadro mostrado. Sem taxa, o
+    instante fica como está.
+    """
+    if not fps or fps <= 0:
+        return seconds
+    index = math.floor(seconds * fps + 0.5) if nearest else frame_index(seconds, fps)
+    return frame_time(index, fps)
+
+
 def last_frame_time(duration: float, fps: float) -> float:
     """Último quadro exibível no intervalo semiaberto [0, duração)."""
     return max(0, math.ceil(duration * fps - 1e-8) - 1) / fps
