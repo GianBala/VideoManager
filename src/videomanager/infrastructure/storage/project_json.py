@@ -529,6 +529,12 @@ def save_project(project: Project, path: Path) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = project_to_dict(project, base_dir=path.parent)
+        # O que o leitor recusaria não se grava: o arquivo saía, e só ao reabrir o projeto se descobria que não abria
+        # (``in_point`` negativo por resto de ponto flutuante). Falhar aqui devolve o erro a quem ainda tem o projeto na tela.
+        try:
+            _validate_project(data)
+        except ProjectError as exc:
+            raise ProjectError(Text("PROJECT_SAVE_FAILED", path=path, error=str(exc))) from exc
         text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
         _backup_previous_version(path, int(data["version"]))
         # Temporário criado com 0666 (a máscara do usuário corta o resto), e
