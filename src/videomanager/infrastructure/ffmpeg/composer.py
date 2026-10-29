@@ -93,10 +93,6 @@ _TO_STEREO = "aformat=channel_layouts=stereo"
 # silêncio para sustentar um efeito de vídeo soa pior que preservar o corte.
 _AUDIO_DECLICK = 0.012
 
-# Duração mínima do fundo. Um projeto vazio ainda precisa de um quadro para
-# mostrar, senão o ffmpeg sai sem escrever nada e a prévia fica sem explicação.
-_MIN_CANVAS = 0.04
-
 # Folga que impede um quadro exatamente sobre a borda de uma janela de ler de
 # ser tomado pelo lado errado dela (ver :func:`_transition_side`). Bem abaixo de
 # qualquer quadro real e bem acima do ruído de ponto flutuante.
@@ -2036,7 +2032,10 @@ def build_graph(
     fps = fps or project.fps
     pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio, still=still,
                      tails=tails)
-    duration = span if span is not None else max(_MIN_CANVAS, project.export_duration - at)
+    # Um projeto vazio ainda precisa de um quadro para mostrar, senão o ffmpeg sai sem
+    # escrever nada. É um quadro, e não um tempo fixo: com 0,04 s o fundo tinha dois a
+    # 30 q/s (três a 60), e uma edição de um quadro só saía com um preto a mais.
+    duration = span if span is not None else max(1.0 / fps, project.export_duration - at)
 
     inputs: list[str] = []
     filters: list[str] = []
@@ -2146,7 +2145,7 @@ def build_graph(
     if want_video and project.has_video:
         filters.append(
             f"color=c={'black@0' if transparent else 'black'}:s={project.width}x{project.height}"
-            f":r={fps:.6f}:d={max(_MIN_CANVAS, duration):.6f}"
+            f":r={fps:.6f}:d={max(1.0 / fps, duration):.6f}"
             f"{',format=rgba' if transparent else ''}[base]"
         )
         current = "[base]"
@@ -2667,7 +2666,7 @@ def _playback_stage(
         filters.append(f"{graph.video_label}scale={width}:{height}[out]")
         args += ["-filter_complex", ";".join(filters), "-map", "[out]"]
     else:
-        remaining = max(_MIN_CANVAS, project.duration - at) if span is None else span
+        remaining = max(1.0 / fps, project.duration - at) if span is None else span
         args += [
             "-f", "lavfi",
             "-i", f"color=c=black:s={width}x{height}:r={fps}:d={remaining:.3f}",
