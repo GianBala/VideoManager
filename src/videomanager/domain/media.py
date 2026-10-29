@@ -42,6 +42,9 @@ class LocalStream:
     language: str | None = None
     rotation: float = 0.0
     attached_picture: bool = False
+    # Curva PQ ou HLG (``color_transfer`` do ffprobe). Sem conversão, o pixel dessa curva vira SDR de 8 bits com as marcas
+    # de cor perdidas: sombras levantadas, brilhos achatados e cor desbotada (ver ``composer._hdr_to_sdr``).
+    hdr: bool = False
     # Duração da própria trilha, quando o arquivo informa. Pode ser menor que a
     # do container: o AAC costuma sobrar alguns quadros além do vídeo.
     duration: float | None = None
