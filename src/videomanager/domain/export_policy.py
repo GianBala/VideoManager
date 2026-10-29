@@ -113,7 +113,12 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
         for earlier, later in zip(ordered, ordered[1:])
     ):
         return None
-    return tuple(Segment(clip.in_point, clip.out_point) for clip in ordered)
+    segments = tuple(Segment(clip.in_point, clip.out_point) for clip in ordered)
+    # Copiar os dados não corta abaixo de ``MIN_SEGMENT`` (o cortador recusa o trecho): um bloco
+    # de um quadro, que a edição passou a aceitar, vai para o compositor em vez de falhar aqui.
+    if not all(segment.is_usable for segment in segments):
+        return None
+    return segments
 
 
 def _interpolated_clips(project: Project) -> list[Clip]:

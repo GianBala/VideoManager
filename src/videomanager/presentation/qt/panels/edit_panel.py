@@ -113,7 +113,6 @@ from videomanager.domain.project import accepts
 from videomanager.domain.project import auto_canvas
 from videomanager.domain.project import next_clip_id
 from videomanager.application.preferences import Preferences as Settings
-from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import REGION_BLUR
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.i18n import decimal
@@ -3213,7 +3212,7 @@ class EditPanel(QWidget):
             clip = selected
         if clip is None or clip.is_transition or not clip.contains(position):
             return
-        if min(position - clip.start, clip.end - position) < MIN_SEGMENT:
+        if not self._project.fits(min(position - clip.start, clip.end - position)):
             return
         self._remember()
         self._apply(self._project.split(clip.clip_id, position))
@@ -3253,14 +3252,12 @@ class EditPanel(QWidget):
         Sobrar menos que o mínimo não é aparar, é apagar o bloco por um caminho
         que não diz isso — para apagar existe a lixeira ao lado.
         """
-        if clip is None or clip.is_transition or not clip.contains(self._position):
+        position = self._position
+        if clip is None or clip.is_transition or not clip.contains(position):
             return False
         if edge == "inicio":
-            return (
-                self._position > clip.start
-                and clip.end - self._position >= MIN_SEGMENT
-            )
-        return self._position - clip.start >= MIN_SEGMENT
+            return position > clip.start and self._project.fits(clip.end - position)
+        return self._project.fits(position - clip.start)
 
     def _toggle_reverse(self, clip_id: int) -> None:
         """Inverte o bloco clicado, ou o devolve ao sentido normal.
@@ -3411,7 +3408,7 @@ class EditPanel(QWidget):
             if c.start >= clip.start and c.start < ceiling:
                 ceiling = c.start
 
-        new_duration = clip.duration_at_speed(value)
+        new_duration = clip.duration_at_speed(value, self._project.min_block)
         if clip.start + new_duration > ceiling + 1e-9:
             # Um arrasto contínuo no spinbox dispara valueChanged a cada passo:
             # sem essa marca, cada passo rejeitado reabria o aviso modal, e

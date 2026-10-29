@@ -574,3 +574,22 @@ class TestVolumeAnimadoNoArquivo:
         dados['version'] = SUPPORTED_VERSION + 1
         with pytest.raises(ProjectError):
             project_from_dict(dados, base_dir=tmp_path)
+
+
+def test_blocos_de_um_quadro_sobrevivem_ao_arquivo_sem_mudar_um_bit(tmp_path):
+    """Abrir não altera, e salvar sem editar regrava o mesmo: o piso de um quadro não muda o formato.
+
+    Os tempos de um quadro (``k/fps``) não são decimais exatos; o JSON guarda o ``float`` inteiro e o
+    arquivo volta idêntico, na versão de sempre (nenhuma chave nova).
+    """
+    from videomanager.infrastructure.storage.project_json import project_version
+    media = MediaRef(tmp_path / "v.mp4", MediaKind.VIDEO, duration=10, width=320, height=180, fps=30.0)
+    quadro = 1 / 30
+    blocos = (Clip(media, 0.0, 10 * quadro), Clip(media, 10 * quadro, quadro, in_point=20 * quadro),
+              Clip(media, 11 * quadro, 289 * quadro, in_point=30 * quadro))
+    projeto = Project(tracks=(Track(TrackKind.VIDEO, clips=blocos),), fps=30.0)
+    dados = project_to_dict(projeto)
+    aberto, _ = project_from_dict(dados)
+    assert [(c.start, c.duration, c.in_point) for c in aberto.clips] == [(c.start, c.duration, c.in_point) for c in blocos]
+    assert project_to_dict(aberto) == dados
+    assert project_version(aberto) == project_version(projeto)
