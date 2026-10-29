@@ -53,6 +53,11 @@ class EstiloDaBarraDeMenus(QProxyStyle):
 # estica o combo por toda a coluna: 800 px para escolher "1080p" fica
 # desproporcional e joga o rótulo para longe do campo que ele descreve.
 FIELD_WIDTH = 280
+# Quanto o QSS afasta o texto de um ``QSpinBox`` da borda de fora: 1 px de borda e 8 px de preenchimento da regra genérica de
+# campos (``QLineEdit, QComboBox, QSpinBox, ... { border: 1px ...; padding: 6px 8px }``). O retângulo do campo de dentro é conta
+# do estilo, e o Qt 6.12 deixou de descontar isso dos lados (``presentation/qt/arrow_spin.py``); um teste confere que o número
+# bate com o QSS.
+SPIN_EDIT_INSET = 9
 
 # As chaves antigas da paleta "atual": o que o QSS e os painéis que se pintam sozinhos ainda leem
 # (e vários testes importam). Os valores moram em ``paletas``; estes nomes continuam existindo até

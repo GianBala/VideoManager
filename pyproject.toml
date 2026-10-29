@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "videomanager"
-version = "4.1"
+version = "4.2"
 description = "Baixa, converte e edita vídeo e áudio, e ajusta metadados (Windows e Linux)"
 readme = "README.md"
 # Expressão SPDX (PEP 639), que pede setuptools 77 ou mais novo.
@@ -17,7 +17,11 @@ dependencies = [
     # a 6.11.1 não acontece. Foi o que derrubou o job do Ubuntu com 3.10 na CI. O teto vale só ali;
     # tire-o quando houver uma 6.12.x que corrija.
     "PySide6>=6.6,<6.12; python_version < '3.11'",
-    "PySide6>=6.6; python_version >= '3.11'",
+    # Teto também no 3.11+: o pacote do Windows sai da CI, que instala a versão mais nova, e a 6.12 mudou o QSS dos
+    # QSpinBox (o número dos campos da aba Propriedades sumia no .exe, sem erro e com a suíte verde, porque o
+    # desenvolvimento rodava a 6.11). O teto é a versão que as telas e a suíte já provaram; suba-o depois de
+    # rodar ambas com a seguinte (tests/test_campo_numerico_visivel.py guarda o que aquela mudança quebrou).
+    "PySide6>=6.6,<6.13; python_version >= '3.11'",
     # Sem teto de versão de propósito: extratores quebram quando as plataformas
     # mudam, então o yt-dlp precisa poder ser atualizado a qualquer momento.
     # O extra "default" traz o que o pacote não tinha: os scripts do solver
