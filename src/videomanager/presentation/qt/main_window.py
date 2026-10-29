@@ -834,13 +834,19 @@ class MainWindow(QMainWindow):
             return
         initial_audio = self._quality.mode is Mode.AUDIO_ONLY
         dialog = PlaylistDialog(playlist, initial_audio=initial_audio, parent=self)
-        if dialog.exec() != PlaylistDialog.DialogCode.Accepted:
-            return
-        entries = dialog.selected_entries()
+        # O diálogo tem a janela por pai: sem o ``deleteLater`` ele ficava escondido para sempre (ver ``EditPanel._exec_menu``).
+        try:
+            if dialog.exec() != PlaylistDialog.DialogCode.Accepted:
+                return
+            entries = dialog.selected_entries()
+            audio_mode = dialog.is_audio_mode()
+            height_limit = None if audio_mode else dialog.height_limit()
+        finally:
+            dialog.deleteLater()
         if not entries:
             return
 
-        if dialog.is_audio_mode():
+        if audio_mode:
             self._quality.set_mode(Mode.AUDIO_ONLY)
         else:
             self._quality.set_mode(Mode.VIDEO)
@@ -848,7 +854,6 @@ class MainWindow(QMainWindow):
         # Cada item da playlist tem formatos próprios, então uma escolha por id
         # concreto não valeria para todos. O pedido vai por limite de resolução,
         # que o seletor resolve item a item na hora do download.
-        height_limit = None if dialog.is_audio_mode() else dialog.height_limit()
         request = self._quality.build_batch_request(height_limit)
         for entry in entries:
             placeholder = MediaInfo(
@@ -899,10 +904,16 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self._settings, self, runtime=self._runtime, tools=self._tools)
-        if dialog.exec() != SettingsDialog.DialogCode.Accepted:
-            return
+        # Cada abertura deixava ~125 widgets escondidos (4 MiB), todos reestilizados a cada troca de tema e de idioma:
+        # 25 aberturas levavam a ida e volta do tema de 1,8 s a 4,7 s. O resultado se lê antes de apagar o diálogo.
+        try:
+            if dialog.exec() != SettingsDialog.DialogCode.Accepted:
+                return
+            result = dialog.result_settings()
+        finally:
+            dialog.deleteLater()
         previous_theme, previous_palette = self._settings.theme, self._settings.palette
-        self._settings = dialog.result_settings()
+        self._settings = result
         self._save_settings()
         self._queue.apply_settings(self._settings)
         self._convert.apply_settings(self._settings)

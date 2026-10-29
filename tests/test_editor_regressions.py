@@ -720,6 +720,9 @@ def test_tela_de_outra_proporcao_escolhida_na_exportacao_aparece_na_lista(panel,
         def exec(self):
             return QDialog.DialogCode.Accepted
 
+        def deleteLater(self):   # o painel apaga o diálogo ao fechar
+            pass
+
     video = MediaRef(Path('/m/a.mp4'), MediaKind.VIDEO, width=1920, height=1080, fps=30.0, duration=2)
     panel.install_project(Project(tracks=(Track(TrackKind.VIDEO, clips=(Clip(video, 0, 2),)),)), None, [video], {})
     panel._canvas_choice, panel._aspect_choice = (1920, 1080), '16:9'
