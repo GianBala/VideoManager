@@ -94,6 +94,13 @@ def test_a_fonte_traz_cada_quadro_identificavel(fonte, tools):
     assert numeros(fonte, tools) == list(range(QUADROS))
 
 
+def test_um_quadro_isolado_sai_com_um_quadro(fonte, tools, tmp_path):
+    saida = exportar(fonte, tools, tmp_path, [(10, 1)])
+    assert numeros(saida, tools) == [10]
+    # O fundo mínimo era de 0,04 s: a 30 q/s, dois quadros, o segundo preto.
+    assert duracoes(saida, tools)["video"] == pytest.approx(QUADRO, abs=1e-3)
+
+
 def test_um_quadro_no_meio_de_outros_sai_no_lugar(fonte, tools, tmp_path):
     saida = exportar(fonte, tools, tmp_path, [(0, 10), (20, 1), (30, 5)])
     assert numeros(saida, tools) == [*range(10), 20, *range(30, 35)]
@@ -127,3 +134,10 @@ def test_cada_emenda_sobre_a_grade_sai_exata_em_qualquer_taxa(tools, tmp_path, t
     quadros = min(60, int(2 * fps) - 2)          # sem passar do fim da fonte, que tem 2 s
     saida = exportar(origem, tools, tmp_path, [(n, 1) for n in range(quadros)], fps)
     assert numeros(saida, tools) == list(range(quadros))
+
+
+@pytest.mark.parametrize("taxa,fps", TAXAS, ids=[t for t, _ in TAXAS])
+def test_um_quadro_isolado_sai_com_um_quadro_em_qualquer_taxa(tools, tmp_path, taxa, fps):
+    origem = gerar_fonte(tools, tmp_path, taxa, 2)
+    saida = exportar(origem, tools, tmp_path, [(7, 1)], fps)
+    assert numeros(saida, tools) == [7]

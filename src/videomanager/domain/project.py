@@ -640,17 +640,19 @@ class Clip:
     def changes_gain(self) -> bool:
         return abs(self.gain_db) >= GAIN_EPSILON
 
-    def duration_at_speed(self, speed: float) -> float:
+    def duration_at_speed(self, speed: float, floor: float = MIN_SEGMENT) -> float:
         """Duração que toca, a ``speed``, o mesmo trecho da mídia.
 
-        O piso de ``MIN_SEGMENT`` só vale onde a mídia tem o que mostrar: num
-        bloco de um quadro, ele esticava a leitura além do fim do arquivo.
+        O piso (``floor``, o ``Project.min_block`` de quem chama) só vale onde a
+        mídia tem o que mostrar: num bloco de um quadro, ele esticava a leitura
+        além do fim do arquivo. Com o piso fixo de 50 ms, mexer na velocidade de um
+        bloco de um quadro o esticava para dois.
         """
         target = self.duration * self.speed / max(0.1, speed)
         if self.is_image or self.is_additional:
-            return max(MIN_SEGMENT, target)
+            return max(floor, target)
         available = available_duration(self.media.duration or 0.0, self.in_point, max(0.1, speed))
-        return max(min(MIN_SEGMENT, available), target)
+        return max(min(floor, available), target)
 
     @property
     def has_keyframes(self) -> bool:
@@ -987,6 +989,48 @@ class Project:
     @property
     def text_ratio(self) -> float:
         return min(self.width / self.text_reference_width, self.height / self.text_reference_height)
+
+    @property
+    def frame_grid(self) -> float | None:
+        """Duração de um quadro da edição, onde há imagem para alinhar a ele.
+
+        Só o som não tem quadro: numa edição de áudio a posição segue livre, e o
+        que seria um passo de 33 ms virava uma perda de precisão que ninguém pediu.
+
+        Guardada na instância (o projeto é imutável): a tela a consulta a cada tique
+        da reprodução, e numa edição só de áudio ela varre todos os blocos sem achar
+        imagem — medido, 0,36 ms por tique com 300 blocos, contra 0,006 antes. Sem
+        ``functools``, que a camada de domínio não pode importar.
+        """
+        try:
+            return self.__dict__["_frame_grid"]
+        except KeyError:
+            pass
+        grid = 1.0 / self.fps if self.fps > 0 and any(
+            clip.has_image for track in self.tracks for clip in track.clips
+        ) else None
+        object.__setattr__(self, "_frame_grid", grid)
+        return grid
+
+    @property
+    def min_block(self) -> float:
+        """O menor bloco que se pode ter: um quadro, ou ``MIN_SEGMENT`` sem imagem.
+
+        Abaixo de um quadro não há o que mostrar, e a exportação o arredonda para
+        cima de qualquer jeito (``_whole_frames``); acima dele, o piso fixo de 50 ms
+        impedia isolar um quadro só — 2 deles a 30 q/s, 3 a 60.
+        """
+        return self.frame_grid or MIN_SEGMENT
+
+    def fits(self, length: float) -> bool:
+        """Se ``length`` chega ao menor bloco, com a folga do ponto flutuante.
+
+        Um quadro cortado de um limite que cai na grade vale ``1/fps`` menos um ruído
+        de 1e-17 (``11/30 - 10/30`` é 0,03333333333333331), e a comparação seca
+        recusava o corte exato. Uma conta só para o modelo e para a tela: duas
+        acabam discordando sobre onde o corte cabe.
+        """
+        return length >= self.min_block - 1e-9
 
     def with_output_canvas(self, width: int, height: int, fps: float | None = None) -> Project:
         has_text = any(c.overlay_type is OverlayType.TEXT for c in self.clips)
@@ -1583,14 +1627,14 @@ class Project:
             )
             # Teto pelo mínimo de duração, mas nunca depois do começo atual: num
             # bloco já mais curto que o mínimo (mídia de um quadro), ``end -
-            # MIN_SEGMENT`` fica antes do começo, e a alça sobrepunha o vizinho
+            # min_block`` fica antes do começo, e a alça sobrepunha o vizinho
             # e lia antes do primeiro quadro da mídia.
             lower = max(floor, limit)
             if clip.reversed:
                 # Esticar um bloco já invertido não pode passar do teto de
                 # memória (ver ``domain.reversal``); encolher é sempre livre.
                 lower = max(lower, clip.end - max(clip.reverse_limit, clip.duration))
-            upper = max(clip.end - MIN_SEGMENT, clip.start)
+            upper = max(clip.end - self.min_block, clip.start)
             value = min(max(lower, seconds), max(upper, lower))
             return self.with_updated_clip(
                 clip_id,
@@ -1611,7 +1655,7 @@ class Project:
         if clip.reversed:
             available = min(available, max(clip.reverse_limit, clip.duration))
         value = min(
-            max(seconds, clip.start + MIN_SEGMENT), min(ceiling, clip.start + available)
+            max(seconds, clip.start + self.min_block), min(ceiling, clip.start + available)
         )
         if clip.reversed:
             # O fim da edição é a base do trecho: esticá-lo desce o ``in_point``.
@@ -1646,8 +1690,8 @@ class Project:
         if clip.is_transition:
             return self
         if (
-            seconds - clip.start < MIN_SEGMENT
-            or clip.end - seconds < MIN_SEGMENT
+            not self.fits(seconds - clip.start)
+            or not self.fits(clip.end - seconds)
         ):
             return self
 
