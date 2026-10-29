@@ -576,6 +576,16 @@ quadro a quadro; `↑`/`↓` sobem/descem o volume em 5.
 
 ## Exportando a edição
 
+**Vídeo HDR.** Um vídeo em HDR (PQ ou HLG: o de celulares e câmeras recentes e alguns downloads) é convertido para
+**SDR** ao ser editado e exportado, com mapeamento de tons, e a janela de exportação avisa antes de enfileirar. Sem a
+conversão, as cores saíam lavadas: o arquivo perdia a marca de HDR, mas os pixels continuavam na curva PQ (medido numa
+fonte de teste: saturação média 25 contra 112 do original, sombras levantadas de 41 para 72 e brilhos achatados de 210
+para 137; com a conversão, 95, 40 e 195). A prévia mostra o mesmo SDR. O custo é de ~7 ms por quadro a 1080p e ~24 ms a
+4K, só nos blocos HDR. Na aba **Converter**, todo vídeo HDR que é recodificado também sai em SDR, e a descrição diz
+"HDR convertido para SDR"; copiar os dados não altera nada. A mídia importada **antes** desta versão não traz a marca
+HDR no `.vmp`: importe-a de novo para que seja convertida. O projeto que tem mídia HDR é gravado na versão 9 do arquivo,
+e uma versão anterior a recusa com a mensagem de versão não suportada (ela a exportaria sem converter as cores).
+
 Os pacotes (Windows e Linux) trazem o próprio ffmpeg. Rodando pelo
 código-fonte, vale o que estiver instalado — e com o ffmpeg 6 (o do Ubuntu
 24.04) uma transição que atravessa um adicional **com filtro** perde esse

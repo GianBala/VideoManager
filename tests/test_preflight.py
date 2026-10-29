@@ -167,3 +167,71 @@ def test_a_lista_de_fontes_e_lida_dentro_do_desvio(pasta, tmp_path, monkeypatch)
     janela._create_application([])
     proprio = str(tmp_path / "VideoManager" / "xdg")
     assert visto == {"criacao": proprio, "lista": proprio}
+
+
+# -- O que a QtGui pede ao sistema, em qualquer plataforma ---------------------------------------------------------
+
+def _sem_as_bibliotecas(monkeypatch, *ausentes: str) -> None:
+    def carregar(nome, *args, **kwargs):
+        if nome in ausentes:
+            raise OSError(f"{nome}: cannot open shared object file")
+        return object()
+
+    monkeypatch.setattr(preflight, "sys", types.SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(preflight.ctypes, "CDLL", carregar)
+
+
+def test_sem_libgl_o_aviso_vale_ate_no_offscreen(monkeypatch):
+    """Sem ``libGL.so.1`` o ``import`` do PySide6 falhava com um traceback de Python, que ninguém via ao abrir pelo ícone."""
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    _sem_as_bibliotecas(monkeypatch, "libGL.so.1")
+    assert preflight.missing_system_libraries() == ["libgl1"]
+    assert "libgl1" in preflight.format_instructions(["libgl1"])
+
+
+def test_com_tudo_instalado_nao_acusa_nada_nem_no_xcb(monkeypatch):
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    monkeypatch.setenv("DISPLAY", ":0")
+    _sem_as_bibliotecas(monkeypatch)
+    assert preflight.missing_system_libraries() == []
+
+
+def test_no_xcb_acusa_o_que_falta_da_qtgui_e_do_plugin(monkeypatch):
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    monkeypatch.setenv("DISPLAY", ":0")
+    _sem_as_bibliotecas(monkeypatch, "libEGL.so.1", "libxcb-xinerama.so.0")
+    assert preflight.missing_system_libraries() == ["libegl1", "libxcb-xinerama0"]
+
+
+def test_numa_sessao_wayland_pura_so_vale_o_que_a_qtgui_pede(monkeypatch):
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    _sem_as_bibliotecas(monkeypatch, "libxcb-xinerama.so.0", "libGL.so.1")
+    assert preflight.missing_system_libraries() == ["libgl1"]
+
+
+def test_a_falta_da_libgl_e_explicada_antes_de_o_qt_ser_importado(tmp_path):
+    """O aviso vale mesmo quando o próprio ``import`` do PySide6 não funciona.
+
+    A ``libGL`` é pedida pela ``QtGui`` ao ser importada: com ela ausente, o aplicativo morria num ``ImportError`` de Python
+    antes de o ``main`` conferir (visto num Ubuntu 24.04 enxuto, com o pacote do Linux), e os testes de
+    ``missing_system_libraries`` passavam o tempo todo porque nenhum deles passava pelo ponto de entrada. Aqui o PySide6
+    é bloqueado e a ``libGL`` "falta": só chega à mensagem quem confere antes do import.
+    """
+    import subprocess
+
+    codigo = (
+        "import sys; sys.modules['PySide6'] = None\n"
+        "from videomanager import preflight\n"
+        "preflight._absent = lambda libs: ['libgl1'] if ('libGL.so.1', 'libgl1') in libs else []\n"
+        "import videomanager.__main__ as entrada\n"
+        "raise SystemExit(entrada.main())\n"
+    )
+    ambiente = {**os.environ, "PYTHONPATH": str(Path(preflight.__file__).resolve().parents[1]),
+                "XDG_CONFIG_HOME": str(tmp_path), "XDG_CACHE_HOME": str(tmp_path), "APPDATA": str(tmp_path)}
+    resultado = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True, env=ambiente, timeout=60)
+    if sys.platform != "linux":
+        pytest.skip("a conferência das bibliotecas só vale no Linux")
+    assert resultado.returncode == 1, resultado.stderr
+    assert "libgl1" in resultado.stderr and "Traceback" not in resultado.stderr, resultado.stderr

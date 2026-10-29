@@ -599,6 +599,10 @@ def secao_persistencia(midia_dir: Path) -> dict:
             self.created_job = object()
             return QDialog.DialogCode.Accepted
 
+        def deleteLater(self):
+            # O painel apaga o diálogo ao fechar (a versão anterior não chamava); o dublê aceita as duas.
+            pass
+
     original_dialogo = modulo_painel.ExportDialog
     modulo_painel.ExportDialog = Janela
     try:

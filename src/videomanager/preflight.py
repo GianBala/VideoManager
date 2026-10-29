@@ -66,30 +66,46 @@ _REQUIRED: tuple[tuple[str, str], ...] = (
     ("libxcb-xkb.so.1", "libxcb-xkb1"),
 )
 
+# O que a própria ``QtGui`` pede ao sistema, em qualquer plataforma (medido com ``ldd`` no ambiente do pacote, que já
+# resolve as demais): sem elas o ``import`` do PySide6 falha com ``ImportError: libGL.so.1: cannot open shared object file``,
+# um traceback de Python que quem abriu o aplicativo por um ícone nunca vê. Uma instalação enxuta e o WSL costumam não ter.
+_ALWAYS: tuple[tuple[str, str], ...] = (
+    ("libGL.so.1", "libgl1"),
+    ("libEGL.so.1", "libegl1"),
+    ("libxcb.so.1", "libxcb1"),
+)
+
 # Plataformas Qt que não passam pelo plugin xcb e portanto não precisam disso.
 _NON_XCB_PLATFORMS = {"offscreen", "minimal", "wayland", "wayland-egl", "vnc", "linuxfb", "eglfs"}
 
 
-def missing_system_libraries() -> list[str]:
-    """Pacotes ausentes necessários ao plugin xcb. Lista vazia se estiver tudo ok."""
-    if sys.platform != "linux":
-        return []
-
-    requested = os.environ.get("QT_QPA_PLATFORM", "").strip().lower()
-    if requested in _NON_XCB_PLATFORMS:
-        return []
-
-    # Sessão Wayland pura (sem XWayland) não carrega o plugin xcb.
-    if os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
-        return []
-
+def _absent(libraries: tuple[tuple[str, str], ...]) -> list[str]:
     missing: list[str] = []
-    for library, package in _REQUIRED:
+    for library, package in libraries:
         try:
             ctypes.CDLL(library)
         except OSError:
             missing.append(package)
     return missing
+
+
+def missing_system_libraries() -> list[str]:
+    """Pacotes ausentes necessários ao Qt. Lista vazia se estiver tudo ok."""
+    if sys.platform != "linux":
+        return []
+
+    # A ``QtGui`` pede isto em toda plataforma, inclusive ``offscreen``.
+    missing = _absent(_ALWAYS)
+
+    requested = os.environ.get("QT_QPA_PLATFORM", "").strip().lower()
+    if requested in _NON_XCB_PLATFORMS:
+        return missing
+
+    # Sessão Wayland pura (sem XWayland) não carrega o plugin xcb.
+    if os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+        return missing
+
+    return missing + _absent(_REQUIRED)
 
 
 def format_instructions(packages: list[str]) -> str:
@@ -102,6 +118,23 @@ def check_or_explain() -> str | None:
     """``None`` se estiver tudo certo; senão, a mensagem a exibir antes de sair."""
     missing = missing_system_libraries()
     return format_instructions(missing) if missing else None
+
+
+def refuse_if_missing() -> int | None:
+    """Explica e devolve o código de saída quando falta biblioteca; ``None`` quando pode seguir.
+
+    Precisa rodar **antes** de qualquer ``import`` do PySide6: a ``libGL`` e a ``libEGL`` a própria ``QtGui`` pede ao ser
+    importada, e sem elas o aplicativo morria num ``ImportError`` de Python (medido num Ubuntu 24.04 enxuto, com o pacote
+    do Linux) antes de o ``main`` chegar a conferir. A explicação sai no idioma das preferências, que não dependem do Qt.
+    """
+    from videomanager.bootstrap import load_preferences
+    from videomanager.domain import i18n
+    i18n.set_language(load_preferences().language)
+    problem = check_or_explain()
+    if problem is None:
+        return None
+    print(problem, file=sys.stderr)
+    return 1
 
 
 # Todo cache do fontconfig começa com FC_CACHE_MAGIC_MMAP (0xFC02FC04, em

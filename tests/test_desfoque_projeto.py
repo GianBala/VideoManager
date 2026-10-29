@@ -27,6 +27,7 @@ from videomanager.domain.project import filter_pose
 from videomanager.domain.project import pseudo_media
 from videomanager.infrastructure.storage import project_json
 from videomanager.infrastructure.storage.project_json import PROJECT_VERSION
+from videomanager.infrastructure.storage.project_json import HDR_SOURCE_VERSION
 from videomanager.infrastructure.storage.project_json import MOVABLE_FILTER_VERSION
 from videomanager.infrastructure.storage.project_json import REGION_BLUR_VERSION
 from videomanager.infrastructure.storage.project_json import SUPPORTED_VERSION
@@ -102,7 +103,7 @@ def test_a_versao_anterior_recusa_o_projeto_com_desfoque_e_abre_os_outros(tmp_pa
     desfoque, _ = _projeto(tmp_path)
     sepia, _ = _projeto(tmp_path, "sepia")
     com, sem = (project_to_dict(p, base_dir=tmp_path) for p in (desfoque, sepia))
-    assert SUPPORTED_VERSION == MOVABLE_FILTER_VERSION == 8
+    assert SUPPORTED_VERSION == HDR_SOURCE_VERSION == 9
     monkeypatch.setattr(project_json, "SUPPORTED_VERSION", PROJECT_VERSION)
     with pytest.raises(ProjectError):
         project_from_dict(com, base_dir=tmp_path)
@@ -157,24 +158,24 @@ def test_abrir_um_projeto_com_desfoque_no_editor_nao_o_marca_como_alterado(tmp_p
     assert volta.region_rect(1280, 720, 1.5) == filtro.region_rect(1280, 720, 1.5)
 
 
-def test_a_7_e_a_8_tem_dono_e_a_leitura_vai_ate_a_maior_das_versoes() -> None:
-    """A 7 é do desfoque e a 8 do filtro móvel: uma chave nova que todo arquivo grava é a 9. Tomar a 7 ou a 8 faria um
-    programa que só conhece uma delas perder a chave ao salvar."""
-    assert PROJECT_VERSION not in (REGION_BLUR_VERSION, MOVABLE_FILTER_VERSION), \
-        "a 7 é do desfoque e a 8 do filtro móvel: uma chave nova sobe PROJECT_VERSION para 9"
-    assert SUPPORTED_VERSION == max(PROJECT_VERSION, REGION_BLUR_VERSION, MOVABLE_FILTER_VERSION)
+def test_a_7_a_8_e_a_9_tem_dono_e_a_leitura_vai_ate_a_maior_das_versoes() -> None:
+    """A 7 é do desfoque, a 8 do filtro móvel e a 9 da mídia HDR: uma chave nova que todo arquivo grava é a 10. Tomar uma
+    delas faria um programa que só conhece outra perder a chave ao salvar."""
+    assert PROJECT_VERSION not in (REGION_BLUR_VERSION, MOVABLE_FILTER_VERSION, HDR_SOURCE_VERSION), \
+        "a 7 é do desfoque, a 8 do filtro móvel e a 9 da mídia HDR: uma chave nova sobe PROJECT_VERSION para 10"
+    assert SUPPORTED_VERSION == max(PROJECT_VERSION, REGION_BLUR_VERSION, MOVABLE_FILTER_VERSION, HDR_SOURCE_VERSION)
 
 
-def test_com_uma_chave_nova_na_versao_9_todo_projeto_grava_9_inclusive_o_com_desfoque_e_o_movel(
+def test_com_uma_chave_nova_na_versao_10_todo_projeto_grava_10_inclusive_o_com_desfoque_e_o_movel(
         tmp_path: Path, monkeypatch) -> None:
-    """Os projetos com desfoque e com filtro móvel gravam a maior das versões: gravar 7 ou 8 deixaria a chave da 9 sem
+    """Os projetos com desfoque e com filtro móvel gravam a maior das versões: gravar 7 ou 8 deixaria a chave da 10 sem
     quem a entenda."""
-    monkeypatch.setattr(project_json, "PROJECT_VERSION", 9)
+    monkeypatch.setattr(project_json, "PROJECT_VERSION", 10)
     desfoque, _ = _projeto(tmp_path)
     sepia, _ = _projeto(tmp_path, "sepia")
     movel, _ = _projeto(tmp_path, "sepia", movable=True)
     for projeto in (desfoque, sepia, movel):
-        assert project_to_dict(projeto, base_dir=tmp_path)["version"] == 9
+        assert project_to_dict(projeto, base_dir=tmp_path)["version"] == 10
 
 
 # -- o filtro móvel no arquivo -------------------------------------------------------------------

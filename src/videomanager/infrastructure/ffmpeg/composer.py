@@ -95,6 +95,11 @@ _AUDIO_DECLICK = 0.012
 
 # Duração mínima do fundo. Um projeto vazio ainda precisa de um quadro para
 # mostrar, senão o ffmpeg sai sem escrever nada e a prévia fica sem explicação.
+# Dois quadros a 30 q/s, e é de propósito para o quadro parado e para a reprodução:
+# no ffmpeg 6.1 (o da CI do Ubuntu) um fundo de **um** quadro só faz o ``overlay``
+# perder a camada da transição que afeta os adicionais — o quadro do corte saía sem
+# o filtro do lado direito, e nada em 7.1 ou 9 mostra isso. Só a exportação, cujo
+# arquivo termina onde o fundo termina, pede o piso de um quadro (``canvas_floor``).
 _MIN_CANVAS = 0.04
 
 # Folga que impede um quadro exatamente sobre a borda de uma janela de ler de
@@ -395,6 +400,33 @@ def _whole_frames(duration: float, fps: float) -> float:
     if fps <= 0:
         return duration
     return math.ceil(duration * fps - 1e-6) / fps
+
+
+# Quanto de um quadro um limite pode estar "abaixo" da grade e ainda contar como nela (o ruído do
+# ponto flutuante e do ``.6f`` com que os tempos chegam aqui é uns cem milésimos disso).
+_EDGE_SLACK = 1e-4
+
+
+def _edge(seconds: float, fps: float) -> float:
+    """O limite de uma janela de ``enable``, posto no meio do quadro em que ele cai.
+
+    O ``enable`` compara o instante de cada quadro (``k/fps``) com o limite. Escrito como
+    ``k/fps`` com seis casas, o limite ficava um fio abaixo ou um fio acima do quadro conforme
+    o arredondamento (``2/30`` vira ``0,066667``, acima), e o quadro da emenda caía no bloco
+    errado. Medido a 30 q/s: o primeiro quadro de todo bloco que começa em ``k`` com
+    ``k mod 3 = 2`` saía como repetição do último do anterior, e a edição por cima da grade
+    (onde todo corte cai exatamente num limite) multiplicava esse caso. O meio do quadro não
+    depende da casa decimal. Um limite fora da grade cai no mesmo quadro de sempre: o primeiro
+    cujo instante o alcança.
+    """
+    if fps <= 0:
+        return seconds
+    return (math.ceil(seconds * fps - _EDGE_SLACK) - 0.5) / fps
+
+
+def _window(start: float, end: float, fps: float) -> str:
+    """``enable`` dos quadros de ``start`` (inclusive) a ``end`` (exclusive)."""
+    return f"gte(t,{_edge(start, fps):.6f})*lt(t,{_edge(end, fps):.6f})"
 
 
 def _input_args(
@@ -714,6 +746,29 @@ def _chain_text(
     )
 
 
+# Vídeo HDR (PQ ou HLG) para SDR BT.709, antes de o quadro virar RGBA de 8 bits. Sem isto o pixel da curva PQ passava por
+# 8 bits como se fosse SDR e saía sem a marca da curva: sombras levantadas (preto 41 → 72), brilhos achatados (210 → 137) e cor
+# desbotada (saturação média 112 → 25), sem erro algum. O ``mobius`` foi o que mais se aproximou do original (medido contra uma
+# fonte SDR reencodada em PQ: saturação 97 e brilhos 194 contra 112 e 210; o ``hable`` escurece, 79 e 162). Custa ~7 ms por
+# quadro a 1080p e ~24 ms a 4K, só nos blocos HDR.
+HDR_TO_SDR_STEPS = (
+    "zscale=t=linear:npl=100",
+    "format=gbrpf32le",
+    "zscale=p=bt709",
+    "tonemap=tonemap=mobius:desat=0",
+    "zscale=t=bt709:m=bt709:r=tv",
+    "format=yuv420p",
+)
+
+
+def _hdr_to_sdr(clip: Clip) -> list[str]:
+    """Os passos do mapeamento de tons, ou nenhum quando o bloco não é vídeo HDR."""
+    media = clip.media
+    if media is None or not media.hdr or media.kind is not MediaKind.VIDEO:
+        return []
+    return list(HDR_TO_SDR_STEPS)
+
+
 def _video_chain(
     piece: _Piece,
     project: Project,
@@ -882,6 +937,8 @@ def _video_chain(
             steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
         else:
             steps.append("setpts=PTS-STARTPTS")
+    # Antes de ``lead``: o fundo desfocado sai do mesmo fluxo e precisa das mesmas cores.
+    steps += _hdr_to_sdr(clip)
     lead = len(steps)
 
     sx = clip.scale_x
@@ -1653,13 +1710,11 @@ def _compose_video_piece(
 ) -> str:
     """Aplica um bloco visual e devolve o novo rótulo da composição."""
     start, end = piece.offset, piece.offset + piece.duration
-    enable = f"gte(t,{start:.6f})*lt(t,{end:.6f})"
+    enable = _window(start, end, fps)
     for excluded_start, excluded_end in excluded_ranges:
         if excluded_end <= start + 1e-6 or excluded_start >= end - 1e-6:
             continue
-        enable += (
-            f"*not(gte(t,{excluded_start:.6f})*lt(t,{excluded_end:.6f}))"
-        )
+        enable += f"*not({_window(excluded_start, excluded_end, fps)})"
     if piece.clip.overlay_type is OverlayType.FILTER:
         if piece.clip.has_region:
             return _compose_region(filters, current, piece, project, order, enable)
@@ -1731,13 +1786,13 @@ def _compose_video_transition(
     label = f"[to{number}]"
     filters.append(
         f"{current}{visible_label}overlay=x=0:y=0:eof_action=repeat:repeatlast=1:format=auto:"
-        f"enable='{_ranges_enable(((render.offset, render.offset+render.visible_duration),))}'{label}"
+        f"enable='{_ranges_enable(((render.offset, render.offset+render.visible_duration),), fps)}'{label}"
     )
     return label
 
 
-def _ranges_enable(ranges: tuple[tuple[float, float], ...]) -> str:
-    return '+'.join(f'gte(t,{a:.6f})*lt(t,{b:.6f})' for a, b in ranges) or '0'
+def _ranges_enable(ranges: tuple[tuple[float, float], ...], fps: float) -> str:
+    return '+'.join(_window(a, b, fps) for a, b in ranges) or '0'
 
 
 def _transition_window(filters: list[str], left: str, right: str,
@@ -1882,7 +1937,7 @@ def _compose_additional_transition(filters: list[str], current: str, render: _Tr
             visible = combined
         result = f'[pointout{name}]'
         filters.append(f'{original}{visible}overlay=x=0:y=0:eof_action=repeat:repeatlast=1:format=auto:'
-                       f"enable='{_ranges_enable(ranges)}'{result}")
+                       f"enable='{_ranges_enable(ranges, fps)}'{result}")
         return result
     labels = []
     for index, side in enumerate(sides):
@@ -1899,7 +1954,7 @@ def _compose_additional_transition(filters: list[str], current: str, render: _Tr
     visible = _transition_window(filters, labels[0], labels[1], render, fps, name, alpha=True)
     output = f'[additionalout{name}]'
     filters.append(f'{current}{visible}overlay=x=0:y=0:eof_action=repeat:repeatlast=1:format=auto:'
-                   f"enable='{_ranges_enable(ranges)}'{output}")
+                   f"enable='{_ranges_enable(ranges, fps)}'{output}")
     return output
 
 
@@ -1974,6 +2029,7 @@ def build_graph(
     transparent: bool = False,
     still: bool = False,
     tails: dict[int, float] | None = None,
+    canvas_floor: float = _MIN_CANVAS,
 ) -> Graph:
     """Traduz o projeto num grafo de filtros do ffmpeg.
 
@@ -1986,7 +2042,7 @@ def build_graph(
     fps = fps or project.fps
     pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio, still=still,
                      tails=tails)
-    duration = span if span is not None else max(_MIN_CANVAS, project.export_duration - at)
+    duration = span if span is not None else max(canvas_floor, project.export_duration - at)
 
     inputs: list[str] = []
     filters: list[str] = []
@@ -2096,7 +2152,7 @@ def build_graph(
     if want_video and project.has_video:
         filters.append(
             f"color=c={'black@0' if transparent else 'black'}:s={project.width}x{project.height}"
-            f":r={fps:.6f}:d={max(_MIN_CANVAS, duration):.6f}"
+            f":r={fps:.6f}:d={max(canvas_floor, duration):.6f}"
             f"{',format=rgba' if transparent else ''}[base]"
         )
         current = "[base]"
@@ -2361,7 +2417,9 @@ def export_args(
     if container == "gif":
         return gif_args(project, destination, tools, text_assets=text_assets)
 
-    graph = build_graph(project, interpolate=interpolate, text_assets=text_assets)
+    # O arquivo termina onde o fundo termina: com o piso de 0,04 s, uma edição de um quadro saía com um
+    # preto a mais (dois quadros a 30 q/s, três a 60). É um quadro, e não um tempo fixo.
+    graph = build_graph(project, interpolate=interpolate, text_assets=text_assets, canvas_floor=1.0 / project.fps)
     codec_family = family or hwaccel.family_for(container)
     encoder = hwaccel.resolve(codec_family, hardware, tools, quality=quality)
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y"]

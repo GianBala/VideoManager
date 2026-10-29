@@ -415,6 +415,10 @@ EXPORT_MODE_AUDIO_ONLY_TIP = (
 )
 EXPORT_CONTAINER = "Video format"
 EXPORT_CONTAINER_TIP = "File format of the generated video (container)"
+EXPORT_HDR_NOTE = (
+    "The project has HDR video: on export the colors are converted to SDR (tone mapping), which most screens "
+    "and players show correctly. The file comes out as SDR, without the HDR tags."
+)
 EXPORT_GIF_NO_FAST = "GIF is always re-encoded: there is no way to copy the data as is."
 EXPORT_GIF_NOTE = (
     "GIF holds no sound: the audio track is left out. In \"Automatic\", the "

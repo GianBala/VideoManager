@@ -18,6 +18,34 @@ set -eu
 
 HERE="$(dirname "$(readlink -f "$0")")"
 
+# As bibliotecas do pacote vêm do sistema que o gerou e pedem a glibc dele. Numa glibc mais velha o carregador morre com
+# "version `GLIBC_2.38' not found" num terminal que quem deu duplo clique não abriu: o programa simplesmente não abre
+# (Ubuntu 22.04 e Debian 12 caem aqui). O mínimo exigido é medido na geração (``build_appimage.sh``) e conferido antes de
+# tudo, com a mensagem numa janela quando houver uma ferramenta para isso.
+MINIMO_FILE="${HERE}/usr/share/videomanager/glibc-minimo"
+if [ -r "$MINIMO_FILE" ]; then
+    NEED="$(cat "$MINIMO_FILE")"
+    HAVE="$(getconf GNU_LIBC_VERSION 2>/dev/null | sed 's/^glibc //')"
+    if [ -n "$HAVE" ] && [ "$(printf '%s\n%s\n' "$NEED" "$HAVE" | sort -V | head -n 1)" != "$NEED" ]; then
+        case "${LC_ALL:-${LANG:-}}" in
+            pt*) MSG="O Video Manager precisa da glibc ${NEED} ou mais nova, e este sistema tem a ${HAVE}.
+Use o Ubuntu 24.04, o Debian 13, o Fedora 40 ou um sistema mais novo, ou rode a partir do código-fonte:
+https://github.com/GianBala/VideoManager" ;;
+            *) MSG="Video Manager needs glibc ${NEED} or newer, and this system has ${HAVE}.
+Use Ubuntu 24.04, Debian 13, Fedora 40 or newer, or run it from source:
+https://github.com/GianBala/VideoManager" ;;
+        esac
+        printf '%s\n' "$MSG" >&2
+        if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+            if command -v zenity >/dev/null 2>&1; then zenity --error --no-markup --title="Video Manager" --text="$MSG" || true
+            elif command -v kdialog >/dev/null 2>&1; then kdialog --title "Video Manager" --error "$MSG" || true
+            elif command -v xmessage >/dev/null 2>&1; then xmessage -center "$MSG" || true
+            fi
+        fi
+        exit 1
+    fi
+fi
+
 export APPDIR="${HERE}"
 export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 
