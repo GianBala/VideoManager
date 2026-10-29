@@ -74,3 +74,15 @@ def test_a_janela_de_exportar_tambem_e_apagada_ao_fechar(tema_do_app, painel_de_
         painel_de_edicao._open_export_dialog()
     assert _widgets_vivos() - antes <= 0
 
+
+def test_a_medida_que_termina_depois_do_dialogo_de_exportar_nao_toca_em_widget_apagado(dialogo_de_exportacao, monkeypatch):
+    """O retorno da medida chega por ``lambda``/``partial``, sem receptor: o Qt não o desliga quando o diálogo morre.
+
+    Na suíte inteira eram 16 ``RuntimeError: Internal C++ object (QCheckBox) already deleted`` engolidos pelo laço de eventos.
+    """
+    dialogo = dialogo_de_exportacao
+    # O objeto C++ de verdade não pode ser apagado aqui (o fixture o apaga de novo no fim): ``isValid`` diz que já morreu.
+    monkeypatch.setattr("shiboken6.isValid", lambda objeto: False)
+    chave = ("arquivo", "mp4", "h264", None, None, None, None)
+    dialogo._on_sampled(dialogo._sampling_token, chave, 1234.0)
+    assert chave not in dialogo._samples
