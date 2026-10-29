@@ -110,10 +110,11 @@ class TestVideo:
         assert "min(1080,1920/dar)" in texto
         assert "force_original_aspect_ratio" not in texto
 
-    def test_bloco_entra_no_instante_em_que_foi_colocado(self) -> None:
+    def test_bloco_entra_no_instante_em_que_foi_colocado(self, quadros_das_janelas) -> None:
         texto = filtros(projeto(video_track(clip(start=4.0, duration=6.0))))
         assert "setpts=PTS-STARTPTS+4.000000/TB" in texto
-        assert "gte(t,4.000000)*lt(t,10.000000)" in texto
+        # Dos 4 s aos 10 s a 30 q/s: do quadro 120 ao 299, e o 300 já é de quem vier depois.
+        assert quadros_das_janelas(texto, 30.0) == [(120, 299)]
 
     def test_bloco_no_zero_nao_recebe_atraso(self) -> None:
         texto = filtros(projeto(video_track(clip(start=0.0))))
@@ -1432,7 +1433,7 @@ class TestDesfoqueDeRegiao:
     def ramo(graph) -> str:
         return next(f for f in ";".join(graph.filters).split(";") if "gblur" in f)
 
-    def test_recorta_borra_na_tela_de_trabalho_e_cola_no_mesmo_lugar(self) -> None:
+    def test_recorta_borra_na_tela_de_trabalho_e_cola_no_mesmo_lugar(self, quadros_das_janelas) -> None:
         texto = ";".join(build_graph(self.com(self.desfoque())).filters)
         ramo = self.ramo(build_graph(self.com(self.desfoque())))
         # 30% da tela de 1920×1080: 576×324, e o lado menor vai a 16 px na tela de trabalho.
@@ -1441,7 +1442,8 @@ class TestDesfoqueDeRegiao:
         assert "format=gbrp,gblur=sigma=5.6000:steps=3,format=rgba" in ramo
         # O overlay segue o formato do quadro principal e só liga na janela do bloco.
         assert "format=auto" in texto and "eof_action=pass" in texto
-        assert "enable='gte(t,2.000000)*lt(t,5.000000)'" in texto
+        # Dos 2 s aos 5 s a 30 q/s: do quadro 60 ao 149.
+        assert (60, 149) in quadros_das_janelas(texto, 30.0)
 
     def test_a_ramificacao_nao_e_aparada_para_o_overlay_nao_reter_quadros(self) -> None:
         # O trim fazia o overlay guardar, na fila, todo quadro do ramo principal anterior ao bloco (o ramo aparado só
