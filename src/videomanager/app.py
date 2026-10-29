@@ -18,7 +18,7 @@ from videomanager import APP_NAME
 from videomanager import __version__
 from videomanager import build_commit
 from videomanager.domain import i18n
-from videomanager.preflight import check_or_explain, font_cache_isolation
+from videomanager.preflight import font_cache_isolation, refuse_if_missing
 from videomanager.presentation.qt.i18n import apply_language
 from videomanager.presentation.qt.main_window import MainWindow
 from videomanager.bootstrap import build_desktop_runtime
@@ -409,13 +409,12 @@ def _qt_messages(mode, context, message) -> None:
 
 def main() -> int:
     # Antes de tocar no Qt: se falta biblioteca do sistema, a criação do
-    # QApplication aborta o processo e não sobra chance de explicar nada. A
-    # explicação sai no idioma das preferências, que não dependem do Qt.
-    i18n.set_language(load_preferences().language)
-    problem = check_or_explain()
-    if problem:
-        print(problem, file=sys.stderr)
-        return 1
+    # QApplication aborta o processo e não sobra chance de explicar nada. O
+    # ``__main__`` já confere antes de importar este módulo (a libGL falta no
+    # próprio import); aqui fica para quem chama ``main`` direto.
+    refused = refuse_if_missing()
+    if refused is not None:
+        return refused
 
     from videomanager.infrastructure.system.logs import configure_file_logging
 

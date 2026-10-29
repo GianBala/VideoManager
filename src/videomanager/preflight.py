@@ -120,6 +120,23 @@ def check_or_explain() -> str | None:
     return format_instructions(missing) if missing else None
 
 
+def refuse_if_missing() -> int | None:
+    """Explica e devolve o código de saída quando falta biblioteca; ``None`` quando pode seguir.
+
+    Precisa rodar **antes** de qualquer ``import`` do PySide6: a ``libGL`` e a ``libEGL`` a própria ``QtGui`` pede ao ser
+    importada, e sem elas o aplicativo morria num ``ImportError`` de Python (medido num Ubuntu 24.04 enxuto, com o pacote
+    do Linux) antes de o ``main`` chegar a conferir. A explicação sai no idioma das preferências, que não dependem do Qt.
+    """
+    from videomanager.bootstrap import load_preferences
+    from videomanager.domain import i18n
+    i18n.set_language(load_preferences().language)
+    problem = check_or_explain()
+    if problem is None:
+        return None
+    print(problem, file=sys.stderr)
+    return 1
+
+
 # Todo cache do fontconfig começa com FC_CACHE_MAGIC_MMAP (0xFC02FC04, em
 # little-endian) e, logo depois, a versão do formato — que também é o sufixo do
 # nome do arquivo (``<hash>-le64.cache-9``). ``le64``: só Linux little-endian
