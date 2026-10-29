@@ -303,6 +303,9 @@ def test_configuracoes_salvas_chegam_ao_painel_de_conversao(desktop_app, monkeyp
         def result_settings(self):
             return novas
 
+        def deleteLater(self):   # a janela apaga o diálogo ao fechar
+            pass
+
     monkeypatch.setattr(module, "SettingsDialog", Dialogo)
     monkeypatch.setattr(window, "_save_settings", lambda: None)
     try:

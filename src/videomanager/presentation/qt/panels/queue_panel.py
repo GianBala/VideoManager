@@ -579,8 +579,14 @@ class QueuePanel(QFrame):
             action.triggered.connect(lambda: self._show_log(job))
             menu.addAction(action)
 
-        if not menu.isEmpty():
+        if menu.isEmpty():
+            menu.deleteLater()
+            return
+        try:
             menu.exec(self._list.viewport().mapToGlobal(position))
+        finally:
+            # Filho do painel: sem isto cada clique direito na fila deixava um menu vivo (ver ``EditPanel._exec_menu``).
+            menu.deleteLater()
 
     def _open_selected_file(self) -> None:
         jobs = self._selected_jobs()
@@ -615,4 +621,7 @@ class QueuePanel(QFrame):
         close = QPushButton(strings.QUEUE_LOG_CLOSE)
         close.clicked.connect(dialog.accept)
         box.addWidget(close, 0, Qt.AlignmentFlag.AlignRight)
-        dialog.exec()
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()

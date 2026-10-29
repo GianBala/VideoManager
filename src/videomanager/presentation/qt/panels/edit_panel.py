@@ -1037,7 +1037,7 @@ class EditPanel(QWidget):
         return menu
 
     def _show_save_menu(self, position) -> None:
-        self.build_save_menu().exec(self._save_btn.mapToGlobal(position))
+        self._exec_menu(self.build_save_menu(), self._save_btn.mapToGlobal(position))
 
     def _update_project_label(self) -> None:
         if not hasattr(self, "_project_label"):
@@ -2340,21 +2340,25 @@ class EditPanel(QWidget):
             project_path=self._project_path,
             parent=self,
          runtime=self._runtime)
-        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.created_job:
-            if (
-                dialog.chosen_canvas != self._canvas_choice
-                or dialog.chosen_rate != self._rate_choice
-            ):
-                self._canvas_choice = dialog.chosen_canvas
-                self._rate_choice = dialog.chosen_rate
-                # A proporção acompanha a tela, como na lista do painel: uma tela
-                # de outra proporção ficava fora da lista filtrada, que passava a
-                # dizer "Automática" com a tela fixada.
-                self._aspect_choice = (format_aspect_ratio(*self._canvas_choice)
-                                       if self._canvas_choice else None)
-                self._sync_canvas()
-                self._after_edit()
-            self.jobs_ready.emit([dialog.created_job])
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            if accepted and dialog.created_job:
+                self._after_export_dialog(dialog)
+        finally:
+            dialog.deleteLater()
+
+    def _after_export_dialog(self, dialog: ExportDialog) -> None:
+        if dialog.chosen_canvas != self._canvas_choice or dialog.chosen_rate != self._rate_choice:
+            self._canvas_choice = dialog.chosen_canvas
+            self._rate_choice = dialog.chosen_rate
+            # A proporção acompanha a tela, como na lista do painel: uma tela
+            # de outra proporção ficava fora da lista filtrada, que passava a
+            # dizer "Automática" com a tela fixada.
+            self._aspect_choice = (format_aspect_ratio(*self._canvas_choice)
+                                   if self._canvas_choice else None)
+            self._sync_canvas()
+            self._after_edit()
+        self.jobs_ready.emit([dialog.created_job])
 
     def _install_shortcuts(self) -> None:
         """Atalhos do editor, com o alcance do painel.
@@ -2678,7 +2682,7 @@ class EditPanel(QWidget):
                 self._remove_media_ref(ref)
 
     def _show_media_context_menu(self, pos: QPoint) -> None:
-        self.build_media_menu(pos).exec(self._media_list.mapToGlobal(pos))
+        self._exec_menu(self.build_media_menu(pos), self._media_list.mapToGlobal(pos))
 
     def build_media_menu(self, pos: QPoint) -> QMenu:
         item = self._media_list.itemAt(pos)
@@ -2811,7 +2815,20 @@ class EditPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _show_menu(self, kind: str, track_index: int, clip_id: int, position) -> None:
-        self.build_menu(kind, track_index, clip_id).exec(position)
+        self._exec_menu(self.build_menu(kind, track_index, clip_id), position)
+
+    @staticmethod
+    def _exec_menu(menu: QMenu, position) -> None:
+        """Abre o menu e o apaga ao fechar.
+
+        O menu nasce com o painel por pai (``QMenu(self)``) e o Python solta a referência ao sair de ``exec``, mas o Qt
+        mantém o objeto filho vivo: cada clique direito deixava um menu com ~18 objetos e os fechos dos itens (medido: 100
+        ciclos de uso do editor, +500 widgets e +40 MiB, sem outra fonte de crescimento).
+        """
+        try:
+            menu.exec(position)
+        finally:
+            menu.deleteLater()
 
     def build_menu(self, kind: str, track_index: int, clip_id: int) -> QMenu:
         """Monta o menu com o que faz sentido para o que foi clicado.

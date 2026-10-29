@@ -344,6 +344,9 @@ def test_ok_nas_configuracoes_troca_o_idioma_com_a_janela_aberta(janelas, monkey
         def result_settings(self):
             return replace(janela._settings, language=i18n.ENGLISH)
 
+        def deleteLater(self):   # a janela apaga o diálogo ao fechar
+            pass
+
     monkeypatch.setattr(modulo, "SettingsDialog", Dialogo)
     monkeypatch.setattr(janela, "_save_settings", lambda: None)
     escolhas.append(Dialogo.DialogCode.Rejected)
@@ -353,6 +356,46 @@ def test_ok_nas_configuracoes_troca_o_idioma_com_a_janela_aberta(janelas, monkey
     janela._open_settings()
     assert janela._tabs.tabText(_EDITOR) == "Edit"
     assert janela._settings.language == i18n.ENGLISH
+
+
+def _widgets_vivos_depois_de_apagar() -> int:
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    for _ in range(3):
+        QApplication.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return len(QApplication.allWidgets())
+
+
+def test_abrir_as_configuracoes_muitas_vezes_nao_acumula_dialogos(janelas, monkeypatch):
+    """Cada abertura das Configurações apaga o diálogo que criou (antes: ~125 widgets e 4 MiB por abertura, e a troca de tema
+    ia de 1,8 s a 4,7 s depois de 25 aberturas). Um diálogo leve no lugar do verdadeiro: a conta é de quem abre. Mora aqui
+    porque é este arquivo que já abre a janela e as Configurações; ver também ``test_nada_sobra_depois_de_fechar``.
+    """
+    from PySide6.QtWidgets import QDialog, QLabel
+
+    import videomanager.presentation.qt.main_window as modulo
+
+    janela = janelas()
+
+    class Falso(QDialog):
+        DialogCode = QDialog.DialogCode
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(args[1] if len(args) > 1 else kwargs.get("parent"))
+            QLabel("conteúdo", self)
+
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(modulo, "SettingsDialog", Falso)
+    janela._open_settings()
+    antes = _widgets_vivos_depois_de_apagar()
+    for _ in range(6):
+        janela._open_settings()
+    depois = _widgets_vivos_depois_de_apagar()
+    assert depois - antes <= 0, f"{depois - antes} widgets a mais depois de 6 aberturas"
 
 
 def test_textos_e_numeros_do_proprio_qt_seguem_o_idioma(desktop_app):
