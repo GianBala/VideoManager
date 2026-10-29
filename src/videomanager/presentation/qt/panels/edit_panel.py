@@ -113,7 +113,6 @@ from videomanager.domain.project import accepts
 from videomanager.domain.project import auto_canvas
 from videomanager.domain.project import next_clip_id
 from videomanager.application.preferences import Preferences as Settings
-from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import REGION_BLUR
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.i18n import decimal
@@ -121,6 +120,7 @@ from videomanager.domain.timing import format_span
 from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_index
 from videomanager.domain.timing import frame_step
+from videomanager.domain.timing import on_grid
 from videomanager.domain.timing import keyframe_after
 from videomanager.domain.timing import keyframe_at_or_before
 from videomanager.presentation.qt.tasks import WorkerRunner
@@ -1037,7 +1037,7 @@ class EditPanel(QWidget):
         return menu
 
     def _show_save_menu(self, position) -> None:
-        self.build_save_menu().exec(self._save_btn.mapToGlobal(position))
+        self._exec_menu(self.build_save_menu(), self._save_btn.mapToGlobal(position))
 
     def _update_project_label(self) -> None:
         if not hasattr(self, "_project_label"):
@@ -1581,7 +1581,7 @@ class EditPanel(QWidget):
         ref = pseudo_media(OverlayType.TEXT, text[:15], IMAGE_DURATION)
         clip = Clip(
             media=ref,
-            start=max(0.0, self._position),
+            start=max(0.0, self._cursor),
             duration=IMAGE_DURATION,
             overlay_type=OverlayType.TEXT,
             text_content=text,
@@ -1607,7 +1607,7 @@ class EditPanel(QWidget):
         ref = pseudo_media(OverlayType.FILTER, label, duration)
         clip = Clip(
             media=ref,
-            start=max(0.0, self._position),
+            start=max(0.0, self._cursor),
             duration=duration,
             overlay_type=OverlayType.FILTER,
             filter_name=fname,
@@ -2340,21 +2340,25 @@ class EditPanel(QWidget):
             project_path=self._project_path,
             parent=self,
          runtime=self._runtime)
-        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.created_job:
-            if (
-                dialog.chosen_canvas != self._canvas_choice
-                or dialog.chosen_rate != self._rate_choice
-            ):
-                self._canvas_choice = dialog.chosen_canvas
-                self._rate_choice = dialog.chosen_rate
-                # A proporção acompanha a tela, como na lista do painel: uma tela
-                # de outra proporção ficava fora da lista filtrada, que passava a
-                # dizer "Automática" com a tela fixada.
-                self._aspect_choice = (format_aspect_ratio(*self._canvas_choice)
-                                       if self._canvas_choice else None)
-                self._sync_canvas()
-                self._after_edit()
-            self.jobs_ready.emit([dialog.created_job])
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            if accepted and dialog.created_job:
+                self._after_export_dialog(dialog)
+        finally:
+            dialog.deleteLater()
+
+    def _after_export_dialog(self, dialog: ExportDialog) -> None:
+        if dialog.chosen_canvas != self._canvas_choice or dialog.chosen_rate != self._rate_choice:
+            self._canvas_choice = dialog.chosen_canvas
+            self._rate_choice = dialog.chosen_rate
+            # A proporção acompanha a tela, como na lista do painel: uma tela
+            # de outra proporção ficava fora da lista filtrada, que passava a
+            # dizer "Automática" com a tela fixada.
+            self._aspect_choice = (format_aspect_ratio(*self._canvas_choice)
+                                   if self._canvas_choice else None)
+            self._sync_canvas()
+            self._after_edit()
+        self.jobs_ready.emit([dialog.created_job])
 
     def _install_shortcuts(self) -> None:
         """Atalhos do editor, com o alcance do painel.
@@ -2461,6 +2465,18 @@ class EditPanel(QWidget):
     @property
     def _position(self) -> float:
         return self._timeline.position
+
+    @property
+    def _cursor(self) -> float:
+        """Onde uma edição feita pelo cursor acontece: o começo do quadro que está na tela.
+
+        A agulha pode parar entre dois quadros: a reprodução de um material de 24 q/s numa edição de
+        30 q/s para em ``n/24``, que não é um limite da grade. Cortar ali dava a quadros e emendas
+        a posição que o arredondamento da exportação decidisse; o começo do quadro mostrado é o que
+        o ``frame_index`` e o ``seek_time`` já chamam de quadro daquele instante.
+        """
+        grid = self._project.frame_grid
+        return on_grid(self._position, 1.0 / grid, nearest=False) if grid else self._position
 
     @property
     def _has_video(self) -> bool:
@@ -2678,7 +2694,7 @@ class EditPanel(QWidget):
                 self._remove_media_ref(ref)
 
     def _show_media_context_menu(self, pos: QPoint) -> None:
-        self.build_media_menu(pos).exec(self._media_list.mapToGlobal(pos))
+        self._exec_menu(self.build_media_menu(pos), self._media_list.mapToGlobal(pos))
 
     def build_media_menu(self, pos: QPoint) -> QMenu:
         item = self._media_list.itemAt(pos)
@@ -2751,7 +2767,7 @@ class EditPanel(QWidget):
         """
         clip = Clip(
             media=reference,
-            start=max(0.0, self._position if at is None else at),
+            start=max(0.0, self._cursor if at is None else at),
             duration=reference.natural_duration,
         )
         index = self._free_track(clip)
@@ -2811,7 +2827,20 @@ class EditPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _show_menu(self, kind: str, track_index: int, clip_id: int, position) -> None:
-        self.build_menu(kind, track_index, clip_id).exec(position)
+        self._exec_menu(self.build_menu(kind, track_index, clip_id), position)
+
+    @staticmethod
+    def _exec_menu(menu: QMenu, position) -> None:
+        """Abre o menu e o apaga ao fechar.
+
+        O menu nasce com o painel por pai (``QMenu(self)``) e o Python solta a referência ao sair de ``exec``, mas o Qt
+        mantém o objeto filho vivo: cada clique direito deixava um menu com ~18 objetos e os fechos dos itens (medido: 100
+        ciclos de uso do editor, +500 widgets e +40 MiB, sem outra fonte de crescimento).
+        """
+        try:
+            menu.exec(position)
+        finally:
+            menu.deleteLater()
 
     def build_menu(self, kind: str, track_index: int, clip_id: int) -> QMenu:
         """Monta o menu com o que faz sentido para o que foi clicado.
@@ -2837,7 +2866,7 @@ class EditPanel(QWidget):
             )
             menu.addSeparator()
             self._act(menu, f"{strings.EDIT_SPLIT}  (S)", self._split_here,
-                      enabled=not clip.is_transition and clip.contains(self._position))
+                      enabled=not clip.is_transition and clip.contains(self._cursor))
             self._act(
                 menu, f"{strings.EDIT_TRIM_LEFT}  (Q)",
                 lambda: self._trim_to_cursor("inicio"),
@@ -3185,7 +3214,7 @@ class EditPanel(QWidget):
         self._apply(self._project.with_track(kind))
 
     def _split_here(self) -> None:
-        position = self._position
+        position = self._cursor
         # O marcador de transição cobre metade de cada bloco que une: achado
         # primeiro, ele fazia a tesoura não cortar nada sobre um corte.
         clip = next(
@@ -3196,7 +3225,7 @@ class EditPanel(QWidget):
             clip = selected
         if clip is None or clip.is_transition or not clip.contains(position):
             return
-        if min(position - clip.start, clip.end - position) < MIN_SEGMENT:
+        if not self._project.fits(min(position - clip.start, clip.end - position)):
             return
         self._remember()
         self._apply(self._project.split(clip.clip_id, position))
@@ -3228,7 +3257,7 @@ class EditPanel(QWidget):
         if not self._can_trim(clip, edge):
             return
         self._remember()
-        self._apply(self._project.resized(clip.clip_id, edge, self._position))
+        self._apply(self._project.resized(clip.clip_id, edge, self._cursor))
 
     def _can_trim(self, clip: Clip | None, edge: str) -> bool:
         """Se há o que apagar daquele lado, e se sobra bloco depois.
@@ -3236,14 +3265,12 @@ class EditPanel(QWidget):
         Sobrar menos que o mínimo não é aparar, é apagar o bloco por um caminho
         que não diz isso — para apagar existe a lixeira ao lado.
         """
-        if clip is None or clip.is_transition or not clip.contains(self._position):
+        position = self._cursor
+        if clip is None or clip.is_transition or not clip.contains(position):
             return False
         if edge == "inicio":
-            return (
-                self._position > clip.start
-                and clip.end - self._position >= MIN_SEGMENT
-            )
-        return self._position - clip.start >= MIN_SEGMENT
+            return position > clip.start and self._project.fits(clip.end - position)
+        return self._project.fits(position - clip.start)
 
     def _toggle_reverse(self, clip_id: int) -> None:
         """Inverte o bloco clicado, ou o devolve ao sentido normal.
@@ -3276,7 +3303,7 @@ class EditPanel(QWidget):
             return
         self._remember()
         pasted = replace(
-            self._clipboard, start=self._position, clip_id=next_clip_id()
+            self._clipboard, start=self._cursor, clip_id=next_clip_id()
         )
         index = self._free_track(pasted)
         if index is None:
@@ -3394,7 +3421,7 @@ class EditPanel(QWidget):
             if c.start >= clip.start and c.start < ceiling:
                 ceiling = c.start
 
-        new_duration = clip.duration_at_speed(value)
+        new_duration = clip.duration_at_speed(value, self._project.min_block)
         if clip.start + new_duration > ceiling + 1e-9:
             # Um arrasto contínuo no spinbox dispara valueChanged a cada passo:
             # sem essa marca, cada passo rejeitado reabria o aviso modal, e
@@ -4244,7 +4271,7 @@ class EditPanel(QWidget):
         self._split_button.setEnabled(
             clip is not None
             and not clip.is_transition
-            and clip.contains(self._position)
+            and clip.contains(self._cursor)
         )
         self._trim_left_button.setEnabled(self._can_trim(clip, "inicio"))
         self._trim_right_button.setEnabled(self._can_trim(clip, "fim"))

@@ -30,6 +30,7 @@ register({
     "DESC_AUDIO_LOSSLESS": ("{codec} · sem perda", "{codec} · lossless"),
     "DESC_VIDEO_COPY": ("vídeo copiado (sem recodificar)", "video copied (no re-encode)"),
     "DESC_REENCODE": ("recodifica em {codec}", "re-encodes to {codec}"),
+    "DESC_HDR_TO_SDR": ("HDR convertido para SDR", "HDR converted to SDR"),
     "DESC_GPU": ("placa de vídeo, se disponível", "GPU, if available"),
     "DESC_GPU_SHORT": (" (placa, se disponível)", " (GPU, if available)"),
     "DESC_AUDIO_TO": ("áudio em {codec}", "audio to {codec}"),

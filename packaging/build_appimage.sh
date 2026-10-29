@@ -56,6 +56,18 @@ mkdir -p "$APPDIR/usr/bin" \
 
 cp -a "$DIST/VideoManager/." "$APPDIR/usr/bin/"
 
+# A glibc que o pacote pede: o maior ``GLIBC_x.y`` entre os binários embutidos. O ``AppRun`` confere antes de abrir e
+# explica, em vez de deixar o carregador morrer calado numa distribuição mais velha.
+mkdir -p "$APPDIR/usr/share/videomanager"
+GLIBC_MINIMO="$(find "$APPDIR/usr/bin" -type f \( -name '*.so*' -o -perm -u+x \) -print0 \
+    | xargs -0 grep -a -o -h 'GLIBC_[0-9]\+\.[0-9]\+' 2>/dev/null | sed 's/^GLIBC_//' | sort -uV | tail -n 1)"
+if [ -z "$GLIBC_MINIMO" ]; then
+    echo "não consegui medir a glibc exigida pelos binários do pacote" >&2
+    exit 1
+fi
+printf '%s\n' "$GLIBC_MINIMO" > "$APPDIR/usr/share/videomanager/glibc-minimo"
+echo "==> glibc exigida pelo pacote: $GLIBC_MINIMO"
+
 install -m 755 packaging/appimage/AppRun "$APPDIR/AppRun"
 
 # O .desktop e o ícone precisam estar na raiz do AppDir: é ali que o

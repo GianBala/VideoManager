@@ -43,7 +43,7 @@ from videomanager.application.formatting import format_size
 from videomanager.domain.i18n import Text
 from videomanager.infrastructure.system.process import ProcessControl, terminate_and_wait, terminate_async
 from videomanager.domain.composition import Composition
-from videomanager.infrastructure.ffmpeg.composer import export_args
+from videomanager.infrastructure.ffmpeg.composer import HDR_TO_SDR_STEPS, export_args
 from videomanager.infrastructure.ffmpeg.parallel import ParallelExport
 from videomanager.infrastructure.ffmpeg.parallel import plan_segments, reversal_bounds
 from videomanager.infrastructure.ffmpeg.parallel import error_cause
@@ -58,6 +58,7 @@ from videomanager.domain.media import VideoTarget
 
 from videomanager.domain.compatibility import copies_audio
 from videomanager.domain.compatibility import needs_scaling
+from videomanager.domain.constants import HDR_TRANSFERS
 from videomanager.domain.compatibility import is_portrait
 from videomanager.domain.compatibility import resolved_video_codec
 from videomanager.domain.compatibility import resolved_audio_codec
@@ -161,6 +162,7 @@ def probe_file(path: Path, tools: FFmpegTools, *, control: ProcessControl | None
                 language=(raw.get("tags") or {}).get("language"),
                 rotation=_display_rotation(raw),
                 attached_picture=bool((raw.get('disposition') or {}).get('attached_pic')),
+                hdr=str(raw.get("color_transfer") or "").lower() in HDR_TRANSFERS,
                 duration=_stream_duration(raw),
             )
         )
@@ -333,6 +335,11 @@ def build_video_args(
             filters.append(f"scale={target.height}:-2")
         else:
             filters.append(f"scale=-2:{target.height}")
+
+    if codec != "copy" and media.video is not None and media.video.hdr:
+        # Esta conversão nunca guarda HDR (sem 10 bits nem marcas de cor na saída): sem mapear os tons, o vídeo PQ ou HLG
+        # saía lavado. Depois da redução de tamanho, que é onde fica mais barato (ver ``composer.HDR_TO_SDR_STEPS``).
+        filters.extend(HDR_TO_SDR_STEPS)
 
     if codec == "copy":
         video_encoder_args = ["-c:v", "copy"]

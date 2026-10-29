@@ -113,7 +113,12 @@ def simple_trim(project: Project) -> tuple[Segment, ...] | None:
         for earlier, later in zip(ordered, ordered[1:])
     ):
         return None
-    return tuple(Segment(clip.in_point, clip.out_point) for clip in ordered)
+    segments = tuple(Segment(clip.in_point, clip.out_point) for clip in ordered)
+    # Copiar os dados não corta abaixo de ``MIN_SEGMENT`` (o cortador recusa o trecho): um bloco
+    # de um quadro, que a edição passou a aceitar, vai para o compositor em vez de falhar aqui.
+    if not all(segment.is_usable for segment in segments):
+        return None
+    return segments
 
 
 def _interpolated_clips(project: Project) -> list[Clip]:
@@ -137,6 +142,14 @@ def _interpolated_clips(project: Project) -> list[Clip]:
 def can_interpolate(project: Project) -> bool:
     """Se há bloco abaixo da taxa da tela — o único caso com o que interpolar."""
     return bool(_interpolated_clips(project))
+
+
+def has_hdr_source(project: Project) -> bool:
+    """Se algum bloco de vídeo do projeto vem de uma mídia HDR (PQ ou HLG).
+
+    A exportação converte esses blocos para SDR (``composer.HDR_TO_SDR_STEPS``), e a janela avisa antes de enfileirar.
+    """
+    return any(clip.has_image and clip.media is not None and clip.media.hdr for clip in project.clips)
 
 
 def region_blur_in_affecting_transition(project: Project) -> bool:
