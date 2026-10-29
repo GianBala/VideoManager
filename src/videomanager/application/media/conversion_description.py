@@ -44,6 +44,8 @@ def describe_target(media: LocalMedia, target: ConversionTarget) -> str:
             parts.append(t("DESC_GPU"))
         if target.quality:
             parts.append(hwaccel.quality_label(target.quality))
+        if media.video is not None and media.video.hdr:
+            parts.append(t("DESC_HDR_TO_SDR"))
     audio_codec = resolved_audio_codec(media, target)
     if media.has_audio and audio_codec != "copy":
         # Só se diz quando há custo: "áudio copiado" seria ruído em toda linha.
