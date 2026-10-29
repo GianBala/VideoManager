@@ -276,7 +276,7 @@ def test_transicao_e_processada_na_trilha_antes_das_camadas_superiores() -> None
     assert xfade_index < image_index, "a transição não pode cobrir a camada superior"
 
 
-def test_transicao_opcionalmente_compoe_imagem_texto_e_filtro_nos_dois_lados() -> None:
+def test_transicao_opcionalmente_compoe_imagem_texto_e_filtro_nos_dois_lados(quadros_das_janelas) -> None:
     video = MediaRef(Path("video.mp4"), MediaKind.VIDEO, duration=10.0)
     left = Clip(video, start=0.0, duration=4.0, in_point=1.0)
     right = Clip(video, start=4.0, duration=4.0, in_point=5.0)
@@ -325,7 +325,8 @@ def test_transicao_opcionalmente_compoe_imagem_texto_e_filtro_nos_dois_lados() -
     assert "[o0layer0_0_0]hue=" in filters, "o filtro mantém sua ordem após a imagem"
     assert 'split=3[pointbase' in filters, 'os dois lados incluem a composição inferior no filtro'
     assert "eof_action=repeat:repeatlast=1" in filters
-    assert "not(gte(t,3.500000)*lt(t,4.500000))" in filters
+    # Dos 3,5 s aos 4,5 s a 30 q/s: do quadro 105 ao 134.
+    assert (105, 134) in quadros_das_janelas(filters, 30.0)
     assert graph.inputs.count("-i") == 8  # 4 normais, 2 da transição e 2 duplicadas
 
 
@@ -466,7 +467,7 @@ def test_transicao_entre_partes_da_tesoura_mantem_sincronismo_temporal() -> None
     assert not any("volume='" in item for item in graph.filters)
 
 
-def test_recorte_de_preview_cobre_o_ultimo_meio_quadro_da_transicao() -> None:
+def test_recorte_de_preview_cobre_o_ultimo_meio_quadro_da_transicao(quadros_das_janelas) -> None:
     fps = 24_000 / 1_001
     media = MediaRef(Path("video.mp4"), MediaKind.VIDEO, duration=10.0)
     left = Clip(media, start=0.0, duration=4.0, in_point=1.0)
@@ -504,7 +505,8 @@ def test_recorte_de_preview_cobre_o_ultimo_meio_quadro_da_transicao() -> None:
         f"trim=start={frame_crop:.6f}:duration={covered:.6f}" in item
         for item in graph.filters
     )
-    assert any("not(gte(t,0.000000)*lt(t,0.020854))" in item for item in graph.filters)
+    # Só o primeiro quadro do recorte (o instante 0): o segundo, 1/fps depois, já não é do que se exclui.
+    assert (0, 0) in quadros_das_janelas(" ".join(graph.filters), fps)
     assert any(
         "eof_action=repeat:repeatlast=1" in item and "[to0]" in item
         for item in graph.filters

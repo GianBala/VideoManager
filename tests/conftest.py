@@ -38,6 +38,24 @@ def fixture_formats(name: str) -> list[dict]:
     return load_fixture(name).get("formats") or []
 
 
+@pytest.fixture
+def quadros_das_janelas():
+    """Os quadros que cada janela ``gte(t,A)*lt(t,B)`` do compositor deixa passar: ``(primeiro, último)``.
+
+    Os testes de comando afirmam **quais quadros** a janela cobre, e não o texto dos limites: o
+    compositor os escreve no meio do quadro (``composer._edge``), onde o número não diz nada a quem
+    lê e o texto muda sem que o quadro mude.
+    """
+    import math
+    import re
+
+    def quadros(texto: str, fps: float) -> list[tuple[int, int]]:
+        achados = re.findall(r"gte\(t,(-?[\d.]+)\)\*lt\(t,(-?[\d.]+)\)", texto)
+        return [(math.ceil(float(a) * fps - 1e-9), math.ceil(float(b) * fps - 1e-9) - 1) for a, b in achados]
+
+    return quadros
+
+
 @pytest.fixture(params=FIXTURE_NAMES)
 def any_fixture(request) -> tuple[str, dict]:
     """Roda o teste uma vez para cada fixture real disponível."""
