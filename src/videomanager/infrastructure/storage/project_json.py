@@ -53,14 +53,18 @@ from videomanager.domain.project import reserve_project_ids
 # * A 8 traz uma chave, ``movable``, **só gravada quando ligada**: uma versão anterior a ignoraria e
 #   aplicaria o filtro à tela inteira, e a perderia ao salvar.
 #
-# **A próxima chave nova que todo arquivo grava é a 9.** ``PROJECT_VERSION`` sobe para 9 (nunca para 7 ou 8,
-# que as versões só com o desfoque ou só com o filtro móvel leriam sem conhecer a chave e a perderiam ao
-# salvar), e ``project_version`` e ``SUPPORTED_VERSION`` já tiram o maior dos números.
+# * A 9 traz a chave ``hdr`` do bloco de mídia, **só gravada quando verdadeira**: uma versão anterior a ignoraria e
+#   exportaria o vídeo HDR sem converter as cores (lavadas), e a perderia ao salvar.
+#
+# **A próxima chave nova que todo arquivo grava é a 10.** ``PROJECT_VERSION`` sobe para 10 (nunca para 7, 8 ou 9,
+# que as versões só com o desfoque, só com o filtro móvel ou só com mídia HDR leriam sem conhecer a chave e a
+# perderiam ao salvar), e ``project_version`` e ``SUPPORTED_VERSION`` já tiram o maior dos números.
 PROJECT_VERSION = 6
 REGION_BLUR_VERSION = 7
 MOVABLE_FILTER_VERSION = 8
+HDR_SOURCE_VERSION = 9
 # A maior versão que a leitura aceita.
-SUPPORTED_VERSION = max(PROJECT_VERSION, REGION_BLUR_VERSION, MOVABLE_FILTER_VERSION)
+SUPPORTED_VERSION = max(PROJECT_VERSION, REGION_BLUR_VERSION, MOVABLE_FILTER_VERSION, HDR_SOURCE_VERSION)
 
 
 def project_version(project: Project) -> int:
@@ -70,6 +74,9 @@ def project_version(project: Project) -> int:
         version = max(version, REGION_BLUR_VERSION)
     if any(clip.movable for clip in project.clips):
         version = max(version, MOVABLE_FILTER_VERSION)
+    # Uma versão anterior ignoraria a chave ``hdr`` e exportaria o vídeo HDR sem conversão (cores lavadas), sem erro.
+    if any(clip.media is not None and clip.media.hdr for clip in project.clips):
+        version = max(version, HDR_SOURCE_VERSION)
     return version
 
 
@@ -86,6 +93,8 @@ def _media_to_dict(media: MediaRef, base_dir: Path | None) -> dict[str, object]:
         "has_audio": media.has_audio,
         "channels": media.channels,
     }
+    if media.hdr:
+        data["hdr"] = True
     if base_dir is not None and not is_pseudo and media.path.is_absolute():
         try:
             # Com "/", e não o separador do sistema: o Windows lê "/", mas o
@@ -136,6 +145,7 @@ def _dict_to_media(data: dict[str, object], base_dir: Path | None) -> tuple[Medi
     fps = float(data["fps"]) if data.get("fps") is not None else None
     has_audio = bool(data.get("has_audio", False))
     channels = int(data["channels"]) if data.get("channels") is not None else None
+    hdr = bool(data.get("hdr", False))
 
     ref = MediaRef(
         path=resolved_path,
@@ -146,6 +156,7 @@ def _dict_to_media(data: dict[str, object], base_dir: Path | None) -> tuple[Medi
         fps=fps,
         has_audio=has_audio,
         channels=channels,
+        hdr=hdr,
     )
     return ref, missing
 
@@ -363,7 +374,7 @@ def _validate_project(data: dict[str, object]) -> None:
             if media.get("kind", "VIDEO") not in MediaKind.__members__:
                 fail(Text("PROJECT_FIELD_MEDIA_KIND"))
             strings(media, ("rel_path",))
-            booleans(media, ("has_audio",))
+            booleans(media, ("has_audio", "hdr"))
             for name in ("duration", "width", "height", "fps", "channels"):
                 if media.get(name) is not None:
                     number(media, name, positive=True, integer=name in ("width", "height", "channels"))

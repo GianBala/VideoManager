@@ -714,6 +714,29 @@ def _chain_text(
     )
 
 
+# Vídeo HDR (PQ ou HLG) para SDR BT.709, antes de o quadro virar RGBA de 8 bits. Sem isto o pixel da curva PQ passava por
+# 8 bits como se fosse SDR e saía sem a marca da curva: sombras levantadas (preto 41 → 72), brilhos achatados (210 → 137) e cor
+# desbotada (saturação média 112 → 25), sem erro algum. O ``mobius`` foi o que mais se aproximou do original (medido contra uma
+# fonte SDR reencodada em PQ: saturação 97 e brilhos 194 contra 112 e 210; o ``hable`` escurece, 79 e 162). Custa ~7 ms por
+# quadro a 1080p e ~24 ms a 4K, só nos blocos HDR.
+HDR_TO_SDR_STEPS = (
+    "zscale=t=linear:npl=100",
+    "format=gbrpf32le",
+    "zscale=p=bt709",
+    "tonemap=tonemap=mobius:desat=0",
+    "zscale=t=bt709:m=bt709:r=tv",
+    "format=yuv420p",
+)
+
+
+def _hdr_to_sdr(clip: Clip) -> list[str]:
+    """Os passos do mapeamento de tons, ou nenhum quando o bloco não é vídeo HDR."""
+    media = clip.media
+    if media is None or not media.hdr or media.kind is not MediaKind.VIDEO:
+        return []
+    return list(HDR_TO_SDR_STEPS)
+
+
 def _video_chain(
     piece: _Piece,
     project: Project,
@@ -882,6 +905,8 @@ def _video_chain(
             steps.append(f"setpts=PTS-STARTPTS+{piece.offset:.6f}/TB")
         else:
             steps.append("setpts=PTS-STARTPTS")
+    # Antes de ``lead``: o fundo desfocado sai do mesmo fluxo e precisa das mesmas cores.
+    steps += _hdr_to_sdr(clip)
     lead = len(steps)
 
     sx = clip.scale_x

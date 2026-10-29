@@ -139,6 +139,14 @@ def can_interpolate(project: Project) -> bool:
     return bool(_interpolated_clips(project))
 
 
+def has_hdr_source(project: Project) -> bool:
+    """Se algum bloco de vídeo do projeto vem de uma mídia HDR (PQ ou HLG).
+
+    A exportação converte esses blocos para SDR (``composer.HDR_TO_SDR_STEPS``), e a janela avisa antes de enfileirar.
+    """
+    return any(clip.has_image and clip.media is not None and clip.media.hdr for clip in project.clips)
+
+
 def region_blur_in_affecting_transition(project: Project) -> bool:
     """Se algum desfoque de região cai na janela de uma transição que afeta os adicionais.
 

@@ -143,6 +143,9 @@ class MediaRef:
     # Número de canais da trilha de áudio. Guardado porque a mixagem trata mono
     # de forma diferente de estéreo (ver ``composer._audio_chain``).
     channels: int | None = None
+    # Vídeo em PQ ou HLG: o compositor o converte para SDR (mapeamento de tons). Só vale para vídeo; guardado porque a
+    # composição não reabre o arquivo. O .vmp só grava a chave quando é verdadeira (versão 9).
+    hdr: bool = False
 
     @property
     def name(self) -> str:
@@ -266,6 +269,7 @@ def media_ref(local: LocalMedia) -> MediaRef:
         height=height,
         fps=video.fps if video else None,
         has_audio=local.has_audio,
+        hdr=bool(kind is MediaKind.VIDEO and video is not None and video.hdr),
         channels=local.audio.channels if local.audio else None,
     )
 
