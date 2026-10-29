@@ -1,0 +1,29 @@
+name: Auditoria das dependências
+
+# O pacote embute o que o pip resolveu no dia em que foi gerado, e as dependências envelhecem dentro dele: o AppImage da 4.2
+# saiu com urllib3, certifi e brotli de avisos conhecidos. Esta execução cria o mesmo ambiente novo que o empacotamento usa
+# (packaging/prepare_env.sh) e o audita com o pip-audit: toda segunda-feira, a cada mudança de dependência e sob demanda.
+# Ela falha quando há aviso conhecido; um aviso aceito de propósito vai em packaging/pip-audit-ignore.txt, com o motivo.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+  push:
+    paths: [pyproject.toml, packaging/pip-audit-ignore.txt, packaging/prepare_env.sh, .github/workflows/auditoria.yml]
+  pull_request:
+    paths: [pyproject.toml, packaging/pip-audit-ignore.txt, packaging/prepare_env.sh, .github/workflows/auditoria.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Ambiente novo e auditoria
+        run: ./packaging/prepare_env.sh "$RUNNER_TEMP/venv-auditoria"
