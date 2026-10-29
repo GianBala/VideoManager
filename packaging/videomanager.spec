@@ -57,7 +57,12 @@ if os.environ.get("VM_BUNDLE_DENO", "1") != "0" and (_vendor / exe_name("deno"))
 # Os scripts do solver JavaScript que o yt-dlp traz dentro do próprio pacote
 # são lidos por ``importlib.resources`` e não seguem os imports: sem coletá-los,
 # o pacote não resolvia os desafios do YouTube nem com um runtime disponível.
-from PyInstaller.utils.hooks import collect_data_files  # noqa: E402
+from PyInstaller.utils.hooks import collect_all, collect_data_files  # noqa: E402
+
+# O curl_cffi (impressão digital TLS de navegador, que o yt-dlp usa em ~30 extratores) traz uma extensão cffi e a
+# libcurl-impersonate, e o PyInstaller não tem hook para ele: sem coletá-lo à mão o pacote abria e o Dailymotion falhava
+# com "none of these impersonate targets are available". ``_smoke_check`` confere que ele chegou.
+_CFFI_DATAS, _CFFI_BINARIES, _CFFI_HIDDEN = collect_all("curl_cffi")
 
 
 # Licenças do que vai dentro do pacote. Redistribuir o ffmpeg (GPL) e o Qt (LGPL)
@@ -112,11 +117,12 @@ def _commit() -> Path:
 a = Analysis(
     [str(REPO_ROOT / "src" / "videomanager" / "__main__.py")],
     pathex=[str(REPO_ROOT / "src")],
-    binaries=binaries_to_bundle,
+    binaries=[*binaries_to_bundle, *_CFFI_BINARIES],
     datas=[
         (str(REPO_ROOT / "src" / "videomanager" / "resources"), "resources"),
         (str(_commit()), "resources"),
         *collect_data_files("yt_dlp", includes=["**/*.js"]),
+        *_CFFI_DATAS,
         *_licencas(),
     ],
     # Os extratores do yt-dlp são carregados dinamicamente; sem coletá-los
@@ -125,6 +131,7 @@ a = Analysis(
         "yt_dlp.extractor.lazy_extractors",
         "yt_dlp.compat._legacy",
         "yt_dlp.utils._legacy",
+        *_CFFI_HIDDEN,
     ],
     hookspath=[],
     runtime_hooks=[],
