@@ -327,6 +327,13 @@ register({
         "This media requires a signed-in account (private, members-only or age-restricted). In "
         "Settings, choose the browser you're already signed in to so its cookies are used.",
     ),
+    "PROBE_IMPERSONATION": (
+        "Este site só responde a um navegador de verdade, e o componente que imita um navegador (curl_cffi) não está "
+        "disponível nesta instalação. Baixe a versão mais recente do Video Manager em {url}; a partir do código-fonte, "
+        "instale com: pip install \"yt-dlp[curl-cffi]\".",
+        "This site only answers a real browser, and the component that imitates one (curl_cffi) isn't available in this "
+        "installation. Get the latest Video Manager at {url}; from source, install with: pip install \"yt-dlp[curl-cffi]\".",
+    ),
     "PROBE_GEO": ("Esta mídia está bloqueada na sua região.", "This media is blocked in your region."),
     "PROBE_UNAVAILABLE": ("Esta mídia não está mais disponível.", "This media is no longer available."),
     "PROBE_NETWORK": (

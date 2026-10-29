@@ -11,6 +11,7 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
+import shiboken6
 from PySide6.QtCore import QSize, Qt, QThreadPool
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -31,6 +32,7 @@ from PySide6.QtWidgets import (
 from videomanager.application.capabilities import FFmpegTools
 from videomanager.domain.export_policy import MIN_FFMPEG_FOR_FILTER_IN_TRANSITION
 from videomanager.domain.export_policy import can_interpolate
+from videomanager.domain.export_policy import has_hdr_source
 from videomanager.domain.export_policy import region_blur_in_affecting_transition
 from videomanager.application.media.export_description import describe_export
 from videomanager.domain.render_cost import interpolation_bytes
@@ -147,8 +149,12 @@ def _drift_text(target: TrimTarget, fps: float) -> str:
 
 def _export_warning(container: str, project: Project, interpolating: bool) -> str:
     if interpolating:
-        return strings.EDIT_INTERPOLATE_WARN.format(memory=format_size(interpolation_bytes(project)))
-    return strings.EXPORT_GIF_NOTE if container == "gif" else ""
+        notes = [strings.EDIT_INTERPOLATE_WARN.format(memory=format_size(interpolation_bytes(project)))]
+    else:
+        notes = [strings.EXPORT_GIF_NOTE] if container == "gif" else []
+    if has_hdr_source(project):
+        notes.append(strings.EXPORT_HDR_NOTE)
+    return "\n".join(notes)
 
 
 def _blur_transition_note(version: int) -> str:
@@ -1024,7 +1030,10 @@ class ExportDialog(QDialog):
         return None, True
 
     def _on_sampled(self, token: int, key: tuple, kbps: float | None) -> None:
-        if token != self._sampling_token:
+        # Os dois sinais da medida chegam por ``lambda``/``partial``, sem objeto receptor, então o Qt não os desliga
+        # quando o diálogo morre: a medida que termina depois dele tocava num ``QCheckBox`` já apagado (um
+        # ``RuntimeError`` engolido pelo laço de eventos, 16 vezes na suíte inteira).
+        if not shiboken6.isValid(self) or token != self._sampling_token:
             return
         self._sampling.discard(key)
         self._samples[key] = kbps

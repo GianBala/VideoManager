@@ -2,6 +2,10 @@
 import re
 
 MIN_SEGMENT = 0.05
+# Quanto de negativo num ``in_point`` ainda é resto de ponto flutuante (um nanossegundo; o resto medido é da ordem de 1e-16 s).
+IN_POINT_ROUNDING = 1e-9
+# Curvas de transferência de vídeo HDR no ``color_transfer`` do ffprobe: PQ (HDR10, Dolby Vision) e HLG (câmeras e celulares).
+HDR_TRANSFERS = ("smpte2084", "arib-std-b67")
 # Abaixo de 0,2 s, uma transição a 24 fps tem menos de cinco quadros e deixa de
 # comunicar movimento. A timeline e os campos de propriedades compartilham
 # este limite; ele não pode ser o mínimo genérico usado por cortes comuns.

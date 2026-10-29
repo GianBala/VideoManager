@@ -101,7 +101,7 @@ def test_bloco_antigo_mais_longo_que_o_video_nao_termina_preto(ffmpeg, tmp_path)
     assert tail[(45 * 160 + 80) * 3] > 200
 
 
-def test_entrada_e_corte_de_uma_imagem_cobrem_o_ultimo_quadro() -> None:
+def test_entrada_e_corte_de_uma_imagem_cobrem_o_ultimo_quadro(quadros_das_janelas) -> None:
     """A imagem precisa existir no último tique do bloco.
 
     Um bloco de 4,27 s a 30 q/s tem seu último quadro em 4,2667 s, mas
@@ -119,7 +119,7 @@ def test_entrada_e_corte_de_uma_imagem_cobrem_o_ultimo_quadro() -> None:
     chain = next(f for f in graph.filters if f.startswith("[0:v]"))
     assert "trim=duration=4.300000" in chain
     # E o bloco continua aparecendo só até o fim dele.
-    assert "lt(t,4.270000)" in " ".join(graph.filters)
+    assert quadros_das_janelas(" ".join(graph.filters), 30.0) == [(0, 128)]
 
 
 @pytest.mark.ffmpeg

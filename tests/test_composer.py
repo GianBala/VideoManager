@@ -87,6 +87,31 @@ def filtros(project: Project, **kw) -> str:
     return ";".join(build_graph(project, **kw).filters)
 
 
+class TestFundoMinimo:
+    """O fundo mínimo de um quadro é da exportação; quadro parado e reprodução seguem com 0,04 s.
+
+    No ffmpeg 6.1 (o da CI do Ubuntu) um fundo de **um** quadro faz o ``overlay`` perder a camada da transição
+    que afeta os adicionais: o quadro do corte saía sem o filtro do lado direito. O 7.1 e o 9 não mostram isso,
+    então a decisão é presa aqui, no comando, e não só no teste de integração que depende do ffmpeg instalado.
+    """
+
+    def fundo(self, texto: str) -> str:
+        import re
+        return re.search(r"color=c=black[^\[;]*:d=([\d.]+)", texto).group(1)
+
+    def test_o_quadro_parado_nao_encurta_o_fundo_para_um_quadro(self) -> None:
+        comando = frame_command(projeto(video_track(clip(VIDEO, duration=5.0))), 1.0, (192, 108), TOOLS)
+        assert self.fundo(" ".join(comando)) == "0.040000"
+
+    def test_a_exportacao_de_um_projeto_de_um_quadro_tem_fundo_de_um_quadro(self) -> None:
+        um_quadro = projeto(video_track(clip(VIDEO, duration=1 / 30)))
+        assert self.fundo(" ".join(export_args(um_quadro, DEST, TOOLS))) == "0.033333"
+
+    def test_a_exportacao_comum_nao_muda(self) -> None:
+        comum = projeto(video_track(clip(VIDEO, duration=5.0)))
+        assert self.fundo(" ".join(export_args(comum, DEST, TOOLS))) == "5.000000"
+
+
 class TestVideo:
     def test_o_fundo_e_uma_tela_preta_do_tamanho_do_projeto(self) -> None:
         # Não se "emenda" vídeo: emendar só funciona com tudo do mesmo tamanho,
@@ -110,10 +135,11 @@ class TestVideo:
         assert "min(1080,1920/dar)" in texto
         assert "force_original_aspect_ratio" not in texto
 
-    def test_bloco_entra_no_instante_em_que_foi_colocado(self) -> None:
+    def test_bloco_entra_no_instante_em_que_foi_colocado(self, quadros_das_janelas) -> None:
         texto = filtros(projeto(video_track(clip(start=4.0, duration=6.0))))
         assert "setpts=PTS-STARTPTS+4.000000/TB" in texto
-        assert "gte(t,4.000000)*lt(t,10.000000)" in texto
+        # Dos 4 s aos 10 s a 30 q/s: do quadro 120 ao 299, e o 300 já é de quem vier depois.
+        assert quadros_das_janelas(texto, 30.0) == [(120, 299)]
 
     def test_bloco_no_zero_nao_recebe_atraso(self) -> None:
         texto = filtros(projeto(video_track(clip(start=0.0))))
@@ -1432,7 +1458,7 @@ class TestDesfoqueDeRegiao:
     def ramo(graph) -> str:
         return next(f for f in ";".join(graph.filters).split(";") if "gblur" in f)
 
-    def test_recorta_borra_na_tela_de_trabalho_e_cola_no_mesmo_lugar(self) -> None:
+    def test_recorta_borra_na_tela_de_trabalho_e_cola_no_mesmo_lugar(self, quadros_das_janelas) -> None:
         texto = ";".join(build_graph(self.com(self.desfoque())).filters)
         ramo = self.ramo(build_graph(self.com(self.desfoque())))
         # 30% da tela de 1920×1080: 576×324, e o lado menor vai a 16 px na tela de trabalho.
@@ -1441,7 +1467,8 @@ class TestDesfoqueDeRegiao:
         assert "format=gbrp,gblur=sigma=5.6000:steps=3,format=rgba" in ramo
         # O overlay segue o formato do quadro principal e só liga na janela do bloco.
         assert "format=auto" in texto and "eof_action=pass" in texto
-        assert "enable='gte(t,2.000000)*lt(t,5.000000)'" in texto
+        # Dos 2 s aos 5 s a 30 q/s: do quadro 60 ao 149.
+        assert (60, 149) in quadros_das_janelas(texto, 30.0)
 
     def test_a_ramificacao_nao_e_aparada_para_o_overlay_nao_reter_quadros(self) -> None:
         # O trim fazia o overlay guardar, na fila, todo quadro do ramo principal anterior ao bloco (o ramo aparado só

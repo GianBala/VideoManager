@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "videomanager"
-version = "4.2"
+version = "4.1"
 description = "Baixa, converte e edita vídeo e áudio, e ajusta metadados (Windows e Linux)"
 readme = "README.md"
 # Expressão SPDX (PEP 639), que pede setuptools 77 ou mais novo.
@@ -26,8 +26,10 @@ dependencies = [
     # mudam, então o yt-dlp precisa poder ser atualizado a qualquer momento.
     # O extra "default" traz o que o pacote não tinha: os scripts do solver
     # JavaScript do YouTube (yt-dlp-ejs), o mutagen para capa em opus/ogg/flac,
-    # certificados, brotli e websockets.
-    "yt-dlp[default]>=2025.1.1",
+    # certificados, brotli e websockets. O extra "curl-cffi" traz a biblioteca com que o yt-dlp imita a impressão digital TLS
+    # de um navegador: sem ela, sites que a exigem (o Dailymotion, medido) respondem "none of these impersonate targets are
+    # available" na primeira URL, e a lista dos que a usam tem trinta extratores (Instagram, TikTok, Reddit, Vimeo...).
+    "yt-dlp[default,curl-cffi]>=2025.1.1",
     "platformdirs>=4.0",
 ]
 
