@@ -235,6 +235,12 @@ def _smoke_check(app: QApplication, window: MainWindow) -> None:
             raise RuntimeError('Scripts do solver JavaScript do yt-dlp ausentes do pacote.')
         import importlib
         importlib.import_module('mutagen')
+        # Sites que exigem a impressão digital TLS de um navegador (o Dailymotion, entre ~30 extratores) não abrem sem o
+        # curl_cffi, e o pacote abria igual: só a primeira URL desses sites falhava.
+        from yt_dlp import YoutubeDL
+        with YoutubeDL({'quiet': True}) as downloader:
+            if not downloader._get_available_impersonate_targets():
+                raise RuntimeError('curl_cffi ausente do pacote: os sites que exigem impersonação não baixam.')
         from videomanager.infrastructure.system.binaries import find_js_runtime
         runtime = find_js_runtime()
         print(f'VM_SMOKE_JS_RUNTIME: {runtime[0] if runtime else "nenhum"}', flush=True)
