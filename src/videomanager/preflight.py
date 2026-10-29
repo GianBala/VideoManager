@@ -66,30 +66,46 @@ _REQUIRED: tuple[tuple[str, str], ...] = (
     ("libxcb-xkb.so.1", "libxcb-xkb1"),
 )
 
+# O que a própria ``QtGui`` pede ao sistema, em qualquer plataforma (medido com ``ldd`` no ambiente do pacote, que já
+# resolve as demais): sem elas o ``import`` do PySide6 falha com ``ImportError: libGL.so.1: cannot open shared object file``,
+# um traceback de Python que quem abriu o aplicativo por um ícone nunca vê. Uma instalação enxuta e o WSL costumam não ter.
+_ALWAYS: tuple[tuple[str, str], ...] = (
+    ("libGL.so.1", "libgl1"),
+    ("libEGL.so.1", "libegl1"),
+    ("libxcb.so.1", "libxcb1"),
+)
+
 # Plataformas Qt que não passam pelo plugin xcb e portanto não precisam disso.
 _NON_XCB_PLATFORMS = {"offscreen", "minimal", "wayland", "wayland-egl", "vnc", "linuxfb", "eglfs"}
 
 
-def missing_system_libraries() -> list[str]:
-    """Pacotes ausentes necessários ao plugin xcb. Lista vazia se estiver tudo ok."""
-    if sys.platform != "linux":
-        return []
-
-    requested = os.environ.get("QT_QPA_PLATFORM", "").strip().lower()
-    if requested in _NON_XCB_PLATFORMS:
-        return []
-
-    # Sessão Wayland pura (sem XWayland) não carrega o plugin xcb.
-    if os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
-        return []
-
+def _absent(libraries: tuple[tuple[str, str], ...]) -> list[str]:
     missing: list[str] = []
-    for library, package in _REQUIRED:
+    for library, package in libraries:
         try:
             ctypes.CDLL(library)
         except OSError:
             missing.append(package)
     return missing
+
+
+def missing_system_libraries() -> list[str]:
+    """Pacotes ausentes necessários ao Qt. Lista vazia se estiver tudo ok."""
+    if sys.platform != "linux":
+        return []
+
+    # A ``QtGui`` pede isto em toda plataforma, inclusive ``offscreen``.
+    missing = _absent(_ALWAYS)
+
+    requested = os.environ.get("QT_QPA_PLATFORM", "").strip().lower()
+    if requested in _NON_XCB_PLATFORMS:
+        return missing
+
+    # Sessão Wayland pura (sem XWayland) não carrega o plugin xcb.
+    if os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+        return missing
+
+    return missing + _absent(_REQUIRED)
 
 
 def format_instructions(packages: list[str]) -> str:
