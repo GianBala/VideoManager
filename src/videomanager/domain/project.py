@@ -33,6 +33,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from videomanager.domain.constants import IN_POINT_ROUNDING
 from videomanager.domain.constants import MIN_SEGMENT
 from videomanager.domain.constants import MIN_TRANSITION_DURATION
 from videomanager.domain.constants import GAIN_EPSILON
@@ -364,6 +365,12 @@ class Clip:
         if self.scale_y is None:
             object.__setattr__(self, "scale_y", self.scale)
         object.__setattr__(self, "opacity", max(0.0, min(1.0, float(self.opacity))))
+        # Resto de ponto flutuante não é posição na mídia: puxar a ponta inicial até o primeiro quadro dava ``in_point`` =
+        # -4e-16, o .vmp gravava e o leitor o recusava ("Estrutura do arquivo de projeto inválida: in_point"), e o projeto
+        # não reabria. É um lugar só, e vale para qualquer conta que chegue aqui (redimensionar, dividir, soltar em outra
+        # trilha). Negativo de verdade segue negativo: o defeito que o produziu precisa aparecer, não sumir.
+        if -IN_POINT_ROUNDING <= self.in_point < 0.0:
+            object.__setattr__(self, "in_point", 0.0)
         # Imagem, texto, filtro e transição não têm trecho de mídia para tocar ao
         # contrário; um .vmp editado à mão não pode inverter o que não tem sentido.
         if self.reversed and (self.is_additional or self.media is None):
