@@ -120,6 +120,7 @@ from videomanager.domain.timing import format_span
 from videomanager.domain.timing import format_timecode
 from videomanager.domain.timing import frame_index
 from videomanager.domain.timing import frame_step
+from videomanager.domain.timing import on_grid
 from videomanager.domain.timing import keyframe_after
 from videomanager.domain.timing import keyframe_at_or_before
 from videomanager.presentation.qt.tasks import WorkerRunner
@@ -1580,7 +1581,7 @@ class EditPanel(QWidget):
         ref = pseudo_media(OverlayType.TEXT, text[:15], IMAGE_DURATION)
         clip = Clip(
             media=ref,
-            start=max(0.0, self._position),
+            start=max(0.0, self._cursor),
             duration=IMAGE_DURATION,
             overlay_type=OverlayType.TEXT,
             text_content=text,
@@ -1606,7 +1607,7 @@ class EditPanel(QWidget):
         ref = pseudo_media(OverlayType.FILTER, label, duration)
         clip = Clip(
             media=ref,
-            start=max(0.0, self._position),
+            start=max(0.0, self._cursor),
             duration=duration,
             overlay_type=OverlayType.FILTER,
             filter_name=fname,
@@ -2466,6 +2467,18 @@ class EditPanel(QWidget):
         return self._timeline.position
 
     @property
+    def _cursor(self) -> float:
+        """Onde uma edição feita pelo cursor acontece: o começo do quadro que está na tela.
+
+        A agulha pode parar entre dois quadros: a reprodução de um material de 24 q/s numa edição de
+        30 q/s para em ``n/24``, que não é um limite da grade. Cortar ali dava a quadros e emendas
+        a posição que o arredondamento da exportação decidisse; o começo do quadro mostrado é o que
+        o ``frame_index`` e o ``seek_time`` já chamam de quadro daquele instante.
+        """
+        grid = self._project.frame_grid
+        return on_grid(self._position, 1.0 / grid, nearest=False) if grid else self._position
+
+    @property
     def _has_video(self) -> bool:
         return self._project.has_video
 
@@ -2754,7 +2767,7 @@ class EditPanel(QWidget):
         """
         clip = Clip(
             media=reference,
-            start=max(0.0, self._position if at is None else at),
+            start=max(0.0, self._cursor if at is None else at),
             duration=reference.natural_duration,
         )
         index = self._free_track(clip)
@@ -2853,7 +2866,7 @@ class EditPanel(QWidget):
             )
             menu.addSeparator()
             self._act(menu, f"{strings.EDIT_SPLIT}  (S)", self._split_here,
-                      enabled=not clip.is_transition and clip.contains(self._position))
+                      enabled=not clip.is_transition and clip.contains(self._cursor))
             self._act(
                 menu, f"{strings.EDIT_TRIM_LEFT}  (Q)",
                 lambda: self._trim_to_cursor("inicio"),
@@ -3201,7 +3214,7 @@ class EditPanel(QWidget):
         self._apply(self._project.with_track(kind))
 
     def _split_here(self) -> None:
-        position = self._position
+        position = self._cursor
         # O marcador de transição cobre metade de cada bloco que une: achado
         # primeiro, ele fazia a tesoura não cortar nada sobre um corte.
         clip = next(
@@ -3244,7 +3257,7 @@ class EditPanel(QWidget):
         if not self._can_trim(clip, edge):
             return
         self._remember()
-        self._apply(self._project.resized(clip.clip_id, edge, self._position))
+        self._apply(self._project.resized(clip.clip_id, edge, self._cursor))
 
     def _can_trim(self, clip: Clip | None, edge: str) -> bool:
         """Se há o que apagar daquele lado, e se sobra bloco depois.
@@ -3252,7 +3265,7 @@ class EditPanel(QWidget):
         Sobrar menos que o mínimo não é aparar, é apagar o bloco por um caminho
         que não diz isso — para apagar existe a lixeira ao lado.
         """
-        position = self._position
+        position = self._cursor
         if clip is None or clip.is_transition or not clip.contains(position):
             return False
         if edge == "inicio":
@@ -3290,7 +3303,7 @@ class EditPanel(QWidget):
             return
         self._remember()
         pasted = replace(
-            self._clipboard, start=self._position, clip_id=next_clip_id()
+            self._clipboard, start=self._cursor, clip_id=next_clip_id()
         )
         index = self._free_track(pasted)
         if index is None:
@@ -4258,7 +4271,7 @@ class EditPanel(QWidget):
         self._split_button.setEnabled(
             clip is not None
             and not clip.is_transition
-            and clip.contains(self._position)
+            and clip.contains(self._cursor)
         )
         self._trim_left_button.setEnabled(self._can_trim(clip, "inicio"))
         self._trim_right_button.setEnabled(self._can_trim(clip, "fim"))
