@@ -93,6 +93,15 @@ _TO_STEREO = "aformat=channel_layouts=stereo"
 # silêncio para sustentar um efeito de vídeo soa pior que preservar o corte.
 _AUDIO_DECLICK = 0.012
 
+# Duração mínima do fundo. Um projeto vazio ainda precisa de um quadro para
+# mostrar, senão o ffmpeg sai sem escrever nada e a prévia fica sem explicação.
+# Dois quadros a 30 q/s, e é de propósito para o quadro parado e para a reprodução:
+# no ffmpeg 6.1 (o da CI do Ubuntu) um fundo de **um** quadro só faz o ``overlay``
+# perder a camada da transição que afeta os adicionais — o quadro do corte saía sem
+# o filtro do lado direito, e nada em 7.1 ou 9 mostra isso. Só a exportação, cujo
+# arquivo termina onde o fundo termina, pede o piso de um quadro (``canvas_floor``).
+_MIN_CANVAS = 0.04
+
 # Folga que impede um quadro exatamente sobre a borda de uma janela de ler de
 # ser tomado pelo lado errado dela (ver :func:`_transition_side`). Bem abaixo de
 # qualquer quadro real e bem acima do ruído de ponto flutuante.
@@ -2020,6 +2029,7 @@ def build_graph(
     transparent: bool = False,
     still: bool = False,
     tails: dict[int, float] | None = None,
+    canvas_floor: float = _MIN_CANVAS,
 ) -> Graph:
     """Traduz o projeto num grafo de filtros do ffmpeg.
 
@@ -2032,10 +2042,7 @@ def build_graph(
     fps = fps or project.fps
     pieces = _pieces(project, at, span, want_video=want_video, want_audio=want_audio, still=still,
                      tails=tails)
-    # Um projeto vazio ainda precisa de um quadro para mostrar, senão o ffmpeg sai sem
-    # escrever nada. É um quadro, e não um tempo fixo: com 0,04 s o fundo tinha dois a
-    # 30 q/s (três a 60), e uma edição de um quadro só saía com um preto a mais.
-    duration = span if span is not None else max(1.0 / fps, project.export_duration - at)
+    duration = span if span is not None else max(canvas_floor, project.export_duration - at)
 
     inputs: list[str] = []
     filters: list[str] = []
@@ -2145,7 +2152,7 @@ def build_graph(
     if want_video and project.has_video:
         filters.append(
             f"color=c={'black@0' if transparent else 'black'}:s={project.width}x{project.height}"
-            f":r={fps:.6f}:d={max(1.0 / fps, duration):.6f}"
+            f":r={fps:.6f}:d={max(canvas_floor, duration):.6f}"
             f"{',format=rgba' if transparent else ''}[base]"
         )
         current = "[base]"
@@ -2410,7 +2417,9 @@ def export_args(
     if container == "gif":
         return gif_args(project, destination, tools, text_assets=text_assets)
 
-    graph = build_graph(project, interpolate=interpolate, text_assets=text_assets)
+    # O arquivo termina onde o fundo termina: com o piso de 0,04 s, uma edição de um quadro saía com um
+    # preto a mais (dois quadros a 30 q/s, três a 60). É um quadro, e não um tempo fixo.
+    graph = build_graph(project, interpolate=interpolate, text_assets=text_assets, canvas_floor=1.0 / project.fps)
     codec_family = family or hwaccel.family_for(container)
     encoder = hwaccel.resolve(codec_family, hardware, tools, quality=quality)
     args = [tools.ffmpeg_str, "-nostdin", "-hide_banner", "-y"]
@@ -2666,7 +2675,7 @@ def _playback_stage(
         filters.append(f"{graph.video_label}scale={width}:{height}[out]")
         args += ["-filter_complex", ";".join(filters), "-map", "[out]"]
     else:
-        remaining = max(1.0 / fps, project.duration - at) if span is None else span
+        remaining = max(_MIN_CANVAS, project.duration - at) if span is None else span
         args += [
             "-f", "lavfi",
             "-i", f"color=c=black:s={width}x{height}:r={fps}:d={remaining:.3f}",

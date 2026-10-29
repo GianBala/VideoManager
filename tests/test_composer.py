@@ -87,6 +87,31 @@ def filtros(project: Project, **kw) -> str:
     return ";".join(build_graph(project, **kw).filters)
 
 
+class TestFundoMinimo:
+    """O fundo mínimo de um quadro é da exportação; quadro parado e reprodução seguem com 0,04 s.
+
+    No ffmpeg 6.1 (o da CI do Ubuntu) um fundo de **um** quadro faz o ``overlay`` perder a camada da transição
+    que afeta os adicionais: o quadro do corte saía sem o filtro do lado direito. O 7.1 e o 9 não mostram isso,
+    então a decisão é presa aqui, no comando, e não só no teste de integração que depende do ffmpeg instalado.
+    """
+
+    def fundo(self, texto: str) -> str:
+        import re
+        return re.search(r"color=c=black[^\[;]*:d=([\d.]+)", texto).group(1)
+
+    def test_o_quadro_parado_nao_encurta_o_fundo_para_um_quadro(self) -> None:
+        comando = frame_command(projeto(video_track(clip(VIDEO, duration=5.0))), 1.0, (192, 108), TOOLS)
+        assert self.fundo(" ".join(comando)) == "0.040000"
+
+    def test_a_exportacao_de_um_projeto_de_um_quadro_tem_fundo_de_um_quadro(self) -> None:
+        um_quadro = projeto(video_track(clip(VIDEO, duration=1 / 30)))
+        assert self.fundo(" ".join(export_args(um_quadro, DEST, TOOLS))) == "0.033333"
+
+    def test_a_exportacao_comum_nao_muda(self) -> None:
+        comum = projeto(video_track(clip(VIDEO, duration=5.0)))
+        assert self.fundo(" ".join(export_args(comum, DEST, TOOLS))) == "5.000000"
+
+
 class TestVideo:
     def test_o_fundo_e_uma_tela_preta_do_tamanho_do_projeto(self) -> None:
         # Não se "emenda" vídeo: emendar só funciona com tudo do mesmo tamanho,
