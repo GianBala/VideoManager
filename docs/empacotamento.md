@@ -113,6 +113,11 @@ O ponto de entrada do PyInstaller é `src/videomanager/__main__.py`, com
 faz o analisador de dependências do PyInstaller parar ali — o pacote saía
 sem o PySide6 inteiro.
 
+O `videomanager.app` (que importa o PySide6) é importado **dentro** de `main()`, depois de `preflight.refuse_if_missing()`:
+a `libGL` e a `libEGL` a própria `QtGui` pede ao ser importada, e sem elas o aplicativo morria num `ImportError` de Python
+antes de qualquer aviso. Para conferir à mão: o AppImage num `ubuntu:24.04` sem `libgl1` (`docker run --rm`, com
+`APPIMAGE_EXTRACT_AND_RUN=1`) tem de mostrar a mensagem com o pacote a instalar, e não o traceback.
+
 O `.spec` também poda bibliotecas C que entram pelo grafo de dependência
 transitiva sem nunca serem carregadas em tempo de execução (`excludes` do
 PyInstaller só alcança módulos Python, não bibliotecas C). O maior caso é
