@@ -810,7 +810,7 @@ SETTINGS_COOKIES_TIP = (
 )
 SETTINGS_COOKIES_FILE = "Arquivo de cookies (.txt)"
 SETTINGS_COOKIES_FILE_BROWSE = "Escolher…"
-SETTINGS_COOKIES_FILE_PLACEHOLDER = "Opcional: caminho para cookies.txt"
+SETTINGS_COOKIES_FILE_PLACEHOLDER = "Opcional: arquivo cookies.txt"
 SETTINGS_COOKIES_FILTER = "Cookies (*.txt);;Todos os arquivos (*)"
 SETTINGS_COOKIES_FILE_TIP = (
     "Arquivo de cookies exportado no formato Netscape (cookies.txt). "

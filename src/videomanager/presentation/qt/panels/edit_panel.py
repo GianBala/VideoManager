@@ -46,6 +46,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QIcon,
     QImage,
+    QKeyEvent,
     QKeySequence,
     QMouseEvent,
     QPainter,
@@ -2389,9 +2390,10 @@ class EditPanel(QWidget):
         ):
             shortcut = QShortcut(QKeySequence(keys), self)
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            shortcut.activated.connect(lambda slot=slot, allowed=keys == "F11": self._dispatch(slot, allow_in_field=allowed))
+            shortcut.activated.connect(
+                lambda slot=slot, keys=keys, allowed=keys == "F11": self._dispatch(slot, allow_in_field=allowed, keys=keys))
 
-    def _dispatch(self, slot: Callable[[], None], *, allow_in_field: bool = False) -> None:
+    def _dispatch(self, slot: Callable[[], None], *, allow_in_field: bool = False, keys: str = "") -> None:
         """Filtra os atalhos de uma tecla antes de deixá-los agir.
 
         Sem a primeira guarda, digitar um timecode dispararia as ações letra a
@@ -2400,16 +2402,35 @@ class EditPanel(QWidget):
         contado duas vezes.
         """
         # Campo de texto, número ou lista: todos usam teclas que também são
-        # atalhos daqui — o espaço abre a lista de mídias, as letras entram no
-        # timecode.
-        if not allow_in_field and isinstance(
-            QApplication.focusWidget(),
-            (QLineEdit, QAbstractSpinBox, QComboBox, QTextEdit, QPlainTextEdit),
-        ):
+        # atalhos daqui — o espaço abre a lista, as letras entram no timecode.
+        campo = QApplication.focusWidget()
+        if not allow_in_field and isinstance(campo, (QLineEdit, QAbstractSpinBox, QComboBox, QTextEdit, QPlainTextEdit)):
+            self._give_key_back(campo, keys)
             return
         if self._on_fullscreen:
             return
         slot()
+
+    @staticmethod
+    def _give_key_back(campo: QWidget, keys: str) -> None:
+        """Entrega ao campo a tecla que o atalho tomou.
+
+        Quando o atalho dispara, o Qt já descartou o toque: ``_dispatch`` só deixava de agir, e a tecla se perdia. O campo
+        de texto não sofre (ele recusa a tomada de teclas de edição), mas uma lista (``QComboBox``) sem a tecla não abria
+        com o Espaço e não buscava o item pela letra (S, Q, W, F, vírgula e ponto são atalhos do editor). Só as teclas
+        sem modificador voltam: Ctrl+C num campo que não edita texto não tem o que fazer.
+        """
+        if not keys:
+            return
+        combinacao = QKeySequence(keys)[0]
+        if combinacao.keyboardModifiers() != Qt.KeyboardModifier.NoModifier:
+            return
+        tecla = combinacao.key()
+        texto = " " if tecla == Qt.Key.Key_Space else (keys.lower() if len(keys) == 1 else "")
+        # ``event`` direto, e não ``QApplication.sendEvent``: o aplicativo procura atalho em todo toque de tecla que
+        # passa por ele, e achava o mesmo atalho outra vez (``_dispatch`` chamado sem fim).
+        for tipo in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            campo.event(QKeyEvent(tipo, tecla, Qt.KeyboardModifier.NoModifier, texto))
 
     # ------------------------------------------------------------------
     # Estado derivado
