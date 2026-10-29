@@ -7,6 +7,7 @@ a saída convertida tem de ficar perto da fonte original, e a sem conversão (o 
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from dataclasses import replace
@@ -209,16 +210,21 @@ def test_a_exportacao_de_um_hdr_fica_perto_do_sdr_original_e_nao_lavada(tools, f
 
 
 @pytest.mark.ffmpeg
-def test_a_saida_vem_em_sdr_com_a_marca_de_bt709(tools, fontes, tmp_path: Path) -> None:
+def test_a_saida_vem_em_8_bits_sem_declarar_hdr_nem_bt2020(tools, fontes, tmp_path: Path) -> None:
+    """A marca ``bt709`` depende do ffmpeg (sai no 7.1 e no 9.0, e no 6.1 a saída fica sem marca, como toda exportação de SDR);
+    o que vale em todos é que o arquivo não afirme ser o que não é."""
     _, hdr = fontes
     saida = tmp_path / "saida.mp4"
     _exporta(tools, hdr, saida)
     info = subprocess.run(
         [tools.ffprobe_str, "-v", "error", "-select_streams", "v:0", "-show_entries",
-         "stream=pix_fmt,color_space,color_transfer", "-of", "csv=p=0", str(saida)],
-        text=True, **subprocess_kwargs()).stdout.strip()
-    assert info.startswith("yuv420p,bt709"), info
-    assert not any(curva in info for curva in HDR_TRANSFERS)
+         "stream=pix_fmt,color_space,color_transfer,color_primaries", "-of", "json", str(saida)],
+        text=True, **subprocess_kwargs()).stdout
+    fluxo = json.loads(info)["streams"][0]
+    assert fluxo["pix_fmt"] == "yuv420p", fluxo
+    assert fluxo.get("color_transfer") not in HDR_TRANSFERS, fluxo
+    assert not str(fluxo.get("color_space", "")).startswith("bt2020"), fluxo
+    assert not str(fluxo.get("color_primaries", "")).startswith("bt2020"), fluxo
 
 
 @pytest.mark.ffmpeg
