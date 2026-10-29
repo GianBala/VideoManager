@@ -57,7 +57,7 @@ from videomanager.domain.project import Project
 from videomanager.domain.project import TrackKind
 from videomanager.domain.project import accepts
 from videomanager.domain.constants import MIN_SEGMENT
-from videomanager.domain.timing import format_timecode, frame_step
+from videomanager.domain.timing import format_timecode, frame_step, on_grid
 from videomanager.presentation.qt import fonts, icons, strings, theme
 from videomanager.presentation.qt.theme import CORPOS_DE_BLOCO, TIPOS_DE_BLOCO
 
@@ -1217,7 +1217,7 @@ class Timeline(QWidget):
 
         self._drag, self._drag_clip = "cursor", -1
         self._press_at, self._dragging = None, False
-        self.set_position(self._time_of(x), follow=False)
+        self.set_position(self._on_grid(self._time_of(x), nearest=False), follow=False)
         self.scrubbed.emit(self._position)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
@@ -1249,7 +1249,7 @@ class Timeline(QWidget):
             return
 
         if self._drag == "cursor":
-            self.set_position(self._time_of(x), follow=False)
+            self.set_position(self._on_grid(self._time_of(x), nearest=False), follow=False)
             self.scrubbed.emit(self._position)
             return
 
@@ -1372,6 +1372,17 @@ class Timeline(QWidget):
             return origin
         return index
 
+    def _on_grid(self, moment: float, *, nearest: bool = True) -> float:
+        """O instante levado à grade de quadros da edição; sem imagem, como está.
+
+        O ponteiro anda em frações de quadro (a 0,4 s de janela, 1 px são 0,4 ms), e uma ponta
+        solta ali ficava entre dois quadros: a exportação a arredonda, e o quadro que sai não é
+        o que se viu. O ímã vem antes (``_snap``): ele encosta num vizinho **exatamente**, mesmo
+        fora da grade, e a grade só vale onde nada o atrai.
+        """
+        grid = self._project.frame_grid
+        return on_grid(moment, 1.0 / grid, nearest=nearest) if grid else moment
+
     def _snap_targets(self, moving: Clip | None) -> list[float]:
         targets = [self._position, 0.0]
         for track in self._project.tracks:
@@ -1394,7 +1405,7 @@ class Timeline(QWidget):
         # alvo: é o que deixa aparar a ponta exatamente onde a animação acaba.
         own = [moving.start + kf.time_offset for kf in moving.visible_keyframes]
         best = min(self._snap_targets(moving) + own, key=lambda value: abs(value - moment))
-        return best if abs(best - moment) <= tolerance else moment
+        return best if abs(best - moment) <= tolerance else self._on_grid(moment)
 
     def _snap_start(self, start: float, moving: Clip) -> float:
         return self._snap_span(start, moving.duration, moving)
@@ -1411,7 +1422,7 @@ class Timeline(QWidget):
         options = [(abs(t - start), t) for t in candidates]
         options += [(abs(t - (start + duration)), t - duration) for t in candidates]
         distance, value = min(options, key=lambda pair: pair[0])
-        return value if distance <= tolerance else start
+        return value if distance <= tolerance else self._on_grid(start)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         self._autoscroll.stop()
