@@ -93,6 +93,12 @@ _LOGIN_HINTS = (
     "requires authentication",
     "confirm your age",
     "age-restricted",
+    # Como o próprio yt-dlp pede a conta nos demais extratores ("only works when logged-in", "only available for
+    # registered users", "Use --cookies ..."): o Vimeo aparecia como "Falha ao analisar a URL" com o texto cru em inglês.
+    "logged-in",
+    "logged in",
+    "registered users",
+    "use --cookies",
     # Formas específicas do extrator do Instagram: ele nunca diz "login
     # required" nesses casos, mas o problema é o mesmo — sem cookies, o
     # Instagram redireciona anônimos para a tela de login após poucos pedidos.
@@ -123,6 +129,12 @@ def _translate_error(exc: Exception, action: Text | None = None) -> ProbeError:
 
     if any(hint in lowered for hint in _LOGIN_HINTS):
         return ProbeError(Text("PROBE_LOGIN"))
+
+    # "The extractor is attempting impersonation, but none of these impersonate targets are available": o yt-dlp pede a
+    # impressão digital TLS de um navegador (Dailymotion e outros ~30 extratores) e o curl_cffi não está lá. O texto cru
+    # é inglês técnico com um link, e não diz o que fazer.
+    if "impersonat" in lowered:
+        return ProbeError(Text("PROBE_IMPERSONATION", url=RELEASES_URL))
 
     if isinstance(exc, GeoRestrictedError) or "not available in your country" in lowered:
         return ProbeError(Text("PROBE_GEO"))
