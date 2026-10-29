@@ -8,7 +8,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VENV="${VENV:-.venv}"
-PY="$VENV/bin/python"
 DIST="${VM_DIST_DIR:-dist}"
 BUILD="${VM_BUILD_DIR:-build}"
 
@@ -20,6 +19,16 @@ if [ -n "$(git status --porcelain)" ] && [ "${VM_ALLOW_DIRTY:-0}" != "1" ]; then
     git status --short >&2
     exit 1
 fi
+
+# O pacote sai de um ambiente criado do zero e auditado, e não do `.venv` de quem desenvolve (que guarda as versões de
+# quando foi criado: o AppImage da 4.2 levou urllib3, certifi e brotli com avisos conhecidos). Fora do `$BUILD`, que o
+# PyInstaller apaga com --clean enquanto roda. VM_FRESH_VENV=0 volta a usar o `$VENV`, para pacote de teste.
+if [ "${VM_FRESH_VENV:-1}" = "1" ]; then
+    VENV="${VM_RELEASE_VENV:-${TMPDIR:-/tmp}/vm-release-venv}"
+    ./packaging/prepare_env.sh "$VENV"
+    SKIP_DEPS=1
+fi
+PY="$VENV/bin/python"
 
 if [ ! -x "$PY" ]; then
     echo "venv não encontrado em $VENV. Crie com: python3 -m venv $VENV" >&2

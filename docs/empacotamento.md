@@ -194,7 +194,11 @@ máquina sem FUSE, ainda roda assim:
    [desenvolvimento](desenvolvimento.md#versões)), num commit próprio.
 2. Crie a tag no commit da versão: `git tag v<versão>` e `git push origin v<versão>`.
 3. Gere os pacotes **a partir da tag, com a árvore limpa**: `build_linux.sh`,
-   `build_appimage.sh` e, no Windows, `build_windows.ps1`. Os scripts recusam
+   `build_appimage.sh` e, no Windows, `build_windows.ps1`. No Linux o pacote sai de
+   um **ambiente novo**, criado e auditado por `packaging/prepare_env.sh` (o `.venv` de
+   quem desenvolve guarda as versões de quando foi criado, e o AppImage da 4.2 levou
+   urllib3, certifi e brotli com avisos conhecidos); a auditoria recusa o pacote se
+   houver aviso, e `VM_FRESH_VENV=0` volta ao `.venv` só para um pacote de teste. Os scripts recusam
    árvore com alteração não commitada (`VM_ALLOW_DIRTY=1` gera assim mesmo, e
    o commit gravado leva `-dirty`). O spec grava o `git describe` no pacote,
    e o Sobre e a primeira linha do log o mostram.

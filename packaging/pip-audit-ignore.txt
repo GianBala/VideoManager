@@ -1,0 +1,2 @@
+# Avisos do pip-audit aceitos de propósito: um identificador por linha, e o motivo depois dele.
+# Vazio é o normal. Quem entra aqui responde por que o aviso não se aplica, e sai quando houver versão corrigida.
