@@ -3,7 +3,7 @@
 import sys
 from pathlib import Path
 
-__version__ = "4.1"
+__version__ = "4.2"
 APP_NAME = "VideoManager"
 APP_DISPLAY_NAME = "Video Manager"
 APP_TITLE = f"{APP_DISPLAY_NAME} {__version__}"
