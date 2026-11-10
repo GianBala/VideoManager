@@ -171,8 +171,20 @@ def pseudo(monkeypatch, desktop_app):
     monkeypatch.setitem(idioma._TABLES, i18n.ENGLISH, tabela)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def isolated_audio(monkeypatch):
+    """Nenhum teste fala com o áudio de verdade: ``available`` volta sempre falso.
+
+    O painel de edição pergunta ``available`` ao ser criado, e a pergunta chega
+    ao ``QMediaDevices.defaultAudioOutput()``. No Ubuntu da CI, que não tem
+    servidor de som, essa chamada derrubou o interpretador (segfault) com o
+    PySide6 6.12.0. Como o processo morre, cada fatia mostrava só o primeiro
+    teste que a fazia, e 27 arquivos criavam o painel sem pedir esta fixture.
+
+    Sem PySide6 não há áudio para isolar: o job ``internal`` roda só com o pytest.
+    """
+    if importlib.util.find_spec("PySide6") is None:
+        return
     from videomanager.infrastructure.qt.audio import AudioPreview
     monkeypatch.setattr(AudioPreview, "available", property(lambda self: False))
 
